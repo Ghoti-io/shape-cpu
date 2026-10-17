@@ -1,0 +1,7 @@
+Name: Ghoti.io Shape CPU(BRANCH)
+Description: The CPU rasterizer for the shape family, bit-identical on every host.
+Version: (VERSION)
+URL: https://github.com/Ghoti-io/shape-cpu
+Libs: -L(PC_LIB_DIR) -l(SUITE)-(PROJECT)(BRANCH)
+CFlags: -I(PC_INCLUDE_DIR)
+Requires: (REQUIRES)
