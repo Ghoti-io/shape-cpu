@@ -10,7 +10,7 @@
 #
 #   check-fp-contract  every compile-flag set names -ffp-contract=off
 #   check-edges        #includes and NEEDED entries stay inside EDGES_ALLOWED
-#   check-libm         no libm transcendental is referenced or defined
+#   check-libm         no libm function is referenced or defined
 #   check-no-x87       no x87 instruction in the objects (the i686 arm is run
 #                      by suite/tools/xarch/shape.sh, which needs a cross compiler)
 #   check-gates        plants a violation for each of the above and requires
@@ -35,8 +35,8 @@ DEPS := shape-geometry shape-scene image
 # it is not a violation to include what a dependency's header already pulls in).
 EDGES_ALLOWED := shape-geometry|shape-scene|image|color|cutil|math
 
-# yes only for math: the one library whose objects check-libm does not judge
-# (AD-22). Anything else saying yes fails check-gates.
+# no, for every library: nothing is exempt from check-libm (AD-22, amended
+# 2026-10-18; math is judged too). Anything else fails check-gates.
 LIBM_EXEMPT := no
 
 BUILD ?= release
@@ -442,8 +442,8 @@ check-edges: $(APP_DIR)/$(TARGET) ## Fail on an #include or NEEDED edge outside 
 	@tools/check-edges.sh --allowed '$(EDGES_ALLOWED)' --self $(PROJECT) --includes .
 	@tools/check-edges.sh --allowed '$(EDGES_ALLOWED)' --self $(PROJECT) --links $(APP_DIR)
 
-check-libm: $(APP_DIR)/$(TARGET) $(APP_DIR)/$(STATIC_TARGET) ## Fail if a libm transcendental is referenced or defined (AD-22)
-	@tools/check-libm.sh $(if $(filter yes,$(LIBM_EXEMPT)),--exempt) $(APP_DIR)/$(TARGET) $(APP_DIR)/$(STATIC_TARGET)
+check-libm: $(APP_DIR)/$(TARGET) $(APP_DIR)/$(STATIC_TARGET) ## Fail if any libm function is referenced or defined (AD-22)
+	@tools/check-libm.sh $(APP_DIR)/$(TARGET) $(APP_DIR)/$(STATIC_TARGET)
 
 check-no-x87: $(APP_DIR)/$(STATIC_TARGET) ## Fail if an x86 object holds an x87 instruction (AD-17)
 	@tools/check-no-x87.sh $(APP_DIR)/$(STATIC_TARGET)

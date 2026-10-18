@@ -20,7 +20,7 @@
 #
 #   check-fp-contract  AD-17  every compile-flag set names -ffp-contract=off
 #   check-edges        AD-2   #includes and NEEDED entries stay in the allowlist
-#   check-libm         AD-22  no libm transcendental referenced or defined
+#   check-libm         AD-22  no libm function referenced or defined (nothing is exempt)
 #   check-no-x87       AD-17  no x87 instruction in an x86 object
 #
 # The cross-target hash gate needs cross compilers and so is not here; it is
@@ -30,7 +30,7 @@
 # Environment, supplied by `make check-gates`:
 #   GATE_PROJECT       this library's name
 #   GATE_ALLOWED       its EDGES_ALLOWED alternation
-#   GATE_LIBM_EXEMPT   yes for math, no for the others
+#   GATE_LIBM_EXEMPT   no, for every library (math too); anything else fails
 #   CC                 the C compiler
 #
 # The same text is in math, shape-geometry, shape-scene and shape-cpu;
@@ -88,13 +88,10 @@ $out"
 
 mkdir "$work/empty"
 
-# Only math may be exempt from the libm gate (AD-22).
+# No library is exempt from the libm gate (AD-22, amended 2026-10-18: math is judged too).
 checks=$((checks + 1))
-if [ "$exempt" = yes ] && [ "$lib" != math ]; then
-  fail "$lib sets LIBM_EXEMPT to yes; only math may"
-fi
-if [ "$exempt" != yes ] && [ "$exempt" != no ]; then
-  fail "LIBM_EXEMPT is '$exempt', not yes or no"
+if [ "$exempt" != no ]; then
+  fail "$lib sets LIBM_EXEMPT to '$exempt'; it must be no (nothing is exempt, math included)"
 fi
 
 #---------------------------------------------------------------------------
@@ -243,85 +240,128 @@ expect_fail 'edges/empty (links)' 'measuring nothing' edge --links "$work/empty"
 
 #---------------------------------------------------------------------------
 printf 'check-libm\n'
+# AD-22 (amended 2026-10-18): nothing comes from libm, not the transcendentals
+# and not the functions C specifies exactly.  The gate prints its refused set
+# (--names), so that the planted object below calls every one of them from the
+# gate's own list, and no name can be added to the list without being planted.
 M="$HERE/check-libm.sh"
 cat > "$work/libm-control.c" <<'EOC'
-/* The exactly-specified functions, declared by hand so no builtin folds them. */
-double sqrt(double);
-double fabs(double);
-double floor(double);
-double rint(double);
-double fma(double, double, double);
-double fmod(double, double);
+/* What a library may reference: the C library's string functions and the gmath_ names. */
+void * memcpy(void *, const void *, unsigned long);
+unsigned long strlen(const char *);
+double gmath_sqrt(double);
+double gmath_floor(double);
+double gmath_sin(double);
 double libm_control(double x) {
-  return sqrt(x) + fabs(x) + floor(x) + rint(x) + fma(x, x, x) + fmod(x, 3.0);
+  char b[8];
+  memcpy(b, "abc", 4);
+  return gmath_sqrt(x) + gmath_floor(x) + gmath_sin(x) + (double)strlen(b);
 }
 EOC
-# One object that references every refused name in all three forms.
+"$M" --names > "$work/libm-names.txt"
+checks=$((checks + 1))
+nnames=$(wc -l < "$work/libm-names.txt")
+for must in sqrt floor ceil trunc round rint fabs copysign scalbn ldexp frexp fmod fma sin cos tan atan2 exp log pow hypot cbrt nearbyint lrint sqrtf sqrtl floorf floorl fabsf fabsl sinf sinl fmaf nan isnan __isnan; do
+  if ! grep -qx "$must" "$work/libm-names.txt"; then
+    fail "the libm gate does not refuse $must"
+  fi
+done
+if [ "$nnames" -lt 500 ]; then
+  fail "the libm gate refuses only $nnames names"
+else
+  printf '  ok   libm/the gate refuses %s names, among them sqrt, floor, fabs, fma, fmod and every f and l form\n' "$nnames"
+fi
+# One object that references every refused name.
 {
-  for b in sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh \
-           exp exp2 exp10 expm1 log log2 log10 log1p logb pow hypot cbrt \
-           sincos erf erfc tgamma lgamma; do
-    for s in "" f l; do
-      printf 'extern void %s%s(void);\n' "$b" "$s"
-    done
-  done
+  while read -r n; do
+    printf 'extern void %s(void);\n' "$n"
+  done < "$work/libm-names.txt"
   printf 'void libm_planted(void) {\n'
-  for b in sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh \
-           exp exp2 exp10 expm1 log log2 log10 log1p logb pow hypot cbrt \
-           sincos erf erfc tgamma lgamma; do
-    for s in "" f l; do
-      printf '  %s%s();\n' "$b" "$s"
-    done
-  done
+  while read -r n; do
+    printf '  %s();\n' "$n"
+  done < "$work/libm-names.txt"
   printf '}\n'
 } > "$work/libm-planted.c"
+# And one defining its own copy of the exactly-specified ones.
 printf 'double sin(double x) { return x; }\n' > "$work/libm-defined.c"
-printf 'double libm_user(double);\ndouble libm_one(double x) { extern double sin(double); return sin(x); }\n' > "$work/libm-one.c"
-if $CC -O0 -fno-builtin -c "$work/libm-control.c" -o "$work/libm-control.o" 2>"$work/libm.log" \
-  && $CC -O0 -fno-builtin -c "$work/libm-planted.c" -o "$work/libm-planted.o" 2>>"$work/libm.log" \
-  && $CC -O0 -fno-builtin -c "$work/libm-defined.c" -o "$work/libm-defined.o" 2>>"$work/libm.log" \
-  && $CC -O0 -fno-builtin -c "$work/libm-one.c" -o "$work/libm-one.o" 2>>"$work/libm.log"; then
-  expect_pass 'libm/control (sqrt fabs floor rint fma fmod referenced)' "$M" "$work/libm-control.o"
-  expect_fail 'libm/planted (sin referenced, object)' 'libm transcendental sin is referenced' "$M" "$work/libm-one.o"
-  # Every refused name, in all three forms, must be named.
+printf 'double sqrt(double x) { return x; }\ndouble floor(double x) { return x; }\n' > "$work/libm-defined2.c"
+# One reference at a time, each by a call a C programmer would write.
+for pair in 'sin:double:double' 'sqrt:double:double' 'floor:double:double' 'fabs:double:double' 'rint:double:double' \
+            'fmod:double:double,double' 'fma:double:double,double,double' 'sinf:float:float' 'sqrtl:long double:long double'; do
+  fn="${pair%%:*}"; rest="${pair#*:}"; ret="${rest%%:*}"; args="${rest#*:}"
+  case "$args" in
+    *,*,*) call="$fn(x, x, x)"; decl="$ret $fn($args)"; params="double x" ;;
+    *,*) call="$fn(x, x)"; decl="$ret $fn($args)"; params="double x" ;;
+    *) call="$fn(($args)x)"; decl="$ret $fn($args)"; params="double x" ;;
+  esac
+  printf '%s;\ndouble libm_call_%s(%s) { return (double)%s; }\n' "$decl" "$fn" "$params" "$call" > "$work/libm-one-$fn.c"
+done
+# A builtin the compiler lowers to a call: sin has no instruction anywhere.
+printf 'double libm_builtin_sin(double x) { return __builtin_sin(x); }\n' > "$work/libm-builtin-sin.c"
+# The exactly-specified ones, as a C programmer writes them with the library's own flags minus the ones that
+# turn them into instructions: sqrt keeps its errno path (a call for a negative argument), and a floor with no
+# rounding instruction (SSE4.1) is a call.  Whether a target does call them is checked below, not assumed.
+printf 'double libm_builtin_sqrt(double x) { return __builtin_sqrt(x); }\n' > "$work/libm-builtin-sqrt.c"
+printf 'double libm_builtin_floor(double x) { return __builtin_floor(x); }\ndouble libm_builtin_fma(double x, double y, double z) { return __builtin_fma(x, y, z); }\n' > "$work/libm-builtin-floor.c"
+built=1
+$CC -O0 -fno-builtin -c "$work/libm-control.c" -o "$work/libm-control.o" 2>"$work/libm.log" || built=0
+$CC -O0 -fno-builtin -c "$work/libm-planted.c" -o "$work/libm-planted.o" 2>>"$work/libm.log" || built=0
+$CC -O0 -fno-builtin -c "$work/libm-defined.c" -o "$work/libm-defined.o" 2>>"$work/libm.log" || built=0
+$CC -O0 -fno-builtin -c "$work/libm-defined2.c" -o "$work/libm-defined2.o" 2>>"$work/libm.log" || built=0
+for f in "$work"/libm-one-*.c; do
+  $CC -O0 -fno-builtin -c "$f" -o "${f%.c}.o" 2>>"$work/libm.log" || built=0
+done
+$CC -O2 -c "$work/libm-builtin-sin.c" -o "$work/libm-builtin-sin.o" 2>>"$work/libm.log" || built=0
+$CC -O2 -fmath-errno -c "$work/libm-builtin-sqrt.c" -o "$work/libm-builtin-sqrt.o" 2>>"$work/libm.log" || built=0
+$CC -O2 -c "$work/libm-builtin-floor.c" -o "$work/libm-builtin-floor.o" 2>>"$work/libm.log" || built=0
+if [ "$built" -eq 1 ]; then
+  expect_pass 'libm/control (memcpy, strlen and gmath_ names referenced)' "$M" "$work/libm-control.o"
+  for fn in sin sqrt floor fabs rint fmod fma sinf sqrtl; do
+    expect_fail "libm/planted ($fn referenced, object)" "libm function $fn is referenced" "$M" "$work/libm-one-$fn.o"
+  done
+  expect_fail 'libm/planted (a __builtin_sin the compiler lowered to a call)' 'libm function sin is referenced' "$M" "$work/libm-builtin-sin.o"
+  # sqrt and floor are instructions on some targets, and then there is nothing for the gate to see
+  # and nothing to plant; say so rather than pass.
+  for pair in 'sqrt:libm-builtin-sqrt' 'floor:libm-builtin-floor' 'fma:libm-builtin-floor'; do
+    fn="${pair%%:*}"; obj="$work/${pair#*:}.o"
+    if nm "$obj" 2>/dev/null | grep -qE " U $fn\$"; then
+      expect_fail "libm/planted (a __builtin_$fn the compiler lowered to a call)" "libm function $fn is referenced" "$M" "$obj"
+    else
+      printf '  skip libm/planted (__builtin_%s is an instruction on this target; nothing to plant)\n' "$fn"
+    fi
+  done
+  # Every refused name must be named.
   checks=$((checks + 1))
   out="$("$M" "$work/libm-planted.o" 2>&1)"; rc=$?
   missing=""
-  for b in sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh \
-           exp exp2 exp10 expm1 log log2 log10 log1p logb pow hypot cbrt \
-           sincos erf erfc tgamma lgamma; do
-    for s in "" f l; do
-      printf '%s\n' "$out" | grep -q "transcendental $b$s is " || missing="$missing $b$s"
-    done
-  done
+  while read -r n; do
+    printf '%s\n' "$out" | grep -q "libm function $n is " || missing="$missing $n"
+  done < "$work/libm-names.txt"
   if [ "$rc" -eq 0 ]; then
     fail "libm/planted (every name) should fail but exited 0"
   elif [ -n "$missing" ]; then
     fail "libm/planted (every name) did not name:$missing"
   else
-    printf '  ok   libm/planted (every name, and its f and l forms) fails, naming each\n'
+    printf '  ok   libm/planted (all %s names, every f and l form among them) fails, naming each\n' "$nnames"
   fi
-  expect_fail 'libm/planted (sin defined, object)' 'libm transcendental sin is defined' "$M" "$work/libm-defined.o"
-  ar rcs "$work/libm-planted.a" "$work/libm-one.o"
-  expect_fail 'libm/planted (sin referenced, archive)' 'libm transcendental sin is referenced' "$M" "$work/libm-planted.a"
+  expect_fail 'libm/planted (sin defined, object)' 'libm function sin is defined' "$M" "$work/libm-defined.o"
+  expect_fail 'libm/planted (sqrt defined, object)' 'libm function sqrt is defined' "$M" "$work/libm-defined2.o"
+  expect_fail 'libm/planted (floor defined, object)' 'libm function floor is defined' "$M" "$work/libm-defined2.o"
+  ar rcs "$work/libm-planted.a" "$work/libm-one-sqrt.o"
+  expect_fail 'libm/planted (sqrt referenced, archive)' 'libm function sqrt is referenced' "$M" "$work/libm-planted.a"
+  ar rcs "$work/libm-control.a" "$work/libm-control.o"
+  expect_pass 'libm/control (an archive of the control)' "$M" "$work/libm-control.a"
   case "$(uname -s)" in
     Linux)
-      if $CC -shared -fPIC -o "$work/libm-planted.so" "$work/libm-one.o" -lm 2>"$work/libm-so.log"; then
-        expect_fail 'libm/planted (sin from libm, shared object, version suffix stripped)' 'libm transcendental sin is referenced' "$M" "$work/libm-planted.so"
+      if $CC -shared -fPIC -o "$work/libm-planted.so" "$work/libm-one-floor.o" -lm 2>"$work/libm-so.log"; then
+        expect_fail 'libm/planted (floor from libm, shared object, version suffix stripped)' 'libm function floor is referenced' "$M" "$work/libm-planted.so"
       else
         fail "could not build the libm shared-object fixture"
       fi
       ;;
   esac
-  # The exemption is scoped: the same planted objects pass under --exempt, and
-  # the gate says it was exempt, so the exemption cannot be mistaken for a pass.
-  expect_pass 'libm/--exempt (the same planted objects, for math)' "$M" --exempt "$work/libm-planted.o" "$work/libm-defined.o"
-  checks=$((checks + 1))
-  if ! "$M" --exempt "$work/libm-planted.o" 2>&1 | grep -q 'exempt'; then
-    fail "check-libm --exempt did not say it was exempt"
-  else
-    printf '  ok   libm/--exempt says so\n'
-  fi
+  # The gate has no exemption: the option is not accepted (it is read as a file that is not there).
+  expect_fail 'libm/no exemption (--exempt is refused)' 'is not a file' "$M" --exempt "$work/libm-planted.o"
 else
   fail "could not build the libm fixtures: $(cat "$work/libm.log")"
 fi
