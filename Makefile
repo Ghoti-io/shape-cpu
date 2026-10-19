@@ -23,10 +23,13 @@
 SUITE := ghoti.io
 PROJECT := shape-cpu
 
-# The libraries this one depends on, by the end of the milestone: the fourth
-# field of its line in suite/libraries.txt, without the optional ones.
-# Each is found by pkg-config and is a hard error when it is not.
-DEPS := shape-geometry shape-scene image
+# The libraries this one depends on: the fourth field of its line in
+# suite/libraries.txt, without the optional ones. Each is found by pkg-config
+# and is a hard error when it is not. This is what the sources include today,
+# so a consumer (font) does not link what it does not use. shape-scene arrives
+# with the sink contract (story 13), and image with the GIMG_Raster targets;
+# each is added here and in the manifest by the story that first includes it.
+DEPS := shape-geometry
 
 # The libraries whose headers this one may include and whose shared objects it
 # may link (check-edges), as a regular expression alternation. Itself is always
