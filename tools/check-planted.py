@@ -382,8 +382,9 @@ PLANTS = [
     ("dump-fill-name", "src", RP, "          gshgeom_fill_rule_string(coverage->fill),", '          "non-zero",', R),
     ("dump-total", "src", RP, "(unsigned long long)gshcpu_coverage_total(coverage),", "(unsigned long long)0,", R),
     ("dump-hash-width", "src", RP, "hash=%016llx", "hash=%llx", R),
-    ("dump-write-error", "src", RP, "      < 0) {\n    return GSHCPU_ERR_IO;\n  }\n  return fflush", "      < 0) {\n    return GSHCPU_OK;\n  }\n  return fflush", R),
-    ("dump-flush-error", "src", RP, "  return fflush(out) == 0 ? GSHCPU_OK : GSHCPU_ERR_IO;", "  return GSHCPU_OK;", R),
+    ("dump-write-error", "src", RP, "      < 0) {\n    return GSHCPU_ERR_IO;\n  }\n  /* ferror", "      < 0) {\n    return GSHCPU_OK;\n  }\n  /* ferror", R),
+    ("dump-flush-error", "src", RP, "  return (fflush(out) == 0 && !ferror(out)) ? GSHCPU_OK : GSHCPU_ERR_IO;", "  return GSHCPU_OK;", R),
+    ("dump-ignores-ferror", "src", RP, "(fflush(out) == 0 && !ferror(out))", "(fflush(out) == 0)", R),
 
     # --- the results and the limits ---------------------------------------------------------------------------------------
     ("result-string-ok", "src", CO, '    return "ok";', '    return "fine";', C + R),

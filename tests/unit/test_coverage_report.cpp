@@ -12,6 +12,7 @@
 #include "test_helpers.h"
 
 #include "coverage_helpers.h"
+#include "dump_sink.h"
 #include "known_answers.h"
 
 #include <cstdio>
@@ -168,6 +169,12 @@ TEST(CoverageDump, AFailingOrMissingStreamIsReported) {
   ASSERT_NE(ro, nullptr);
   EXPECT_EQ(gshcpu_coverage_dump(&h.c, ro), GSHCPU_ERR_IO);
   std::fclose(ro);
+}
+
+TEST(CoverageDump, EveryWriteIsChecked) {
+  const known::Hand & k = known::hands()[2];
+  Hand h(k, 0);
+  GSHCPU_EVERY_WRITE_CHECKED(gshcpu_coverage_dump, &h.c, "coverage");
 }
 
 TEST(CoverageDestroy, ZeroesTheStructAndASecondCallIsHarmless) {

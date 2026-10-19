@@ -116,5 +116,7 @@ GSHCPU_Result gshcpu_coverage_dump(const GSHCPU_Coverage * coverage,
       < 0) {
     return GSHCPU_ERR_IO;
   }
-  return fflush(out) == 0 ? GSHCPU_OK : GSHCPU_ERR_IO;
+  /* ferror as well as fflush: on an unbuffered stream glibc's fprintf can return
+   * a count while the stream's error flag is set. */
+  return (fflush(out) == 0 && !ferror(out)) ? GSHCPU_OK : GSHCPU_ERR_IO;
 }
