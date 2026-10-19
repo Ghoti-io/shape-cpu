@@ -5,8 +5,16 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
 
 ## What is implemented
 
-The scaffold only: `gshcpu_version_string()` and `gshcpu_version_number()`, and
-the gates every library in the shape family runs in `make test`.
+- `gshcpu_version_string()` and `gshcpu_version_number()`, and the gates every
+  library in the shape family runs in `make test`.
+- Coverage: 8-bit exact-area coverage of a `shape-geometry` device path under
+  the nonzero and even-odd rules, y down, linear alpha. It is the scan converter
+  `font` had, moved here without changing a pixel (`font` renders through it).
+  `gshcpu_coverage_fill` fills into a rectangle of pixels;
+  `gshcpu_coverage_from_path` finds the rectangle and trims. Curves are
+  flattened by `shape-geometry`'s flattener first. `_at`, `_total`, `_hash`,
+  `_dump`, and limits (`GSHCPU_Limits`) for the extent, the bytes, the cells and
+  the points.
 
 ## Building
 

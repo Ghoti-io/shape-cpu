@@ -255,7 +255,9 @@ TESTFLAGS := `PKG_CONFIG_PATH=$(PKG_CONFIG_LOOKUP_PATH) pkg-config --libs --cfla
 
 # coverage clears this: --coverage links the gcov runtime, whose mangle_path
 # check-symbols is right to reject in a shipping library.
-TEST_GATES ?= check-symbols check-aliasing check-stamps check-fp-contract check-edges check-libm check-no-x87 check-gates examples
+PLANT_JOBS ?= 4
+
+TEST_GATES ?= check-symbols check-aliasing check-stamps check-fp-contract check-edges check-libm check-no-x87 check-gates check-vectors check-corpus-hash examples
 
 VALGRIND_FLAGS := --leak-check=full --show-leak-kinds=definite,indirect,possible --track-origins=yes --error-exitcode=1 --suppressions=tests/valgrind.supp
 
@@ -373,6 +375,7 @@ $(APP_DIR)/examples/%$(EXE_EXTENSION): examples/%.c $(APP_DIR)/$(STATIC_TARGET) 
 
 .PHONY: clean cloc docs docs-pdf examples coverage check-symbols check-stamps check-aliasing
 .PHONY: check-fp-contract check-edges check-libm check-no-x87 check-gates libver-gen
+.PHONY: check-vectors check-corpus-hash check-planted
 .PHONY: all install test test-quiet test-asan test-valgrind test-valgrind-quiet test-watch uninstall watch
 .PHONY: all-debug install-debug test-debug test-valgrind-debug test-watch-debug uninstall-debug watch-debug
 .PHONY: fuzz fuzz-clean
@@ -447,6 +450,33 @@ check-libm: $(APP_DIR)/$(TARGET) $(APP_DIR)/$(STATIC_TARGET) ## Fail if any libm
 
 check-no-x87: $(APP_DIR)/$(STATIC_TARGET) ## Fail if an x86 object holds an x87 instruction (AD-17)
 	@tools/check-no-x87.sh $(APP_DIR)/$(STATIC_TARGET)
+
+# The cross-target probe (tools/corpus-hash.c), linked against the static
+# archive as the examples are.
+HASH_PROBE := $(APP_DIR)/corpus-hash$(EXE_EXTENSION)
+
+$(HASH_PROBE): tools/corpus-hash.c $(APP_DIR)/$(STATIC_TARGET) \
+		$(FLAGS_STAMP) | $(APP_DIR)/$(TARGET) $(LIBVER_GEN)
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(INCLUDE) -o $@ $< $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
+
+check-corpus-hash: $(HASH_PROBE) ## Fail unless the probe prints the committed cross-target hash (CAP-13)
+	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash
+
+check-vectors: ## Fail if tests/known_answers.h is not what the independent generator writes
+	@python3 tools/gen-coverage-vectors.py --check
+
+# Each planted defect in tools/check-planted.py is built into a copy of the
+# sources and must fail a test (or the probe's hash); the unplanted copy is the
+# control and must pass.
+check-planted: $(HASH_PROBE) $(LIBOBJECTS) $(TEST_EXECUTABLES) ## Fail unless each planted defect fails a test and the control passes
+	@PLANT_CC='$(CC)' PLANT_CFLAGS='$(LIB_CFLAGS) $(INCLUDE)' \
+	 PLANT_PROBE_CFLAGS='$(CFLAGS) $(INCLUDE)' PLANT_PROBE_LIBS='$(LDFLAGS) $(DEP_LIBS)' \
+	 PLANT_CXX='$(CXX) $(CXXFLAGS)' PLANT_CXX_INCLUDE='$(INCLUDE) -Itests' \
+	 PLANT_LDFLAGS='$(LDFLAGS) $(DEP_LIBS) $(TESTFLAGS)' \
+	 PLANT_TESTS='$(TEST_NAMES)' PLANT_APP_DIR='$(APP_DIR)' PLANT_OBJ_DIR='$(OBJ_DIR)' \
+	 PLANT_LD_PATH='$(TEST_LD_PATH)' PLANT_WORK='$(BUILD_DIR)/planted' PLANT_JOBS='$(PLANT_JOBS)' \
+	 python3 tools/check-planted.py
 
 check-gates: ## Prove each gate fails on its planted violation and passes its control
 	@CC='$(CC)' GATE_PROJECT='$(PROJECT)' GATE_ALLOWED='$(EDGES_ALLOWED)' GATE_LIBM_EXEMPT='$(LIBM_EXEMPT)' tools/check-gates.sh

@@ -21,13 +21,53 @@
 /**
  * @file
  *
- * The version this build reports.
+ * The result strings, the default limits and the version this build reports.
  */
 
 #include <ghoti.io/shape-cpu/macros.h>
 
 #include <ghoti.io/shape-cpu/core.h>
 #include <ghoti.io/shape-cpu/libver.h>
+
+const char * gshcpu_result_string(GSHCPU_Result result) {
+  switch (result) {
+  case GSHCPU_OK:
+    return "ok";
+  case GSHCPU_ERR_IO:
+    return "input/output error";
+  case GSHCPU_ERR_FORMAT:
+    return "not a format handled here";
+  case GSHCPU_ERR_UNSUPPORTED:
+    return "feature not supported";
+  case GSHCPU_ERR_LIMIT:
+    return "a limit was exceeded";
+  case GSHCPU_ERR_CORRUPT:
+    return "corrupt data";
+  case GSHCPU_ERR_OOM:
+    return "out of memory";
+  case GSHCPU_ERR_INVALID:
+    return "invalid argument";
+  case GSHCPU_ERR_INTERNAL:
+    return "internal error";
+  case GSHCPU_RESULT_COUNT:
+    break;
+  }
+  return "unknown result";
+}
+
+void gshcpu_limits_default(GSHCPU_Limits * limits) {
+  if (!limits) {
+    return;
+  }
+  limits->max_dimension = GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION;
+  limits->max_bytes = GSHCPU_LIMITS_DEFAULT_MAX_BYTES;
+  limits->max_cells = GSHCPU_LIMITS_DEFAULT_MAX_CELLS;
+  /* Zero: shape-geometry's own default for a flattened path. */
+  limits->max_points = 0;
+  for (size_t i = 0; i < sizeof limits->_reserved; i++) {
+    limits->_reserved[i] = 0;
+  }
+}
 
 const char * gshcpu_version_string(void) {
   return GSHCPU_VERSION_STRING;

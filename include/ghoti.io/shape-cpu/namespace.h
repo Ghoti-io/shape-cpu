@@ -41,6 +41,20 @@
 /// @cond HIDDEN_SYMBOLS
 
 /* Public functions. */
+#define GSHCPU_Result GHOTIIO_SHAPE_CPU(GSHCPU_Result)
+#define GSHCPU_Limits GHOTIIO_SHAPE_CPU(GSHCPU_Limits)
+#define GSHCPU_Allocator GHOTIIO_SHAPE_CPU(GSHCPU_Allocator)
+#define GSHCPU_Coverage GHOTIIO_SHAPE_CPU(GSHCPU_Coverage)
+#define gshcpu_result_string GHOTIIO_SHAPE_CPU(gshcpu_result_string)
+#define gshcpu_limits_default GHOTIIO_SHAPE_CPU(gshcpu_limits_default)
+#define gshcpu_coverage_fill GHOTIIO_SHAPE_CPU(gshcpu_coverage_fill)
+#define gshcpu_coverage_from_path GHOTIIO_SHAPE_CPU(gshcpu_coverage_from_path)
+#define gshcpu_coverage_trim GHOTIIO_SHAPE_CPU(gshcpu_coverage_trim)
+#define gshcpu_coverage_destroy GHOTIIO_SHAPE_CPU(gshcpu_coverage_destroy)
+#define gshcpu_coverage_at GHOTIIO_SHAPE_CPU(gshcpu_coverage_at)
+#define gshcpu_coverage_total GHOTIIO_SHAPE_CPU(gshcpu_coverage_total)
+#define gshcpu_coverage_hash GHOTIIO_SHAPE_CPU(gshcpu_coverage_hash)
+#define gshcpu_coverage_dump GHOTIIO_SHAPE_CPU(gshcpu_coverage_dump)
 #define gshcpu_version_number GHOTIIO_SHAPE_CPU(gshcpu_version_number)
 #define gshcpu_version_string GHOTIIO_SHAPE_CPU(gshcpu_version_string)
 
