@@ -372,6 +372,7 @@ TEST(RenderGlyphs, ARunOfOutlinesDrawsAsOneShapeOfItsGlyphs) {
   ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &both), GSHGEOM_OK);
   RF_Ctx c;
   rf_begin(&c);
+  GSHSCENE_Store * own = c.store;
   c.store = s.store; // intern into the test's store
   const GSHSCENE_Resource * o = rf_glyph(&c, 0);
   const GSHSCENE_Resource * v = rf_glyph(&c, 1);
@@ -428,10 +429,11 @@ TEST(RenderGlyphs, ARunOfOutlinesDrawsAsOneShapeOfItsGlyphs) {
     ASSERT_EQ(gshscene_sink_render(sink.sink, &qb), GSHSCENE_OK);
     EXPECT_EQ(ra.bytes(), rb.bytes()) << "rule " << rule;
   }
-  // rf_release would destroy the test's store: release the two outlines by hand instead.
+  // rf_release would destroy the test's store: release the two outlines by hand instead, and the context's own store.
   for (size_t i = 0; i < c.held_count; i++) {
     gshscene_resource_release(c.held[i]);
   }
+  gshscene_store_destroy(own);
 }
 
 TEST(RenderGlyphs, ARunNamedByAFontIsRefusedByThePlan) {
