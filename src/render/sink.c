@@ -332,9 +332,9 @@ static GSHCPU_Result need_of(const Cpu_Sink * cs, const GSHSCENE_Render_Request 
   }
   size_t peak = 0;
   GSHCPU_Arena arena;
-  /* The caller's workspace, when there is room in it for the walk and some arena, is the measure's scratch: a
-   * render that brings its workspace allocates nothing, not even to size itself. */
-  if ((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) && request->workspace && request->workspace_bytes > L.fixed) {
+  /* The caller's workspace, when there is room in it for the walk (the arena may be empty), is the measure's
+   * scratch: a render that brings its workspace allocates nothing, not even to size itself. */
+  if ((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) && request->workspace && request->workspace_bytes >= L.fixed) {
     unsigned char * base = (unsigned char *)(((uintptr_t)request->workspace + (CARVE_ALIGN - 1u)) &
         ~(uintptr_t)(CARVE_ALIGN - 1u));
     gshcpu_render_arena_init(&arena, base + L.at_items, request->workspace_bytes - L.fixed);

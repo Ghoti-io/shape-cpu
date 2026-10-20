@@ -8275,8 +8275,8 @@
 "rs-337-neg",
 "srcl",
 "src/render/sink.c",
-"337:((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) && request->workspace && request->workspace_bytes > L.fixed)",
-"(!((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) && request->workspace && request->workspace_bytes > L.fixed))",
+"337:((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) && request->workspace && request->workspace_bytes >= L.fixed)",
+"(!((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) && request->workspace && request->workspace_bytes >= L.fixed))",
 [
 "testRender_vectors",
 "testRender_parts",

@@ -562,6 +562,38 @@ TEST(RenderMemory, TheNeedIsTheBlockAndTheLargestItemNotTheirSum) {
   EXPECT_GT(a, need[1] + (size_t)RF_WIDTH * RF_HEIGHT * 33u) << "a group's layer and a clip's coverage over the region";
 }
 
+TEST(RenderMemory, AListThatNeedsNoItemMemoryRendersInItsExactWorkspaceWithoutAllocating) {
+  // A caller-memory render whose items take nothing from the arena (an empty list, here) needs exactly the fixed
+  // block, and in a workspace of exactly that the sink sizes the render inside it and allocates nothing (S9). Story
+  // 16's fuzz replay found it measuring over its own allocator instead: the test was "more than the block", not "at
+  // least the block". The control is a list with an item, whose need is past the block.
+  Store s;
+  GSHSCENE_Paint red = solid(1, 0, 0, 0.5);
+  GSHSCENE_List * empty = s.open();
+  GSHSCENE_List * one = s.open();
+  ASSERT_EQ(gshscene_list_fill(one, s.rect(1, 1, 5, 5), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(empty), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(one), GSHSCENE_OK);
+  for (GSHSCENE_List * list : {empty, one}) {
+    tracker::Tracker t;
+    GSHSCENE_Allocator alloc = tracker::allocator_for(&t);
+    SinkRef sink(nullptr, &alloc);
+    RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+    ReportRef report;
+    GSHSCENE_Target target = target_of(r.raster);
+    GSHSCENE_Render_Request req = request_of(list, &target, report.report);
+    req.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+    size_t need = 0;
+    ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &req, &need), GSHSCENE_OK);
+    std::vector<unsigned char> workspace(need);
+    req.workspace = workspace.data();
+    req.workspace_bytes = need;
+    const long before = t.calls;
+    EXPECT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK);
+    EXPECT_EQ(t.calls, before) << (list == empty ? "the empty list" : "the list with an item");
+  }
+}
+
 /* --- what a render touches ---------------------------------------------------------------------------------- */
 
 namespace {
