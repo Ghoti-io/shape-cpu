@@ -95,8 +95,11 @@ survive.  The empty-frame fix (2026-10-20: layers made ready as the units reach
 them) changed sink.c and swept its 444 candidates again: 81 do not compile, 331
 are caught (they replace sink.c's in tools/render-plants.json), and 32 survived;
 one of those, a group's pop visiting one row past its region, is caught since
-by a test of its own (rs-669-lt, in tools/render-plants.json).  The 31
-survivors, by kind:
+by a test of its own.  Story 14c changed sink.c (a fill's color is shape-scene's
+one resolution of its paint, and the disposition reads the list's palette) and
+swept its 440 candidates again: 80 do not compile, 329 are caught (they replace
+sink.c's in tools/render-plants.json) and 31 survive, the same 31 as before by
+kind and none on the story's lines.  The 31 survivors, by kind:
 
   - a tie between equal values: `<` for `<=` where both sides choosing the same
     value is the same answer (the rectangles' meet and join, the lowest and
@@ -654,7 +657,14 @@ PLANTS += [
     ("r-region-max-bytes", "src", RS, "  if (L->pixels > cs->max_bytes) {", "  if (L->pixels > cs->max_bytes + 1) {", RT),
     ("r-default-cells", "src", RS, "limits->max_cells : GSHCPU_LIMITS_DEFAULT_MAX_CELLS;", "limits->max_cells : 1000;", RT),
     ("r-default-dimension-ceiling", "src", RS, "    cs->max_dimension = GSHCPU_MAX_DIMENSION_CEILING;", "    cs->max_dimension = 16;", RT),
-    ("r-foreground-alpha", "src", RS, "alpha = run->foreground.rgba[3] * item->paint.rgba[3];", "alpha = item->paint.rgba[3];", RT),
+    ("r-foreground-alpha", "src", RS, "gshscene_list_foreground(request->list, &run->foreground) != GSHSCENE_OK",
+     "(gshscene_color_init(&run->foreground), GSHSCENE_OK) != GSHSCENE_OK", RT),
+    # Story 14c: a palette fill takes the list's palette, in the paint's resolution and in the sink's disposition.
+    ("r-palette-resolve", "src", RS, "gshscene_paint_resolve(&item->paint, &run->foreground, run->palette, &color)",
+     "gshscene_paint_resolve(&item->paint, &run->foreground, NULL, &color)", RT),
+    ("r-palette-disposition", "src", RS, "gshscene_caps_disposition(&run->job->caps, item, gshscene_job_target_space(run->job), run->palette);",
+     "gshscene_caps_disposition(&run->job->caps, item, gshscene_job_target_space(run->job), NULL);", RT),
+    ("r-palette-taken", "src", RS, "  run->palette = gshscene_list_palette(request->list);\n", "", RT),
     ("r-paint-target-space", "src", RS, "    space = *gshscene_job_target_space(run->job);", "    space = frame->space;", RT),
     ("r-group-space-inherit", "src", RS, "? parent->space : item->group.blend_space;", "? (parent ? *gshscene_job_target_space(run->job) : parent->space) : item->group.blend_space;", RT),
     ("r-group-opacity", "src", RS, "        s[i] = o * s[i];", "        s[i] = o * o * s[i];", RT),
