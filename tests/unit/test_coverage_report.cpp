@@ -205,13 +205,21 @@ TEST(CoverageCore, EveryResultHasAName) {
   EXPECT_STREQ(gshcpu_result_string(GSHCPU_ERR_OOM), "out of memory");
   EXPECT_STREQ(gshcpu_result_string(GSHCPU_ERR_INVALID), "invalid argument");
   EXPECT_STREQ(gshcpu_result_string(GSHCPU_ERR_INTERNAL), "internal error");
+  EXPECT_STREQ(gshcpu_result_string(GSHCPU_ERR_REFUSED), "refused");
+  EXPECT_STREQ(gshcpu_result_string(GSHCPU_ERR_CANCELLED), "cancelled");
   EXPECT_STREQ(gshcpu_result_string(static_cast<GSHCPU_Result>(99)), "unknown result");
-  // The same vocabulary as shape-geometry, in the same order.
+  // The same vocabulary as shape-geometry, in the same order, then the sink contract's two (story 13b).
   EXPECT_EQ((int)GSHCPU_ERR_LIMIT, (int)GSHGEOM_ERR_LIMIT);
   EXPECT_EQ((int)GSHCPU_ERR_OOM, (int)GSHGEOM_ERR_OOM);
   EXPECT_EQ((int)GSHCPU_ERR_INVALID, (int)GSHGEOM_ERR_INVALID);
   EXPECT_EQ((int)GSHCPU_ERR_IO, (int)GSHGEOM_ERR_IO);
-  EXPECT_EQ((int)GSHCPU_RESULT_COUNT, (int)GSHGEOM_RESULT_COUNT);
+  EXPECT_EQ((int)GSHCPU_ERR_INTERNAL + 1, (int)GSHGEOM_RESULT_COUNT);
+  EXPECT_EQ((int)GSHCPU_ERR_REFUSED, (int)GSHGEOM_RESULT_COUNT);
+  EXPECT_EQ((int)GSHCPU_ERR_CANCELLED, (int)GSHGEOM_RESULT_COUNT + 1);
+  EXPECT_EQ((int)GSHCPU_RESULT_COUNT, (int)GSHGEOM_RESULT_COUNT + 2);
+  // font names only these two, and their values have not moved.
+  EXPECT_EQ((int)GSHCPU_ERR_LIMIT, 4);
+  EXPECT_EQ((int)GSHCPU_ERR_OOM, 6);
 }
 
 int main(int argc, char ** argv) {

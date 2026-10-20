@@ -40,10 +40,14 @@ extern "C" {
 /**
  * @brief Result of an operation.
  *
- * Zero is success.  This is the suite's fixed vocabulary with nothing added,
- * the same enumeration in the same order as the other libraries of the shape
- * family; most of it is never returned by this library.  ::GSHCPU_RESULT_COUNT
- * closes the enum so that a test can check the string table is complete.
+ * Zero is success.  This is the suite's fixed vocabulary (CONVENTIONS section
+ * 5) followed by ::GSHCPU_ERR_REFUSED and ::GSHCPU_ERR_CANCELLED, which the sink
+ * contract adds (shape-scene's sink.h, S6 and S7), in the same order as
+ * shape-scene's enumeration; the values `font` names do not move.  A render
+ * through the sink returns shape-scene's result; these two are here so that this
+ * library's own vocabulary can say what its sink does.  Some of the vocabulary is
+ * never returned by this library.  ::GSHCPU_RESULT_COUNT closes the enum so that
+ * a test can check the string table is complete.
  */
 typedef enum {
   GSHCPU_OK = 0,          ///< The operation succeeded.
@@ -55,6 +59,8 @@ typedef enum {
   GSHCPU_ERR_OOM,         ///< The allocator returned NULL.
   GSHCPU_ERR_INVALID,     ///< A caller-supplied argument is wrong.
   GSHCPU_ERR_INTERNAL,    ///< The library's own invariant failed.
+  GSHCPU_ERR_REFUSED,     ///< An effect was refused under strict mode (sink.h, S6).
+  GSHCPU_ERR_CANCELLED,   ///< The render's cancel token was set (sink.h, S7).
   GSHCPU_RESULT_COUNT
 } GSHCPU_Result;
 

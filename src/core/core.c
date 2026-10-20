@@ -49,6 +49,10 @@ const char * gshcpu_result_string(GSHCPU_Result result) {
     return "invalid argument";
   case GSHCPU_ERR_INTERNAL:
     return "internal error";
+  case GSHCPU_ERR_REFUSED:
+    return "refused";
+  case GSHCPU_ERR_CANCELLED:
+    return "cancelled";
   case GSHCPU_RESULT_COUNT:
     break;
   }
