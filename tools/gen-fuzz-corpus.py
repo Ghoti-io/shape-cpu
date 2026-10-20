@@ -24,6 +24,7 @@ by construction, each outcome the replay requires.  The replay gate
 outcomes: that is what keeps the corpus from measuring nothing, and what to read if
 the byte layout below drifts from the C file.
 """
+import base64
 import os
 import sys
 
@@ -120,6 +121,13 @@ def scripted():
     out["scripted-workspace-short.bin"] = header(request=CALLER_MEMORY | SHORT) + body(STANDARD)
     out["scripted-damage.bin"] = header(request=DAMAGE | EXTENT) + body(STANDARD)
     out["scripted-damage-float.bin"] = header(target=T64 | 2, request=DAMAGE | CALLER_MEMORY) + body(STANDARD)
+    # Found by the first libFuzzer soak (story 16): strict, a damage and a small cell cap. The damage-limited render
+    # passes and the whole render meets the cap outside the damage, so it is refused; the harness had allowed only a
+    # region limit there.
+    out["regression-strict-cells-outside-damage.bin"] = base64.b64decode(
+        "cQsAMplAJm0ZT3ZmwR6Jf2Fd7lDCRLR/QSt6/zbm6uHj7bR6JLZqECw6JO+wOwclMCTHsAvBvaXFi6p+svmrTJ+KgxAuG0woagxRNjJeiGcC"
+        "myM9FiyKlJxCJFFWzIkK8SvFqHMplT7Bdyd9VFOqgVUfzMjmgcV+F/qsYJOfKS/fHjRpgYuTPZ9DGeivfs7ibhEb5CtwDwGioZomrmEA7NLX"
+        "H5rRQNlNKpMl8Og98ySqsAWGgpW+WBAM1grAFdQqD5fiB4thMQSas5I3pmv8sPE=")
     return out
 
 

@@ -633,8 +633,10 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
           memcpy(gimg_raster_pixels(again), gimg_raster_pixels_const(backdrop), raster_bytes(backdrop));
           target.damage = NULL;
           r2 = gshscene_sink_render(sink, &request);
-          /* The whole region can be past a region limit the damage's was within. */
-          CHECK(r2 == GSHSCENE_OK || r2 == GSHSCENE_ERR_OOM || (r2 == GSHSCENE_ERR_LIMIT && (limit_byte & 7) >= 3));
+          /* The whole region can be past a region limit the damage's was within, and under strict an item can meet
+           * a per-item limit (cells, points) outside the damage that it never reached inside it. */
+          CHECK(r2 == GSHSCENE_OK || r2 == GSHSCENE_ERR_OOM || (r2 == GSHSCENE_ERR_LIMIT && (limit_byte & 7) >= 3) ||
+                (r2 == GSHSCENE_ERR_REFUSED && (request.flags & GSHSCENE_RENDER_STRICT)));
           if (r2 == GSHSCENE_OK) {
             for (int64_t y = damage.y0; y < damage.y1 && y < (int64_t)height; y++) {
               for (int64_t x = damage.x0; x < damage.x1 && x < (int64_t)width; x++) {
