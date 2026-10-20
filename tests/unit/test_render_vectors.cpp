@@ -119,6 +119,15 @@ void evaluate(const composite_vectors::VCase & c, double out[4]) {
         std::memcpy(rgb, c.fg, sizeof rgb);
         alpha = c.fg[3] * it.rgba[3];
         space = space_of(c.fg_space.primaries, c.fg_space.transfer, c.fg_space.gamma);
+      } else if (it.paint == 3) {
+        // N14: the entry's color, its alpha scaled; a missing entry is refused and draws nothing.
+        if (it.entry >= c.palette_count) {
+          continue;
+        }
+        const VColor & e = c.palette[it.entry];
+        std::memcpy(rgb, e.rgba, sizeof rgb);
+        alpha = e.rgba[3] * it.rgba[3];
+        space = space_of(e.space.primaries, e.space.transfer, e.space.gamma);
       } else {
         std::memcpy(rgb, it.rgba, sizeof rgb);
         alpha = it.rgba[3];
@@ -228,12 +237,13 @@ struct Bench {
   }
   /** Record one item (a composite_vectors or render_vectors item, in their common shape). */
   void record(int kind, int paint, const double rgba[4], GSHSCENE_Color_Space space, double opacity,
-      GSHSCENE_Color_Space blend, int composite, int width) {
+      GSHSCENE_Color_Space blend, int composite, int width, int entry = 0) {
     if (kind == 1) {
       GSHSCENE_Paint p{};
-      p.kind = paint == 2 ? GSHSCENE_PAINT_FOREGROUND : GSHSCENE_PAINT_SOLID;
-      if (paint == 2) {
+      p.kind = paint == 2 ? GSHSCENE_PAINT_FOREGROUND : paint == 3 ? GSHSCENE_PAINT_PALETTE : GSHSCENE_PAINT_SOLID;
+      if (paint == 2 || paint == 3) {
         p.rgba[3] = rgba[3];
+        p.entry = (uint32_t)entry;
       } else {
         std::memcpy(p.rgba, rgba, sizeof p.rgba);
         p.space = space;
@@ -329,10 +339,22 @@ TEST(RenderVectors, RendersMeetTheCompositeVectorsWhereTheCoverageIsWhole) {
     std::memcpy(fg.rgba, c.fg, sizeof fg.rgba);
     fg.space = space_of(c.fg_space.primaries, c.fg_space.transfer, c.fg_space.gamma);
     ASSERT_EQ(gshscene_list_set_foreground(b.list, &fg), GSHSCENE_OK);
+    if (c.palette_count >= 0) {
+      std::vector<GSHSCENE_Color> entries((size_t)c.palette_count);
+      for (int e = 0; e < c.palette_count; e++) {
+        std::memcpy(entries[(size_t)e].rgba, c.palette[e].rgba, sizeof entries[(size_t)e].rgba);
+        entries[(size_t)e].space = space_of(c.palette[e].space.primaries, c.palette[e].space.transfer, c.palette[e].space.gamma);
+      }
+      const GSHSCENE_Resource * palette = nullptr;
+      ASSERT_EQ(gshscene_store_intern_palette(b.store, entries.size(), entries.data(), &palette), GSHSCENE_OK) << c.name;
+      ASSERT_EQ(gshscene_list_set_palette(b.list, palette), GSHSCENE_OK);
+      gshscene_resource_release(palette); /* the list holds its own */
+    }
     for (int i = 0; i < c.item_count; i++) {
       const VItem & it = c.items[i];
       b.record(it.kind, it.paint, it.rgba, space_of(it.space.primaries, it.space.transfer, it.space.gamma), it.opacity,
-          space_of(it.blend.primaries, it.blend.transfer, it.blend.gamma), it.composite, it.coverage == 1.0 ? 64 : 0);
+          space_of(it.blend.primaries, it.blend.transfer, it.blend.gamma), it.composite, it.coverage == 1.0 ? 64 : 0,
+          it.entry);
     }
     ASSERT_EQ(gshscene_list_close(b.list), GSHSCENE_OK);
     GIMG_Raster * raster = one_pixel(GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED);

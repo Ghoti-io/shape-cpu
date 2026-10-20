@@ -122,6 +122,7 @@ typedef struct Run {
   GSHCPU_Arena arena;        /* CALLER_MEMORY: the items' geometry */
   const GSHGEOM_Allocator * item_alloc;
   GSHSCENE_Color foreground;
+  const GSHSCENE_Resource * palette; /* the list's (N14); the request keeps it alive (S10) */
   Skip skip;
   size_t processed;
   size_t done;
@@ -565,20 +566,18 @@ static uint32_t weigh_clips(const Run * run, size_t from, size_t to, uint32_t m8
   return m8;
 }
 
-/** The fill's source in the layer's space, premultiplied (N7, N10): converted once. */
+/**
+ * The fill's source in the layer's space, premultiplied (N7, N10, N14): converted once.  The color is shape-scene's one
+ * resolution of the paint (a missing palette entry was refused by the plan and skipped by unit()).
+ */
 static void source_of(const Run * run, const GSHSCENE_Item * item, const Frame * frame, double s[4]) {
-  double rgb[3];
-  double alpha;
-  GSHSCENE_Color_Space space;
-  if (item->paint.kind == GSHSCENE_PAINT_FOREGROUND) {
-    memcpy(rgb, run->foreground.rgba, sizeof rgb);
-    alpha = run->foreground.rgba[3] * item->paint.rgba[3];
-    space = run->foreground.space;
-  } else {
-    memcpy(rgb, item->paint.rgba, sizeof rgb);
-    alpha = item->paint.rgba[3];
-    space = item->paint.space;
+  GSHSCENE_Color color;
+  if (gshscene_paint_resolve(&item->paint, &run->foreground, run->palette, &color) != GSHSCENE_OK) {
+    memset(&color, 0, sizeof color); /* unreachable: the disposition refused it; transparent draws nothing */
   }
+  double rgb[3] = {color.rgba[0], color.rgba[1], color.rgba[2]};
+  double alpha = color.rgba[3];
+  GSHSCENE_Color_Space space = color.space;
   if (gshscene_color_space_is_target(&space)) {
     space = *gshscene_job_target_space(run->job);
   }
@@ -699,7 +698,8 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
   if (skip_step(&run->skip, item, count)) {
     return GSHSCENE_OK;
   }
-  GSHSCENE_Disposition d = gshscene_caps_disposition(&run->job->caps, item, gshscene_job_target_space(run->job));
+  GSHSCENE_Disposition d =
+      gshscene_caps_disposition(&run->job->caps, item, gshscene_job_target_space(run->job), run->palette);
   GSHSCENE_Glyph_Route route;
   if (d.entry_class == GSHSCENE_ENTRY_REFUSED ||
       (gshcpu_render_glyph_route(item, run->maps, count - 1, &run->job->target.map, &route) &&
@@ -845,6 +845,7 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
     }
     return GSHSCENE_ERR_INTERNAL;
   }
+  run->palette = gshscene_list_palette(request->list);
   /* The root layer is the target (N6): its values are read once, as the units reach them (widen). */
   Frame * root = &run->frames[0];
   memset(root, 0, sizeof *root);
