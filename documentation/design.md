@@ -124,7 +124,7 @@ The full text is in render.h. In short (D7, D8):
 
 Measured (story 13b's gate, `tests/unit/test_render_vectors.cpp`): the worst
 error before the write is 1.22e-15 over shape-scene's 82 composite vectors and
-this library's 76 render vectors on four formats; every exact case is equal bit
+this library's 77 render vectors on four formats; every exact case is equal bit
 for bit, and every stored value is the oracle's rounding.
 
 ### Why the layers cover the region, not bands of it
