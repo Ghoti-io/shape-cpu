@@ -84,9 +84,12 @@ Story 13b, the sink (src/render):
               returned status of src/render's compose, cover, geometry, arena,
               hash and sink, mutated once
 
-Of the 962 generated candidates on the final tree, 192 do not compile and are
-dropped, 681 are caught (tools/render-plants.json), and these 89 cannot be
-seen by any test, by kind:
+Of the 962 generated candidates on story 13b's final tree, 192 did not compile
+and were dropped, 681 were caught (tools/render-plants.json), and 89 could not
+be seen by any test.  Story 14a changed geometry.c and sink.c and swept their
+550 candidates again on its final tree: 91 do not compile, 420 are caught (in
+tools/render-plants.json beside the other four files' 329, unchanged), and 39
+survive.  The survivors, by kind:
 
   - a tie between equal values: `<` for `<=` where both sides choosing the same
     value is the same answer (the rectangles' meet and join, the lowest and
@@ -108,7 +111,11 @@ seen by any test, by kind:
     geometry's release clearing what is gone, the dirty rectangle of a group
     (stale, it only widens the pixels a bounded pop visits, where the source is
     zero), `ops.thread_affine = 0` over a zeroed table, the non-caller
-    `raw_bytes`
+    `raw_bytes`, the glyph note's `memset` (every path that reads it after a
+    failure overwrites it with the limit's note)
+  - the destroy of a device path on a glyph's failure paths: the path is set
+    only on success, so it is NULL there; and `r == OK && outline` for `||`
+    (an outline is set only on success)
   - the arena's forgetting of a freed last block and of a reset's last block:
     no freed or stale pointer is ever reallocated
   - the work of a group's pop: it is never more than its push's (the region),
@@ -117,8 +124,10 @@ seen by any test, by kind:
     use that the reset already zeroes, so it is the largest item either way
   - unreachable: the skip of a refused instance (shape-cpu refuses no
     instance: its caps draw every kind and no resource limit applies to one),
-    a geometry status other than OOM and LIMIT, a run named by a font reaching
-    the geometry (the plan refuses it first), the layout's overflow on a 64-bit
+    a geometry status other than OOM and LIMIT, a glyph run that cannot be
+    read where the resource is not a path, a route that fails or refuses a run
+    the plan routed (the plan decided it on the same map and skips a refused
+    one), the layout's overflow on a 64-bit
     host, the expansion's failure to start, `GSHSCENE_ERR_REFUSED` and
     `GSHSCENE_ERR_INVALID` from the geometry's mapping, a failure other than
     cancel, refusal and memory (whose reason is "the CPU sink failed"), the
@@ -614,7 +623,7 @@ PLANTS += [
     # --- geometry (S16, AD-24) ------------------------------------------------------------------------------------------
     ("rule-S16-target-first", "src", RG, "  GSHGEOM_Result r = gshgeom_map_compose_chain(chain, count, target, &map);",
      "  GSHGEOM_Map ident;\n  gshgeom_map_identity(2, &ident);\n  GSHGEOM_Result r = gshgeom_map_compose_chain(chain, count, &ident, &map);\n  if (r == GSHGEOM_OK) {\n    r = gshgeom_map_compose(&map, target, &map);\n  }", RT),
-    ("r-geometry-item-map", "src", RG, "  chain[count] = item->map;", "  gshgeom_map_identity(2, &chain[count]);", RT),
+    ("r-geometry-item-map", "src", RG, "  memset(out, 0, sizeof *out);\n  chain[count] = item->map;", "  memset(out, 0, sizeof *out);\n  gshgeom_map_identity(2, &chain[count]);", RT),
     ("r-geometry-glyph-y", "src", RG, "run.glyphs[i].x, run.glyphs[i].y, 0.0,", "run.glyphs[i].x, run.glyphs[i].x, 0.0,", RT),
     ("r-geometry-oom", "src", RG, "return r == GSHGEOM_ERR_OOM ? GSHCPU_ERR_OOM : GSHCPU_ERR_LIMIT;", "return GSHCPU_ERR_LIMIT;", RT),
     ("r-geometry-box-ceiling", "src", RG, "    out->box.x1 = -pixel_floor(-x1);", "    out->box.x1 = pixel_floor(x1);", RT),
@@ -655,7 +664,8 @@ PLANTS += [
     ("rule-S3-failure-leaks", "src", RS, "      finish(run, r, memory);\n      return GSHSCENE_OK;", "      return r;", CONF),
     ("rule-S4-damage-ignored", "src", RS, "    r = gshcpu_render_rect_meet(r, *target->damage);", "    (void)0;", CONF),
     ("rule-S5-entry-chain", "src", RS, "GSHSCENE_REASON_RESOURCE_LIMIT, chain, count);", "GSHSCENE_REASON_RESOURCE_LIMIT, chain, count - 1);", RT),
-    ("rule-S6-planned-refusal-drawn", "src", RS, "  if (d.entry_class == GSHSCENE_ENTRY_REFUSED) {", "  if (d.entry_class == GSHSCENE_ENTRY_REFUSED && 0) {", CONF),
+    # rule-S6-planned-refusal-drawn is gone (story 14a): shape-cpu's caps refuse no item, so its first clause can only
+    # be reached by a refused route, which rgl-refused-route-drawn plants.
     ("rule-S7-check-skipped", "src", RS, "    if (gshscene_job_unit(job, run->processed, run->done)) {",
      "    if (gshscene_job_unit(job, run->processed, run->done) && 0) {", CONF),
     ("rule-S7-done-in-group", "src", RS, "    if (run->groups_open == 0) {\n      run->done = run->processed;", "    if (1) {\n      run->done = run->processed;", RT),
@@ -669,6 +679,22 @@ PLANTS += [
     ("rule-S11-src-over", "src", RC, "      fa = 1.0;\n      fb = 1.0 - sa;", "      fa = 1.0;\n      fb = 1.0 - sa * 0.5;", RT),
     ("rule-S14-affine-unstated", "src", RS, "  ops.thread_affine = 0;", "  ops.thread_affine = 1;", CONF),
     ("rule-S15-readback-offset", "src", RS, "+ (size_t)target->extent.x0 * bytes,", "+ (size_t)target->extent.y0 * bytes,", CONF),
+]
+
+# Story 14a: runs from a font by both routes.  The cap; the route the plan refused, skipped; each glyph's entry, its
+# index, and the strict stop; the fast tier taken (AD-5's "always general" plant), the general route's map, the
+# flattener's limit as a glyph's own.  geometry.c and sink.c are also mutated by the generator.
+GLR = ["testGlyph_render", "testRender_conformance"]
+PLANTS += [
+    ("rgl-cap", "src", RS, "      GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT;", "      GSHSCENE_CAP_READBACK;", ["testRender"] + GLR),
+    ("rgl-refused-route-drawn", "src", RS, "          route.entry_class == GSHSCENE_ENTRY_REFUSED)) {", "          0)) {", CONF),
+    ("rgl-notes-unreported", "src", RS, "    if (!g.notes[i].entry_class) {\n      continue;", "    if (1) {\n      continue;", GLR),
+    ("rgl-strict-goes-on", "src", RS, "        (run->request->flags & GSHSCENE_RENDER_STRICT)) {", "        0) {", GLR),
+    ("rgl-entry-index", "src", RS, "        (GSHSCENE_Reason)g.notes[i].reason, chain, count, i);", "        (GSHSCENE_Reason)g.notes[i].reason, chain, count, 0);", GLR),
+    ("rgl-always-general", "src", RG, "  if (route->route == GSHSCENE_GLYPH_FAST) {", "  if (0) {", GLR),
+    ("rgl-general-map", "src", RG, "gshgeom_device_path_from_model(outline, &glyph_map, alloc, limits, &device);", "gshgeom_device_path_from_model(outline, map, alloc, limits, &device);", GLR),
+    ("rgl-flatten-limit-unnoted", "src", RG, "      limit_note(note); /* past the flattener's points */\n", "", GLR),
+    ("rgl-route-raster", "src", RG, "         gshscene_glyph_route(item->resource, &map, GSHSCENE_TARGET_RASTER, out) == GSHSCENE_OK;", "         gshscene_glyph_route(item->resource, &map, GSHSCENE_TARGET_STREAM, out) == GSHSCENE_OK;", GLR),
 ]
 
 # The generated plants (tools/gen-render-plants.py): the mutations of src/render the sweep was seen to catch, and

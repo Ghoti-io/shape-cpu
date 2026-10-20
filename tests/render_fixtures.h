@@ -441,8 +441,8 @@ static inline GSHSCENE_List * rf_glyphs(RF_Ctx * c) {
 /* --- runs from a font (story 14a): the test provider's faces ---------------------------------------------- */
 
 /** A 2048-unit face with a program, and a 1000-unit one without; for the life of the process. */
-static GSHSCENE_Test_Provider rf_provider_program = {2048u, GSHSCENE_FACE_HINTING, 0, 0, {0}, {0}, {0}, {0}, {0}, {0}};
-static GSHSCENE_Test_Provider rf_provider_plain = {1000u, 0, 0, 0, {0}, {0}, {0}, {0}, {0}, {0}};
+static GSHSCENE_Test_Provider rf_provider_program = {2048u, GSHSCENE_FACE_HINTING, 0, 0, 0, {0}, {0}, {0}, {0}, {0}, {0}, {0}};
+static GSHSCENE_Test_Provider rf_provider_plain = {1000u, 0, 0, 0, 0, {0}, {0}, {0}, {0}, {0}, {0}, {0}};
 
 /** A run of the test glyphs 1, 2, 3, 6 and 7 of @p tp's face (fast tier bound), 1.3 em apart from (x, y). */
 static inline const GSHSCENE_Resource * rf_font_run(RF_Ctx * c, GSHSCENE_Test_Provider * tp, int16_t coord, double size,

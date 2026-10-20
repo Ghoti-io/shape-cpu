@@ -258,6 +258,80 @@ TEST(GlyphRender, EntriesRefusalsAndTheStrictPrefix) {
   EXPECT_EQ(s2.pixel(13, 17), fresh.pixel(13, 17)) << "the run is not";
 }
 
+// Every allocation of a render of runs from a font can fail: the render is out of memory, never a glyph refused for
+// a limit it did not reach, and nothing leaks, strict or not (a glyph refused under strict stops with its paths freed).
+TEST(GlyphRender, EveryAllocationCanFailAndNothingLeaks) {
+  GSHSCENE_Test_Provider tp{};
+  tp.upem = 2048;
+  tp.flags = GSHSCENE_FACE_HINTING;
+  Store s;
+  const GSHSCENE_Resource * face = face_of(s, &tp, 0);
+  GSHSCENE_Paint ink = solid(0, 0, 0, 1);
+  GSHGEOM_Map turn;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 10.0, &turn);
+  std::vector<GSHSCENE_Glyph> g = {{1, 4, 20, nullptr}, {3, 14, 20, nullptr}, {4, 20, 20, nullptr}};
+  GSHSCENE_List * l = s.open();
+  ASSERT_EQ(gshscene_list_fill(l, run_of(s, face, 12.0, GSHSCENE_HINT_FONT, g), nullptr, GSHGEOM_FILL_NONZERO, &ink, 0,
+                0.0),
+      GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, run_of(s, face, 12.0, GSHSCENE_HINT_NONE, g), &turn, GSHGEOM_FILL_NONZERO, &ink, 0,
+                0.0),
+      GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  for (uint32_t flags : {0u, (uint32_t)GSHSCENE_RENDER_STRICT}) {
+    bool finished = false;
+    long ooms = 0;
+    for (long k = 0; k < 100000 && !finished; k++) {
+      tracker::Tracker t;
+      GSHSCENE_Allocator a = tracker::allocator_for(&t);
+      {
+        RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 32, 32));
+        SinkRef sink(nullptr, &a);
+        ReportRef report;
+        GSHSCENE_Target target = target_of(r.raster);
+        GSHSCENE_Render_Request req = request_of(l, &target, report.report);
+        req.flags = flags;
+        t.fail_from = t.calls + k;
+        GSHSCENE_Result rc = gshscene_sink_render(sink.sink, &req);
+        t.fail_from = -1;
+        if (rc == GSHSCENE_ERR_OOM) {
+          ooms++;
+        } else {
+          ASSERT_EQ(rc, flags ? GSHSCENE_ERR_REFUSED : GSHSCENE_OK) << k;
+          finished = true;
+        }
+        for (const GSHSCENE_Report_Entry & e : report.entries()) {
+          EXPECT_NE(e.reason, GSHSCENE_REASON_RESOURCE_LIMIT) << "k " << k << ": out of memory is not a limit";
+        }
+      }
+      EXPECT_TRUE(t.live.empty()) << "k " << k << " flags " << flags << " leaked";
+    }
+    EXPECT_TRUE(finished);
+    EXPECT_GT(ooms, 0);
+  }
+}
+
+// An origin past the 26.6 range refuses its glyph alone.
+TEST(GlyphRender, AnOriginPastTheRangeRefusesItsGlyph) {
+  GSHSCENE_Test_Provider tp{};
+  tp.upem = 2048;
+  Store s;
+  const GSHSCENE_Resource * face = face_of(s, &tp, 0);
+  GSHSCENE_Paint ink = solid(0, 0, 0, 1);
+  GSHSCENE_List * l = s.open();
+  ASSERT_EQ(gshscene_list_fill(l, run_of(s, face, 12.0, GSHSCENE_HINT_NONE, {{1, 4e7, 20, nullptr}, {1, 4, 20, nullptr}}),
+                nullptr, GSHGEOM_FILL_NONZERO, &ink, 0, 0.0),
+      GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  ReportRef report;
+  render(l, 16, 24, report.report);
+  auto e = report.entries();
+  ASSERT_EQ(e.size(), 1u);
+  EXPECT_EQ(e[0].entry_class, GSHSCENE_ENTRY_REFUSED);
+  EXPECT_EQ(e[0].reason, GSHSCENE_REASON_RESOURCE_LIMIT);
+  EXPECT_EQ(e[0].second, 0u);
+}
+
 // Caller memory: the provider's paths come from the workspace, sized exactly, and the render allocates nothing.
 TEST(GlyphRender, CallerMemoryCoversTheProvidersPaths) {
   GSHSCENE_Test_Provider tp{};
