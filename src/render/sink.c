@@ -397,7 +397,7 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
     out->composites |= UINT32_C(1) << c;
   }
   out->flags = GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA | GSHSCENE_CAP_BLEND_SPACES |
-      GSHSCENE_CAP_READBACK;
+      GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT;
   out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;
   out->cancel_work_bound = work_bound(cs);
   out->work_measure = "cells+points+pixels";
@@ -440,8 +440,8 @@ static uint32_t clip_at(const Clip * clip, int64_t x, int64_t y) {
  * The geometry and the coverage of a fill or clip push, into @p out over @p rect (the item's pixels meet what it
  * can reach).  @return ::GSHSCENE_OK; ::GSHSCENE_ERR_LIMIT for a resource limit (the caller refuses the item); OOM.
  */
-static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, size_t count, GSHCPU_Rect reach, uint8_t * out,
-    GSHCPU_Rect * rect) {
+static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count,
+    GSHCPU_Rect reach, uint8_t * out, GSHCPU_Rect * rect) {
   GSHCPU_Item_Geometry g;
   if (run->item_alloc == &run->arena.self) {
     gshcpu_render_arena_reset(&run->arena);
@@ -449,6 +449,24 @@ static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, size_t count
   GSHCPU_Result r = gshcpu_render_geometry(item, run->maps, count - 1, &run->job->target.map, run->item_alloc,
       &run->cs->geometry, &g);
   run->work += g.points;
+  /* A run from a font: each glyph's entry (glyph.h, D7); a glyph refused under strict stops the render here (S6). */
+  for (size_t i = 0; r == GSHCPU_OK && g.notes && i < g.count; i++) {
+    if (!g.notes[i].entry_class) {
+      continue;
+    }
+    GSHSCENE_Result e = gshscene_job_report_glyph(run->job, (GSHSCENE_Entry_Class)g.notes[i].entry_class,
+        (GSHSCENE_Reason)g.notes[i].reason, chain, count, i);
+    if (e == GSHSCENE_OK && g.notes[i].entry_class == GSHSCENE_ENTRY_REFUSED &&
+        (run->request->flags & GSHSCENE_RENDER_STRICT)) {
+      memcpy(run->stop, chain, count * sizeof *chain);
+      run->stop_count = count;
+      e = GSHSCENE_ERR_REFUSED;
+    }
+    if (e != GSHSCENE_OK) {
+      gshcpu_render_geometry_release(&g, run->item_alloc);
+      return e;
+    }
+  }
   if (r == GSHCPU_OK) {
     *rect = gshcpu_render_rect_meet(g.box, reach);
     if (gshcpu_render_rect_empty(*rect)) {
@@ -511,7 +529,7 @@ static void source_of(const Run * run, const GSHSCENE_Item * item, const Frame *
 static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
   Frame * frame = &run->frames[run->top];
   GSHCPU_Rect rect;
-  GSHSCENE_Result r = shape(run, item, count, reach_of(run, frame->clip_base, run->clip_count), run->coverage, &rect);
+  GSHSCENE_Result r = shape(run, item, chain, count, reach_of(run, frame->clip_base, run->clip_count), run->coverage, &rect);
   if (r == GSHSCENE_ERR_LIMIT) {
     return refuse(run, item, chain, count);
   }
@@ -545,7 +563,7 @@ static GSHSCENE_Result clip_push(Run * run, const GSHSCENE_Item * item, const si
   Clip * clip = &run->clips[run->clip_count];
   clip->coverage = run->clip_memory + run->clip_count * run->layout.pixels;
   GSHSCENE_Result r =
-      shape(run, item, count, reach_of(run, frame->clip_base, run->clip_count), clip->coverage, &clip->rect);
+      shape(run, item, chain, count, reach_of(run, frame->clip_base, run->clip_count), clip->coverage, &clip->rect);
   if (r == GSHSCENE_ERR_LIMIT) {
     return refuse(run, item, chain, count);
   }
@@ -616,7 +634,10 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
     return GSHSCENE_OK;
   }
   GSHSCENE_Disposition d = gshscene_caps_disposition(&run->job->caps, item, gshscene_job_target_space(run->job));
-  if (d.entry_class == GSHSCENE_ENTRY_REFUSED) {
+  GSHSCENE_Glyph_Route route;
+  if (d.entry_class == GSHSCENE_ENTRY_REFUSED ||
+      (gshcpu_render_glyph_route(item, run->maps, count - 1, &run->job->target.map, &route) &&
+          route.entry_class == GSHSCENE_ENTRY_REFUSED)) {
     /* The planning pass reported it. */
     skip_begin(&run->skip, item, count);
     return GSHSCENE_OK;
@@ -666,7 +687,7 @@ static const char * reason_of(GSHSCENE_Result result) {
     case GSHSCENE_ERR_CANCELLED:
       return "cancelled between units";
     case GSHSCENE_ERR_REFUSED:
-      return "strict: refused while drawing (the sink's resource limit)";
+      return "strict: refused while drawing (the sink's resource limit, or a glyph)";
     case GSHSCENE_ERR_OOM:
       return "out of memory while drawing";
     default:

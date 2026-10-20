@@ -45,5 +45,13 @@ render maps rgba8 d45687bb17b6ef91
 render maps rgba8-premultiplied 8a64dd00692a5a4e
 render maps rgbaf32 6d1d15a365559b37
 render maps rgbaf32-premultiplied caac3b307091633c
-hash ee4d1842df5800f3
-count 44
+render font-fast rgba8 3fd2373c606bd8a2
+render font-fast rgba8-premultiplied 7811b3587c8acc4c
+render font-fast rgbaf32 39dbeb7a82e2e453
+render font-fast rgbaf32-premultiplied 92db7fe2f0a63b4c
+render font-general rgba8 2a379c5721d64b6e
+render font-general rgba8-premultiplied 2f3983c234c5a4eb
+render font-general rgbaf32 f8c5a63c5728f842
+render font-general rgbaf32-premultiplied 4c88b1e549baa06c
+hash 1d6a304e0fa86071
+count 52

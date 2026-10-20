@@ -169,17 +169,26 @@ void gshcpu_render_arena_reset(GSHCPU_Arena * arena);
 
 /* --- the geometry of one item (geometry.c) ------------------------------------------- */
 
+/** What became of one glyph of a run from a font (glyph.h): its entry, if it has one. */
+typedef struct GSHCPU_Glyph_Note {
+  uint32_t entry_class; /* 0, HINT_STATUS or REFUSED */
+  uint32_t reason;
+} GSHCPU_Glyph_Note;
+
 /** An item's flattened paths in device space. */
 typedef struct GSHCPU_Item_Geometry {
-  GSHGEOM_Flat_Path ** paths; /* one per path or outline glyph; NULL entries are none */
+  GSHGEOM_Flat_Path ** paths; /* one per path or glyph; NULL entries are none */
   size_t count;
   size_t points;              /* their points */
   GSHCPU_Rect box;            /* the pixels their points touch (empty for none) */
+  GSHCPU_Glyph_Note * notes;  /* a run from a font: one per glyph (count of them); else NULL */
 } GSHCPU_Item_Geometry;
 
 /**
  * Convert and flatten the resource of a fill or clip push: @p chain holds the maps of the enclosing instances, room
- * for two more, and @p count of them are set (the item's map is added here, and a glyph's translation).
+ * for two more, and @p count of them are set (the item's map is added here, and a glyph's translation).  A run
+ * from a font goes by its route (glyph.h): the fast tier's device path from the face's provider, or the unhinted
+ * outline under the glyph's map; what became of each glyph is in `notes`, and a refused glyph has no path.
  *
  * @return ::GSHCPU_OK; ::GSHCPU_ERR_OOM; ::GSHCPU_ERR_LIMIT for anything else that stops it (the sink's resource
  *   limits: a map, a coordinate, the points); on failure @p out holds what must still be released.
@@ -187,6 +196,10 @@ typedef struct GSHCPU_Item_Geometry {
 GSHCPU_Result gshcpu_render_geometry(const GSHSCENE_Item * item, GSHGEOM_Map * chain, size_t count,
     const GSHGEOM_Map * target, const GSHGEOM_Allocator * alloc, const GSHGEOM_Limits * limits,
     GSHCPU_Item_Geometry * out);
+
+/** The route of a fill or clip push of a run from a font under the maps of @p chain (as above); 0 for any other item. */
+int gshcpu_render_glyph_route(const GSHSCENE_Item * item, GSHGEOM_Map * chain, size_t count, const GSHGEOM_Map * target,
+    GSHSCENE_Glyph_Route * out);
 
 /** Release what ::gshcpu_render_geometry made. */
 void gshcpu_render_geometry_release(GSHCPU_Item_Geometry * g, const GSHGEOM_Allocator * alloc);

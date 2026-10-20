@@ -40,6 +40,8 @@
  * | picture | a picture (a fill and a clipped group) instanced twice, rotated and scaled |
  * | glyphs | a glyph run of two outline glyphs (curves, a rational arc, a counter) |
  * | maps | a skewed fill, a rotated clip, and the target's map |
+ * | font-fast | (story 14a) runs from the test provider's faces on the fast tier: unhinted at a scaled map and fractional origins, hinted, and a face without a program |
+ * | font-general | (story 14a) the same runs on the general route: rotated, and at a size that is no integer ppem |
  */
 
 #ifndef GHOTI_IO_GSHCPU_TEST_RENDER_FIXTURES_H
@@ -49,6 +51,7 @@
 #include <ghoti.io/shape-cpu/shape-cpu.h>
 #include <ghoti.io/shape-geometry/shape-geometry.h>
 #include <ghoti.io/shape-scene/shape-scene.h>
+#include <ghoti.io/shape-scene/testing/glyph_test_provider.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -435,6 +438,74 @@ static inline GSHSCENE_List * rf_glyphs(RF_Ctx * c) {
   return l;
 }
 
+/* --- runs from a font (story 14a): the test provider's faces ---------------------------------------------- */
+
+/** A 2048-unit face with a program, and a 1000-unit one without; for the life of the process. */
+static GSHSCENE_Test_Provider rf_provider_program = {2048u, GSHSCENE_FACE_HINTING, 0, 0, {0}, {0}, {0}, {0}, {0}, {0}};
+static GSHSCENE_Test_Provider rf_provider_plain = {1000u, 0, 0, 0, {0}, {0}, {0}, {0}, {0}, {0}};
+
+/** A run of the test glyphs 1, 2, 3, 6 and 7 of @p tp's face (fast tier bound), 1.3 em apart from (x, y). */
+static inline const GSHSCENE_Resource * rf_font_run(RF_Ctx * c, GSHSCENE_Test_Provider * tp, int16_t coord, double size,
+    uint32_t mode, double x, double y) {
+  const GSHSCENE_Resource * face = rf_hold(c, gshscene_tp_face(c->store, tp, 1, tp == &rf_provider_plain ? 0x62u : 0x61u,
+      coord));
+  rf_check(c, face != NULL);
+  static const uint32_t ids[5] = {1, 2, 3, 6, 7};
+  GSHSCENE_Glyph glyphs[5];
+  memset(glyphs, 0, sizeof glyphs);
+  for (size_t i = 0; i < 5; i++) {
+    glyphs[i].id = ids[i];
+    glyphs[i].x = x + (double)i * 0.95 * size + (double)i / 7.0;
+    glyphs[i].y = y + (double)(i % 2) / 3.0;
+  }
+  GSHSCENE_Glyph_Run run;
+  memset(&run, 0, sizeof run);
+  run.source = GSHSCENE_GLYPHS_FROM_FONT;
+  run.face = face;
+  run.size = size;
+  run.hint_mode = mode;
+  run.glyph_count = 5;
+  run.glyphs = glyphs;
+  const GSHSCENE_Resource * r = NULL;
+  rf_check(c, gshscene_store_intern_glyph_run(c->store, &run, &r) == GSHSCENE_OK);
+  return rf_hold(c, r);
+}
+
+static inline GSHSCENE_List * rf_font_fast(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  GSHGEOM_Map map;
+  GSHGEOM_Map half;
+  gshgeom_map_scale(2, 0.5, 0.5, 1.0, &half);
+  gshgeom_map_translate(2, 0.3125, 0.0, 0.0, &map);
+  gshgeom_map_compose(&map, &half, &map);
+  /* Unhinted at 9 ppem (18 at a scale of one half), an instance of the axis. */
+  rf_fill(c, l, rf_font_run(c, &rf_provider_program, 6000, 18.0, GSHSCENE_HINT_NONE, 1.0, 20.0), &map,
+      GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.1, 0.2, 1.0), 0, 0.0);
+  /* Hinted at 9 ppem; and a face without a program, unhinted with its entry. */
+  gshgeom_map_translate(2, 0.6, 20.0, 0.0, &map);
+  rf_fill(c, l, rf_font_run(c, &rf_provider_program, 0, 9.0, GSHSCENE_HINT_FONT, 0.0, 0.0), &map, GSHGEOM_FILL_NONZERO,
+      rf_solid(0.8, 0.2, 0.1, 0.9), 0, 0.0);
+  rf_fill(c, l, rf_font_run(c, &rf_provider_plain, 0, 8.0, GSHSCENE_HINT_FONT, 2.0, 37.5), NULL, GSHGEOM_FILL_EVEN_ODD,
+      rf_solid(0.1, 0.6, 0.3, 0.8), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_font_general(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  GSHGEOM_Map map;
+  GSHGEOM_Map turn;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, -20.0, &turn);
+  gshgeom_map_translate(2, 2.0, 18.0, 0.0, &map);
+  gshgeom_map_compose(&map, &turn, &map);
+  rf_fill(c, l, rf_font_run(c, &rf_provider_program, -8000, 9.0, GSHSCENE_HINT_FONT, 0.0, 0.0), &map,
+      GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.2, 0.7, 1.0), 0, 0.0);
+  rf_fill(c, l, rf_font_run(c, &rf_provider_program, 0, 40.0 / 3.0, GSHSCENE_HINT_FONT, 1.0, 36.0), NULL,
+      GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.5, 0.0, 0.7), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
 static inline GSHSCENE_List * rf_maps(RF_Ctx * c) {
   GSHSCENE_List * l = rf_open(c);
   const double skew[4] = {1.0, 0.45, 0.1, 0.9};
@@ -473,6 +544,8 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"picture", rf_picture},
     {"glyphs", rf_glyphs},
     {"maps", rf_maps},
+    {"font-fast", rf_font_fast},
+    {"font-general", rf_font_general},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

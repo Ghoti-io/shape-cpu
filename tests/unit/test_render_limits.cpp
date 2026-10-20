@@ -462,7 +462,7 @@ TEST(RenderLimits, DeepInNestedPicturesTheChainNamesTheItem) {
   EXPECT_EQ(strict.result, GSHSCENE_ERR_REFUSED);
   EXPECT_EQ(strict.failure, (std::vector<size_t>{1, 0, 2}));
   EXPECT_EQ(q.bytes(), b.bytes()) << "everything before the refusal is in the target";
-  EXPECT_STREQ(strict.summary.failure.reason, "strict: refused while drawing (the sink's resource limit)");
+  EXPECT_STREQ(strict.summary.failure.reason, "strict: refused while drawing (the sink's resource limit, or a glyph)");
   for (size_t i = 0; i < c.held_count; i++) {
     gshscene_resource_release(c.held[i]);
   }

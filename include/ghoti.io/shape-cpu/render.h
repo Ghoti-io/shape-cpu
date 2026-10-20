@@ -35,10 +35,11 @@
  * target and the reserved GPU kinds are ::GSHSCENE_ERR_UNSUPPORTED.  For a target
  * it draws, the caps are: every item kind and every composite operator;
  * `CAN_BLOCK` (it completes inside `begin`), `CALLER_MEMORY`, `CLIP_AA`,
- * `BLEND_SPACES` and `READBACK`; no `THREAD_AFFINE` (it holds no mutable state of
- * its own, so renders on distinct surfaces may run at once), no `PREPARE`, and no
- * `GLYPHS_FROM_FONT` until the glyph path provider (story 14): a glyph run named
- * by a font is refused by the planning pass.  Cancel is `BETWEEN_UNITS` (each unit
+ * `BLEND_SPACES`, `READBACK` and `GLYPHS_FROM_FONT` (story 14a: a run from a font
+ * is drawn through its face's provider by shape-scene's route, glyph.h, the fast
+ * tier wherever the route returns it); no `THREAD_AFFINE` (it holds no mutable
+ * state of its own, so renders on distinct surfaces may run at once) and no
+ * `PREPARE`.  Cancel is `BETWEEN_UNITS` (each unit
  * of the list's expansion); the work between two checks is counted in
  * `"cells+points+pixels"` and its bound is `max_points + max_cells + max_bytes`
  * of the sink's ::GSHCPU_Limits (each at its default when zero; `max_points`
@@ -60,6 +61,16 @@
  * device origin, a map or a device path `shape-geometry` refuses, a flattened
  * path past `max_points` and more than `max_cells` cell deposits are the sink's
  * resource limits: the item is refused while drawing (S6).
+ *
+ * A run from a font is one shape too.  On the fast tier each glyph's device path is
+ * the face's provider's (glyph.h), moved by the whole pixel of its origin; on the
+ * general route it is the provider's unhinted outline under the glyph's map
+ * (`gshscene_glyph_map`), made a device path after the map; either is flattened as
+ * above.  With hinting off the two are the same path under the snapped map (AD-5),
+ * so the same pixels.  Each glyph's entry is reported with its index in `second`;
+ * a glyph the provider cannot give, or whose path passes `max_points` or the 26.6
+ * range, is refused alone (the rest of the run is drawn), and under strict the
+ * render stops at the item.
  *
  * ### S11 Arithmetic (normative)
  *

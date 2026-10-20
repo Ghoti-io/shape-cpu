@@ -50,7 +50,7 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
     EXPECT_EQ(caps.item_kinds, ((1u << GSHSCENE_ITEM_KIND_COUNT) - 1u) & ~1u) << "every kind, and no bit past them";
     EXPECT_EQ(caps.composites, (1u << GSHSCENE_COMPOSITE_COUNT) - 1u);
     EXPECT_EQ(caps.flags, GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA |
-        GSHSCENE_CAP_BLEND_SPACES | GSHSCENE_CAP_READBACK);
+        GSHSCENE_CAP_BLEND_SPACES | GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT);
     EXPECT_EQ(caps.cancel_unit, (uint32_t)GSHSCENE_CANCEL_BETWEEN_UNITS);
     EXPECT_STREQ(caps.work_measure, "cells+points+pixels");
     EXPECT_EQ(caps.cancel_work_bound, (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS + GSHCPU_LIMITS_DEFAULT_MAX_CELLS +
@@ -436,12 +436,18 @@ TEST(RenderGlyphs, ARunOfOutlinesDrawsAsOneShapeOfItsGlyphs) {
   gshscene_store_destroy(own);
 }
 
-TEST(RenderGlyphs, ARunNamedByAFontIsRefusedByThePlan) {
+TEST(RenderGlyphs, ARunOfAnUnboundFaceIsRefusedByThePlan) {
+  // Story 14a: shape-cpu draws runs from a font, through their face's provider; a face with none is refused.
   Store s;
+  GSHSCENE_Face_Desc desc{};
+  desc.font_key = 0x1234;
+  const GSHSCENE_Resource * face = nullptr;
+  ASSERT_EQ(gshscene_store_intern_face(s.store, &desc, &face), GSHSCENE_OK);
+  s.held.push_back(face);
   GSHSCENE_Glyph glyphs[1] = {{36, 2.0, 30.0, nullptr}};
   GSHSCENE_Glyph_Run run{};
   run.source = GSHSCENE_GLYPHS_FROM_FONT;
-  run.font_key = 0x1234;
+  run.face = face;
   run.size = 12.0;
   run.glyph_count = 1;
   run.glyphs = glyphs;
@@ -469,8 +475,8 @@ TEST(RenderGlyphs, ARunNamedByAFontIsRefusedByThePlan) {
   ASSERT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK);
   auto e = report.entries();
   ASSERT_EQ(e.size(), 2u);
-  EXPECT_EQ(e[0].reason, GSHSCENE_REASON_GLYPH_SOURCE);
-  EXPECT_EQ(e[1].reason, GSHSCENE_REASON_GLYPH_SOURCE);
+  EXPECT_EQ(e[0].reason, GSHSCENE_REASON_FACE_UNBOUND);
+  EXPECT_EQ(e[1].reason, GSHSCENE_REASON_FACE_UNBOUND);
   // The first fill is drawn, the clip block (and the fill in it) is skipped.
   EXPECT_NE(r.pixel(4, 4), fresh.pixel(4, 4));
   EXPECT_EQ(r.pixel(24, 4), fresh.pixel(24, 4));

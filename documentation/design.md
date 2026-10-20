@@ -88,12 +88,13 @@ keeps its own spelling, which is committed in its goldens.
 It draws `RASTER` targets of RGBA, interleaved, 8-bit unsigned normalized or
 32-bit float, straight or premultiplied as the raster's format says; every other
 target is `ERR_UNSUPPORTED`. Its caps are every item kind and every operator,
-`CAN_BLOCK`, `CALLER_MEMORY`, `CLIP_AA`, `BLEND_SPACES`, `READBACK`, cancel
-between units with a bound of `max_points + max_cells + max_bytes` in
-cells, points and pixels, and no `GLYPHS_FROM_FONT` until story 14 (the planning
-pass refuses such a run). The planning pass is the contract layer's; the sink
-decides each unit with the same predicate, skips what it refused, and adds only
-the entries it finds while drawing: an item past one of its resource limits.
+`CAN_BLOCK`, `CALLER_MEMORY`, `CLIP_AA`, `BLEND_SPACES`, `READBACK`,
+`GLYPHS_FROM_FONT` (story 14a), and cancel between units with a bound of
+`max_points + max_cells + max_bytes` in cells, points and pixels. The planning
+pass is the contract layer's; the sink decides each unit with the same predicate
+(and a run from a font with shape-scene's route), skips what it refused, and adds
+only the entries it finds while drawing: an item past one of its resource
+limits, and a glyph's own entry.
 
 ### S11 Arithmetic (normative)
 
@@ -155,6 +156,27 @@ coverage the whole path gives it, which `tests/unit/test_render_parts.cpp`
 checks against `gshcpu_coverage_fill` on random paths and windows. That is also
 what makes a damaged render equal the whole render inside the damage. An outline
 glyph run is one shape: its glyphs' windings add.
+
+**Runs from a font (story 14a, AD-5).** shape-cpu takes the fast tier wherever
+shape-scene's `gshscene_glyph_route` returns it (AD-13: this is shape-cpu's fast
+tier for glyphs): it asks the face's provider for each glyph's device path at the
+route's ppem and snapped scale and the origin's fraction, adds the whole pixel as an
+exact integer, and flattens it like any device path. On the general route it asks
+for the unhinted outline and makes it a device path under the glyph's map
+(`gshscene_glyph_map`), after the map. A run is one shape (its glyphs' windings
+add). Each glyph's entry (glyph.h, D7) is reported with its index; a glyph the
+provider cannot give, or past the flattener's points or the 26.6 range, is refused
+and the rest drawn, and under strict the render stops at the item with the
+finished prefix. With caller memory the provider's paths come from the workspace,
+measured like any item's geometry (a provider's own caches are its own). AD-5's
+gate is `tests/unit/test_glyph_render.cpp`: with hinting off, a run on the fast
+tier renders byte for byte what the general route renders under the snapped map,
+for every outline glyph of shape-scene's test provider, ppem 8 to 72, a 2048-unit
+and a 1000-unit face, two instances and five fractions on each axis (260 scenes of
+25 glyphs), and the provider's fast count is the glyph count. The goldens include
+two fixtures of runs from a font (`font-fast`, `font-general`), so the
+cross-target probe hashes both routes on every target. No glyph is cached across
+frames (step 5).
 
 A point must lie within 2^24 pixels of the origin (so that a product of two
 coordinate differences fits `int64`); a flattened path is at most `max_points`;
