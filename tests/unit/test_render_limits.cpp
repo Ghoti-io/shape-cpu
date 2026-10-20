@@ -678,6 +678,46 @@ TEST(RenderMemory, ARenderTouchesThePixelsItsUnitsReachNotTheRegion) {
   }
 }
 
+TEST(RenderMemory, AnUnboundedGroupsPopVisitsTheRowsOfItsClipsReachAndNoMore) {
+  // A group with an unbounded operator acts wherever the clips around it weigh above zero (N8), and its pop visits
+  // the rows of those clips' reach.  The row just below the reach is outside the clip, but a clip's coverage is kept
+  // compact over its own rectangle in memory the clips at its level share, so reading one row past it reads what an
+  // earlier, larger clip left there.  Here that is a whole row of 255: the first clip covers the target and the
+  // second, the rows 2 to 4 of it, reuses its memory.  A pop that went one row too far would weigh row 5 fully and
+  // apply its operator (SRC, with the group's empty source) there, clearing the red backdrop below the clip.
+  const uint32_t w = 8;
+  const uint32_t h = 8;
+  Store s;
+  GSHSCENE_Paint red = solid(1, 0, 0, 1);
+  GSHSCENE_Paint blue = solid(0, 0, 1, 1);
+  const GSHSCENE_Resource * all = s.rect(0, 0, w, h);
+  const GSHSCENE_Resource * band = s.rect(0, 2, w, 5);
+  GSHSCENE_Group src{};
+  src.opacity = 1.0;
+  src.composite = GSHSCENE_COMPOSITE_SRC;
+  ASSERT_FALSE(gshcpu_render_bounded(src.composite));
+  GSHSCENE_List * list = s.open();
+  ASSERT_EQ(gshscene_list_clip_push(list, all, nullptr, GSHGEOM_FILL_NONZERO, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(list, all, nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_pop(list), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_push(list, band, nullptr, GSHGEOM_FILL_NONZERO, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_push(list, &src, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(list, band, nullptr, GSHGEOM_FILL_NONZERO, &blue, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_pop(list), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_pop(list), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(list), GSHSCENE_OK);
+  SinkRef sink;
+  RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, w, h));
+  ASSERT_EQ(render(sink.sink, list, r.raster).result, GSHSCENE_OK);
+  const std::string redpx("\xff\x00\x00\xff", 4);
+  const std::string bluepx("\x00\x00\xff\xff", 4);
+  for (uint32_t y = 0; y < h; y++) {
+    for (uint32_t x = 0; x < w; x++) {
+      EXPECT_EQ(r.pixel(x, y), (y >= 2 && y < 5) ? bluepx : redpx) << "at " << x << ", " << y;
+    }
+  }
+}
+
 /* --- cancel (S7) -------------------------------------------------------------------------------------------- */
 
 namespace {

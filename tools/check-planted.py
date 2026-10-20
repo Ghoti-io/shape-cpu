@@ -93,8 +93,10 @@ be seen by any test.  Story 14a changed geometry.c and sink.c and swept their
 tools/render-plants.json beside the other four files' 329, unchanged), and 39
 survive.  The empty-frame fix (2026-10-20: layers made ready as the units reach
 them) changed sink.c and swept its 444 candidates again: 81 do not compile, 331
-are caught (they replace sink.c's in tools/render-plants.json), and 32 survive.
-The survivors, by kind:
+are caught (they replace sink.c's in tools/render-plants.json), and 32 survived;
+one of those, a group's pop visiting one row past its region, is caught since
+by a test of its own (rs-669-lt, in tools/render-plants.json).  The 31
+survivors, by kind:
 
   - a tie between equal values: `<` for `<=` where both sides choosing the same
     value is the same answer (the rectangles' meet and join, the lowest and
@@ -127,11 +129,6 @@ The survivors, by kind:
     no freed or stale pointer is ever reallocated
   - the work of a group's pop: it is never more than its push's (the region),
     so the most work between checks cannot show it
-  - a group's pop visiting one row past its region (`<=` for `<`): the row is
-    outside every frame's dirty rectangle, which is all anything reads (the
-    write visits the root's), so it is a memory-safety defect no output shows.
-    Before the layers were made ready lazily it read memory nothing had
-    written, and was caught by that chance
   - the measure's per-item reset of its peak: the peak is a high-water mark of a
     use that the reset already zeroes, so it is the largest item either way
   - unreachable: the skip of a refused instance (shape-cpu refuses no
