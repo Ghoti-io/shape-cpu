@@ -47,7 +47,7 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
     for (uint32_t k = GSHSCENE_ITEM_FILL; k < GSHSCENE_ITEM_KIND_COUNT; k++) {
       EXPECT_TRUE(caps.item_kinds & (1u << k)) << k;
     }
-    EXPECT_EQ(caps.item_kinds & 1u, 0u);
+    EXPECT_EQ(caps.item_kinds, ((1u << GSHSCENE_ITEM_KIND_COUNT) - 1u) & ~1u) << "every kind, and no bit past them";
     EXPECT_EQ(caps.composites, (1u << GSHSCENE_COMPOSITE_COUNT) - 1u);
     EXPECT_EQ(caps.flags, GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA |
         GSHSCENE_CAP_BLEND_SPACES | GSHSCENE_CAP_READBACK);
@@ -260,6 +260,13 @@ TEST(RenderFixtures, APixelNoUnitTouchedIsNotWritten) {
     req.list = m;
     ASSERT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK);
     EXPECT_EQ(r.bytes(), fresh.bytes()) << gshcpu_format_string(format);
+    // A box wholly outside the region is no work: the bound holds.
+    GSHSCENE_Sink_Caps caps = caps_for(sink.sink, r.raster);
+    GSHSCENE_Report_Summary sum{};
+    gshscene_report_summary(report.report, &sum);
+    EXPECT_LE(sum.work_max, caps.cancel_work_bound);
+    EXPECT_LT(sum.work_max, 100u) << "an empty box has no pixels";
+    EXPECT_STREQ(sum.failure.reason, "") << "a render that succeeded states no failure";
   }
 }
 

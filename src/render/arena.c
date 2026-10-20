@@ -149,10 +149,8 @@ static void * arena_realloc(void * ctx, void * old, size_t n) {
   if (old == a->last) {
     /* The last block grows or shrinks where it is. */
     size_t keep = a->used;
-    size_t at = take(a, a->last_offset, n);
-    if (at == SIZE_MAX) {
-      a->used = keep;
-      return NULL;
+    if (take(a, a->last_offset, n) == SIZE_MAX) {
+      return NULL; /* take changes nothing when it fails */
     }
     if (a->measure) {
       void * p = a->measure->realloc_fn(a->measure->ctx, old, n);

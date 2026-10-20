@@ -188,6 +188,31 @@ TEST(RenderCover, BandsJoinAndCellsAreCountedToTheLimit) {
   EXPECT_EQ(n, cells - 1);
 }
 
+TEST(RenderCover, ACellIsACrossingOfNonzeroHeight) {
+  // A shallow edge crosses three columns of one row and has height in one of them only: one cell, not three.
+  Device d;
+  gshgeom_device_path_move_to(d.path, dp(0, 0));
+  gshgeom_device_path_line_to(d.path, dp(130, 1));
+  gshgeom_device_path_line_to(d.path, dp(0, 64));
+  gshgeom_device_path_close(d.path);
+  d.flatten();
+  uint64_t cells = 0;
+  cover(d.flat, GSHGEOM_FILL_NONZERO, GSHCPU_Rect{0, 0, 4, 2}, &cells);
+  EXPECT_EQ(cells, 5u) << "1 for the shallow edge, 3 for the steep one, 1 for the closing one";
+  // A pixel-aligned rectangle: a cell per row of each vertical edge.
+  Device r;
+  gshgeom_device_path_move_to(r.path, dp(2 * 64, 2 * 64));
+  gshgeom_device_path_line_to(r.path, dp(5 * 64, 2 * 64));
+  gshgeom_device_path_line_to(r.path, dp(5 * 64, 4 * 64));
+  gshgeom_device_path_line_to(r.path, dp(2 * 64, 4 * 64));
+  gshgeom_device_path_close(r.path);
+  r.flatten();
+  cover(r.flat, GSHGEOM_FILL_NONZERO, GSHCPU_Rect{0, 0, 10, 10}, &cells);
+  EXPECT_EQ(cells, 4u);
+  cover(r.flat, GSHGEOM_FILL_NONZERO, GSHCPU_Rect{3, 0, 4, 10}, &cells);
+  EXPECT_EQ(cells, 2u) << "left of the window: one folded cell a row; right of it: none";
+}
+
 TEST(RenderCover, Rectangles) {
   GSHCPU_Rect a{0, 0, 10, 10};
   GSHCPU_Rect b{5, -2, 20, 7};
@@ -206,6 +231,18 @@ TEST(RenderCover, Rectangles) {
   EXPECT_TRUE(gshcpu_render_rect_empty(GSHCPU_Rect{3, 4, 9, 4}));
   EXPECT_TRUE(gshcpu_render_rect_empty(GSHCPU_Rect{3, 4, 2, 9}));
   EXPECT_FALSE(gshcpu_render_rect_empty(a));
+  GSHCPU_Rect c{3, 4, 30, 40};
+  GSHCPU_Rect d{7, 2, 11, 50};
+  GSHCPU_Rect cd = gshcpu_render_rect_join(c, d);
+  EXPECT_EQ(cd.x0, 3);
+  EXPECT_EQ(cd.y0, 2);
+  EXPECT_EQ(cd.x1, 30);
+  EXPECT_EQ(cd.y1, 50);
+  GSHCPU_Rect dc = gshcpu_render_rect_meet(d, c);
+  EXPECT_EQ(dc.x0, 7);
+  EXPECT_EQ(dc.y0, 4);
+  EXPECT_EQ(dc.x1, 11);
+  EXPECT_EQ(dc.y1, 40);
   GSHCPU_Rect je = gshcpu_render_rect_join(e, b);
   EXPECT_EQ(je.x0, b.x0);
   EXPECT_EQ(je.x1, b.x1);
@@ -272,6 +309,31 @@ TEST(RenderArena, TheMeasureIsTheSizeThatRepeatsTheCalls) {
   EXPECT_TRUE(any_null) << "an arena smaller than the measure ran the calls anyway";
 }
 
+TEST(RenderArena, ACallocdLastBlockGrowsInPlaceInTheMeasureAsInTheArena) {
+  tracker::Tracker t;
+  GSHSCENE_Allocator real = tracker::allocator_for(&t);
+  GSHCPU_Arena m;
+  gshcpu_render_arena_measure(&m, &real);
+  void * a = m.self.malloc_fn(m.self.ctx, 100);
+  void * b = m.self.calloc_fn(m.self.ctx, 4, 8);
+  b = m.self.realloc_fn(m.self.ctx, b, 300);
+  EXPECT_EQ(m.peak, (16u + 112u) + (16u + 304u)) << "the calloc'd block, last, grew where it was";
+  m.self.free_fn(m.self.ctx, a);
+  m.self.free_fn(m.self.ctx, b);
+  EXPECT_TRUE(t.live.empty());
+  alignas(16) static unsigned char memory[1024];
+  GSHCPU_Arena r;
+  gshcpu_render_arena_init(&r, memory, m.peak);
+  a = r.self.malloc_fn(r.self.ctx, 100);
+  b = r.self.calloc_fn(r.self.ctx, 4, 8);
+  EXPECT_NE(r.self.realloc_fn(r.self.ctx, b, 300), nullptr) << "the measure's size repeats it";
+  EXPECT_EQ(r.used, m.peak);
+  // Growing the last block past the capacity fails and takes nothing.
+  EXPECT_EQ(r.self.realloc_fn(r.self.ctx, b, 400), nullptr);
+  EXPECT_EQ(r.used, m.peak);
+  (void)a;
+}
+
 TEST(RenderArena, BlocksAreAlignedZeroedCopiedAndGrownInPlace) {
   alignas(16) static unsigned char memory[1024];
   GSHCPU_Arena a;
@@ -297,8 +359,11 @@ TEST(RenderArena, BlocksAreAlignedZeroedCopiedAndGrownInPlace) {
   for (int i = 0; i < 5; i++) {
     EXPECT_EQ(moved[i], 0xab) << "and its bytes go with it";
   }
+  size_t moved_at = (size_t)(moved - memory) - 16u;
+  EXPECT_EQ(a.used, moved_at + 16u + 80u);
   unsigned char * shrunk = (unsigned char *)al->realloc_fn(al->ctx, moved, 10);
   EXPECT_EQ(shrunk, moved);
+  EXPECT_EQ(a.used, moved_at + 16u + 16u) << "the moved block is the last now, and shrinks where it is";
   size_t used = a.used;
   al->free_fn(al->ctx, shrunk);
   EXPECT_EQ(a.used, used) << "a free keeps the block";
@@ -476,6 +541,32 @@ TEST(RenderArithmetic, TheOperatorsTableAndBoundedness) {
   std::memcpy(e, d0, sizeof e);
   gshcpu_render_apply(e, s, 1.0, GSHSCENE_COMPOSITE_COUNT); // outside the enum: (0, 0), the caps refuse it first
   EXPECT_EQ(e[0], 0.0);
+}
+
+TEST(RenderArithmetic, AConversionBetweenEqualSpacesCopies) {
+  GSHSCENE_Color_Space p3{};
+  p3.primaries = GCOL_PRIMARIES_DISPLAY_P3;
+  p3.transfer = GCOL_TRANSFER_GAMMA;
+  p3.gamma = 2.2;
+  GSHSCENE_Color_Space p3b = p3;
+  p3b.gamma = 1.8;
+  GSHCPU_Convert c;
+  gshcpu_render_convert_prepare(&c, &p3, &p3);
+  const double in[4] = {0.25, -0.5, 1.5, 0.5};
+  double out[4] = {9, 9, 9, 9};
+  gshcpu_render_convert_straight(&c, in, out);
+  EXPECT_EQ(out[0], 0.25);
+  EXPECT_EQ(out[1], -0.5);
+  EXPECT_EQ(out[2], 1.5);
+  double pre[4] = {9, 9, 9, 9};
+  gshcpu_render_convert_premultiplied(&c, in, pre);
+  EXPECT_EQ(std::memcmp(pre, in, sizeof pre), 0);
+  // Spaces that differ only in their gamma are not equal: the colour moves.
+  gshcpu_render_convert_prepare(&c, &p3, &p3b);
+  EXPECT_FALSE(c.same);
+  EXPECT_FALSE(c.matrix);
+  gshcpu_render_convert_straight(&c, in, out);
+  EXPECT_NE(out[0], 0.25);
 }
 
 TEST(RenderArithmetic, TransfersAndTheirKnees) {

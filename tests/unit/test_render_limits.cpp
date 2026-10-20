@@ -12,6 +12,8 @@
 
 #include "render_helpers.h"
 
+#include <algorithm>
+
 using namespace rh;
 
 namespace {
@@ -134,7 +136,11 @@ TEST(RenderLimits, TheRegionIsBoundedByMaxDimensionAndMaxBytes) {
   for (int64_t extra : {0, 1}) {
     RasterRef q(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
     GSHSCENE_Target tq = target_of(q.raster);
-    tq.extent = GSHSCENE_Rect{0, 0, 16, 16 + extra};
+    tq.extent = extra ? GSHSCENE_Rect{0, 0, 257, 1} : GSHSCENE_Rect{0, 0, 16, 16};
+    RasterRef wide_raster(extra ? rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 257, 1) : nullptr);
+    if (extra) {
+      tq.surface = wide_raster.raster;
+    }
     GSHSCENE_Render_Request rq = request_of(fx.list, &tq, report.report);
     EXPECT_EQ(gshscene_sink_render(small.sink, &rq), extra ? GSHSCENE_ERR_LIMIT : GSHSCENE_OK);
     size_t need = 0;
@@ -254,6 +260,38 @@ TEST(RenderLimits, ARefusedClipSkipsItsBlockAndARefusedGroupItemTheGroupGoesOn) 
   EXPECT_EQ(run.summary.units_processed, 7u);
 }
 
+TEST(RenderLimits, TheRegionLiesWithinTwoToThe24PixelsOfTheOrigin) {
+  // A raster one pixel past the ceiling (64 MiB): its last columns are drawn up to the ceiling and not past it.
+  const uint32_t width = (1u << 24) + 1u;
+  RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, width, 1));
+  ASSERT_NE(r.raster, nullptr);
+  Store s;
+  GSHSCENE_List * l = s.open();
+  GSHSCENE_Paint red = solid(1, 0, 0, 1);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(16777210.0, 0, 16777216.0, 1), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0),
+      GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  SinkRef sink;
+  for (int64_t past : {0, 1}) {
+    ReportRef report;
+    GSHSCENE_Target t = target_of(r.raster);
+    t.extent = GSHSCENE_Rect{(1 << 24) - 4 + past, 0, (1 << 24) + past, 1};
+    GSHSCENE_Render_Request req = request_of(l, &t, report.report);
+    EXPECT_EQ(gshscene_sink_render(sink.sink, &req), past ? GSHSCENE_ERR_LIMIT : GSHSCENE_OK) << past;
+  }
+  EXPECT_EQ(r.pixel((1u << 24) - 1u, 0), std::string("\xff\0\0\xff", 4));
+  // And down: a raster one pixel taller than the ceiling.
+  RasterRef tall(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 1, (1u << 24) + 1u));
+  ASSERT_NE(tall.raster, nullptr);
+  for (int64_t past : {0, 1}) {
+    ReportRef report;
+    GSHSCENE_Target t = target_of(tall.raster);
+    t.extent = GSHSCENE_Rect{0, (1 << 24) - 4 + past, 1, (1 << 24) + past};
+    GSHSCENE_Render_Request req = request_of(l, &t, report.report);
+    EXPECT_EQ(gshscene_sink_render(sink.sink, &req), past ? GSHSCENE_ERR_LIMIT : GSHSCENE_OK) << past;
+  }
+}
+
 TEST(RenderLimits, ACoordinateMoreThanTwoToThe24PixelsOutIsRefused) {
   const double far = 16777216.0;
   for (int side = 0; side < 4; side++) {
@@ -321,6 +359,208 @@ TEST(RenderLimits, AHostileMaximalItemDoesItsWorkWithinTheDeclaredBound) {
   EXPECT_EQ(run.summary.work_max, points + cells + RF_WIDTH * RF_HEIGHT) << "and every pixel of its box, the raster here";
 }
 
+TEST(RenderLimits, ARefusedBlockSkipsItsNestedBlocksAndEndsAtItsOwnPop) {
+  Store s;
+  GSHSCENE_List * l = s.open();
+  GSHSCENE_Paint red = solid(1, 0, 0, 1);
+  GSHSCENE_Paint blue = solid(0, 0, 1, 1);
+  GSHSCENE_Group g{};
+  g.opacity = 1.0;
+  ASSERT_EQ(gshscene_list_clip_push(l, zigzag(s, 40, 46, 38), nullptr, GSHGEOM_FILL_NONZERO, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_push(l, &g, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_push(l, s.rect(0, 0, 48, 40), nullptr, GSHGEOM_FILL_NONZERO, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, 20, 20), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_pop(l), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(20, 20, 30, 30), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(30, 0, 40, 10), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_pop(l), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(40, 30, 48, 40), nullptr, GSHGEOM_FILL_NONZERO, &blue, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  GSHSCENE_List * after = s.open();
+  ASSERT_EQ(gshscene_list_fill(after, s.rect(40, 30, 48, 40), nullptr, GSHGEOM_FILL_NONZERO, &blue, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(after), GSHSCENE_OK);
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  limits.max_points = 39;
+  SinkRef sink(&limits);
+  RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+  RasterRef want(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+  Outcome run = render(sink.sink, l, r.raster);
+  ASSERT_EQ(render(sink.sink, after, want.raster).result, GSHSCENE_OK);
+  EXPECT_EQ(run.result, GSHSCENE_OK);
+  ASSERT_EQ(run.entries.size(), 1u);
+  EXPECT_EQ(r.bytes(), want.bytes()) << "everything in the refused clip's block is skipped, and nothing after it";
+  EXPECT_EQ(run.summary.units_processed, gshscene_list_count(l));
+  EXPECT_EQ(run.summary.units_done, gshscene_list_count(l));
+}
+
+TEST(RenderLimits, DeepInNestedPicturesTheChainNamesTheItem) {
+  // A glyph run (two maps more than its item: its glyph's translation) in a picture instanced by a picture.
+  Store s;
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_Store * own = c.store;
+  c.store = s.store;
+  GSHSCENE_Glyph glyphs[2] = {{82, 0.0, 0.0, rf_glyph(&c, 0)}, {89, 13.0, 0.0, rf_glyph(&c, 1)}};
+  GSHSCENE_Glyph_Run run{};
+  run.source = GSHSCENE_GLYPHS_FROM_OUTLINES;
+  run.glyph_count = 2;
+  run.glyphs = glyphs;
+  const GSHSCENE_Resource * text = nullptr;
+  ASSERT_EQ(gshscene_store_intern_glyph_run(s.store, &run, &text), GSHSCENE_OK);
+  s.held.push_back(text);
+  GSHSCENE_Paint ink = solid(0.2, 0.1, 0.6, 1.0);
+  GSHGEOM_Map one;
+  GSHGEOM_Map two;
+  GSHGEOM_Map three;
+  gshgeom_map_translate(2, 1.0, 2.0, 0.0, &one);
+  gshgeom_map_translate(2, 3.0, 4.0, 0.0, &two);
+  gshgeom_map_translate(2, 5.0, 6.0, 0.0, &three);
+  GSHSCENE_List * inner = s.open();
+  ASSERT_EQ(gshscene_list_fill(inner, s.rect(0, 0, 2, 2), nullptr, GSHGEOM_FILL_NONZERO, &ink, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(inner, text, &three, GSHGEOM_FILL_NONZERO, &ink, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(inner, zigzag(s, 400, 30, 20), nullptr, GSHGEOM_FILL_NONZERO, &ink, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(inner), GSHSCENE_OK);
+  const GSHSCENE_Resource * p1 = nullptr;
+  ASSERT_EQ(gshscene_store_intern_picture(s.store, inner, &p1), GSHSCENE_OK);
+  s.held.push_back(p1);
+  GSHSCENE_List * middle = s.open();
+  ASSERT_EQ(gshscene_list_instance(middle, p1, &two, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(middle), GSHSCENE_OK);
+  const GSHSCENE_Resource * p2 = nullptr;
+  ASSERT_EQ(gshscene_store_intern_picture(s.store, middle, &p2), GSHSCENE_OK);
+  s.held.push_back(p2);
+  GSHSCENE_List * l = s.open();
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(40, 30, 44, 34), nullptr, GSHGEOM_FILL_NONZERO, &ink, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_instance(l, p2, &one, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  // The same drawing, flat: the translations are whole numbers, so composed they are exact.
+  GSHGEOM_Map at_glyphs;
+  gshgeom_map_translate(2, 9.0, 12.0, 0.0, &at_glyphs);
+  GSHGEOM_Map at_square;
+  gshgeom_map_translate(2, 4.0, 6.0, 0.0, &at_square);
+  GSHSCENE_List * flat = s.open();
+  ASSERT_EQ(gshscene_list_fill(flat, s.rect(40, 30, 44, 34), nullptr, GSHGEOM_FILL_NONZERO, &ink, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(flat, s.rect(0, 0, 2, 2), &at_square, GSHGEOM_FILL_NONZERO, &ink, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(flat, text, &at_glyphs, GSHGEOM_FILL_NONZERO, &ink, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(flat), GSHSCENE_OK);
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  limits.max_points = 399; // the zigzag, last in the inner picture, is refused; every glyph's outline passes
+  SinkRef sink(&limits);
+  RasterRef a(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+  RasterRef b(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+  Outcome got = render(sink.sink, l, a.raster);
+  ASSERT_EQ(render(sink.sink, flat, b.raster).result, GSHSCENE_OK);
+  EXPECT_EQ(got.result, GSHSCENE_OK);
+  EXPECT_EQ(a.bytes(), b.bytes()) << "the nested pictures draw as the flat list";
+  ASSERT_EQ(got.chains.size(), 1u);
+  EXPECT_EQ(got.chains[0], (std::vector<size_t>{1, 0, 2}));
+  RasterRef q(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+  Outcome strict = render(sink.sink, l, q.raster, GSHSCENE_RENDER_STRICT);
+  EXPECT_EQ(strict.result, GSHSCENE_ERR_REFUSED);
+  EXPECT_EQ(strict.failure, (std::vector<size_t>{1, 0, 2}));
+  EXPECT_EQ(q.bytes(), b.bytes()) << "everything before the refusal is in the target";
+  EXPECT_STREQ(strict.summary.failure.reason, "strict: refused while drawing (the sink's resource limit)");
+  for (size_t i = 0; i < c.held_count; i++) {
+    gshscene_resource_release(c.held[i]);
+  }
+  gshscene_store_destroy(own);
+}
+
+TEST(RenderLimits, TheWorkOfAUnitIsItsPointsCellsAndPixels) {
+  Store s;
+  GSHSCENE_Paint red = solid(1, 0, 0, 1);
+  // One small fill: its box is 2..7 by 3..7 (rounded out), 20 pixels.
+  GSHSCENE_List * l = s.open();
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(2.5, 3.5, 6.25, 7.0), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  uint64_t cells = 0;
+  size_t points = 0;
+  measure(l, 0, RF_WIDTH, RF_HEIGHT, &cells, &points);
+  SinkRef sink;
+  RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+  Outcome o = render(sink.sink, l, r.raster);
+  ASSERT_EQ(o.result, GSHSCENE_OK);
+  EXPECT_EQ(o.summary.work_max, points + cells + 20u);
+  // A box with a negative corner: the floor rounds out, not toward zero.
+  GSHSCENE_List * n = s.open();
+  ASSERT_EQ(gshscene_list_fill(n, s.rect(-1.5, -2.25, 3.5, 2.0), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(n), GSHSCENE_OK);
+  measure(n, 0, RF_WIDTH, RF_HEIGHT, &cells, &points);
+  o = render(sink.sink, n, r.raster);
+  EXPECT_EQ(o.summary.work_max, points + cells + 4u * 2u) << "the box meets the region: 0..4 by 0..2";
+  // A group: its push clears a layer of the region; each unit's work is its own, not the sum so far.
+  GSHSCENE_Group g{};
+  g.opacity = 0.5;
+  GSHSCENE_List * m = s.open();
+  ASSERT_EQ(gshscene_list_group_push(m, &g, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(m, s.rect(2.5, 3.5, 6.25, 7.0), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_pop(m), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(m), GSHSCENE_OK);
+  o = render(sink.sink, m, r.raster);
+  EXPECT_EQ(o.summary.work_max, (uint64_t)RF_WIDTH * RF_HEIGHT);
+}
+
+TEST(RenderMemory, TheNeedIsTheBlockAndTheLargestItemNotTheirSum) {
+  Store s;
+  GSHSCENE_Paint red = solid(1, 0, 0, 1);
+  const GSHSCENE_Resource * small = s.rect(1, 1, 5, 5);
+  const GSHSCENE_Resource * large = zigzag(s, 300, 40, 30);
+  GSHSCENE_List * both = s.open();
+  GSHSCENE_List * one = s.open();
+  GSHSCENE_List * two = s.open();
+  for (auto lr : {std::make_pair(both, small), std::make_pair(both, large), std::make_pair(one, small), std::make_pair(two, large)}) {
+    ASSERT_EQ(gshscene_list_fill(lr.first, lr.second, nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  }
+  for (GSHSCENE_List * l : {both, one, two}) {
+    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  }
+  SinkRef sink;
+  RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+  ReportRef report;
+  GSHSCENE_Target t = target_of(r.raster);
+  size_t need[3] = {0, 0, 0};
+  GSHSCENE_List * lists[3] = {both, one, two};
+  for (int i = 0; i < 3; i++) {
+    GSHSCENE_Render_Request req = request_of(lists[i], &t, report.report);
+    req.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+    ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &req, &need[i]), GSHSCENE_OK);
+  }
+  EXPECT_LT(need[1], need[2]);
+  EXPECT_EQ(need[0], std::max(need[1], need[2]));
+  // The layers and clip coverages are counted by the most open at once, not by how many there are.
+  GSHSCENE_Group g{};
+  g.opacity = 0.5;
+  GSHSCENE_List * one_each = s.open();
+  GSHSCENE_List * three_each = s.open();
+  for (int k = 0; k < 3; k++) {
+    for (GSHSCENE_List * l : {one_each, three_each}) {
+      if (l == one_each && k > 0) {
+        continue;
+      }
+      ASSERT_EQ(gshscene_list_group_push(l, &g, 0, 0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_clip_push(l, small, nullptr, GSHGEOM_FILL_NONZERO, 0, 0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_fill(l, small, nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_clip_pop(l), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+    }
+  }
+  ASSERT_EQ(gshscene_list_close(one_each), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(three_each), GSHSCENE_OK);
+  size_t a = 0;
+  size_t b = 0;
+  GSHSCENE_Render_Request ra = request_of(one_each, &t, report.report);
+  ra.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+  GSHSCENE_Render_Request rb = ra;
+  rb.list = three_each;
+  ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &ra, &a), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &rb, &b), GSHSCENE_OK);
+  EXPECT_EQ(a, b);
+  EXPECT_GT(a, need[1] + (size_t)RF_WIDTH * RF_HEIGHT * 33u) << "a group's layer and a clip's coverage over the region";
+}
+
 /* --- cancel (S7) -------------------------------------------------------------------------------------------- */
 
 namespace {
@@ -358,6 +598,7 @@ TEST(RenderCancel, ACancelledRenderHoldsTheRenderOfThePrefixOfPaintOrder) {
       req.progress_ctx = &at;
       ASSERT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_ERR_CANCELLED);
       GSHSCENE_Report_Summary sum = report.summary();
+      EXPECT_STREQ(sum.failure.reason, "cancelled between units");
       EXPECT_EQ(sum.units_processed, k);
       EXPECT_LE(sum.units_done, k);
       // What the target holds is the render of the units done, and nothing of an open group.
@@ -465,6 +706,7 @@ TEST(RenderMemory, EveryAllocationOfEveryFixturesRenderCanFail) {
     Fixture fx(i);
     bool reached = false;
     int ooms = 0;
+    int named = 0; // failures inside a unit, which the failure's chain names
     for (long fail = 0; fail < 2000 && !reached; fail++) {
       tracker::Tracker t;
       GSHSCENE_Allocator alloc = tracker::allocator_for(&t);
@@ -482,7 +724,16 @@ TEST(RenderMemory, EveryAllocationOfEveryFixturesRenderCanFail) {
           EXPECT_FALSE(t.failed);
         } else {
           EXPECT_EQ(got, GSHSCENE_ERR_OOM) << RF_FIXTURES[i].name << " fail " << fail;
-          EXPECT_EQ(report.summary().result, GSHSCENE_ERR_OOM);
+          GSHSCENE_Report_Summary sum = report.summary();
+          EXPECT_EQ(sum.result, GSHSCENE_ERR_OOM);
+          if (sum.failure.chain_count) {
+            named++;
+            if (!has_instance(fx.list)) {
+              ASSERT_EQ(sum.failure.chain_count, 1u);
+              EXPECT_EQ(sum.failure.chain[0], sum.units_processed) << "the unit that failed is the next one";
+            }
+            EXPECT_STREQ(sum.failure.reason, "out of memory while drawing");
+          }
           ooms++;
         }
       }
@@ -490,6 +741,7 @@ TEST(RenderMemory, EveryAllocationOfEveryFixturesRenderCanFail) {
     }
     EXPECT_TRUE(reached) << RF_FIXTURES[i].name;
     EXPECT_GT(ooms, 1) << RF_FIXTURES[i].name;
+    EXPECT_GT(named, 0) << RF_FIXTURES[i].name << ": no failure inside a unit was seen";
   }
 }
 

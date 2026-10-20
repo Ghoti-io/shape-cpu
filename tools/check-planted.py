@@ -47,6 +47,90 @@ Families (story 9):
   report      at, total, destroy, the hash's fields, order and width, the dump
   core        the result strings, the default limits and their header constants
 
+Story 13b, the sink (src/render):
+
+  r-          by hand: every constant of S11's arithmetic (the sRGB curve's five,
+              the white point, a value of each gamut and the row each gamut
+              takes), the gamma's exponent and sign, the matrix's construction,
+              order and use, each factor of each Porter-Duff operator, PLUS's
+              clamp, apply's two weights, the operators that are bounded, the
+              D8 weight's rounding and divisor, the stores' scale, half and top,
+              the loads, the alpha forms, the scan converter's constants, cuts,
+              fold column, cell cap and closing edge, the coordinate range, the
+              geometry's maps and box, the arena's alignment, capacity and copy,
+              the hash's version, kind and format codes, the work bound, the
+              region's limits, the paint's and the group's spaces, opacity and
+              clips, the weight of a fill, the touched map, the clips' memory
+  rule-S*     a violation of each rule of the sink contract a sink can break,
+              each caught by shape-scene's conformance suite unchanged
+              (testRender_conformance) except where the suite cannot look: S1
+              (a job that never completes), S2 (caps that leave out a kind), S3
+              (a failure that does not release what it took), S4 (damage
+              ignored), S5 (an entry keyed by the wrong chain), S6 (a planned
+              refusal drawn), S7 (the check skipped; the prefix reported done
+              inside a group; cells uncounted), S9 (memory taken anyway; the need
+              short of the items; an arena shorter than its workspace), S10 (a
+              reference kept), S11 (source-over's factor), S14 (affinity the caps
+              do not state), S15 (readback from the wrong place) and S16 (the
+              target's map composed first).  S8 (the conflation flag) and S13
+              (non-blocking completion) are the contract layer's: a sink cannot
+              break them, and its caps cannot misstate them in a way the layer
+              does not refuse.  S12 (output independent of the allocator and the
+              workspace's address) has no plant: nothing in the sink reads an
+              address, and a plant that made it would be the test, not the sink
+  rc- rv- rg- generated (tools/gen-render-plants.py; tools/render-plants.json
+  ra- rh- rs- holds the ones caught): every comparison, logical operator,
+              condition, statement, hash width, printed width, output letter and
+              returned status of src/render's compose, cover, geometry, arena,
+              hash and sink, mutated once
+
+Of the 962 generated candidates on the final tree, 192 do not compile and are
+dropped, 681 are caught (tools/render-plants.json), and these 89 cannot be
+seen by any test, by kind:
+
+  - a tie between equal values: `<` for `<=` where both sides choosing the same
+    value is the same answer (the rectangles' meet and join, the lowest and
+    highest row and column of a piece, the box's minimum and maximum, the
+    nesting's maxima, PLUS's clamp at exactly 1, the store's 0 and 255 ends,
+    the arena's peak, the copy's shorter length)
+  - a sign test at zero where zero gives the same answer: `x < 0` for `x <= 0`
+    in the gamma's sign, the absolute values and signs of the integer
+    divisions (whose denominators are never zero), the fold's absolute value
+  - shortcuts that a later step repeats: the band test of an edge (the row
+    clamp below it leaves the loop empty), a row loop's extra band at its end
+    (it has no rows), the subpath read's failure (no index is out of range), the
+    column direction where the piece has one column (handled before), each of
+    the two lines that make an empty rectangle empty (the other one alone makes
+    every loop and the work empty)
+  - stores the next step overwrites or never reads: the conversion's memset, the
+    default row of the gamut table, the layout's memset, the skip's depth reset
+    (a skip always ends at depth 0), a glyph run read that is not used, the
+    geometry's release clearing what is gone, the dirty rectangle of a group
+    (stale, it only widens the pixels a bounded pop visits, where the source is
+    zero), `ops.thread_affine = 0` over a zeroed table, the non-caller
+    `raw_bytes`
+  - the arena's forgetting of a freed last block and of a reset's last block:
+    no freed or stale pointer is ever reallocated
+  - the work of a group's pop: it is never more than its push's (the region),
+    so the most work between checks cannot show it
+  - the measure's per-item reset of its peak: the peak is a high-water mark of a
+    use that the reset already zeroes, so it is the largest item either way
+  - unreachable: the skip of a refused instance (shape-cpu refuses no
+    instance: its caps draw every kind and no resource limit applies to one),
+    a geometry status other than OOM and LIMIT, a run named by a font reaching
+    the geometry (the plan refuses it first), the layout's overflow on a 64-bit
+    host, the expansion's failure to start, `GSHSCENE_ERR_REFUSED` and
+    `GSHSCENE_ERR_INVALID` from the geometry's mapping, a failure other than
+    cancel, refusal and memory (whose reason is "the CPU sink failed"), the
+    clamp of `max_dimension` to the ceiling (the region's own ceiling check
+    refuses first), the caller's workspace being exactly the block (the measure
+    then falls back to the allocator and finds the same need)
+  - `fprintf(...) < 0` for `<= 0`: no line of the dump prints nothing; and the
+    final `fflush` and `ferror` of the dump, either of which reports a failed
+    stream
+  - the stop chain's condition `&&` for `||`: a strict refusal has set the
+    chain already, so both read the same
+
 What is NOT planted, and why.  A defect that no input can reach, or that
 changes no result, cannot be seen by any test:
 
@@ -406,6 +490,195 @@ PLANTS = [
     ("header-result-order", "hdr", CH, "  GSHCPU_ERR_IO,          ///< A write to a caller's stream failed.\n  GSHCPU_ERR_FORMAT,      ///< Not returned by this library.", "  GSHCPU_ERR_FORMAT,      ///< Not returned by this library.\n  GSHCPU_ERR_IO,          ///< A write to a caller's stream failed.", C + R),
 ]
 
+# --- story 13b: the sink -------------------------------------------------------------------------------------------------
+# The named plants: every constant of S11's arithmetic and of the formats, the operators' factors one by one, and a
+# violation of each rule of the sink contract that a sink can break (rule-S*; S8, S12 and S13 are argued in the
+# docstring).  The rest of src/render is mutated by tools/gen-render-plants.py (tools/render-plants.json, below).
+
+RC = "src/render/compose.c"
+RV = "src/render/cover.c"
+RG = "src/render/geometry.c"
+RA = "src/render/arena.c"
+RH = "src/render/hash.c"
+RS = "src/render/sink.c"
+RI = "src/render/render_internal.h"
+RHD = "include/ghoti.io/shape-cpu/render.h"
+# Quick and likely first: the sweep stops at the first test that fails.
+RT = ["testRender_vectors", "testRender_parts", "testRender", "testRender_limits", "testRender_conformance", "probe"]
+CONF = ["testRender_conformance"]
+
+
+def factor(op, old, new):
+    """Replace one factor of one operator's case in apply()."""
+    return "    case GSHSCENE_COMPOSITE_%s:\n%s" % (op, old), "    case GSHSCENE_COMPOSITE_%s:\n%s" % (op, new)
+
+
+_FACTORS = [
+    ("clear-fa", "CLEAR", "      break;", "      fa = 1.0;\n      break;"),
+    ("src-fa", "SRC", "      fa = 1.0;", "      fa = 0.5;"),
+    ("dest-fb", "DEST", "      fb = 1.0;", "      fb = 0.5;"),
+    ("src-over-fa", "SRC_OVER", "      fa = 1.0;\n      fb = 1.0 - sa;", "      fa = 0.5;\n      fb = 1.0 - sa;"),
+    ("src-over-fb", "SRC_OVER", "      fa = 1.0;\n      fb = 1.0 - sa;", "      fa = 1.0;\n      fb = 1.0 - da;"),
+    ("dest-over-fa", "DEST_OVER", "      fa = 1.0 - da;", "      fa = 1.0 - sa;"),
+    ("dest-over-fb", "DEST_OVER", "      fa = 1.0 - da;\n      fb = 1.0;", "      fa = 1.0 - da;\n      fb = sa;"),
+    ("src-in-fa", "SRC_IN", "      fa = da;", "      fa = sa;"),
+    ("dest-in-fb", "DEST_IN", "      fb = sa;", "      fb = da;"),
+    ("src-out-fa", "SRC_OUT", "      fa = 1.0 - da;", "      fa = 1.0 - sa;"),
+    ("dest-out-fb", "DEST_OUT", "      fb = 1.0 - sa;", "      fb = 1.0 - da;"),
+    ("src-atop-fa", "SRC_ATOP", "      fa = da;", "      fa = 1.0 - da;"),
+    ("src-atop-fb", "SRC_ATOP", "      fa = da;\n      fb = 1.0 - sa;", "      fa = da;\n      fb = sa;"),
+    ("dest-atop-fa", "DEST_ATOP", "      fa = 1.0 - da;", "      fa = da;"),
+    ("dest-atop-fb", "DEST_ATOP", "      fa = 1.0 - da;\n      fb = sa;", "      fa = 1.0 - da;\n      fb = 1.0 - sa;"),
+    ("xor-fa", "XOR", "      fa = 1.0 - da;", "      fa = da;"),
+    ("xor-fb", "XOR", "      fa = 1.0 - da;\n      fb = 1.0 - sa;", "      fa = 1.0 - da;\n      fb = sa;"),
+]
+
+PLANTS += [
+    # --- S11: the transfers, the gamuts, the white ------------------------------------------------------------------
+    ("r-srgb-decode-knee", "src", RC, "#define SRGB_DECODE_KNEE 0.04045", "#define SRGB_DECODE_KNEE 0.04046", RT),
+    ("r-srgb-encode-knee", "src", RC, "#define SRGB_ENCODE_KNEE 0.0031308", "#define SRGB_ENCODE_KNEE 0.0031309", RT),
+    ("r-srgb-slope", "src", RC, "#define SRGB_SLOPE 12.92", "#define SRGB_SLOPE 12.9", RT),
+    ("r-srgb-offset", "src", RC, "#define SRGB_OFFSET 0.055", "#define SRGB_OFFSET 0.054", RT),
+    ("r-srgb-scale", "src", RC, "#define SRGB_SCALE 1.055", "#define SRGB_SCALE 1.054", RT),
+    ("r-srgb-exponent", "src", RC, "#define SRGB_EXPONENT 2.4", "#define SRGB_EXPONENT 2.2", RT),
+    ("r-white-x", "src", RC, "#define WHITE_X 0.3127", "#define WHITE_X 0.3128", RT),
+    ("r-white-y", "src", RC, "#define WHITE_Y 0.3290", "#define WHITE_Y 0.3291", RT),
+    ("r-gamut-srgb-green", "src", RC, "{{0.64, 0.33}, {0.30, 0.60}, {0.15, 0.06}},       /* sRGB */",
+     "{{0.64, 0.33}, {0.30, 0.61}, {0.15, 0.06}},       /* sRGB */", RT),
+    ("r-gamut-adobe-green", "src", RC, "{0.21, 0.71}", "{0.21, 0.70}", RT),
+    ("r-gamut-p3-red", "src", RC, "{{0.680, 0.320}", "{{0.681, 0.320}", RT),
+    ("r-gamut-p3-blue", "src", RC, "{0.150, 0.060}}, /* Display P3 */", "{0.150, 0.061}}, /* Display P3 */", RT),
+    ("r-gamut-bt2020-green", "src", RC, "{0.170, 0.797}", "{0.170, 0.796}", RT),
+    ("r-gamut-bt2020-blue", "src", RC, "{0.131, 0.046}", "{0.131, 0.047}", RT),
+    ("r-gamut-adobe-row", "src", RC, "    case GCOL_PRIMARIES_ADOBE_RGB:\n      row = 1;", "    case GCOL_PRIMARIES_ADOBE_RGB:\n      row = 0;", RT),
+    ("r-gamut-p3-row", "src", RC, "    case GCOL_PRIMARIES_DISPLAY_P3:\n      row = 2;", "    case GCOL_PRIMARIES_DISPLAY_P3:\n      row = 3;", RT),
+    ("r-gamut-bt2020-row", "src", RC, "    case GCOL_PRIMARIES_BT2020:\n      row = 3;", "    case GCOL_PRIMARIES_BT2020:\n      row = 2;", RT),
+    ("r-gamma-decode-exponent", "src", RC, "return x < 0.0 ? -gmath_pow(-x, space->gamma) : gmath_pow(x, space->gamma);",
+     "return x < 0.0 ? -gmath_pow(-x, space->gamma) : gmath_pow(x, 1.0 / space->gamma);", RT),
+    ("r-gamma-encode-exponent", "src", RC, "return y < 0.0 ? -gmath_pow(-y, 1.0 / space->gamma) : gmath_pow(y, 1.0 / space->gamma);",
+     "return y < 0.0 ? -gmath_pow(-y, 1.0 / space->gamma) : gmath_pow(y, space->gamma);", RT),
+    ("r-gamma-negative", "src", RC, "return x < 0.0 ? -gmath_pow(-x, space->gamma)", "return x < 0.0 ? gmath_pow(-x, space->gamma)", RT),
+    ("r-xyz-z-row", "src", RC, "    p.m[2][c] = (1.0 - xy[c][0] - xy[c][1]) / xy[c][1];", "    p.m[2][c] = (1.0 - xy[c][0]) / xy[c][1];", RT),
+    ("r-xyz-scale", "src", RC, "      out->m[r][c] = s[c] * p.m[r][c];", "      out->m[r][c] = s[r] * p.m[r][c];", RT),
+    ("r-inverse-index", "src", RC, "      int c1 = (i + 2) % 3;", "      int c1 = (i + 1) % 3;", RT),
+    ("r-det-sign", "src", RC, "- m[0][1] * (m[1][0] * m[2][2]", "+ m[0][1] * (m[1][0] * m[2][2]", RT),
+    ("r-matrix-order", "src", RC, "    mul3(&c->to_xyz, lin, lin);\n    mul3(&c->from_xyz, lin, lin);",
+     "    mul3(&c->from_xyz, lin, lin);\n    mul3(&c->to_xyz, lin, lin);", RT),
+    ("r-matrix-whenever", "src", RC, "c->matrix = !c->same && from->primaries != to->primaries;", "c->matrix = !c->same;", RT),
+    ("r-premultiply-again", "src", RC, "  out[1] = straight[1] * a;", "  out[1] = straight[1];", RT),
+    ("r-space-equal-gamma", "src", RC, "a->transfer == b->transfer && a->gamma == b->gamma;", "a->transfer == b->transfer;", RT),
+    # --- S11: the operators -------------------------------------------------------------------------------------------
+] + [("r-op-" + n, "src", RC) + factor(op, o, w) + (RT,) for n, op, o, w in _FACTORS] + [
+    ("r-op-plus-clamp", "src", RC, "o[i] = sum < 1.0 ? sum : 1.0;", "o[i] = sum < 2.0 ? sum : 2.0;", RT),
+    ("r-op-apply-weights", "src", RC, "d[i] = (1.0 - m) * d[i] + m * o[i];", "d[i] = m * d[i] + (1.0 - m) * o[i];", RT),
+    ("r-op-apply-backdrop", "src", RC, "d[i] = (1.0 - m) * d[i] + m * o[i];", "d[i] = d[i] + m * o[i];", RT),
+    ("r-bounded-dest", "src", RC, "    case GSHSCENE_COMPOSITE_DEST:\n    case GSHSCENE_COMPOSITE_SRC_OVER:\n",
+     "    case GSHSCENE_COMPOSITE_SRC_OVER:\n", RT),
+    ("r-bounded-plus", "src", RC, "    case GSHSCENE_COMPOSITE_PLUS:\n      return 1;", "      return 1;\n    case GSHSCENE_COMPOSITE_PLUS:", RT),
+    ("r-bounded-src-in", "src", RC, "    case GSHSCENE_COMPOSITE_XOR:\n    case GSHSCENE_COMPOSITE_PLUS:\n      return 1;",
+     "    case GSHSCENE_COMPOSITE_XOR:\n    case GSHSCENE_COMPOSITE_SRC_IN:\n    case GSHSCENE_COMPOSITE_PLUS:\n      return 1;", RT),
+    # --- D8 and the write -----------------------------------------------------------------------------------------------
+    ("r-weigh-round", "src", RC, "return (m8 * c8 + 127u) / 255u;", "return (m8 * c8 + 128u) / 255u;", RT),
+    ("r-weigh-floor", "src", RC, "return (m8 * c8 + 127u) / 255u;", "return (m8 * c8) / 255u;", RT),
+    ("r-weigh-divisor", "src", RC, "return (m8 * c8 + 127u) / 255u;", "return (m8 * c8 + 127u) / 256u;", RT),
+    ("r-store8-scale", "src", RC, "  double t = v * 255.0;", "  double t = v * 256.0;", RT),
+    ("r-store8-half", "src", RC, "(fraction >= 0.5 ? 1 : 0)", "(fraction > 0.5 ? 1 : 0)", RT),
+    ("r-store8-truncate", "src", RC, "(fraction >= 0.5 ? 1 : 0)", "(fraction >= 1.0 ? 1 : 0)", RT),
+    ("r-store8-top", "src", RC, "  if (t >= 255.0) {\n    return 255;", "  if (t >= 254.0) {\n    return 255;", RT),
+    ("r-store-float-twice", "src", RC, "  return (float)v;", "  return (float)(double)(float)(v * (1.0 + 0x1p-30));", RT),
+    ("r-load-scale", "src", RC, "      v[i] = (double)p[i] / 255.0;", "      v[i] = (double)p[i] / 256.0;", RT),
+    ("r-load-straight", "src", RC, "      v[i] = v[i] * v[3];", "      v[i] = v[i];", RT),
+    ("r-store-straight", "src", RC, "      w[i] = w[3] == 0.0 ? 0.0 : w[i] / w[3];", "      w[i] = w[3] == 0.0 ? 0.0 : w[i];", RT),
+    ("r-store-straight-zero", "src", RC, "      w[i] = w[3] == 0.0 ? 0.0 : w[i] / w[3];", "      w[i] = w[i] / w[3];", RT),
+    ("r-pixel-bytes", "src", RC, "? 16u : 4u;", "? 8u : 4u;", RT),
+    ("r-premultiplied-forms", "src", RC, "  return format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED || format == GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED;",
+     "  return format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED;", RT),
+    # --- the clipped scan converter ---------------------------------------------------------------------------------
+    ("r-cover-area-shift", "src", RV, "#define AREA_SHIFT (2 * PIXEL_BITS + 1 - 8)", "#define AREA_SHIFT (2 * PIXEL_BITS - 8)", RT),
+    ("r-cover-pixel", "src", RV, "#define ONE_PIXEL 64", "#define ONE_PIXEL 63", RT),
+    ("r-cover-fold-column", "src", RV, "int64_t column = ex < c->rect.x0 ? 0 : ex - c->rect.x0 + 1;",
+     "int64_t column = ex < c->rect.x0 ? 1 : ex - c->rect.x0 + 1;", RT),
+    ("r-cover-round-half", "src", RV, "uint64_t quotient = (n + d / 2) / d;", "uint64_t quotient = (n + (d - 1) / 2) / d;", RT),
+    ("r-cover-floor", "src", RV, "    q -= 1;", "    q += 0;", RT),
+    ("r-cover-cells-limit", "src", RV, "  if (c->cells >= c->max_cells) {", "  if (c->cells > c->max_cells) {", RT),
+    ("r-cover-sweep-scale", "src", RV, "      int64_t accumulated = cv[0] * (ONE_PIXEL * 2);", "      int64_t accumulated = cv[0] * ONE_PIXEL;", RT),
+    ("r-cover-even-odd-fold", "src", RV, "      value = 512 - value;", "      value = 511 - value;", RT),
+    ("r-cover-even-odd-mask", "src", RV, "    value &= 511;", "    value &= 1023;", RT),
+    ("r-cover-saturate", "src", RV, "  } else if (value >= 256) {\n    value = 255;", "  } else if (value >= 255) {\n    value = 254;", RT),
+    ("r-cover-row-cut", "src", RV, "p.x = from.x + round_div((b - from.y) * (to.x - from.x), to.y - from.y);",
+     "p.x = from.x + (b - from.y) * (to.x - from.x) / (to.y - from.y);", RT),
+    ("r-cover-column-cut", "src", RV, "p.y = from.y + round_div((b - from.x) * (to.y - from.y), to.x - from.x);",
+     "p.y = from.y + (b - from.x) * (to.y - from.y) / (to.x - from.x);", RT),
+    ("r-cover-closing", "src", RV, "    edge(c, point_of(points[sub.first + sub.count - 1]), point_of(points[sub.first]));", "", RT),
+    ("r-coord-limit", "srch", RI, "#define GSHCPU_RENDER_COORD_LIMIT ((int64_t)1 << 30)", "#define GSHCPU_RENDER_COORD_LIMIT ((int64_t)1 << 31)", RT),
+    # --- geometry (S16, AD-24) ------------------------------------------------------------------------------------------
+    ("rule-S16-target-first", "src", RG, "  GSHGEOM_Result r = gshgeom_map_compose_chain(chain, count, target, &map);",
+     "  GSHGEOM_Map ident;\n  gshgeom_map_identity(2, &ident);\n  GSHGEOM_Result r = gshgeom_map_compose_chain(chain, count, &ident, &map);\n  if (r == GSHGEOM_OK) {\n    r = gshgeom_map_compose(&map, target, &map);\n  }", RT),
+    ("r-geometry-item-map", "src", RG, "  chain[count] = item->map;", "  gshgeom_map_identity(2, &chain[count]);", RT),
+    ("r-geometry-glyph-y", "src", RG, "run.glyphs[i].x, run.glyphs[i].y, 0.0,", "run.glyphs[i].x, run.glyphs[i].x, 0.0,", RT),
+    ("r-geometry-oom", "src", RG, "return r == GSHGEOM_ERR_OOM ? GSHCPU_ERR_OOM : GSHCPU_ERR_LIMIT;", "return GSHCPU_ERR_LIMIT;", RT),
+    ("r-geometry-box-ceiling", "src", RG, "    out->box.x1 = -pixel_floor(-x1);", "    out->box.x1 = pixel_floor(x1);", RT),
+    ("r-geometry-floor", "src", RG, "  return v % 64 != 0 && v < 0 ? q - 1 : q;", "  return q;", RT),
+    # --- the arena ------------------------------------------------------------------------------------------------------
+    ("r-arena-align", "src", RA, "#define ARENA_ALIGN 16u", "#define ARENA_ALIGN 32u", RT),
+    ("r-arena-capacity", "src", RA, "(!a->measure && end > a->capacity)", "(!a->measure && end >= a->capacity)", RT),
+    ("r-arena-copy", "src", RA, "    memcpy(p, old, had < n ? had : n);", "    memcpy(p, old, had < n ? had - 1 : n);", RT),
+    # --- the formats and the hash -----------------------------------------------------------------------------------
+    ("r-hash-version", "src", RH, "#define RENDER_FORMAT_VERSION 1u", "#define RENDER_FORMAT_VERSION 2u", RT),
+    ("r-hash-kind", "src", RH, "#define RENDER_KIND 0x444e4552u", "#define RENDER_KIND 0x444e4553u", RT),
+    ("r-hash-format-code", "hdr", RHD, "  GSHCPU_FORMAT_RGBAF32_STRAIGHT = 3,", "  GSHCPU_FORMAT_RGBAF32_STRAIGHT = 6,", RT),
+    ("r-format-bits", "src", RH, "    bits = 32;", "    bits = 16;", RT),
+    ("r-format-float-straight", "src", RH, "return premultiplied ? GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED : GSHCPU_FORMAT_RGBAF32_STRAIGHT;",
+     "return GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED;", RT),
+    # --- the sink -------------------------------------------------------------------------------------------------------
+    ("r-work-bound", "src", RS, "!gcu_safe_add_u64(b, (uint64_t)cs->max_bytes, &b)", "!gcu_safe_add_u64(b, 0, &b)", RT),
+    ("r-region-ceiling", "src", RS, "L->region.x1 > (int64_t)GSHCPU_MAX_DIMENSION_CEILING", "L->region.x1 > (int64_t)GSHCPU_MAX_DIMENSION_CEILING * 0", RT),
+    ("r-region-max-bytes", "src", RS, "  if (L->pixels > cs->max_bytes) {", "  if (L->pixels > cs->max_bytes + 1) {", RT),
+    ("r-default-cells", "src", RS, "limits->max_cells : GSHCPU_LIMITS_DEFAULT_MAX_CELLS;", "limits->max_cells : 1000;", RT),
+    ("r-default-dimension-ceiling", "src", RS, "    cs->max_dimension = GSHCPU_MAX_DIMENSION_CEILING;", "    cs->max_dimension = 16;", RT),
+    ("r-foreground-alpha", "src", RS, "alpha = run->foreground.rgba[3] * item->paint.rgba[3];", "alpha = item->paint.rgba[3];", RT),
+    ("r-paint-target-space", "src", RS, "    space = *gshscene_job_target_space(run->job);", "    space = frame->space;", RT),
+    ("r-group-space-inherit", "src", RS, "? parent->space : item->group.blend_space;", "? *gshscene_job_target_space(run->job) : item->group.blend_space;", RT),
+    ("r-group-opacity", "src", RS, "        s[i] = o * s[i];", "        s[i] = o * o * s[i];", RT),
+    ("r-group-convert-way", "src", RS, "gshcpu_render_convert_prepare(&c, &f->space, &parent->space);", "gshcpu_render_convert_prepare(&c, &parent->space, &f->space);", RT),
+    ("r-group-outer-clips", "src", RS, "uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);", "uint32_t m8 = 255u;", RT),
+    ("r-group-unbounded-region", "src", RS, "GSHCPU_Rect region = bounded ? f->dirty : run->layout.region;", "GSHCPU_Rect region = f->dirty;", RT),
+    ("r-fill-weight", "src", RS, "gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);",
+     "gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 256.0, GSHSCENE_COMPOSITE_SRC_OVER);", RT),
+    ("r-touched", "src", RS, "      if (run->touched[p]) {", "      if (1) {", RT),
+    ("r-clip-memory", "src", RS, "clip->coverage = run->clip_memory + run->clip_count * run->layout.pixels;", "clip->coverage = run->clip_memory;", RT),
+    # --- the contract's rules (shape-scene's sink.h): each violated, the conformance suite must fail -----------------
+    ("rule-S1-never-completes", "src", RS, "  finish(run, GSHSCENE_OK, memory);\n  return GSHSCENE_OK;\n}",
+     "  (void)memory;\n  return GSHSCENE_OK;\n}", CONF),
+    ("rule-S2-caps-instances", "src", RS, "for (uint32_t k = GSHSCENE_ITEM_FILL; k < GSHSCENE_ITEM_KIND_COUNT; k++) {",
+     "for (uint32_t k = GSHSCENE_ITEM_FILL; k < GSHSCENE_ITEM_INSTANCE; k++) {", CONF),
+    ("rule-S3-failure-leaks", "src", RS, "      finish(run, r, memory);\n      return GSHSCENE_OK;", "      return r;", CONF),
+    ("rule-S4-damage-ignored", "src", RS, "    r = gshcpu_render_rect_meet(r, *target->damage);", "    (void)0;", CONF),
+    ("rule-S5-entry-chain", "src", RS, "GSHSCENE_REASON_RESOURCE_LIMIT, chain, count);", "GSHSCENE_REASON_RESOURCE_LIMIT, chain, count - 1);", RT),
+    ("rule-S6-planned-refusal-drawn", "src", RS, "  if (d.entry_class == GSHSCENE_ENTRY_REFUSED) {", "  if (0) {", CONF),
+    ("rule-S7-check-skipped", "src", RS, "    if (gshscene_job_unit(job, run->processed, run->done)) {",
+     "    if (gshscene_job_unit(job, run->processed, run->done) && 0) {", CONF),
+    ("rule-S7-done-in-group", "src", RS, "    if (run->groups_open == 0) {\n      run->done = run->processed;", "    if (1) {\n      run->done = run->processed;", RT),
+    ("rule-S7-cells-uncounted", "src", RS, "      run->work += cells;", "      (void)cells;", RT),
+    ("rule-S9-allocates", "src", RS, "  if (caller) {\n    raw = request->workspace;", "  if (0) {\n    raw = request->workspace;", CONF),
+    ("rule-S9-need-short", "src", RS, "      return gcu_safe_add_size(L.fixed, peak, out) ? GSHCPU_OK : GSHCPU_ERR_LIMIT;\n    }",
+     "      return gcu_safe_add_size(L.fixed, 0, out) ? GSHCPU_OK : GSHCPU_ERR_LIMIT;\n    }", CONF),
+    ("rule-S9-arena-short", "src", RS, "raw_bytes - (size_t)(base - raw) - L.at_items);", "raw_bytes - (size_t)(base - raw) - L.at_items - 16);", CONF),
+    ("rule-S10-keeps-a-reference", "src", RS, "  double s[4];\n  source_of(run, item, frame, s);",
+     "  double s[4];\n  gshscene_resource_retain(item->resource);\n  source_of(run, item, frame, s);", CONF),
+    ("rule-S11-src-over", "src", RC, "      fa = 1.0;\n      fb = 1.0 - sa;", "      fa = 1.0;\n      fb = 1.0 - sa * 0.5;", RT),
+    ("rule-S14-affine-unstated", "src", RS, "  ops.thread_affine = 0;", "  ops.thread_affine = 1;", CONF),
+    ("rule-S15-readback-offset", "src", RS, "+ (size_t)target->extent.x0 * bytes,", "+ (size_t)target->extent.y0 * bytes,", CONF),
+]
+
+# The generated plants (tools/gen-render-plants.py): the mutations of src/render the sweep was seen to catch, and
+# PLANT_EXTRA_JSON, a file of candidates to run as well (for re-making tools/render-plants.json).
+import json as _json
+for _file in [str(ROOT / "tools" / "render-plants.json")] + ([os.environ["PLANT_EXTRA_JSON"]] if os.environ.get("PLANT_EXTRA_JSON") else []):
+    if os.path.exists(_file):
+        with open(_file) as _f:
+            PLANTS += [tuple(x) for x in _json.load(_f)]
+
 def run(cmd, shell=False, env_extra=None, cwd=None):
     environment = dict(os.environ)
     if env_extra:
@@ -419,7 +692,7 @@ def compile_all(destdir, srcs, extra=(), pre=()):
     destdir.mkdir(parents=True, exist_ok=True)
     objs = []
     for src in srcs:
-        obj = destdir / (src.replace("/", "_") + ".o")
+        obj = destdir / (str(src).replace("/", "_") + ".o")
         r = run(CC + list(pre) + CFLAGS + list(extra) + ["-c", src, "-o", str(obj)])
         if r.returncode != 0:
             raise RuntimeError("cannot compile %s:\n%s" % (src, r.stderr))
@@ -460,9 +733,23 @@ def probe_hash(objs, d, extra=()):
     r = run(cmd, shell=True)
     if r.returncode != 0:
         raise RuntimeError("cannot build the probe:\n%s" % r.stderr)
-    c = run(["tools/check-corpus-hash.sh", str(exe), "tests/corpus/coverage.hash"],
+    c = run(["tools/check-corpus-hash.sh", str(exe), "tests/corpus/coverage.hash", "tests/corpus/render.hash"],
             env_extra={"LD_LIBRARY_PATH": LD_PATH})
     return c.returncode, (c.stdout + c.stderr).strip()
+
+
+def apply_line(text, spec, new, label):
+    """A plant addressed by line: spec is "LINE:FRAGMENT"; FRAGMENT must occur exactly once on that line."""
+    number, fragment = spec.split(":", 1)
+    lines = text.split("\n")
+    line = lines[int(number) - 1]
+    n = line.count(fragment)
+    if n != 1:
+        raise RuntimeError("plant %s: the fragment occurs %d times on line %s, not once:\n%s\n%s" % (label, n, number, fragment, line))
+    if fragment == new:
+        raise RuntimeError("plant %s: the replacement changes nothing" % label)
+    lines[int(number) - 1] = line.replace(fragment, new)
+    return "\n".join(lines)
 
 
 def apply(text, old, new, label):
@@ -480,21 +767,25 @@ def do_plant(plant, control_objs):
     shutil.rmtree(d, ignore_errors=True)
     d.mkdir(parents=True)
     srcs = sources()
-    if kind == "src":
-        text = apply((ROOT / fname).read_text(), old, new, pid)
+    if kind in ("src", "srcl", "srch"):
+        original = (ROOT / fname).read_text()
+        text = apply(original, old, new, pid) if kind != "srcl" else apply_line(original, old, new, pid)
         planted = d / "planted" / fname
         planted.parent.mkdir(parents=True, exist_ok=True)
         # A source may include a neighbour by a relative path ("../exact/exact.h"),
         # so the planted file sits in a copy of the whole tree.
         shutil.copytree(ROOT / "src", d / "planted" / "src", dirs_exist_ok=True)
         planted.write_text(text)
-        obj = d / "planted.o"
-        r = run(CC + CFLAGS + ["-c", str(planted), "-o", str(obj)])
-        if r.returncode != 0:
-            raise RuntimeError("plant %s does not compile:\n%s" % (pid, r.stderr))
-        base = str(ROOT / fname)
-        objs = [str(obj) if o.endswith(fname.replace("/", "_") + ".o") else o for o in control_objs]
-        assert str(obj) in objs, pid
+        if fname.endswith(".h"):
+            # A private header: every source is rebuilt from the planted copy of the tree.
+            objs = compile_all(d / "obj", [str(d / "planted" / s) for s in srcs])
+        else:
+            obj = d / "planted.o"
+            r = run(CC + CFLAGS + ["-c", str(planted), "-o", str(obj)])
+            if r.returncode != 0:
+                raise RuntimeError("plant %s does not compile:\n%s" % (pid, r.stderr))
+            objs = [str(obj) if o.endswith(fname.replace("/", "_") + ".o") else o for o in control_objs]
+            assert str(obj) in objs, pid
     else:
         text = apply((ROOT / fname).read_text(), old, new, pid)
         hdr = d / "include" / Path(fname).relative_to("include")
@@ -503,11 +794,16 @@ def do_plant(plant, control_objs):
         objs = compile_all(d / "obj", srcs, pre=["-I" + str(d / "include")])
     caught_by = []
     for test in tests:
-        exe = d / test
-        link_test(test, objs, exe)
-        rc, failing = run_test(exe)
+        if test == "probe":
+            rc, msg = probe_hash(objs, d)
+            failing = [msg.splitlines()[-1] if msg else "probe"]
+        else:
+            exe = d / test
+            link_test(test, objs, exe)
+            rc, failing = run_test(exe)
         if rc != 0:
             caught_by.append((test, failing[:1]))
+            break  # one test seeing it is enough; the lists are ordered by cost
     return pid, caught_by
 
 

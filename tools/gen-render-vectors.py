@@ -461,6 +461,8 @@ def cases():
     add("a target that blends in linear sRGB", [fill([0.5, 0.25, 0.125, 0.5], 44)], target=LIN)
     add("foreground in another space over a linear target", [fg_fill(0.75, 64)], target=LIN,
         fg={"rgba": [0.5, 0.25, 0.75, 1.0], "space": P3})
+    add("nested groups in two gammas of one gamut",
+        [group(0.9, 0, (3, GAMMA, 1.8)), group(0.8, 0, P3_GAMMA), fill([0.6, 0.3, 0.2, 0.7]), UNGROUP, UNGROUP])
     add("an xor group under two clips", [clip(60), clip(24), group(0.9, 11, P3), fill([0.3, 0.9, 0.1, 0.8], 56), UNGROUP,
                                          UNCLIP, UNCLIP], backdrop=BACKDROPS[3])
     return out
@@ -501,16 +503,31 @@ def render_dump(fmt, extent, rows):
 
 
 def hash_cases():
-    """(format, raster width, height, pixels row by row as 4-tuples, extent) for the known answers."""
+    """(format, raster width, height, pixels row by row as 4-tuples, extent) for the known answers.
+
+    Every channel holds a value of one hexadecimal digit somewhere (a byte below 16, a float whose bit pattern is
+    below 2^28), so a dump that drops a leading zero differs; and one raster is chosen so that its hash has a
+    leading zero digit, so a dump that drops that differs too.
+    """
     out = []
     w, h = 3, 2
-    pix8 = [[(x * 40 + y, 255 - x * 17, (x * y * 91) & 255, 128 + x + y) for x in range(w)] for y in range(h)]
+    pix8 = [[(x * 40 + y, 9 * (2 - x) + y * 200, (x * y * 91) & 255, 5 + x * 120 + y) for x in range(w)] for y in range(h)]
     out.append((1, w, h, pix8, (0, 0, 3, 2)))
     out.append((2, w, h, pix8, (1, 0, 3, 2)))
-    floats = [[tuple(float_bits(to_float(F(v, 7))) for v in (x + 1, y + 2, x * y - 3, 6)) for x in range(2)]
-              for y in range(2)]
+    tiny = to_float(F(1, 2**130))  # a subnormal float: its bit pattern has leading zero digits
+    floats = [[tuple(float_bits(v) for v in (to_float(F(x + 1, 7)) if y else tiny, tiny if x else to_float(F(y + 2, 7)),
+                                              to_float(F(x * y - 3, 7)) if x + y else ZERO, tiny if x + y == 1 else F(6, 7)))
+               for x in range(2)] for y in range(2)]
     out.append((3, 2, 2, floats, (0, 0, 2, 2)))
     out.append((4, 2, 2, floats, (0, 1, 2, 2)))
+    # A raster whose hash begins with a zero digit: the first such of a fixed walk.
+    for k in range(4096):
+        px = [[(k & 255, (k >> 8) & 255, 3, 4)]]
+        if render_hash(1, (0, 0, 1, 1), px) >> 60 == 0:
+            out.append((1, 1, 1, px, (0, 0, 1, 1)))
+            break
+    else:
+        raise RuntimeError("no hash with a leading zero digit in the walk")
     return out
 
 
