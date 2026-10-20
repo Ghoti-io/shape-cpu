@@ -60,7 +60,9 @@ Story 13b, the sink (src/render):
               geometry's maps and box, the arena's alignment, capacity and copy,
               the hash's version, kind and format codes, the work bound, the
               region's limits, the paint's and the group's spaces, opacity and
-              clips, the weight of a fill, the touched map, the clips' memory
+              clips, the weight of a fill, the touched map, the clips' memory,
+              what a render makes ready (the whole region every time, the root
+              not read, a group read where it was never made ready)
   rule-S*     a violation of each rule of the sink contract a sink can break,
               each caught by shape-scene's conformance suite unchanged
               (testRender_conformance) except where the suite cannot look: S1
@@ -89,7 +91,10 @@ and were dropped, 681 were caught (tools/render-plants.json), and 89 could not
 be seen by any test.  Story 14a changed geometry.c and sink.c and swept their
 550 candidates again on its final tree: 91 do not compile, 420 are caught (in
 tools/render-plants.json beside the other four files' 329, unchanged), and 39
-survive.  The survivors, by kind:
+survive.  The empty-frame fix (2026-10-20: layers made ready as the units reach
+them) changed sink.c and swept its 444 candidates again: 81 do not compile, 331
+are caught (they replace sink.c's in tools/render-plants.json), and 32 survive.
+The survivors, by kind:
 
   - a tie between equal values: `<` for `<=` where both sides choosing the same
     value is the same answer (the rectangles' meet and join, the lowest and
@@ -104,13 +109,15 @@ survive.  The survivors, by kind:
     (it has no rows), the subpath read's failure (no index is out of range), the
     column direction where the piece has one column (handled before), each of
     the two lines that make an empty rectangle empty (the other one alone makes
-    every loop and the work empty)
+    every loop and the work empty), and the readiness's own: widen's return
+    when nothing grows (`&&` for `||`) and its test for side spans (`<=` for
+    `<`), and ready_span's empty-span test (`>` for `>=`), which only let an
+    empty span through to a memset of nothing
   - stores the next step overwrites or never reads: the conversion's memset, the
     default row of the gamut table, the layout's memset, the skip's depth reset
     (a skip always ends at depth 0), a glyph run read that is not used, the
-    geometry's release clearing what is gone, the dirty rectangle of a group
-    (stale, it only widens the pixels a bounded pop visits, where the source is
-    zero), `ops.thread_affine = 0` over a zeroed table, the non-caller
+    geometry's release clearing what is gone, `ops.thread_affine = 0` over a
+    zeroed table, the non-caller
     `raw_bytes`, the glyph note's `memset` (every path that reads it after a
     failure overwrites it with the limit's note)
   - the destroy of a device path on a glyph's failure paths: the path is set
@@ -120,6 +127,11 @@ survive.  The survivors, by kind:
     no freed or stale pointer is ever reallocated
   - the work of a group's pop: it is never more than its push's (the region),
     so the most work between checks cannot show it
+  - a group's pop visiting one row past its region (`<=` for `<`): the row is
+    outside every frame's dirty rectangle, which is all anything reads (the
+    write visits the root's), so it is a memory-safety defect no output shows.
+    Before the layers were made ready lazily it read memory nothing had
+    written, and was caught by that chance
   - the measure's per-item reset of its peak: the peak is a high-water mark of a
     use that the reset already zeroes, so it is the largest item either way
   - unreachable: the skip of a refused instance (shape-cpu refuses no
@@ -656,6 +668,11 @@ PLANTS += [
      "gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 256.0, GSHSCENE_COMPOSITE_SRC_OVER);", RT),
     ("r-touched", "src", RS, "      if (run->touched[p]) {", "      if (1) {", RT),
     ("r-clip-memory", "src", RS, "clip->coverage = run->clip_memory + run->clip_count * run->layout.pixels;", "clip->coverage = run->clip_memory;", RT),
+    # What a render makes ready (widen, ready_span): the whole region on every frame changes no pixel, only the bytes
+    # touched, which testRender_limits counts; the root not read from the target, and a group read where it is not ready.
+    ("r-ready-whole-region", "src", RS, "  GSHCPU_Rect grown = gshcpu_render_rect_join(old, r);", "  GSHCPU_Rect grown = gshcpu_render_rect_join(old, run->layout.region);", ["testRender_limits"]),
+    ("r-root-unread", "src", RS, "    gshcpu_render_load(run->format, row, (size_t)x, &run->root[4u * p]);", "    (void)row;", RT),
+    ("r-group-reads-unready", "src", RS, "inside(f->dirty, x, y) ? &f->layer[4u * p] : zero", "1 ? &f->layer[4u * p] : zero", RT),
     # --- the contract's rules (shape-scene's sink.h): each violated, the conformance suite must fail -----------------
     ("rule-S1-never-completes", "src", RS, "  finish(run, GSHSCENE_OK, memory);\n  return GSHSCENE_OK;\n}",
      "  (void)memory;\n  return GSHSCENE_OK;\n}", CONF),

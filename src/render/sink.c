@@ -55,13 +55,17 @@ typedef struct Cpu_Sink {
 
 /* --- what a render remembers ----------------------------------------------------------------- */
 
-/** A layer: the root's or a group's (N6). */
+/**
+ * A layer: the root's or a group's (N6).  Its memory is made ready only inside `dirty`, as a unit reaches it (widen):
+ * outside, a group's layer is zero, and the root's values the target's with its touched map clear, without any of it
+ * being written, so a render pays for the pixels its units reach and not for the region.
+ */
 typedef struct Frame {
   double * layer;            /* four doubles a pixel of the region */
   GSHSCENE_Color_Space space;
   GSHSCENE_Group group;      /* a group's properties */
   size_t clip_base;          /* the first clip pushed in this group */
-  GSHCPU_Rect dirty;         /* the pixels anything was applied to */
+  GSHCPU_Rect dirty;         /* the pixels anything was applied to, and the pixels made ready */
 } Frame;
 
 /** A clip in force: its coverage inside its rectangle (0 outside it). */
@@ -98,6 +102,8 @@ typedef struct Run {
   const GSHSCENE_Render_Request * request;
   GSHCPU_Format format;
   GIMG_Raster * raster;
+  unsigned char * pixels;    /* the target's, and its stride */
+  size_t stride;
   Layout layout;
   GSHSCENE_Expansion walk;
   GSHGEOM_Map * maps;        /* the enclosing instances' maps, and room for the item's and a glyph's */
@@ -430,6 +436,65 @@ static size_t at(const Run * run, int64_t x, int64_t y) {
   return (size_t)(y - run->layout.region.y0) * run->layout.width + (size_t)(x - run->layout.region.x0);
 }
 
+/**
+ * Make the pixels of row @p y from @p x0 to @p x1 of @p f ready (widen): a group's layer starts at `(0, 0, 0, 0)`;
+ * the root layer is the target (N6), its values read once, here, and its touched map clear.
+ */
+static void ready_span(Run * run, Frame * f, int64_t x0, int64_t x1, int64_t y) {
+  if (x0 >= x1) {
+    return;
+  }
+  size_t p = at(run, x0, y);
+  size_t n = (size_t)(x1 - x0);
+  if (f != &run->frames[0]) {
+    memset(f->layer + 4u * p, 0, 4u * n * sizeof *f->layer);
+    return;
+  }
+  memset(run->touched + p, 0, n);
+  const unsigned char * row = run->pixels + (size_t)y * run->stride;
+  for (int64_t x = x0; x < x1; x++, p++) {
+    gshcpu_render_load(run->format, row, (size_t)x, &run->root[4u * p]);
+  }
+}
+
+/**
+ * Widen @p f's dirty rectangle to take in @p r (inside the region), first making ready the pixels it gains
+ * (ready_span).  Nothing reads a frame's memory outside its dirty rectangle: a group's pop reads zero there, and the
+ * write visits the root's dirty rectangle only.  So the values drawn are the ones every layer made ready over the
+ * whole region at the start would give (story 13b), while an empty list touches none of the region and a small item
+ * its own pixels.
+ */
+static void widen(Run * run, Frame * f, GSHCPU_Rect r) {
+  GSHCPU_Rect old = f->dirty;
+  GSHCPU_Rect grown = gshcpu_render_rect_join(old, r);
+  if (gshcpu_render_rect_empty(r) ||
+      (grown.x0 == old.x0 && grown.y0 == old.y0 && grown.x1 == old.x1 && grown.y1 == old.y1)) {
+    return;
+  }
+  if (gshcpu_render_rect_empty(old)) {
+    old.x0 = old.x1 = grown.x0; /* nothing is ready: every row of grown is below this one */
+    old.y0 = old.y1 = grown.y0;
+  }
+  for (int64_t y = grown.y0; y < old.y0; y++) {
+    ready_span(run, f, grown.x0, grown.x1, y);
+  }
+  if (grown.x0 < old.x0 || old.x1 < grown.x1) {
+    for (int64_t y = old.y0; y < old.y1; y++) {
+      ready_span(run, f, grown.x0, old.x0, y);
+      ready_span(run, f, old.x1, grown.x1, y);
+    }
+  }
+  for (int64_t y = old.y1; y < grown.y1; y++) {
+    ready_span(run, f, grown.x0, grown.x1, y);
+  }
+  f->dirty = grown;
+}
+
+/** Whether (x, y) lies in @p r. */
+static int inside(GSHCPU_Rect r, int64_t x, int64_t y) {
+  return x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1;
+}
+
 /** The clip's coverage at (x, y), which lies in its rectangle. */
 static uint32_t clip_at(const Clip * clip, int64_t x, int64_t y) {
   size_t w = (size_t)(clip->rect.x1 - clip->rect.x0);
@@ -538,6 +603,7 @@ static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t 
   }
   double s[4];
   source_of(run, item, frame, s);
+  widen(run, frame, rect);
   size_t w = (size_t)(rect.x1 - rect.x0);
   for (int64_t y = rect.y0; y < rect.y1; y++) {
     for (int64_t x = rect.x0; x < rect.x1; x++) {
@@ -554,7 +620,6 @@ static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t 
     }
   }
   run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);
-  frame->dirty = gshcpu_render_rect_join(frame->dirty, rect);
   return GSHSCENE_OK;
 }
 
@@ -577,8 +642,7 @@ static GSHSCENE_Result clip_push(Run * run, const GSHSCENE_Item * item, const si
 static void group_push(Run * run, const GSHSCENE_Item * item) {
   const Frame * parent = &run->frames[run->top];
   Frame * f = &run->frames[++run->top];
-  f->layer = run->layers + (run->top - 1u) * run->layout.pixels * 4u;
-  memset(f->layer, 0, run->layout.pixels * 4u * sizeof *f->layer);
+  f->layer = run->layers + (run->top - 1u) * run->layout.pixels * 4u; /* made ready as it is drawn on (widen) */
   f->group = item->group;
   f->space = gshscene_color_space_is_target(&item->group.blend_space) ? parent->space : item->group.blend_space;
   f->clip_base = run->clip_count;
@@ -599,6 +663,9 @@ static void group_pop(Run * run) {
   GSHCPU_Convert c;
   gshcpu_render_convert_prepare(&c, &f->space, &parent->space);
   const double o = f->group.opacity;
+  /* The group's layer is zero outside its dirty rectangle (widen), where it was never made ready. */
+  static const double zero[4] = {0.0, 0.0, 0.0, 0.0};
+  widen(run, parent, region);
   for (int64_t y = region.y0; y < region.y1; y++) {
     for (int64_t x = region.x0; x < region.x1; x++) {
       uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);
@@ -607,7 +674,7 @@ static void group_pop(Run * run) {
       }
       size_t p = at(run, x, y);
       double s[4];
-      gshcpu_render_convert_premultiplied(&c, &f->layer[4u * p], s);
+      gshcpu_render_convert_premultiplied(&c, inside(f->dirty, x, y) ? &f->layer[4u * p] : zero, s);
       for (int i = 0; i < 4; i++) {
         s[i] = o * s[i];
       }
@@ -622,7 +689,6 @@ static void group_pop(Run * run) {
   }
   if (!gshcpu_render_rect_empty(region)) {
     run->work += (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0);
-    parent->dirty = gshcpu_render_rect_join(parent->dirty, region);
   }
   run->top--;
   run->groups_open--;
@@ -666,14 +732,12 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
 
 /* --- a render: begin to completion ---------------------------------------------------------------- */
 
-/** The one rounding (S11): every touched pixel of the root layer to the target. */
+/** The one rounding (S11): every touched pixel of the root layer (all in its dirty rectangle) to the target. */
 static void write_target(Run * run) {
-  const Layout * L = &run->layout;
-  unsigned char * pixels = gimg_raster_pixels(run->raster);
-  size_t stride = gimg_raster_stride_bytes(run->raster);
-  for (int64_t y = L->region.y0; y < L->region.y1; y++) {
-    unsigned char * row = pixels + (size_t)y * stride;
-    for (int64_t x = L->region.x0; x < L->region.x1; x++) {
+  const GSHCPU_Rect d = run->frames[0].dirty;
+  for (int64_t y = d.y0; y < d.y1; y++) {
+    unsigned char * row = run->pixels + (size_t)y * run->stride;
+    for (int64_t x = d.x0; x < d.x1; x++) {
       size_t p = at(run, x, y);
       if (run->touched[p]) {
         gshcpu_render_store(run->format, row, (size_t)x, &run->root[4u * p]);
@@ -699,6 +763,18 @@ static const char * reason_of(GSHSCENE_Result result) {
 static void finish(Run * run, GSHSCENE_Result result, void * memory) {
   Cpu_Sink * cs = run->cs;
   if (cs->observer) {
+    /* The observer sees the whole region (render_internal.h): what no unit reached is made what it would have been
+     * had the root been read in full at the start, the target's values and an untouched map. */
+    const GSHCPU_Rect R = run->layout.region;
+    for (int64_t y = R.y0; y < R.y1; y++) {
+      for (int64_t x = R.x0; x < R.x1; x++) {
+        if (!inside(run->frames[0].dirty, x, y)) {
+          size_t p = at(run, x, y);
+          run->touched[p] = 0;
+          gshcpu_render_load(run->format, run->pixels + (size_t)y * run->stride, (size_t)x, &run->root[4u * p]);
+        }
+      }
+    }
     cs->observer(cs->observer_ctx, run->layout.region, run->root, run->touched);
   }
   write_target(run);
@@ -743,6 +819,8 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   run->layout = L;
   run->raster = target->surface;
   run->format = gshcpu_format_of(run->raster);
+  run->pixels = gimg_raster_pixels(run->raster);
+  run->stride = gimg_raster_stride_bytes(run->raster);
   run->maps = (GSHGEOM_Map *)(void *)(base + L.at_maps);
   run->stop = (size_t *)(void *)(base + L.at_stop);
   run->frames = (Frame *)(void *)(base + L.at_frames);
@@ -767,15 +845,7 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
     }
     return GSHSCENE_ERR_INTERNAL;
   }
-  /* The root layer is the target (N6): its values, read once. */
-  memset(run->touched, 0, L.pixels);
-  const unsigned char * pixels = gimg_raster_pixels_const(run->raster);
-  size_t stride = gimg_raster_stride_bytes(run->raster);
-  for (int64_t y = L.region.y0; y < L.region.y1; y++) {
-    for (int64_t x = L.region.x0; x < L.region.x1; x++) {
-      gshcpu_render_load(run->format, pixels + (size_t)y * stride, (size_t)x, &run->root[4u * at(run, x, y)]);
-    }
-  }
+  /* The root layer is the target (N6): its values are read once, as the units reach them (widen). */
   Frame * root = &run->frames[0];
   memset(root, 0, sizeof *root);
   root->layer = run->root;

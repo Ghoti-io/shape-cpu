@@ -141,6 +141,17 @@ prefix of paint order. So the bands are the coverage's (the cell accumulator is
 bytes a pixel for the root and for each level of group nesting, a byte a pixel
 for each level of clip nesting, for the touched map and for one item's coverage.
 
+That is the memory's size, not the work. Each layer is made ready only over the
+rectangle its units have reached so far (its dirty rectangle, widened before a
+unit applies to a pixel outside it): a group's layer is cleared there, and the
+root's values are read from the target there, once, with its touched map
+cleared. A group's pop reads zero outside its dirty rectangle, and the write
+visits the root's. The values are the ones a
+layer made ready over the whole region would hold, so nothing drawn changes; an
+empty list touches none of the block and a small item on a large target its own
+pixels (`RenderMemory.ARenderTouchesThePixelsItsUnitsReachNotTheRegion` counts
+the bytes of a workspace a render writes).
+
 ### Geometry
 
 The maps are composed root to leaf with `gshgeom_map_compose_chain` (the

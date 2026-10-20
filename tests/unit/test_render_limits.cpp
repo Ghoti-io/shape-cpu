@@ -5,7 +5,8 @@
  * 13b): each limit at its bound and one past it, a cancelled render's prefix of
  * paint order against the render of that prefix, the work between two checks
  * on a hostile maximal item, the exact workspace and frames that allocate
- * nothing, and a failing allocator at every call of every fixture's render.
+ * nothing, the bytes of it a render touches (the pixels its units reach, not
+ * the region), and a failing allocator at every call of every fixture's render.
  *
  * Copyright 2026 by Corey Pennycuff
  */
@@ -559,6 +560,122 @@ TEST(RenderMemory, TheNeedIsTheBlockAndTheLargestItemNotTheirSum) {
   ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &rb, &b), GSHSCENE_OK);
   EXPECT_EQ(a, b);
   EXPECT_GT(a, need[1] + (size_t)RF_WIDTH * RF_HEIGHT * 33u) << "a group's layer and a clip's coverage over the region";
+}
+
+/* --- what a render touches ---------------------------------------------------------------------------------- */
+
+namespace {
+
+/** Bytes of a workspace of a known fill that a CALLER_MEMORY render of @p list on @p raster changed. */
+size_t workspace_written(const GSHSCENE_List * list, GIMG_Raster * raster, size_t * need) {
+  SinkRef sink;
+  ReportRef report;
+  GSHSCENE_Target t = target_of(raster);
+  GSHSCENE_Render_Request req = request_of(list, &t, report.report);
+  req.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+  *need = 0;
+  EXPECT_EQ(gshscene_sink_workspace_bytes(sink.sink, &req, need), GSHSCENE_OK);
+  const unsigned char fill = 0xa5;
+  std::vector<unsigned char> workspace(*need, fill);
+  req.workspace = workspace.data();
+  req.workspace_bytes = *need;
+  EXPECT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK);
+  return (size_t)std::count_if(workspace.begin(), workspace.end(), [fill](unsigned char b) { return b != fill; });
+}
+
+} // namespace
+
+TEST(RenderMemory, ARenderTouchesThePixelsItsUnitsReachNotTheRegion) {
+  // A render pays for the pixels its units reach (Frame, widen in sink.c): an empty list on a large target writes
+  // kilobytes of its workspace at most, and so does a small item, alone, in a group, or in a group with an
+  // unbounded operator under a small clip.  The region here is 1024 by 1024, so the block is 34 MB and more; reading
+  // the target into the root layer, clearing the touched map or clearing a group's layer over the region (story
+  // 13b's sink did all three on every render) writes megabytes.  Counted in bytes, not time.
+  const uint32_t w = 1024;
+  const uint32_t h = 1024;
+  const size_t bound = 64u * 1024u;
+  Store s;
+  GSHSCENE_Paint red = solid(1, 0, 0, 0.5);
+  const GSHSCENE_Resource * item = s.rect(700.25, 600.5, 708.75, 606.25);
+  const GSHSCENE_Resource * clip = s.rect(690, 590, 720, 620);
+  GSHSCENE_Group over{};
+  over.opacity = 0.5;
+  GSHSCENE_Group in{};
+  in.opacity = 1.0;
+  in.composite = GSHSCENE_COMPOSITE_SRC_IN;
+  ASSERT_FALSE(gshcpu_render_bounded(in.composite));
+  GSHSCENE_List * empty = s.open();
+  GSHSCENE_List * one = s.open();
+  GSHSCENE_List * grouped = s.open();
+  GSHSCENE_List * unbounded = s.open();
+  GSHSCENE_List * around = s.open();
+  ASSERT_EQ(gshscene_list_fill(one, item, nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_push(grouped, &over, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_push(grouped, &over, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(grouped, item, nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_pop(grouped), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_pop(grouped), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_push(unbounded, clip, nullptr, GSHGEOM_FILL_NONZERO, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_push(unbounded, &in, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(unbounded, item, nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_pop(unbounded), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_pop(unbounded), GSHSCENE_OK);
+  // Items that widen what is ready on every side of what already is, on the root and in a group (widen's four spans).
+  const GSHSCENE_Resource * sides[] = {item, s.rect(690.5, 603.5, 695.5, 604.5), s.rect(712.5, 602.5, 715.5, 605.5),
+      s.rect(705.5, 595.5, 707.5, 598.5), s.rect(704.5, 610.5, 707.5, 612.5)};
+  for (int level = 0; level < 2; level++) {
+    if (level == 1) {
+      ASSERT_EQ(gshscene_list_group_push(around, &over, 0, 0), GSHSCENE_OK);
+    }
+    for (const GSHSCENE_Resource * side : sides) {
+      ASSERT_EQ(gshscene_list_fill(around, side, nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+    }
+    if (level == 1) {
+      ASSERT_EQ(gshscene_list_group_pop(around), GSHSCENE_OK);
+    }
+  }
+  struct Case {
+    const char * name;
+    GSHSCENE_List * list;
+    GSHCPU_Rect reach; // where the target may change
+  } cases[] = {
+      {"empty", empty, {0, 0, 0, 0}},
+      {"one small item", one, {700, 600, 709, 607}},
+      {"a small item in two groups", grouped, {700, 600, 709, 607}},
+      {"a small item in an unbounded group under a small clip", unbounded, {690, 590, 720, 620}},
+      {"small items around it, on the root and in a group", around, {690, 595, 716, 613}},
+  };
+  for (const Case & c : cases) {
+    ASSERT_EQ(gshscene_list_close(c.list), GSHSCENE_OK);
+    RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, w, h));
+    RasterRef before(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, w, h));
+    size_t need = 0;
+    size_t written = workspace_written(c.list, r.raster, &need);
+    EXPECT_GT(need, (size_t)w * h * 34u) << c.name << ": the block covers the region";
+    EXPECT_LE(written, bound) << c.name << ": " << written << " bytes of a " << need << "-byte workspace written";
+    size_t changed = 0;
+    size_t outside = 0;
+    const unsigned char * now = (const unsigned char *)gimg_raster_pixels_const(r.raster);
+    const unsigned char * was = (const unsigned char *)gimg_raster_pixels_const(before.raster);
+    size_t stride = gimg_raster_stride_bytes(r.raster);
+    ASSERT_EQ(stride, gimg_raster_stride_bytes(before.raster));
+    for (uint32_t y = 0; y < h; y++) {
+      for (uint32_t x = 0; x < w; x++) {
+        if (std::memcmp(now + y * stride + 4u * x, was + y * stride + 4u * x, 4) != 0) {
+          changed++;
+          outside += (x < c.reach.x0 || x >= c.reach.x1 || y < c.reach.y0 || y >= c.reach.y1) ? 1 : 0;
+        }
+      }
+    }
+    EXPECT_EQ(outside, 0u) << c.name;
+    EXPECT_EQ(changed == 0, c.list == empty) << c.name;
+    // And the pixels are the sink's own allocation's (S12): nothing was read from memory the render had not made
+    // ready, which a workspace of 0xa5 bytes would show.
+    SinkRef plain;
+    RasterRef q(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, w, h));
+    EXPECT_EQ(render(plain.sink, c.list, q.raster).result, GSHSCENE_OK) << c.name;
+    EXPECT_TRUE(q.bytes() == r.bytes()) << c.name;
+  }
 }
 
 /* --- cancel (S7) -------------------------------------------------------------------------------------------- */

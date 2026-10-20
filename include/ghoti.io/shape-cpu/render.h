@@ -129,7 +129,10 @@
  * the most any item takes.  A workspace one byte smaller is ::GSHSCENE_ERR_LIMIT.
  * Sizing a list for a workspace the caller gives uses that workspace as its
  * scratch, so a `CALLER_MEMORY` render whose workspace is large enough allocates
- * nothing at all.
+ * nothing at all.  The block is sized for the region, but a render reads,
+ * clears and writes only the part of it its units reach: each layer is made
+ * ready (a group's cleared, the root's read from the target) over the rectangle
+ * its units have drawn on so far.  An empty list touches none of it.
  *
  * ### Limits
  *
