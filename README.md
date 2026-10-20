@@ -15,6 +15,16 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   flattened by `shape-geometry`'s flattener first. `_at`, `_total`, `_hash`,
   `_dump`, and limits (`GSHCPU_Limits`) for the extent, the bytes, the cells and
   the points.
+- The CPU sink (`render.h`): `gshcpu_sink_create` makes a `shape-scene` sink that
+  renders closed lists into RGBA8 and RGBAF32 rasters, straight or
+  premultiplied: fills under both rules, clips, opacity groups in their blend
+  spaces with every Porter-Duff operator and plus, the foreground, pictures and
+  outline glyph runs, in premultiplied `double` with one rounding at the write.
+  It passes shape-scene's sink conformance suite, cancels between list items,
+  takes its memory from a caller's workspace when asked, and draws damage
+  exactly. `gshcpu_render_hash` and `gshcpu_render_dump` spell a render; the
+  fixture set's renders are committed goldens, the same on every target.
+  `examples/render.c` renders a list.
 
 ## Building
 
@@ -24,7 +34,8 @@ make install PREFIX="$PWD/.local"
 ```
 
 Dependencies are found by pkg-config and nothing else; a missing one is an
-error that names the fix. The libraries this one needs: shape-geometry, shape-scene, image.
+error that names the fix. The libraries this one needs: cutil, color, math,
+image, shape-geometry and shape-scene.
 
 Determinism is a requirement, not a hope: every `double` stage builds with
 `-ffp-contract=off` and no x87, and elementary functions come from `math`, not

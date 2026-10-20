@@ -1,0 +1,49 @@
+# The committed renders of the fixture set (tests/render_fixtures.h), one line per fixture and format:
+# gshcpu_render_hash of the whole raster.  tools/corpus-hash.c must print each, and their fold, on every
+# target (make check-corpus-hash; suite/tools/xarch/shape.sh, suite/tools/xwin/shape.sh).
+render fill-rules rgba8 611360aef9c6adde
+render fill-rules rgba8-premultiplied 220c645a4d800fc7
+render fill-rules rgbaf32 36d07b3360925c37
+render fill-rules rgbaf32-premultiplied dfeb04febb573bfd
+render clip-leaf rgba8 bed324e06fec6f2c
+render clip-leaf rgba8-premultiplied 12cec1c08e1318fb
+render clip-leaf rgbaf32 a51241d1242c389e
+render clip-leaf rgbaf32-premultiplied 532f55edd5ca529f
+render clip-group rgba8 bb373550e5f0b927
+render clip-group rgba8-premultiplied f0c28fa153f41e24
+render clip-group rgbaf32 690835ea4cf805c2
+render clip-group rgbaf32-premultiplied fecf206da0128005
+render opacity-group rgba8 2c25e634110e9c7c
+render opacity-group rgba8-premultiplied 724260fc450cca0c
+render opacity-group rgbaf32 56b9ab47d62ddecf
+render opacity-group rgbaf32-premultiplied 1ba364c15e8bd12c
+render operators rgba8 2df286b805a52044
+render operators rgba8-premultiplied 4aa746eff76c7999
+render operators rgbaf32 fb05b2d10d757872
+render operators rgbaf32-premultiplied e407d2b78dd0ce2f
+render order rgba8 28e3572a64e2f743
+render order rgba8-premultiplied a04c5298a09457fa
+render order rgbaf32 d19f9b5d8bf9bee6
+render order rgbaf32-premultiplied 7179efb894707b84
+render blend-spaces rgba8 da7d581f2e39ad69
+render blend-spaces rgba8-premultiplied b2d129563310a6e2
+render blend-spaces rgbaf32 c3d6e6bc4ade2eb6
+render blend-spaces rgbaf32-premultiplied 59b8dcbb557ea9cd
+render foreground rgba8 480b0c0777b8823d
+render foreground rgba8-premultiplied 0cbf49cd1387da2c
+render foreground rgbaf32 2f7717eae8bc3a11
+render foreground rgbaf32-premultiplied e728046b23694bea
+render picture rgba8 ed17a4fb8eb8f452
+render picture rgba8-premultiplied 2e2207e24dbb5efe
+render picture rgbaf32 3715ef2836142536
+render picture rgbaf32-premultiplied 736e8ff54beb7a7a
+render glyphs rgba8 0a1777961d645208
+render glyphs rgba8-premultiplied 60a950bd5ed1ede7
+render glyphs rgbaf32 e004f22ae4a87ab4
+render glyphs rgbaf32-premultiplied a0a830e4f293f720
+render maps rgba8 d45687bb17b6ef91
+render maps rgba8-premultiplied 8a64dd00692a5a4e
+render maps rgbaf32 6d1d15a365559b37
+render maps rgbaf32-premultiplied caac3b307091633c
+hash ee4d1842df5800f3
+count 44

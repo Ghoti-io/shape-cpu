@@ -25,11 +25,12 @@ PROJECT := shape-cpu
 
 # The libraries this one depends on: the fourth field of its line in
 # suite/libraries.txt, without the optional ones. Each is found by pkg-config
-# and is a hard error when it is not. This is what the sources include today,
-# so a consumer (font) does not link what it does not use. shape-scene arrives
-# with the sink contract (story 13), and image with the GIMG_Raster targets;
-# each is added here and in the manifest by the story that first includes it.
-DEPS := shape-geometry
+# and is a hard error when it is not. This is what the sources include: the
+# coverage path needs shape-geometry alone, and the sink (story 13b) adds
+# shape-scene's contract, image's GIMG_Raster targets, math's gmath_pow, color's
+# gamut and transfer names and cutil's checked arithmetic. In
+# suite/libraries.txt order.
+DEPS := cutil color math image shape-geometry shape-scene
 
 # The libraries whose headers this one may include and whose shared objects it
 # may link (check-edges), as a regular expression alternation. Itself is always
@@ -458,16 +459,17 @@ check-no-x87: $(APP_DIR)/$(STATIC_TARGET) ## Fail if an x86 object holds an x87 
 # archive as the examples are.
 HASH_PROBE := $(APP_DIR)/corpus-hash$(EXE_EXTENSION)
 
-$(HASH_PROBE): tools/corpus-hash.c $(APP_DIR)/$(STATIC_TARGET) \
+$(HASH_PROBE): tools/corpus-hash.c tests/render_fixtures.h $(APP_DIR)/$(STATIC_TARGET) \
 		$(FLAGS_STAMP) | $(APP_DIR)/$(TARGET) $(LIBVER_GEN)
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) $(INCLUDE) -o $@ $< $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
 
 check-corpus-hash: $(HASH_PROBE) ## Fail unless the probe prints the committed cross-target hash (CAP-13)
-	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash
+	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash tests/corpus/render.hash
 
-check-vectors: ## Fail if tests/known_answers.h is not what the independent generator writes
+check-vectors: ## Fail if tests/known_answers.h or tests/render_vectors.h is not what its independent generator writes
 	@python3 tools/gen-coverage-vectors.py --check
+	@python3 tools/gen-render-vectors.py --check
 
 # Each planted defect in tools/check-planted.py is built into a copy of the
 # sources and must fail a test (or the probe's hash); the unplanted copy is the

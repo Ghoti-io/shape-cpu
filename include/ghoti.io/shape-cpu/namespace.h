@@ -57,6 +57,13 @@
 #define gshcpu_coverage_dump GHOTIIO_SHAPE_CPU(gshcpu_coverage_dump)
 #define gshcpu_version_number GHOTIIO_SHAPE_CPU(gshcpu_version_number)
 #define gshcpu_version_string GHOTIIO_SHAPE_CPU(gshcpu_version_string)
+#define GSHCPU_Format GHOTIIO_SHAPE_CPU(GSHCPU_Format)
+#define gshcpu_format_of GHOTIIO_SHAPE_CPU(gshcpu_format_of)
+#define gshcpu_format_string GHOTIIO_SHAPE_CPU(gshcpu_format_string)
+#define gshcpu_sink_create GHOTIIO_SHAPE_CPU(gshcpu_sink_create)
+#define gshcpu_sink_is GHOTIIO_SHAPE_CPU(gshcpu_sink_is)
+#define gshcpu_render_hash GHOTIIO_SHAPE_CPU(gshcpu_render_hash)
+#define gshcpu_render_dump GHOTIIO_SHAPE_CPU(gshcpu_render_dump)
 
 /// @endcond
 

@@ -1,0 +1,876 @@
+/*
+ * SPDX-License-Identifier: LGPL-3.0-only
+ *
+ * Copyright (C) 2026 Corey Pennycuff
+ *
+ * This file is part of Ghoti.io Shape CPU.
+ *
+ * Ghoti.io Shape CPU is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * Ghoti.io Shape CPU is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
+ * License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * @file
+ *
+ * The CPU sink (render.h): its operations for shape-scene's contract layer, and
+ * the render, which goes through the list's expansion one unit at a time,
+ * compositing into premultiplied `double` layers, and writes the root layer to
+ * the target once at the end (S11).  The planning pass is the contract layer's;
+ * this file decides each unit with the same predicate, skips what was refused,
+ * and adds only what it finds while drawing (its resource limits).
+ */
+
+#include <ghoti.io/shape-cpu/macros.h>
+
+#include "render_internal.h"
+
+#include <ghoti.io/cutil/safemath.h>
+#include <ghoti.io/shape-scene/resource.h>
+
+#include <string.h>
+
+/** What every carved piece is aligned to. */
+#define CARVE_ALIGN 16u
+
+/* --- the sink object ------------------------------------------------------------------------ */
+
+typedef struct Cpu_Sink {
+  GSHGEOM_Allocator alloc;
+  size_t max_dimension;      /* the effective limits */
+  size_t max_bytes;
+  uint64_t max_cells;
+  GSHGEOM_Limits geometry;   /* max_points for the flattener */
+  GSHCPU_Render_Observer observer;
+  void * observer_ctx;
+} Cpu_Sink;
+
+/* --- what a render remembers ----------------------------------------------------------------- */
+
+/** A layer: the root's or a group's (N6). */
+typedef struct Frame {
+  double * layer;            /* four doubles a pixel of the region */
+  GSHSCENE_Color_Space space;
+  GSHSCENE_Group group;      /* a group's properties */
+  size_t clip_base;          /* the first clip pushed in this group */
+  GSHCPU_Rect dirty;         /* the pixels anything was applied to */
+} Frame;
+
+/** A clip in force: its coverage inside its rectangle (0 outside it). */
+typedef struct Clip {
+  GSHCPU_Rect rect;
+  uint8_t * coverage;        /* rect's width by height */
+} Clip;
+
+/** What a refusal skips (S6): a refused push its block, a refused instance its picture. */
+typedef struct Skip {
+  size_t level;              /* the chain length of the refused item; 0 when nothing is skipped */
+  size_t depth;              /* pushes open inside the block, at its level */
+  int instance;
+} Skip;
+
+/** The sizes and places of a render's memory (render.h, Memory). */
+typedef struct Layout {
+  GSHCPU_Rect region;
+  size_t width;
+  size_t height;
+  size_t pixels;
+  size_t levels;             /* the list and each picture under it */
+  size_t groups;             /* the most groups open at once */
+  size_t clips;              /* the most clips open at once */
+  size_t walk;               /* bytes of the expansion walk */
+  size_t at_walk, at_maps, at_stop, at_frames, at_clips, at_root, at_layers, at_touched, at_coverage, at_clip_memory,
+      at_acc, at_items;      /* offsets from the aligned base */
+  size_t fixed;              /* the bytes before the items' arena, the alignment slack included */
+} Layout;
+
+typedef struct Run {
+  Cpu_Sink * cs;
+  GSHSCENE_Job * job;
+  const GSHSCENE_Render_Request * request;
+  GSHCPU_Format format;
+  GIMG_Raster * raster;
+  Layout layout;
+  GSHSCENE_Expansion walk;
+  GSHGEOM_Map * maps;        /* the enclosing instances' maps, and room for the item's and a glyph's */
+  size_t * stop;             /* the chain a strict refusal stopped at */
+  size_t stop_count;
+  Frame * frames;
+  size_t top;                /* the innermost frame */
+  Clip * clips;
+  size_t clip_count;
+  double * root;
+  double * layers;
+  uint8_t * touched;
+  uint8_t * coverage;
+  uint8_t * clip_memory;
+  int64_t * acc;
+  GSHCPU_Arena arena;        /* CALLER_MEMORY: the items' geometry */
+  const GSHGEOM_Allocator * item_alloc;
+  GSHSCENE_Color foreground;
+  Skip skip;
+  size_t processed;
+  size_t done;
+  size_t groups_open;
+  uint64_t work;
+} Run;
+
+/* --- sizes ------------------------------------------------------------------------------------ */
+
+/** @p n rounded up to the carve alignment; SIZE_MAX on overflow. */
+static size_t align_up(size_t n) {
+  size_t r;
+  if (n == SIZE_MAX || !gcu_safe_add_size(n, CARVE_ALIGN - 1u, &r)) {
+    return SIZE_MAX;
+  }
+  return r & ~(size_t)(CARVE_ALIGN - 1u);
+}
+
+/** Place @p bytes at @p *at; 0 on overflow. */
+static int place(size_t * at, size_t bytes, size_t * out) {
+  size_t a = align_up(bytes);
+  *out = *at;
+  return a != SIZE_MAX && gcu_safe_add_size(*at, a, at);
+}
+
+/** @p a times @p b times @p c; SIZE_MAX on overflow. */
+static size_t mul3(size_t a, size_t b, size_t c) {
+  size_t r;
+  if (!gcu_safe_mul_size(a, b, &r) || !gcu_safe_mul_size(r, c, &r)) {
+    return SIZE_MAX;
+  }
+  return r;
+}
+
+/** The most groups and clips open at once in @p list's expansion, a picture's counting where it is drawn. */
+static void nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips) {
+  size_t g = 0;
+  size_t c = 0;
+  size_t most_g = 0;
+  size_t most_c = 0;
+  size_t count = gshscene_list_count(list);
+  for (size_t i = 0; i < count; i++) {
+    const GSHSCENE_Item * item = NULL;
+    if (gshscene_list_item(list, i, &item) != GSHSCENE_OK) {
+      break;
+    }
+    switch (item->kind) {
+      case GSHSCENE_ITEM_GROUP_PUSH:
+        g++;
+        break;
+      case GSHSCENE_ITEM_GROUP_POP:
+        g--;
+        break;
+      case GSHSCENE_ITEM_CLIP_PUSH:
+        c++;
+        break;
+      case GSHSCENE_ITEM_CLIP_POP:
+        c--;
+        break;
+      case GSHSCENE_ITEM_INSTANCE: {
+        size_t ig = 0;
+        size_t ic = 0;
+        nesting(gshscene_resource_picture(item->resource), &ig, &ic);
+        most_g = g + ig > most_g ? g + ig : most_g;
+        most_c = c + ic > most_c ? c + ic : most_c;
+        break;
+      }
+      default:
+        break;
+    }
+    most_g = g > most_g ? g : most_g;
+    most_c = c > most_c ? c : most_c;
+  }
+  *groups = most_g;
+  *clips = most_c;
+}
+
+/** The region a render draws: the extent, meet the damage. */
+static GSHCPU_Rect region_of(const GSHSCENE_Target * target) {
+  GSHCPU_Rect r = target->extent;
+  if (target->damage) {
+    r = gshcpu_render_rect_meet(r, *target->damage);
+  }
+  if (gshcpu_render_rect_empty(r)) {
+    r.x1 = r.x0;
+    r.y1 = r.y0;
+  }
+  return r;
+}
+
+/** Lay out a render of @p list on @p target; ::GSHCPU_ERR_LIMIT past a limit or when a size overflows. */
+static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, const GSHSCENE_Target * target, Layout * L) {
+  memset(L, 0, sizeof *L);
+  L->region = region_of(target);
+  L->width = (size_t)(L->region.x1 - L->region.x0);
+  L->height = (size_t)(L->region.y1 - L->region.y0);
+  if (L->region.x1 > (int64_t)GSHCPU_MAX_DIMENSION_CEILING || L->region.y1 > (int64_t)GSHCPU_MAX_DIMENSION_CEILING ||
+      L->width > cs->max_dimension || L->height > cs->max_dimension) {
+    return GSHCPU_ERR_LIMIT;
+  }
+  L->pixels = L->width * L->height; /* each at most 2^24: no overflow */
+  if (L->pixels > cs->max_bytes) {
+    return GSHCPU_ERR_LIMIT;
+  }
+  L->walk = gshscene_expansion_bytes(list);
+  L->levels = L->walk / (sizeof(const GSHSCENE_List *) + sizeof(size_t));
+  nesting(list, &L->groups, &L->clips);
+  size_t at = 0;
+  size_t ignored;
+  int ok = place(&at, sizeof(Run), &ignored) && place(&at, L->walk, &L->at_walk) &&
+      place(&at, mul3(L->levels + 2u, sizeof(GSHGEOM_Map), 1), &L->at_maps) &&
+      place(&at, mul3(L->levels, sizeof(size_t), 1), &L->at_stop) &&
+      place(&at, mul3(L->groups + 1u, sizeof(Frame), 1), &L->at_frames) &&
+      place(&at, mul3(L->clips, sizeof(Clip), 1), &L->at_clips) &&
+      place(&at, mul3(L->pixels, 4u, sizeof(double)), &L->at_root) &&
+      place(&at, mul3(L->groups, L->pixels, 4u * sizeof(double)), &L->at_layers) &&
+      place(&at, L->pixels, &L->at_touched) && place(&at, L->pixels, &L->at_coverage) &&
+      place(&at, mul3(L->clips, L->pixels, 1), &L->at_clip_memory) &&
+      place(&at, mul3(2u * (L->width + 1u), GSHCPU_RENDER_BAND_ROWS, sizeof(int64_t)), &L->at_acc);
+  L->at_items = at;
+  if (!ok || !gcu_safe_add_size(at, CARVE_ALIGN - 1u, &L->fixed)) {
+    return GSHCPU_ERR_LIMIT;
+  }
+  return GSHCPU_OK;
+}
+
+/* --- skipping (S6) ---------------------------------------------------------------------------- */
+
+static void skip_begin(Skip * s, const GSHSCENE_Item * item, size_t count) {
+  if (item->kind == GSHSCENE_ITEM_CLIP_PUSH || item->kind == GSHSCENE_ITEM_GROUP_PUSH ||
+      item->kind == GSHSCENE_ITEM_INSTANCE) {
+    s->level = count;
+    s->depth = 0;
+    s->instance = item->kind == GSHSCENE_ITEM_INSTANCE;
+  }
+}
+
+/** Whether the unit is inside what is skipped (and step past it). */
+static int skip_step(Skip * s, const GSHSCENE_Item * item, size_t count) {
+  if (!s->level) {
+    return 0;
+  }
+  if (count > s->level) {
+    return 1;
+  }
+  if (s->instance || count < s->level) {
+    s->level = 0;
+    return 0;
+  }
+  if (item->kind == GSHSCENE_ITEM_CLIP_PUSH || item->kind == GSHSCENE_ITEM_GROUP_PUSH) {
+    s->depth++;
+  } else if (item->kind == GSHSCENE_ITEM_CLIP_POP || item->kind == GSHSCENE_ITEM_GROUP_POP) {
+    if (s->depth == 0) {
+      s->level = 0; /* the matching pop: skipped, and the block is over */
+    } else {
+      s->depth--;
+    }
+  }
+  return 1;
+}
+
+/* --- the geometry of the items, measured (S9) --------------------------------------------------- */
+
+/**
+ * Convert every fill and clip push of the expansion of @p list once, through @p arena (reset for each), and give
+ * the most one took.  @p memory holds the walk and the maps (at the layout's offsets from it).
+ */
+static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * list, const GSHSCENE_Target * target,
+    const Layout * L, unsigned char * memory, GSHCPU_Arena * arena, size_t * peak) {
+  GSHSCENE_Expansion walk;
+  GSHGEOM_Map * maps = (GSHGEOM_Map *)(void *)(memory + L->at_maps);
+  if (gshscene_expansion_init(&walk, list, memory + L->at_walk, L->walk) != GSHSCENE_OK) {
+    return GSHCPU_ERR_INTERNAL;
+  }
+  const GSHSCENE_Item * item;
+  const size_t * chain;
+  size_t count;
+  *peak = 0;
+  while (gshscene_expansion_next(&walk, &item, &chain, &count)) {
+    (void)chain;
+    if (item->kind == GSHSCENE_ITEM_INSTANCE) {
+      maps[count - 1] = item->map;
+      continue;
+    }
+    if (item->kind != GSHSCENE_ITEM_FILL && item->kind != GSHSCENE_ITEM_CLIP_PUSH) {
+      continue;
+    }
+    GSHCPU_Item_Geometry g;
+    gshcpu_render_arena_reset(arena);
+    arena->peak = 0;
+    GSHCPU_Result r = gshcpu_render_geometry(item, maps, count - 1, &target->map, &arena->self, &cs->geometry, &g);
+    gshcpu_render_geometry_release(&g, &arena->self);
+    if (r == GSHCPU_ERR_OOM) {
+      return r;
+    }
+    *peak = arena->peak > *peak ? arena->peak : *peak;
+  }
+  return GSHCPU_OK;
+}
+
+/** The exact workspace (S9): the fixed block and the most any item's geometry takes. */
+static GSHCPU_Result need_of(const Cpu_Sink * cs, const GSHSCENE_Render_Request * request, size_t * out) {
+  Layout L;
+  GSHCPU_Result r = layout(cs, request->list, request->target, &L);
+  if (r != GSHCPU_OK) {
+    return r;
+  }
+  size_t peak = 0;
+  GSHCPU_Arena arena;
+  /* The caller's workspace, when there is room in it for the walk and some arena, is the measure's scratch: a
+   * render that brings its workspace allocates nothing, not even to size itself. */
+  if ((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) && request->workspace && request->workspace_bytes > L.fixed) {
+    unsigned char * base = (unsigned char *)(((uintptr_t)request->workspace + (CARVE_ALIGN - 1u)) &
+        ~(uintptr_t)(CARVE_ALIGN - 1u));
+    gshcpu_render_arena_init(&arena, base + L.at_items, request->workspace_bytes - L.fixed);
+    r = measure_items(cs, request->list, request->target, &L, base, &arena, &peak);
+    if (r == GSHCPU_OK) {
+      return gcu_safe_add_size(L.fixed, peak, out) ? GSHCPU_OK : GSHCPU_ERR_LIMIT;
+    }
+    if (r != GSHCPU_ERR_OOM) {
+      return r;
+    }
+    /* The workspace is too small for some item: measure over the sink's allocator, for the need to report. */
+  }
+  size_t scratch_bytes = L.at_stop; /* the walk and the maps, from the aligned base (the Run's room unused) */
+  unsigned char * scratch = cs->alloc.malloc_fn(cs->alloc.ctx, scratch_bytes + CARVE_ALIGN);
+  if (!scratch) {
+    return GSHCPU_ERR_OOM;
+  }
+  unsigned char * base = (unsigned char *)(((uintptr_t)scratch + (CARVE_ALIGN - 1u)) & ~(uintptr_t)(CARVE_ALIGN - 1u));
+  gshcpu_render_arena_measure(&arena, &cs->alloc);
+  r = measure_items(cs, request->list, request->target, &L, base, &arena, &peak);
+  cs->alloc.free_fn(cs->alloc.ctx, scratch);
+  if (r != GSHCPU_OK) {
+    return r;
+  }
+  return gcu_safe_add_size(L.fixed, peak, out) ? GSHCPU_OK : GSHCPU_ERR_LIMIT;
+}
+
+/* --- the operations ----------------------------------------------------------------------------- */
+
+static GSHSCENE_Result scene_result(GSHCPU_Result r) {
+  switch (r) {
+    case GSHCPU_OK:
+      return GSHSCENE_OK;
+    case GSHCPU_ERR_LIMIT:
+      return GSHSCENE_ERR_LIMIT;
+    case GSHCPU_ERR_OOM:
+      return GSHSCENE_ERR_OOM;
+    case GSHCPU_ERR_REFUSED:
+      return GSHSCENE_ERR_REFUSED;
+    case GSHCPU_ERR_CANCELLED:
+      return GSHSCENE_ERR_CANCELLED;
+    case GSHCPU_ERR_INVALID:
+      return GSHSCENE_ERR_INVALID;
+    default:
+      return GSHSCENE_ERR_INTERNAL;
+  }
+}
+
+/** The bound of the work between two checks (S7): render.h. */
+static uint64_t work_bound(const Cpu_Sink * cs) {
+  uint64_t b = (uint64_t)cs->geometry.max_points;
+  if (!gcu_safe_add_u64(b, cs->max_cells, &b) || !gcu_safe_add_u64(b, (uint64_t)cs->max_bytes, &b)) {
+    return UINT64_MAX;
+  }
+  return b;
+}
+
+static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHSCENE_Sink_Caps * out) {
+  Cpu_Sink * cs = impl;
+  if (target->kind != GSHSCENE_TARGET_RASTER || !gshcpu_format_of(target->surface)) {
+    return GSHSCENE_ERR_UNSUPPORTED;
+  }
+  for (uint32_t k = GSHSCENE_ITEM_FILL; k < GSHSCENE_ITEM_KIND_COUNT; k++) {
+    out->item_kinds |= UINT32_C(1) << k;
+  }
+  for (uint32_t c = 0; c < GSHSCENE_COMPOSITE_COUNT; c++) {
+    out->composites |= UINT32_C(1) << c;
+  }
+  out->flags = GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA | GSHSCENE_CAP_BLEND_SPACES |
+      GSHSCENE_CAP_READBACK;
+  out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;
+  out->cancel_work_bound = work_bound(cs);
+  out->work_measure = "cells+points+pixels";
+  return GSHSCENE_OK;
+}
+
+static GSHSCENE_Result op_workspace_bytes(void * impl, const GSHSCENE_Render_Request * request, size_t * out) {
+  return scene_result(need_of(impl, request, out));
+}
+
+/* --- one unit ----------------------------------------------------------------------------------- */
+
+/** Refused while drawing (S6): the entry; under strict the render stops here, else the item's block is skipped. */
+static GSHSCENE_Result refuse(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  GSHSCENE_Result r = gshscene_job_report(run->job, GSHSCENE_ENTRY_REFUSED, GSHSCENE_REASON_RESOURCE_LIMIT, chain, count);
+  if (r != GSHSCENE_OK) {
+    return r;
+  }
+  if (run->request->flags & GSHSCENE_RENDER_STRICT) {
+    memcpy(run->stop, chain, count * sizeof *chain);
+    run->stop_count = count;
+    return GSHSCENE_ERR_REFUSED;
+  }
+  skip_begin(&run->skip, item, count);
+  return GSHSCENE_OK;
+}
+
+/** The pixel (x, y) of a region-sized buffer. */
+static size_t at(const Run * run, int64_t x, int64_t y) {
+  return (size_t)(y - run->layout.region.y0) * run->layout.width + (size_t)(x - run->layout.region.x0);
+}
+
+/** The clip's coverage at (x, y), which lies in its rectangle. */
+static uint32_t clip_at(const Clip * clip, int64_t x, int64_t y) {
+  size_t w = (size_t)(clip->rect.x1 - clip->rect.x0);
+  return clip->coverage[(size_t)(y - clip->rect.y0) * w + (size_t)(x - clip->rect.x0)];
+}
+
+/**
+ * The geometry and the coverage of a fill or clip push, into @p out over @p rect (the item's pixels meet what it
+ * can reach).  @return ::GSHSCENE_OK; ::GSHSCENE_ERR_LIMIT for a resource limit (the caller refuses the item); OOM.
+ */
+static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, size_t count, GSHCPU_Rect reach, uint8_t * out,
+    GSHCPU_Rect * rect) {
+  GSHCPU_Item_Geometry g;
+  if (run->item_alloc == &run->arena.self) {
+    gshcpu_render_arena_reset(&run->arena);
+  }
+  GSHCPU_Result r = gshcpu_render_geometry(item, run->maps, count - 1, &run->job->target.map, run->item_alloc,
+      &run->cs->geometry, &g);
+  run->work += g.points;
+  if (r == GSHCPU_OK) {
+    *rect = gshcpu_render_rect_meet(g.box, reach);
+    if (gshcpu_render_rect_empty(*rect)) {
+      rect->x1 = rect->x0;
+      rect->y1 = rect->y0;
+    } else {
+      uint64_t cells = 0;
+      r = gshcpu_render_cover((const GSHGEOM_Flat_Path * const *)g.paths, g.count, item->fill_rule, *rect, out,
+          run->acc, run->cs->max_cells, &cells);
+      run->work += cells;
+    }
+  }
+  gshcpu_render_geometry_release(&g, run->item_alloc);
+  return scene_result(r);
+}
+
+/** The pixels the clips in force in the innermost group allow (N9): the region meet their rectangles. */
+static GSHCPU_Rect reach_of(const Run * run, size_t from, size_t to) {
+  GSHCPU_Rect r = run->layout.region;
+  for (size_t i = from; i < to; i++) {
+    r = gshcpu_render_rect_meet(r, run->clips[i].rect);
+  }
+  return r;
+}
+
+/** D8: the weight of @p m8 under the clips @p from to @p to at (x, y). */
+static uint32_t weigh_clips(const Run * run, size_t from, size_t to, uint32_t m8, int64_t x, int64_t y) {
+  for (size_t i = from; i < to && m8 != 0; i++) {
+    m8 = gshcpu_render_weigh(m8, clip_at(&run->clips[i], x, y));
+  }
+  return m8;
+}
+
+/** The fill's source in the layer's space, premultiplied (N7, N10): converted once. */
+static void source_of(const Run * run, const GSHSCENE_Item * item, const Frame * frame, double s[4]) {
+  double rgb[3];
+  double alpha;
+  GSHSCENE_Color_Space space;
+  if (item->paint.kind == GSHSCENE_PAINT_FOREGROUND) {
+    memcpy(rgb, run->foreground.rgba, sizeof rgb);
+    alpha = run->foreground.rgba[3] * item->paint.rgba[3];
+    space = run->foreground.space;
+  } else {
+    memcpy(rgb, item->paint.rgba, sizeof rgb);
+    alpha = item->paint.rgba[3];
+    space = item->paint.space;
+  }
+  if (gshscene_color_space_is_target(&space)) {
+    space = *gshscene_job_target_space(run->job);
+  }
+  GSHCPU_Convert c;
+  gshcpu_render_convert_prepare(&c, &space, &frame->space);
+  gshcpu_render_convert_straight(&c, rgb, rgb);
+  s[0] = rgb[0] * alpha;
+  s[1] = rgb[1] * alpha;
+  s[2] = rgb[2] * alpha;
+  s[3] = alpha;
+}
+
+static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  Frame * frame = &run->frames[run->top];
+  GSHCPU_Rect rect;
+  GSHSCENE_Result r = shape(run, item, count, reach_of(run, frame->clip_base, run->clip_count), run->coverage, &rect);
+  if (r == GSHSCENE_ERR_LIMIT) {
+    return refuse(run, item, chain, count);
+  }
+  if (r != GSHSCENE_OK) {
+    return r;
+  }
+  double s[4];
+  source_of(run, item, frame, s);
+  size_t w = (size_t)(rect.x1 - rect.x0);
+  for (int64_t y = rect.y0; y < rect.y1; y++) {
+    for (int64_t x = rect.x0; x < rect.x1; x++) {
+      uint32_t m8 = run->coverage[(size_t)(y - rect.y0) * w + (size_t)(x - rect.x0)];
+      m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);
+      if (m8 == 0) {
+        continue;
+      }
+      size_t p = at(run, x, y);
+      gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);
+      if (run->top == 0) {
+        run->touched[p] = 1;
+      }
+    }
+  }
+  run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);
+  frame->dirty = gshcpu_render_rect_join(frame->dirty, rect);
+  return GSHSCENE_OK;
+}
+
+static GSHSCENE_Result clip_push(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  Frame * frame = &run->frames[run->top];
+  Clip * clip = &run->clips[run->clip_count];
+  clip->coverage = run->clip_memory + run->clip_count * run->layout.pixels;
+  GSHSCENE_Result r =
+      shape(run, item, count, reach_of(run, frame->clip_base, run->clip_count), clip->coverage, &clip->rect);
+  if (r == GSHSCENE_ERR_LIMIT) {
+    return refuse(run, item, chain, count);
+  }
+  if (r != GSHSCENE_OK) {
+    return r;
+  }
+  run->clip_count++;
+  return GSHSCENE_OK;
+}
+
+static void group_push(Run * run, const GSHSCENE_Item * item) {
+  const Frame * parent = &run->frames[run->top];
+  Frame * f = &run->frames[++run->top];
+  f->layer = run->layers + (run->top - 1u) * run->layout.pixels * 4u;
+  memset(f->layer, 0, run->layout.pixels * 4u * sizeof *f->layer);
+  f->group = item->group;
+  f->space = gshscene_color_space_is_target(&item->group.blend_space) ? parent->space : item->group.blend_space;
+  f->clip_base = run->clip_count;
+  f->dirty.x0 = f->dirty.y0 = f->dirty.x1 = f->dirty.y1 = 0;
+  run->groups_open++;
+  run->work += run->layout.pixels;
+}
+
+static void group_pop(Run * run) {
+  const Frame * f = &run->frames[run->top];
+  Frame * parent = &run->frames[run->top - 1u];
+  uint32_t op = f->group.composite;
+  int bounded = gshcpu_render_bounded(op);
+  /* A bounded operator changes nothing where the group drew nothing (N4); an unbounded one acts wherever it is
+   * weighed above zero (N8). */
+  GSHCPU_Rect region = bounded ? f->dirty : run->layout.region;
+  region = gshcpu_render_rect_meet(region, reach_of(run, parent->clip_base, f->clip_base));
+  GSHCPU_Convert c;
+  gshcpu_render_convert_prepare(&c, &f->space, &parent->space);
+  const double o = f->group.opacity;
+  for (int64_t y = region.y0; y < region.y1; y++) {
+    for (int64_t x = region.x0; x < region.x1; x++) {
+      uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);
+      if (m8 == 0) {
+        continue;
+      }
+      size_t p = at(run, x, y);
+      double s[4];
+      gshcpu_render_convert_premultiplied(&c, &f->layer[4u * p], s);
+      for (int i = 0; i < 4; i++) {
+        s[i] = o * s[i];
+      }
+      if (bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0) {
+        continue;
+      }
+      gshcpu_render_apply(&parent->layer[4u * p], s, (double)m8 / 255.0, op);
+      if (run->top == 1u) {
+        run->touched[p] = 1;
+      }
+    }
+  }
+  if (!gshcpu_render_rect_empty(region)) {
+    run->work += (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0);
+    parent->dirty = gshcpu_render_rect_join(parent->dirty, region);
+  }
+  run->top--;
+  run->groups_open--;
+}
+
+/** Go through one unit.  @return ::GSHSCENE_OK to go on, or the result to stop with. */
+static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  if (skip_step(&run->skip, item, count)) {
+    return GSHSCENE_OK;
+  }
+  GSHSCENE_Disposition d = gshscene_caps_disposition(&run->job->caps, item, gshscene_job_target_space(run->job));
+  if (d.entry_class == GSHSCENE_ENTRY_REFUSED) {
+    /* The planning pass reported it. */
+    skip_begin(&run->skip, item, count);
+    return GSHSCENE_OK;
+  }
+  switch (item->kind) {
+    case GSHSCENE_ITEM_FILL:
+      return fill(run, item, chain, count);
+    case GSHSCENE_ITEM_CLIP_PUSH:
+      return clip_push(run, item, chain, count);
+    case GSHSCENE_ITEM_CLIP_POP:
+      run->clip_count--;
+      return GSHSCENE_OK;
+    case GSHSCENE_ITEM_GROUP_PUSH:
+      group_push(run, item);
+      return GSHSCENE_OK;
+    case GSHSCENE_ITEM_GROUP_POP:
+      group_pop(run);
+      return GSHSCENE_OK;
+    case GSHSCENE_ITEM_INSTANCE:
+      run->maps[count - 1] = item->map;
+      return GSHSCENE_OK;
+    default:
+      return GSHSCENE_ERR_INTERNAL;
+  }
+}
+
+/* --- a render: begin to completion ---------------------------------------------------------------- */
+
+/** The one rounding (S11): every touched pixel of the root layer to the target. */
+static void write_target(Run * run) {
+  const Layout * L = &run->layout;
+  unsigned char * pixels = gimg_raster_pixels(run->raster);
+  size_t stride = gimg_raster_stride_bytes(run->raster);
+  for (int64_t y = L->region.y0; y < L->region.y1; y++) {
+    unsigned char * row = pixels + (size_t)y * stride;
+    for (int64_t x = L->region.x0; x < L->region.x1; x++) {
+      size_t p = at(run, x, y);
+      if (run->touched[p]) {
+        gshcpu_render_store(run->format, row, (size_t)x, &run->root[4u * p]);
+      }
+    }
+  }
+}
+
+static const char * reason_of(GSHSCENE_Result result) {
+  switch (result) {
+    case GSHSCENE_ERR_CANCELLED:
+      return "cancelled between units";
+    case GSHSCENE_ERR_REFUSED:
+      return "strict: refused while drawing (the sink's resource limit)";
+    case GSHSCENE_ERR_OOM:
+      return "out of memory while drawing";
+    default:
+      return "the CPU sink failed";
+  }
+}
+
+/** Write what is done (the prefix), hand the result to the contract, free the memory. */
+static void finish(Run * run, GSHSCENE_Result result, void * memory) {
+  Cpu_Sink * cs = run->cs;
+  if (cs->observer) {
+    cs->observer(cs->observer_ctx, run->layout.region, run->root, run->touched);
+  }
+  write_target(run);
+  GSHSCENE_Job * job = run->job;
+  gshscene_job_set_frame_bytes(job, run->layout.fixed);
+  gshscene_job_complete(job, result, run->stop, run->stop_count, result == GSHSCENE_OK ? NULL : reason_of(result));
+  if (memory) {
+    cs->alloc.free_fn(cs->alloc.ctx, memory);
+  }
+}
+
+static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
+  Cpu_Sink * cs = impl;
+  const GSHSCENE_Render_Request * request = gshscene_job_request(job);
+  const GSHSCENE_Target * target = request->target;
+  Layout L;
+  GSHCPU_Result lr = layout(cs, request->list, target, &L);
+  if (lr != GSHCPU_OK) {
+    return scene_result(lr);
+  }
+  void * memory = NULL;
+  unsigned char * raw;
+  size_t raw_bytes;
+  int caller = (request->flags & GSHSCENE_RENDER_CALLER_MEMORY) != 0;
+  if (caller) {
+    raw = request->workspace; /* the contract layer has checked it holds the need */
+    raw_bytes = request->workspace_bytes;
+  } else {
+    memory = cs->alloc.malloc_fn(cs->alloc.ctx, L.fixed);
+    if (!memory) {
+      return GSHSCENE_ERR_OOM;
+    }
+    raw = memory;
+    raw_bytes = L.fixed;
+  }
+  unsigned char * base = (unsigned char *)(((uintptr_t)raw + (CARVE_ALIGN - 1u)) & ~(uintptr_t)(CARVE_ALIGN - 1u));
+  Run * run = (Run *)(void *)base;
+  memset(run, 0, sizeof *run);
+  run->cs = cs;
+  run->job = job;
+  run->request = request;
+  run->layout = L;
+  run->raster = target->surface;
+  run->format = gshcpu_format_of(run->raster);
+  run->maps = (GSHGEOM_Map *)(void *)(base + L.at_maps);
+  run->stop = (size_t *)(void *)(base + L.at_stop);
+  run->frames = (Frame *)(void *)(base + L.at_frames);
+  run->clips = (Clip *)(void *)(base + L.at_clips);
+  run->root = (double *)(void *)(base + L.at_root);
+  run->layers = (double *)(void *)(base + L.at_layers);
+  run->touched = base + L.at_touched;
+  run->coverage = base + L.at_coverage;
+  run->clip_memory = base + L.at_clip_memory;
+  run->acc = (int64_t *)(void *)(base + L.at_acc);
+  if (caller) {
+    /* The items' geometry from the rest of the workspace. */
+    gshcpu_render_arena_init(&run->arena, base + L.at_items, raw_bytes - (size_t)(base - raw) - L.at_items);
+    run->item_alloc = &run->arena.self;
+  } else {
+    run->item_alloc = &cs->alloc;
+  }
+  if (gshscene_expansion_init(&run->walk, request->list, base + L.at_walk, L.walk) != GSHSCENE_OK ||
+      gshscene_list_foreground(request->list, &run->foreground) != GSHSCENE_OK) {
+    if (memory) {
+      cs->alloc.free_fn(cs->alloc.ctx, memory);
+    }
+    return GSHSCENE_ERR_INTERNAL;
+  }
+  /* The root layer is the target (N6): its values, read once. */
+  memset(run->touched, 0, L.pixels);
+  const unsigned char * pixels = gimg_raster_pixels_const(run->raster);
+  size_t stride = gimg_raster_stride_bytes(run->raster);
+  for (int64_t y = L.region.y0; y < L.region.y1; y++) {
+    for (int64_t x = L.region.x0; x < L.region.x1; x++) {
+      gshcpu_render_load(run->format, pixels + (size_t)y * stride, (size_t)x, &run->root[4u * at(run, x, y)]);
+    }
+  }
+  Frame * root = &run->frames[0];
+  memset(root, 0, sizeof *root);
+  root->layer = run->root;
+  root->space = *gshscene_job_target_space(job);
+
+  const GSHSCENE_Item * item;
+  const size_t * chain;
+  size_t count;
+  while (gshscene_expansion_next(&run->walk, &item, &chain, &count)) {
+    run->work = 0;
+    GSHSCENE_Result r = unit(run, item, chain, count);
+    gshscene_job_work(job, run->work);
+    if (r != GSHSCENE_OK) {
+      if (run->stop_count == 0 && r != GSHSCENE_ERR_REFUSED) {
+        memcpy(run->stop, chain, count * sizeof *chain);
+        run->stop_count = count;
+      }
+      finish(run, r, memory);
+      return GSHSCENE_OK;
+    }
+    run->processed++;
+    if (run->groups_open == 0) {
+      run->done = run->processed;
+    }
+    if (gshscene_job_unit(job, run->processed, run->done)) {
+      finish(run, GSHSCENE_ERR_CANCELLED, memory);
+      return GSHSCENE_OK;
+    }
+  }
+  finish(run, GSHSCENE_OK, memory);
+  return GSHSCENE_OK;
+}
+
+static GSHSCENE_Result op_readback(void * impl, const GSHSCENE_Job * job, GIMG_Raster * out) {
+  (void)impl;
+  const GSHSCENE_Target * target = &job->target;
+  const GIMG_Raster * raster = target->surface;
+  size_t bytes = gshcpu_render_pixel_bytes(gshcpu_format_of(raster));
+  const unsigned char * src = gimg_raster_pixels_const(raster);
+  unsigned char * dst = gimg_raster_pixels(out);
+  size_t src_stride = gimg_raster_stride_bytes(raster);
+  size_t dst_stride = gimg_raster_stride_bytes(out);
+  size_t row = (size_t)(target->extent.x1 - target->extent.x0) * bytes;
+  for (int64_t y = target->extent.y0; y < target->extent.y1; y++) {
+    memcpy(dst + (size_t)(y - target->extent.y0) * dst_stride, src + (size_t)y * src_stride + (size_t)target->extent.x0 * bytes,
+        row);
+  }
+  return GSHSCENE_OK;
+}
+
+static void op_destroy(void * impl) {
+  Cpu_Sink * cs = impl;
+  GSHGEOM_Allocator alloc = cs->alloc;
+  alloc.free_fn(alloc.ctx, cs);
+}
+
+/* --- making one -------------------------------------------------------------------------------------- */
+
+int gshcpu_sink_is(const GSHSCENE_Sink * sink) {
+  /* The contract's object is opaque; the name in the ops table is what can be asked. */
+  const char * name = gshscene_sink_name(sink);
+  return sink && name && strcmp(name, "shape-cpu") == 0;
+}
+
+GSHCPU_Result gshcpu_render_sink_create_observed(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
+    const GSHCPU_Limits * limits, GSHCPU_Render_Observer observer, void * observer_ctx, GSHSCENE_Sink ** out) {
+  if (!out) {
+    return GSHCPU_ERR_INVALID;
+  }
+  if (limits) {
+    for (size_t i = 0; i < sizeof limits->_reserved; i++) {
+      if (limits->_reserved[i]) {
+        return GSHCPU_ERR_INVALID;
+      }
+    }
+  }
+  if (!alloc) {
+    alloc = gshgeom_allocator_default();
+  }
+  Cpu_Sink * cs = alloc->calloc_fn(alloc->ctx, 1, sizeof *cs);
+  if (!cs) {
+    return GSHCPU_ERR_OOM;
+  }
+  cs->alloc = *alloc;
+  cs->observer = observer;
+  cs->observer_ctx = observer_ctx;
+  cs->max_dimension = limits && limits->max_dimension ? limits->max_dimension : GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION;
+  if (cs->max_dimension > GSHCPU_MAX_DIMENSION_CEILING) {
+    cs->max_dimension = GSHCPU_MAX_DIMENSION_CEILING;
+  }
+  cs->max_bytes = limits && limits->max_bytes ? limits->max_bytes : GSHCPU_LIMITS_DEFAULT_MAX_BYTES;
+  cs->max_cells = limits && limits->max_cells ? limits->max_cells : GSHCPU_LIMITS_DEFAULT_MAX_CELLS;
+  gshgeom_limits_default(&cs->geometry);
+  if (limits && limits->max_points) {
+    cs->geometry.max_points = limits->max_points;
+  }
+  GSHSCENE_Sink_Ops ops;
+  memset(&ops, 0, sizeof ops);
+  ops.name = "shape-cpu";
+  ops.thread_affine = 0;
+  ops.caps = op_caps;
+  ops.workspace_bytes = op_workspace_bytes;
+  ops.begin = op_begin;
+  ops.readback = op_readback;
+  ops.destroy = op_destroy;
+  GSHSCENE_Sink * sink = NULL;
+  GSHSCENE_Result r = gshscene_sink_create(alloc, scene_limits, &ops, cs, &sink);
+  if (r != GSHSCENE_OK) {
+    alloc->free_fn(alloc->ctx, cs);
+    return r == GSHSCENE_ERR_OOM ? GSHCPU_ERR_OOM : GSHCPU_ERR_INVALID;
+  }
+  *out = sink;
+  return GSHCPU_OK;
+}
+
+GSHCPU_Result gshcpu_sink_create(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
+    const GSHCPU_Limits * limits, GSHSCENE_Sink ** out) {
+  return gshcpu_render_sink_create_observed(alloc, scene_limits, limits, NULL, NULL, out);
+}

@@ -30,5 +30,6 @@
 #include <ghoti.io/shape-cpu/core.h>
 #include <ghoti.io/shape-cpu/coverage.h>
 #include <ghoti.io/shape-cpu/macros.h>
+#include <ghoti.io/shape-cpu/render.h>
 
 #endif // GHOTI_IO_GSHCPU_GSHCPU_H

@@ -21,33 +21,41 @@
 /**
  * @file
  *
- * The cross-target probe (CAP-6, CAP-12, AD-17): a fixed set of device paths,
- * filled under both rules, hashed in the library's own spelling and folded
- * into one hash.  Every target must print the committed value in
- * tests/corpus/coverage.hash: x86-64, i686 (SSE), arm64, big-endian and
- * Windows.  It is built by `make check-corpus-hash` on the host and by
- * suite/tools/xarch/shape.sh and suite/tools/xwin/shape.sh for the others.
+ * The cross-target probe (CAP-6, CAP-12, CAP-13, AD-17), in two parts.
  *
- * What it can see: byte order (the hash is written from shifts, the cells are
- * accumulated in 64 bits), a 32-bit `long` or `size_t` where one was assumed,
- * and a sign or rounding rule that depends on the host (the division of a
- * negative number).  The input is integers only, from a fixed generator.
- * Nothing in the library's coverage path is floating point, so the flags that
- * matter to `shape-geometry`'s probe cannot matter here, but its flattener
- * runs on the curves, and the probe is built with the same flags.
+ * Coverage: a fixed set of device paths, filled under both rules, hashed in the
+ * library's own spelling and folded into one hash, the committed value in
+ * tests/corpus/coverage.hash.  What it can see: byte order (the hash is written
+ * from shifts, the cells are accumulated in 64 bits), a 32-bit `long` or
+ * `size_t` where one was assumed, and a sign or rounding rule that depends on
+ * the host (the division of a negative number).  The input is integers only,
+ * from a fixed generator; nothing in the coverage path is floating point.
  *
- * -DSHAPE_CPU_PLANT_BIT flips one bit of one result before it is folded in: the
- * planted differing bit that the gate has to catch on the target it is built
- * for.  -DSHAPE_CPU_CONTROL_NATIVE_ORDER folds each result in the host's byte
- * order instead of the hash's: the control that shows a big-endian target
- * disagrees when the byte order is wrong.  (There is no control for a fused
- * multiply-add or for x87 excess precision, as there is in shape-geometry's
- * probe: nothing in the coverage path is floating point, so those flags cannot
- * change a bit here, and a control that cannot differ would show nothing.)
+ * Renders (story 13b): the fixture set of tests/render_fixtures.h drawn by the
+ * sink on each of the four formats it writes, one line per render (its
+ * gshcpu_render_hash) and their fold, the committed values in
+ * tests/corpus/render.hash.  The compositor is `double` arithmetic and the
+ * transfers are `math`'s, so this part sees what the flags prevent: a fused
+ * multiply-add and x87 excess precision as well as byte order.
+ *
+ * Every target must print both committed values: x86-64, i686 (SSE), arm64,
+ * big-endian and Windows.  It is built by `make check-corpus-hash` on the host
+ * and by suite/tools/xarch/shape.sh and suite/tools/xwin/shape.sh for the
+ * others.
+ *
+ * -DSHAPE_CPU_PLANT_BIT flips one bit of one coverage result and of one render
+ * hash before they are folded in: the planted differing bit that the gate has to
+ * catch on the target it is built for.  -DSHAPE_CPU_CONTROL_NATIVE_ORDER folds
+ * each result in the host's byte order instead of the hash's: the control that
+ * shows a big-endian target disagrees when the byte order is wrong.  The
+ * controls for the flags (i686 without SSE, a fused multiply-add) are the
+ * render part's: suite/tools/xarch/shape.sh builds them.
  */
 
 #include <ghoti.io/shape-cpu/shape-cpu.h>
 #include <ghoti.io/shape-geometry/shape-geometry.h>
+
+#include "../tests/render_fixtures.h"
 
 #include <inttypes.h>
 #include <stdint.h>
@@ -233,5 +241,34 @@ int main(void) {
 
   printf("shape-cpu.hash %016" PRIx64 "\n", gshgeom_hash_value(&total));
   printf("shape-cpu.count %lu\n", count);
+
+  /* Story 13b: the fixture set rendered on each format the sink writes, each render hashed in the library's
+   * spelling (render.h) and the hashes folded in order.  The compositor is double arithmetic and the transfers are
+   * math's gmath_pow, so here the probe sees a fused multiply-add or x87 excess precision too. */
+  GSHGEOM_Hash renders;
+  gshgeom_hash_init(&renders);
+  unsigned long render_count = 0;
+  for (size_t i = 0; i < RF_FIXTURE_COUNT; i++) {
+    for (size_t f = 0; f < 4; f++) {
+      uint64_t h = 0;
+      if (rf_render(i, RF_FORMATS[f], &h, NULL) != 0) {
+        fail("a fixture did not render");
+      }
+#ifdef SHAPE_CPU_PLANT_BIT
+      if (render_count == 7) {
+        h ^= 1u;
+      }
+#endif
+      printf("shape-cpu.render %s %s %016" PRIx64 "\n", RF_FIXTURES[i].name, gshcpu_format_string(RF_FORMATS[f]), h);
+#ifdef SHAPE_CPU_CONTROL_NATIVE_ORDER
+      gshgeom_hash_bytes(&renders, &h, sizeof h);
+#else
+      gshgeom_hash_u64(&renders, h);
+#endif
+      render_count++;
+    }
+  }
+  printf("shape-cpu.render-hash %016" PRIx64 "\n", gshgeom_hash_value(&renders));
+  printf("shape-cpu.render-count %lu\n", render_count);
   return 0;
 }
