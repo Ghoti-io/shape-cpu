@@ -1091,7 +1091,7 @@
 "rc-328-del",
 "srcl",
 "src/render/compose.c",
-"328:n = c[2] < n ? c[2] : n;",
+"333:n = c[2] < n ? c[2] : n;",
 ";",
 [
 "testRender_vectors",
@@ -1108,143 +1108,7 @@
 "rc-330-del",
 "srcl",
 "src/render/compose.c",
-"330:x = c[2] > x ? c[2] : x;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender_gradient",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rc-331-and",
-"srcl",
-"src/render/compose.c",
-"331:&&",
-"||",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender_gradient",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rc-331-ne",
-"srcl",
-"src/render/compose.c",
-"331:!=",
-"==",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender_gradient",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rc-331-neg",
-"srcl",
-"src/render/compose.c",
-"331:(n < 0.0 && n != x)",
-"(!(n < 0.0 && n != x))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender_gradient",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rc-333-del",
-"srcl",
-"src/render/compose.c",
-"333:c[i] = l + (c[i] - l) * l / (l - n);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender_gradient",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rc-336-and",
-"srcl",
-"src/render/compose.c",
-"336:&&",
-"||",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender_gradient",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rc-336-ne",
-"srcl",
-"src/render/compose.c",
-"336:!=",
-"==",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender_gradient",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rc-336-neg",
-"srcl",
-"src/render/compose.c",
-"336:(x > 1.0 && n != x)",
-"(!(x > 1.0 && n != x))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender_gradient",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rc-338-del",
-"srcl",
-"src/render/compose.c",
-"338:c[i] = l + (c[i] - l) * (1.0 - l) / (x - l);",
+"335:x = c[2] > x ? c[2] : x;",
 ";",
 [
 "testRender_vectors",
@@ -1261,7 +1125,7 @@
 "rc-348-del",
 "srcl",
 "src/render/compose.c",
-"348:clip_color(c);",
+"368:clip_color(c);",
 ";",
 [
 "testRender_vectors",
@@ -1278,7 +1142,7 @@
 "rc-360-neg",
 "srcl",
 "src/render/compose.c",
-"360:(c[i0] > c[i1])",
+"380:(c[i0] > c[i1])",
 "(!(c[i0] > c[i1]))",
 [
 "testRender_vectors",
@@ -1295,7 +1159,7 @@
 "rc-361-del",
 "srcl",
 "src/render/compose.c",
-"361:t = i0;",
+"381:t = i0;",
 ";",
 [
 "testRender_vectors",
@@ -1312,7 +1176,7 @@
 "rc-362-del",
 "srcl",
 "src/render/compose.c",
-"362:i0 = i1;",
+"382:i0 = i1;",
 ";",
 [
 "testRender_vectors",
@@ -1329,7 +1193,7 @@
 "rc-363-del",
 "srcl",
 "src/render/compose.c",
-"363:i1 = t;",
+"383:i1 = t;",
 ";",
 [
 "testRender_vectors",
@@ -1346,7 +1210,7 @@
 "rc-365-neg",
 "srcl",
 "src/render/compose.c",
-"365:(c[i1] > c[i2])",
+"385:(c[i1] > c[i2])",
 "(!(c[i1] > c[i2]))",
 [
 "testRender_vectors",
@@ -1363,7 +1227,7 @@
 "rc-366-del",
 "srcl",
 "src/render/compose.c",
-"366:t = i1;",
+"386:t = i1;",
 ";",
 [
 "testRender_vectors",
@@ -1380,7 +1244,7 @@
 "rc-367-del",
 "srcl",
 "src/render/compose.c",
-"367:i1 = i2;",
+"387:i1 = i2;",
 ";",
 [
 "testRender_vectors",
@@ -1397,7 +1261,7 @@
 "rc-368-del",
 "srcl",
 "src/render/compose.c",
-"368:i2 = t;",
+"388:i2 = t;",
 ";",
 [
 "testRender_vectors",
@@ -1414,7 +1278,7 @@
 "rc-370-neg",
 "srcl",
 "src/render/compose.c",
-"370:(c[i0] > c[i1])",
+"390:(c[i0] > c[i1])",
 "(!(c[i0] > c[i1]))",
 [
 "testRender_vectors",
@@ -1431,7 +1295,7 @@
 "rc-371-del",
 "srcl",
 "src/render/compose.c",
-"371:t = i0;",
+"391:t = i0;",
 ";",
 [
 "testRender_vectors",
@@ -1448,7 +1312,7 @@
 "rc-372-del",
 "srcl",
 "src/render/compose.c",
-"372:i0 = i1;",
+"392:i0 = i1;",
 ";",
 [
 "testRender_vectors",
@@ -1465,7 +1329,7 @@
 "rc-373-del",
 "srcl",
 "src/render/compose.c",
-"373:i1 = t;",
+"393:i1 = t;",
 ";",
 [
 "testRender_vectors",
@@ -1482,7 +1346,7 @@
 "rc-376-gt",
 "srcl",
 "src/render/compose.c",
-"376:>",
+"396:>",
 ">=",
 [
 "testRender_vectors",
@@ -1499,7 +1363,7 @@
 "rc-376-neg",
 "srcl",
 "src/render/compose.c",
-"376:(c[i2] > c[i0])",
+"396:(c[i2] > c[i0])",
 "(!(c[i2] > c[i0]))",
 [
 "testRender_vectors",
@@ -1516,7 +1380,7 @@
 "rc-377-del",
 "srcl",
 "src/render/compose.c",
-"377:out[i1] = (c[i1] - c[i0]) * s / (c[i2] - c[i0]);",
+"397:out[i1] = (c[i1] - c[i0]) * s / (c[i2] - c[i0]);",
 ";",
 [
 "testRender_vectors",
@@ -1533,7 +1397,7 @@
 "rc-378-del",
 "srcl",
 "src/render/compose.c",
-"378:out[i2] = s;",
+"398:out[i2] = s;",
 ";",
 [
 "testRender_vectors",
@@ -1550,7 +1414,7 @@
 "rc-384-ge",
 "srcl",
 "src/render/compose.c",
-"384:>=",
+"404:>=",
 ">",
 [
 "testRender_vectors",
@@ -1567,7 +1431,7 @@
 "rc-384-and",
 "srcl",
 "src/render/compose.c",
-"384:&&",
+"404:&&",
 "||",
 [
 "testRender_vectors",
@@ -1584,7 +1448,7 @@
 "rc-384-le",
 "srcl",
 "src/render/compose.c",
-"384:<=",
+"404:<=",
 "<",
 [
 "testRender_vectors",
@@ -1601,7 +1465,7 @@
 "rc-391-del",
 "srcl",
 "src/render/compose.c",
-"391:memcpy(c, cs, sizeof c);",
+"411:memcpy(c, cs, sizeof c);",
 ";",
 [
 "testRender_vectors",
@@ -1618,7 +1482,7 @@
 "rc-392-del",
 "srcl",
 "src/render/compose.c",
-"392:set_sat(c, sat_of(cb));",
+"412:set_sat(c, sat_of(cb));",
 ";",
 [
 "testRender_vectors",
@@ -1635,7 +1499,7 @@
 "rc-393-del",
 "srcl",
 "src/render/compose.c",
-"393:set_lum(c, lum(cb));",
+"413:set_lum(c, lum(cb));",
 ";",
 [
 "testRender_vectors",
@@ -1652,7 +1516,7 @@
 "rc-396-del",
 "srcl",
 "src/render/compose.c",
-"396:memcpy(c, cb, sizeof c);",
+"416:memcpy(c, cb, sizeof c);",
 ";",
 [
 "testRender_vectors",
@@ -1669,7 +1533,7 @@
 "rc-397-del",
 "srcl",
 "src/render/compose.c",
-"397:set_sat(c, sat_of(cs));",
+"417:set_sat(c, sat_of(cs));",
 ";",
 [
 "testRender_vectors",
@@ -1686,7 +1550,7 @@
 "rc-398-del",
 "srcl",
 "src/render/compose.c",
-"398:set_lum(c, lum(cb));",
+"418:set_lum(c, lum(cb));",
 ";",
 [
 "testRender_vectors",
@@ -1703,7 +1567,7 @@
 "rc-401-del",
 "srcl",
 "src/render/compose.c",
-"401:memcpy(c, cs, sizeof c);",
+"421:memcpy(c, cs, sizeof c);",
 ";",
 [
 "testRender_vectors",
@@ -1720,7 +1584,7 @@
 "rc-402-del",
 "srcl",
 "src/render/compose.c",
-"402:set_lum(c, lum(cb));",
+"422:set_lum(c, lum(cb));",
 ";",
 [
 "testRender_vectors",
@@ -1737,7 +1601,7 @@
 "rc-405-del",
 "srcl",
 "src/render/compose.c",
-"405:memcpy(c, cb, sizeof c);",
+"425:memcpy(c, cb, sizeof c);",
 ";",
 [
 "testRender_vectors",
@@ -1754,7 +1618,7 @@
 "rc-406-del",
 "srcl",
 "src/render/compose.c",
-"406:set_lum(c, lum(cs));",
+"426:set_lum(c, lum(cs));",
 ";",
 [
 "testRender_vectors",
@@ -1771,7 +1635,7 @@
 "rc-410-del",
 "srcl",
 "src/render/compose.c",
-"410:c[i] = mix_separable(op, cb[i], cs[i]);",
+"430:c[i] = mix_separable(op, cb[i], cs[i]);",
 ";",
 [
 "testRender_vectors",
@@ -1788,7 +1652,7 @@
 "rc-424-ne",
 "srcl",
 "src/render/compose.c",
-"424:!=",
+"444:!=",
 "==",
 [
 "testRender_vectors",
@@ -1805,7 +1669,7 @@
 "rc-424-neg",
 "srcl",
 "src/render/compose.c",
-"424:(sa * da != 0.0)",
+"444:(sa * da != 0.0)",
 "(!(sa * da != 0.0))",
 [
 "testRender_vectors",
@@ -1822,7 +1686,7 @@
 "rc-434-del",
 "srcl",
 "src/render/compose.c",
-"434:o[i] = s[i] * (1.0 - da) + d[i] * (1.0 - sa) + sa * da * b[i];",
+"454:o[i] = s[i] * (1.0 - da) + d[i] * (1.0 - sa) + sa * da * b[i];",
 ";",
 [
 "testRender_vectors",
@@ -1839,7 +1703,7 @@
 "rc-436-del",
 "srcl",
 "src/render/compose.c",
-"436:o[3] = sa + da * (1.0 - sa);",
+"456:o[3] = sa + da * (1.0 - sa);",
 ";",
 [
 "testRender_vectors",
@@ -1856,7 +1720,7 @@
 "rc-482-del",
 "srcl",
 "src/render/compose.c",
-"482:fa = 1.0;",
+"502:fa = 1.0;",
 ";",
 [
 "testRender_vectors",
@@ -1873,7 +1737,7 @@
 "rc-485-del",
 "srcl",
 "src/render/compose.c",
-"485:fb = 1.0;",
+"505:fb = 1.0;",
 ";",
 [
 "testRender_vectors",
@@ -1890,7 +1754,7 @@
 "rc-488-del",
 "srcl",
 "src/render/compose.c",
-"488:fa = 1.0;",
+"508:fa = 1.0;",
 ";",
 [
 "testRender_vectors",
@@ -1907,7 +1771,7 @@
 "rc-489-del",
 "srcl",
 "src/render/compose.c",
-"489:fb = 1.0 - sa;",
+"509:fb = 1.0 - sa;",
 ";",
 [
 "testRender_vectors",
@@ -1924,7 +1788,7 @@
 "rc-492-del",
 "srcl",
 "src/render/compose.c",
-"492:fa = 1.0 - da;",
+"512:fa = 1.0 - da;",
 ";",
 [
 "testRender_vectors",
@@ -1941,7 +1805,7 @@
 "rc-493-del",
 "srcl",
 "src/render/compose.c",
-"493:fb = 1.0;",
+"513:fb = 1.0;",
 ";",
 [
 "testRender_vectors",
@@ -1958,7 +1822,7 @@
 "rc-496-del",
 "srcl",
 "src/render/compose.c",
-"496:fa = da;",
+"516:fa = da;",
 ";",
 [
 "testRender_vectors",
@@ -1975,7 +1839,7 @@
 "rc-499-del",
 "srcl",
 "src/render/compose.c",
-"499:fb = sa;",
+"519:fb = sa;",
 ";",
 [
 "testRender_vectors",
@@ -1992,7 +1856,7 @@
 "rc-502-del",
 "srcl",
 "src/render/compose.c",
-"502:fa = 1.0 - da;",
+"522:fa = 1.0 - da;",
 ";",
 [
 "testRender_vectors",
@@ -2009,7 +1873,7 @@
 "rc-505-del",
 "srcl",
 "src/render/compose.c",
-"505:fb = 1.0 - sa;",
+"525:fb = 1.0 - sa;",
 ";",
 [
 "testRender_vectors",
@@ -2026,7 +1890,7 @@
 "rc-508-del",
 "srcl",
 "src/render/compose.c",
-"508:fa = da;",
+"528:fa = da;",
 ";",
 [
 "testRender_vectors",
@@ -2043,7 +1907,7 @@
 "rc-509-del",
 "srcl",
 "src/render/compose.c",
-"509:fb = 1.0 - sa;",
+"529:fb = 1.0 - sa;",
 ";",
 [
 "testRender_vectors",
@@ -2060,7 +1924,7 @@
 "rc-512-del",
 "srcl",
 "src/render/compose.c",
-"512:fa = 1.0 - da;",
+"532:fa = 1.0 - da;",
 ";",
 [
 "testRender_vectors",
@@ -2077,7 +1941,7 @@
 "rc-513-del",
 "srcl",
 "src/render/compose.c",
-"513:fb = sa;",
+"533:fb = sa;",
 ";",
 [
 "testRender_vectors",
@@ -2094,7 +1958,7 @@
 "rc-516-del",
 "srcl",
 "src/render/compose.c",
-"516:fa = 1.0 - da;",
+"536:fa = 1.0 - da;",
 ";",
 [
 "testRender_vectors",
@@ -2111,7 +1975,7 @@
 "rc-517-del",
 "srcl",
 "src/render/compose.c",
-"517:fb = 1.0 - sa;",
+"537:fb = 1.0 - sa;",
 ";",
 [
 "testRender_vectors",
@@ -2128,7 +1992,7 @@
 "rc-537-del",
 "srcl",
 "src/render/compose.c",
-"537:blend(op, s, d, o);",
+"557:blend(op, s, d, o);",
 ";",
 [
 "testRender_vectors",
@@ -2145,7 +2009,7 @@
 "rc-549-eq",
 "srcl",
 "src/render/compose.c",
-"549:==",
+"569:==",
 "!=",
 [
 "testRender_vectors",
@@ -2162,7 +2026,7 @@
 "rc-549-neg",
 "srcl",
 "src/render/compose.c",
-"549:(op == GSHSCENE_COMPOSITE_PLUS)",
+"569:(op == GSHSCENE_COMPOSITE_PLUS)",
 "(!(op == GSHSCENE_COMPOSITE_PLUS))",
 [
 "testRender_vectors",
@@ -2179,7 +2043,7 @@
 "rc-572-neg",
 "srcl",
 "src/render/compose.c",
-"572:(!(t > 0.0))",
+"592:(!(t > 0.0))",
 "(!(!(t > 0.0)))",
 [
 "testRender_vectors",
@@ -2196,7 +2060,7 @@
 "rc-575-neg",
 "srcl",
 "src/render/compose.c",
-"575:(t >= 255.0)",
+"595:(t >= 255.0)",
 "(!(t >= 255.0))",
 [
 "testRender_vectors",
@@ -2213,7 +2077,7 @@
 "rc-582-ge",
 "srcl",
 "src/render/compose.c",
-"582:>=",
+"602:>=",
 ">",
 [
 "testRender_vectors",
@@ -2230,7 +2094,7 @@
 "rc-590-eq",
 "srcl",
 "src/render/compose.c",
-"590:n format == GSHCPU_F",
+"610:n format == GSHCPU_F",
 "n format != GSHCPU_F",
 [
 "testRender_vectors",
@@ -2247,7 +2111,7 @@
 "rc-590-or",
 "srcl",
 "src/render/compose.c",
-"590:||",
+"610:||",
 "&&",
 [
 "testRender_vectors",
@@ -2264,7 +2128,7 @@
 "rc-590-eq2",
 "srcl",
 "src/render/compose.c",
-"590:| format == GSHCPU_F",
+"610:| format == GSHCPU_F",
 "| format != GSHCPU_F",
 [
 "testRender_vectors",
@@ -2281,7 +2145,7 @@
 "rc-594-eq",
 "srcl",
 "src/render/compose.c",
-"594:n format == GSHCPU_F",
+"614:n format == GSHCPU_F",
 "n format != GSHCPU_F",
 [
 "testRender_vectors",
@@ -2298,7 +2162,7 @@
 "rc-594-or",
 "srcl",
 "src/render/compose.c",
-"594:||",
+"614:||",
 "&&",
 [
 "testRender_vectors",
@@ -2315,7 +2179,7 @@
 "rc-594-eq2",
 "srcl",
 "src/render/compose.c",
-"594:| format == GSHCPU_F",
+"614:| format == GSHCPU_F",
 "| format != GSHCPU_F",
 [
 "testRender_vectors",
@@ -2332,7 +2196,7 @@
 "rc-599-eq",
 "srcl",
 "src/render/compose.c",
-"599:==",
+"619:==",
 "!=",
 [
 "testRender_vectors",
@@ -2349,7 +2213,7 @@
 "rc-599-neg",
 "srcl",
 "src/render/compose.c",
-"599:(gshcpu_render_pixel_bytes(format) == 4u)",
+"619:(gshcpu_render_pixel_bytes(format) == 4u)",
 "(!(gshcpu_render_pixel_bytes(format) == 4u))",
 [
 "testRender_vectors",
@@ -2366,7 +2230,7 @@
 "rc-608-del",
 "srcl",
 "src/render/compose.c",
-"608:v[i] = (double)f[i];",
+"628:v[i] = (double)f[i];",
 ";",
 [
 "testRender_vectors",
@@ -2383,7 +2247,7 @@
 "rc-611-neg",
 "srcl",
 "src/render/compose.c",
-"611:(!premultiplied(format))",
+"631:(!premultiplied(format))",
 "(!(!premultiplied(format)))",
 [
 "testRender_vectors",
@@ -2400,7 +2264,7 @@
 "rc-612-lt",
 "srcl",
 "src/render/compose.c",
-"612:<",
+"632:<",
 "<=",
 [
 "testRender_vectors",
@@ -2417,7 +2281,7 @@
 "rc-613-del",
 "srcl",
 "src/render/compose.c",
-"613:v[i] = v[i] * v[3];",
+"633:v[i] = v[i] * v[3];",
 ";",
 [
 "testRender_vectors",
@@ -2434,7 +2298,7 @@
 "rc-622-neg",
 "srcl",
 "src/render/compose.c",
-"622:(!premultiplied(format))",
+"642:(!premultiplied(format))",
 "(!(!premultiplied(format)))",
 [
 "testRender_vectors",
@@ -2451,7 +2315,7 @@
 "rc-623-lt",
 "srcl",
 "src/render/compose.c",
-"623:<",
+"643:<",
 "<=",
 [
 "testRender_vectors",
@@ -2468,7 +2332,7 @@
 "rc-624-eq",
 "srcl",
 "src/render/compose.c",
-"624:==",
+"644:==",
 "!=",
 [
 "testRender_vectors",
@@ -2485,7 +2349,7 @@
 "rc-627-eq",
 "srcl",
 "src/render/compose.c",
-"627:==",
+"647:==",
 "!=",
 [
 "testRender_vectors",
@@ -2502,7 +2366,7 @@
 "rc-627-neg",
 "srcl",
 "src/render/compose.c",
-"627:(gshcpu_render_pixel_bytes(format) == 4u)",
+"647:(gshcpu_render_pixel_bytes(format) == 4u)",
 "(!(gshcpu_render_pixel_bytes(format) == 4u))",
 [
 "testRender_vectors",

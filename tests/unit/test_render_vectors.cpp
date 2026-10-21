@@ -219,6 +219,25 @@ TEST(RenderVectors, TheMixingFunctionMeetsTheTable) {
       root.error, non_separable.error);
 }
 
+TEST(RenderVectors, ClipColorARoundingOffTheRayMeetsTheTable) {
+  // shape-scene's kNearRay (B10): a triple a rounding off C = L mixed with itself, where the literal Lum(C) - n (or
+  // x - Lum(C)) in doubles is 0 and the step 0 / 0 (a NaN this library's fuzzer found); within the tolerance.
+  using namespace composite_vectors;
+  ASSERT_GE(kNearRayCount, 20);
+  Worst w;
+  for (int n = 0; n < kNearRayCount; n++) {
+    const VNearRay & r = kNearRay[n];
+    double got[3];
+    gshcpu_render_mix((uint32_t)r.mode, r.c, r.c, got);
+    for (double v : got) {
+      ASSERT_TRUE(std::isfinite(v)) << "kNearRay[" << n << "]";
+    }
+    double got4[4] = {got[0], got[1], got[2], 0.0}, want4[4] = {r.want[0], r.want[1], r.want[2], 0.0};
+    expect_pre(got4, want4, false, "kNearRay[" + std::to_string(n) + "] " + gshscene_composite_string((GSHSCENE_Composite)r.mode), w);
+  }
+  std::printf("kNearRay through shape-cpu: %d samples; worst relative error %.3g\n", kNearRayCount, w.error);
+}
+
 /* --- through whole renders ----------------------------------------------------------------------------- */
 
 /** The root layer and touched map before the write, as the observer saw them. */

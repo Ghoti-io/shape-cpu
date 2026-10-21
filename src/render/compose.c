@@ -321,21 +321,41 @@ static double lum(const double c[3]) {
   return LUM_R * c[0] + LUM_G * c[1] + LUM_B * c[2];
 }
 
-/** B8: L, n and x read once, on entry; each step only when the components are not all equal (B10's 0/0 form). */
+/**
+ * B8: L, n and x read once, on entry.  The offsets `C - L` and the denominators `L - n` and `x - L` are formed from
+ * the differences `C - n` (B10): `L - n` is `Lum(C - n)`, a sum of terms that are not negative, so it is positive
+ * whenever the components are not all equal, where `lum(c) - n` can round to 0 (and the step to 0 / 0).  A step is
+ * taken only when its denominator is positive, which also leaves an all-equal triple alone (B10's 0/0 form).
+ */
 static void clip_color(double c[3]) {
   double l = lum(c);
   double n = c[0] < c[1] ? c[0] : c[1];
   n = c[2] < n ? c[2] : n;
   double x = c[0] > c[1] ? c[0] : c[1];
   x = c[2] > x ? c[2] : x;
-  if (n < 0.0 && n != x) {
-    for (int i = 0; i < 3; i++) {
-      c[i] = l + (c[i] - l) * l / (l - n);
-    }
+  if (!(n < 0.0) && !(x > 1.0)) {
+    return;
   }
-  if (x > 1.0 && n != x) {
+  double d[3] = {c[0] - n, c[1] - n, c[2] - n};
+  double ln = lum(d);    /* L - n */
+  double xl = x - n - ln; /* x - L */
+  double t[3] = {d[0] - ln, d[1] - ln, d[2] - ln}; /* C - L */
+  int moved = 0;
+  if (n < 0.0 && ln > 0.0) {
     for (int i = 0; i < 3; i++) {
-      c[i] = l + (c[i] - l) * (1.0 - l) / (x - l);
+      t[i] = t[i] * l / ln;
+    }
+    moved = 1;
+  }
+  if (x > 1.0 && xl > 0.0) {
+    for (int i = 0; i < 3; i++) {
+      t[i] = t[i] * (1.0 - l) / xl;
+    }
+    moved = 1;
+  }
+  if (moved) {
+    for (int i = 0; i < 3; i++) {
+      c[i] = l + t[i];
     }
   }
 }

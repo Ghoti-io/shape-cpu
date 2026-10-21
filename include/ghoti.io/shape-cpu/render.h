@@ -152,9 +152,12 @@
  *   `(b + s) - (2 * b) * s`; dodge's and burn's quotients `b / (1 - s)` and
  *   `(1 - b) / s` taken as `sign * 2^66` once the numerator is at least `2^66`
  *   times the denominator (exact, and nothing past it is formed); `Lum` with the
- *   doubles nearest `0.3, 0.59, 0.11`; ClipColor's steps only when the components
- *   are not all equal (B10's `0 / 0`, decided exactly); SetSat by a three-swap
- *   sort.  No silent default: an operator the compositor does not know fails the
+ *   doubles nearest `0.3, 0.59, 0.11`; ClipColor's offsets and denominators from
+ *   the differences `C - n` (B10): `L - n` as `Lum(C - n)`, `x - L` as
+ *   `(x - n) - (L - n)`, `C - L` as `(C - n) - (L - n)`, each step
+ *   `L + ((C - L) * L) / (L - n)` or `L + ((C - L) * (1 - L)) / (x - L)` taken only
+ *   when its denominator is positive (so never `0 / 0`, and an all-equal triple is
+ *   left alone); SetSat by a three-swap sort.  No silent default: an operator the compositor does not know fails the
  *   render, and the caps claim exactly those it knows.  Before the write a value
  *   is equal to shape-scene's oracle where every step of this evaluation is exact
  *   (STOP-2: the vectors mark those), and otherwise within `1e-12` times

@@ -173,9 +173,12 @@ target.
 A group of a blend mode composites at its pop by `apply` with shape-scene's `op_X` (B2), in the enclosing layer's
 space (B5): both colors un-premultiplied by N1's evaluation, the mixing function evaluated as B7 and B8 write it in the
 order `render.h` states (S11), saturated (B9), weighted, applied, with one rounding at the write. Dodge's and burn's
-quotients are never formed past `2^66`; ClipColor's `0 / 0` form is decided by "all components equal", which a double
-evaluation decides exactly (stated as `n = L`, the doubles of `Lum` would make it the quotient of two roundings);
-`Lum`'s constants are the doubles nearest `0.3, 0.59, 0.11`. The caps were narrowed to name the operators `apply`
+quotients are never formed past `2^66`. ClipColor forms `L - n`, `x - L` and `C - L` from the differences `C - n`
+(B10), and takes a step only when its denominator is positive: written literally, `Lum(C) - n` in doubles is 0 a
+rounding off the ray `C = L` (the fuzzer found the NaN of that `0 / 0`), while
+`Lum(C - n)` is a sum of terms that are not negative, positive whenever the components are not all equal, and
+accurate there; an all-equal triple, B10's `0 / 0` form, has every difference 0 and is left alone. shape-scene's
+`kNearRay` holds 24 such samples (the grid refuses them, the ray being a discontinuity). `Lum`'s constants are the doubles nearest `0.3, 0.59, 0.11`. The caps were narrowed to name the operators `apply`
 knows before shape-scene's enum grew, and `apply` has no silent default, so an operator it does not know is refused by
 the plan and could not be drawn as `CLEAR`.
 

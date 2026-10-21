@@ -79,7 +79,7 @@ render blend-non-separable rgbaf32 7cdabc79aa32470d
 render blend-non-separable rgbaf32-premultiplied c7e6ca56ae6a033c
 render blend-out-of-range rgba8 fe6af0aaa0f0f474
 render blend-out-of-range rgba8-premultiplied a3584eb347f8f02b
-render blend-out-of-range rgbaf32 659ddba7c8433d05
-render blend-out-of-range rgbaf32-premultiplied c086d5f464ace710
-hash ab5d7d8e8600ca19
+render blend-out-of-range rgbaf32 24a54eb033c1fe00
+render blend-out-of-range rgbaf32-premultiplied 5c2a977369bf8a75
+hash c20f99f4cda9a0b6
 count 80
