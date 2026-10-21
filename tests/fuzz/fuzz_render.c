@@ -202,9 +202,15 @@ static void intern_paths(Input * in, GSHSCENE_Store * store, const GSHGEOM_Alloc
     }
     const int elements = next(in) % 12;
     for (int e = 0; e < elements; e++) {
-      GSHGEOM_Point a = {coordinate(in), coordinate(in), 0.0};
-      GSHGEOM_Point b = {coordinate(in), coordinate(in), 0.0};
-      GSHGEOM_Point c = {coordinate(in), coordinate(in), 0.0};
+      /* Each draw a statement of its own (C leaves the order inside an initializer or a call's arguments
+       * unspecified), so that one input means one scene to every compiler. */
+      GSHGEOM_Point a = {0.0, 0.0, 0.0}, b = {0.0, 0.0, 0.0}, c = {0.0, 0.0, 0.0};
+      a.x = coordinate(in);
+      a.y = coordinate(in);
+      b.x = coordinate(in);
+      b.y = coordinate(in);
+      c.x = coordinate(in);
+      c.y = coordinate(in);
       switch (next(in) % 6) {
         case 0:
           gshgeom_path_move_to(path, a);
@@ -261,16 +267,23 @@ static void intern_runs(Input * in, GSHSCENE_Store * store, GSHSCENE_Test_Provid
 
 static void map_of(Input * in, GSHGEOM_Map * map) {
   GSHGEOM_Map a, b;
+  double u, v, w;
   switch (next(in) % 5) {
     case 0:
       gshgeom_map_identity(2, map);
       break;
     case 1:
-      gshgeom_map_translate(2, coordinate(in), coordinate(in), 0.0, map);
+      u = coordinate(in);
+      v = coordinate(in);
+      gshgeom_map_translate(2, u, v, 0.0, map);
       break;
     case 2:
-      gshgeom_map_scale(2, (double)(next(in) % 17) / 4.0, (double)(next(in) % 17) / 4.0, 1.0, &a);
-      gshgeom_map_translate(2, coordinate(in), coordinate(in), 0.0, &b);
+      u = (double)(next(in) % 17) / 4.0;
+      v = (double)(next(in) % 17) / 4.0;
+      gshgeom_map_scale(2, u, v, 1.0, &a);
+      u = coordinate(in);
+      v = coordinate(in);
+      gshgeom_map_translate(2, u, v, 0.0, &b);
       gshgeom_map_compose(&b, &a, map);
       break;
     case 3:
@@ -279,7 +292,10 @@ static void map_of(Input * in, GSHGEOM_Map * map) {
       gshgeom_map_compose(&b, &a, map);
       break;
     default:
-      gshgeom_map_design_to_model((double)(1 + next(in) % 4) / 64.0, coordinate(in), coordinate(in), map);
+      w = (double)(1 + next(in) % 4) / 64.0;
+      u = coordinate(in);
+      v = coordinate(in);
+      gshgeom_map_design_to_model(w, u, v, map);
       break;
   }
 }
@@ -396,6 +412,17 @@ static GIMG_Pixel_Format format_of(int index) {
   }
   f.alpha_form = (uint8_t)(index & 1 ? GIMG_ALPHA_PREMULTIPLIED : GIMG_ALPHA_STRAIGHT);
   return f;
+}
+
+/** How many items the render refused for a sink's own limit while drawing (RESOURCE_LIMIT). */
+static size_t limit_refusals(const GSHSCENE_Report * report) {
+  size_t n = 0;
+  for (size_t i = 0; i < gshscene_report_count(report); i++) {
+    GSHSCENE_Report_Entry e;
+    CHECK(gshscene_report_entry(report, i, &e) == GSHSCENE_OK);
+    n += e.reason == GSHSCENE_REASON_RESOURCE_LIMIT;
+  }
+  return n;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size);
@@ -609,6 +636,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     }
   }
 
+  const size_t first_limits = limit_refusals(report);
   if (r == GSHSCENE_OK) {
     outcomes[OUT_OK]++;
     outcomes[OUT_CALLER_MEMORY] += (request.flags & GSHSCENE_RENDER_CALLER_MEMORY) != 0;
@@ -637,7 +665,11 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
            * a per-item limit (cells, points) outside the damage that it never reached inside it. */
           CHECK(r2 == GSHSCENE_OK || r2 == GSHSCENE_ERR_OOM || (r2 == GSHSCENE_ERR_LIMIT && (limit_byte & 7) >= 3) ||
                 (r2 == GSHSCENE_ERR_REFUSED && (request.flags & GSHSCENE_RENDER_STRICT)));
-          if (r2 == GSHSCENE_OK) {
+          /* A cell cap is met per region drawn (cover.c counts the deposits inside it), so an item can be refused
+           * in the whole render and drawn in the damage-limited one: S4's "inside the damage equals the whole
+           * render" holds when neither render refused an item for its own limit (story 16's soak found the
+           * other case; Implementation Notes, for Corey). */
+          if (r2 == GSHSCENE_OK && first_limits == 0 && limit_refusals(report) == 0) {
             for (int64_t y = damage.y0; y < damage.y1 && y < (int64_t)height; y++) {
               for (int64_t x = damage.x0; x < damage.x1 && x < (int64_t)width; x++) {
                 CHECK(same_pixel(raster, again, (uint32_t)x, (uint32_t)y, bpp));

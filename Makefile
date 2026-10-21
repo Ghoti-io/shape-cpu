@@ -749,7 +749,7 @@ FUZZ_CC ?= clang
 FUZZ_TIME ?= 60
 FUZZ_CFLAGS := -std=c17 -O1 -g -ffp-contract=off $(ARCH_FP_FLAGS) -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined -DGSHCPU_BUILD
 
-fuzz: ## Build the libFuzzer target and run it for FUZZ_TIME seconds from the committed corpus
+fuzz: | $(LIBVER_GEN) ## Build the libFuzzer target and run it for FUZZ_TIME seconds from the committed corpus
 	@if ! command -v $(FUZZ_CC) >/dev/null 2>&1; then \
 		printf 'fuzz: needs %s (libFuzzer); `make fuzz-replay` runs the committed corpus without it\n' "$(FUZZ_CC)" >&2; exit 1; \
 	fi

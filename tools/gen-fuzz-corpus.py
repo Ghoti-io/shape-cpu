@@ -128,6 +128,12 @@ def scripted():
         "cQsAMplAJm0ZT3ZmwR6Jf2Fd7lDCRLR/QSt6/zbm6uHj7bR6JLZqECw6JO+wOwclMCTHsAvBvaXFi6p+svmrTJ+KgxAuG0woagxRNjJeiGcC"
         "myM9FiyKlJxCJFFWzIkK8SvFqHMplT7Bdyd9VFOqgVUfzMjmgcV+F/qsYJOfKS/fHjRpgYuTPZ9DGeivfs7ibhEb5CtwDwGioZomrmEA7NLX"
         "H5rRQNlNKpMl8Og98ySqsAWGgpW+WBAM1grAFdQqD5fiB4thMQSas5I3pmv8sPE=")
+    # Found by the second soak: a cell cap met in the whole render and not in the damage-limited one, so an item is
+    # refused in one and drawn in the other and the pixels inside the damage differ (Implementation Notes of story 16).
+    out["regression-cells-damage-differs.bin"] = base64.b64decode(
+        "9BgAWsyop3vto1FSswDDWgVM3Wc837Z/Bhr8trLLWZ+T+zR4Kv4uM8LbHINihtt8J+Yff5kQmyh+3NASYQKDo4hSD1YkaL2jnZauWqEjRcW5S+MV"
+        "TYEs5O3+VcU8cwKp97YVqjP+tkKYlPe40dOONqAWqnu2fwYa/Layy1mfk/s0eCr+LjPCg2KG23wn5h9/mb/Zk6LFN3COUCe4RAEAAAAAAAAzLrJp"
+        "7erJLLbxT2DcaRiDr3FfL5muk266bM1ykol1iyREAQAAAAAAAClFIsW5EQNQoh+EIbRdySMraXA2")
     return out
 
 
