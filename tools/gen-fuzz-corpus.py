@@ -79,9 +79,51 @@ def runs():
     return one + one
 
 
-def fill(pick, map_bytes=b"\x00", rule=0):
-    # op 0, the resource pick (0..: a path; 3 the fast run, 7 the general run), the map, a paint (rgba, space), rule
-    return bytes([0, pick]) + map_bytes + bytes([200, 100, 50, 255, 1, rule])
+def fill(pick, map_bytes=b"\x00", rule=0, gradient=None):
+    # op 0, the resource pick (0..: a path; 3 the fast run, 7 the general run), the map, a paint (rgba, then a byte:
+    # 0 mod 4 Display P3, 1 mod 4 a gradient whose bytes follow, else the target's space), rule
+    if gradient is None:
+        return bytes([0, pick]) + map_bytes + bytes([200, 100, 50, 255, 2, rule])
+    return bytes([0, pick]) + map_bytes + bytes([200, 100, 50, 255, 1]) + gradient + bytes([rule])
+
+
+def gval(x):
+    """The byte below 248 that fuzz_render.c's gradient_value reads as @p x (an integer or a half)."""
+    for b in range(248):
+        if ((b % 80) - 8) / (1.0 if b % 3 == 0 else 2.0) == x:
+            return b
+    raise ValueError(x)
+
+
+# gradient_value's table past 247: 248 2^64, 251 one step past it, 252 one step below 2^-64.
+PAST_BOUND = 251
+
+
+def gradient(kind, values, extend=0, premultiplied=0, space=0, map_byte=0, stops=(), sub=0):
+    """A gradient's bytes, in fuzz_render.c's gradient_of order: kind (0 linear, 1 radial, 2 sweep), six values,
+    (linear: the isoline byte; sweep: the angle unit), extend, the premultiplied flag, the space byte (0 the
+    target's, 1 linear sRGB, 2 a P3 gamma), the map byte (0 identity, 1 turned, 2 flat, 3 out of the domain), the
+    stop count and each stop: an offset byte (k: k/8 - 1/4), a kind byte (mod 7: 5 foreground, 6 palette, else
+    solid with alpha kind%5/4 and then two bytes of red and green)."""
+    out = bytearray([kind]) + bytes(v if isinstance(v, int) and v >= 248 else gval(v) for v in values)
+    if kind in (0, 2):
+        out.append(sub)
+    out += bytes([extend, premultiplied, space, map_byte, len(stops)])
+    for offset_byte, kind_byte, red, green in stops:
+        out += bytes([offset_byte, kind_byte])
+        if kind_byte % 7 < 5:
+            out += bytes([red, green])
+    return bytes(out)
+
+
+THREE_STOPS = ((2, 4, 250, 10), (6, 3, 20, 240), (10, 4, 10, 30))
+LINEAR = gradient(0, (2, 0, 30, 0, 0, 0), stops=THREE_STOPS)
+RADIAL = gradient(1, (20, 20, 4, 30, 25, 20), extend=1, premultiplied=1, space=1, stops=THREE_STOPS)
+SWEEP = gradient(2, (32, 32, 10, 70, 0, 0), extend=2, space=2, map_byte=1, stops=THREE_STOPS + ((10, 5, 0, 0),),
+                 sub=1)
+DEGENERATE = gradient(0, (4, 4, 4, 4, 0, 0), stops=THREE_STOPS)
+PAST = gradient(0, (PAST_BOUND, 0, 30, 0, 0, 0), stops=THREE_STOPS)
+OUT_OF_DOMAIN = gradient(0, (2, 0, 30, 0, 0, 0), map_byte=3, stops=THREE_STOPS)
 
 
 ROTATED = bytes([3, 20])  # map_of case 3: a rotation by 30 degrees about (32, 32)
@@ -121,6 +163,16 @@ def scripted():
     out["scripted-workspace-short.bin"] = header(request=CALLER_MEMORY | SHORT) + body(STANDARD)
     out["scripted-damage.bin"] = header(request=DAMAGE | EXTENT) + body(STANDARD)
     out["scripted-damage-float.bin"] = header(target=T64 | 2, request=DAMAGE | CALLER_MEMORY) + body(STANDARD)
+    # Color-paint story P2: gradients of each kind, extend and space, under a group and a rotation; on a float target,
+    # damaged and in caller memory; one that draws nothing (a notice), one past G14's bounds (refused at intern, drawn
+    # solid), one mapped out of the sampling domain (refused while drawing, the same with a damage).
+    grads = [fill(0, gradient=LINEAR), group(), fill(1, ROTATED, gradient=RADIAL), fill(7, gradient=SWEEP), POP,
+             fill(0, ROTATED, gradient=SWEEP)]
+    out["scripted-gradients.bin"] = header() + body(grads)
+    out["scripted-gradients-float-damage.bin"] = header(target=T64 | 3, request=DAMAGE | CALLER_MEMORY) + body(grads)
+    out["scripted-gradient-notice.bin"] = header(request=STRICT) + body([fill(0), fill(1, gradient=DEGENERATE)])
+    out["scripted-gradient-past-bound.bin"] = header() + body([fill(0, gradient=PAST)])
+    out["scripted-gradient-domain.bin"] = header(request=DAMAGE) + body([fill(1), fill(0, gradient=OUT_OF_DOMAIN)])
     # Found by the first libFuzzer soak (story 16): strict, a damage and a small cell cap. The damage-limited render
     # passed and the whole render met the cap outside the damage, so it was refused. Since 2026-10-21 the cap is met
     # over the whole render's region whatever the damage (S4), and the harness requires both to agree.
