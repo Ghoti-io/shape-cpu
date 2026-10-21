@@ -80,6 +80,10 @@ Story 13b, the sink (src/render):
               does not refuse.  S12 (output independent of the allocator and the
               workspace's address) has no plant: nothing in the sink reads an
               address, and a plant that made it would be the test, not the sink
+  rn1-        N1's saturation (shape-scene's paint.h, Corey 2026-10-21): the
+              clamp's two sides, the un-premultiply's guard, its bound and sign,
+              and each point it is named at (a conversion's decode, matrix and
+              encode, a group's un-premultiply, every apply, a straight store, G4)
   rc- rv- rg- generated (tools/gen-render-plants.py; tools/render-plants.json
   ra- rh- rs- holds the ones caught): every comparison, logical operator,
               condition, statement, hash width, printed width, output letter and
@@ -139,6 +143,17 @@ first stops, the smaller root, the pool's offset between two gradients, the
 clip's weight of a gradient fill); each is caught by a test since, and three
 hand plants were rewritten to compile or dropped (the stated tolerance is the
 test's constant, so no library build can move it).
+
+N1's saturation (2026-10-21) changed compose.c and gradient.c, and their 369
+candidates were swept again in ghoti-build:gcc16: 67 do not compile, 267 are
+caught (they replace compose.c's and gradient.c's in tools/render-plants.json)
+and 35 survive, gradient.c's 22 of before and compose.c's of before by kind,
+and seven on the new lines, each a tie or a zero the saturation cannot tell
+apart: the clamp's `>` and `<` against `>=` and `<=` (at exactly 2^64 both
+give 2^64), the un-premultiply's absolute values at zero, its `>=` against `>`
+(at equality the quotient is exactly 2^64) and the sign tests' `<` against `<=`
+(an alpha of 0 never reaches it, and a zero color with a nonzero alpha never
+passes the guard).
 
 The survivors, by kind:
 
@@ -631,8 +646,8 @@ PLANTS += [
     # --- S11: the operators -------------------------------------------------------------------------------------------
 ] + [("r-op-" + n, "src", RC) + factor(op, o, w) + (RT,) for n, op, o, w in _FACTORS] + [
     ("r-op-plus-clamp", "src", RC, "o[i] = sum < 1.0 ? sum : 1.0;", "o[i] = sum < 2.0 ? sum : 2.0;", RT),
-    ("r-op-apply-weights", "src", RC, "d[i] = (1.0 - m) * d[i] + m * o[i];", "d[i] = m * d[i] + (1.0 - m) * o[i];", RT),
-    ("r-op-apply-backdrop", "src", RC, "d[i] = (1.0 - m) * d[i] + m * o[i];", "d[i] = d[i] + m * o[i];", RT),
+    ("r-op-apply-weights", "src", RC, "d[i] = gshcpu_render_saturate((1.0 - m) * d[i] + m * o[i]);", "d[i] = gshcpu_render_saturate(m * d[i] + (1.0 - m) * o[i]);", RT),
+    ("r-op-apply-backdrop", "src", RC, "d[i] = gshcpu_render_saturate((1.0 - m) * d[i] + m * o[i]);", "d[i] = gshcpu_render_saturate(d[i] + m * o[i]);", RT),
     ("r-bounded-dest", "src", RC, "    case GSHSCENE_COMPOSITE_DEST:\n    case GSHSCENE_COMPOSITE_SRC_OVER:\n",
      "    case GSHSCENE_COMPOSITE_SRC_OVER:\n", RT),
     ("r-bounded-plus", "src", RC, "    case GSHSCENE_COMPOSITE_PLUS:\n      return 1;", "      return 1;\n    case GSHSCENE_COMPOSITE_PLUS:", RT),
@@ -649,8 +664,8 @@ PLANTS += [
     ("r-store-float-twice", "src", RC, "  return (float)v;", "  return (float)(double)(float)(v * (1.0 + 0x1p-30));", RT),
     ("r-load-scale", "src", RC, "      v[i] = (double)p[i] / 255.0;", "      v[i] = (double)p[i] / 256.0;", RT),
     ("r-load-straight", "src", RC, "      v[i] = v[i] * v[3];", "      v[i] = v[i];", RT),
-    ("r-store-straight", "src", RC, "      w[i] = w[3] == 0.0 ? 0.0 : w[i] / w[3];", "      w[i] = w[3] == 0.0 ? 0.0 : w[i];", RT),
-    ("r-store-straight-zero", "src", RC, "      w[i] = w[3] == 0.0 ? 0.0 : w[i] / w[3];", "      w[i] = w[i] / w[3];", RT),
+    ("r-store-straight", "src", RC, "      w[i] = w[3] == 0.0 ? 0.0 : gshcpu_render_unpremultiply(w[i], w[3]);", "      w[i] = w[3] == 0.0 ? 0.0 : w[i];", RT),
+    ("r-store-straight-zero", "src", RC, "      w[i] = w[3] == 0.0 ? 0.0 : gshcpu_render_unpremultiply(w[i], w[3]);", "      w[i] = gshcpu_render_unpremultiply(w[i], w[3]);", RT),
     ("r-pixel-bytes", "src", RC, "? 16u : 4u;", "? 8u : 4u;", RT),
     ("r-premultiplied-forms", "src", RC, "  return format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED || format == GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED;",
      "  return format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED;", RT),
@@ -791,7 +806,7 @@ PLANTS += [
     ("rgr-pool-offset", "src", RS, "run->pool + e->first, &composed", "run->pool, &composed", GRT),
     ("rgr-pool-unadvanced", "src", RS, "    run->pooled += g->stop_count;\n", "", GRT),
     ("rgr-interpolant-straight", "src", RGR, "      stops[i].rgba[k] = stops[i].rgba[k] * a;", "      stops[i].rgba[k] = stops[i].rgba[k] * (a > 2.0 ? a : 1.0);", GRT),
-    ("rgr-unpremultiplied-not", "src", RGR, "      c[k] = a == 0.0 ? 0.0 : c[k] / a;", "      c[k] = a == 0.0 ? 0.0 : c[k];", GRT),
+    ("rgr-unpremultiplied-not", "src", RGR, "      c[k] = a == 0.0 ? 0.0 : gshcpu_render_unpremultiply(c[k], a);", "      c[k] = a == 0.0 ? 0.0 : c[k];", GRT),
     ("rgr-paint-alpha-unread", "src", RGR, "  c[3] = c[3] * g->alpha;", "  c[3] = c[3];", GRT),
     ("rgr-linear-normal", "src", RGR, "        out->n[0] = -g->d[1];", "        out->n[0] = g->d[1];", GRT),
     ("rgr-linear-den", "src", RGR, "        grow_square_of_difference(&den, g->p1[1], g->p0[1], 1.0);", "", GRT),
@@ -815,6 +830,25 @@ PLANTS += [
     ("rgr-invert-translation", "src", RGR, "  double u = qx - g->inv[4];", "  double u = qx;", GRT),
     ("rgr-invert-row", "src", RGR, "  inv[1] = gmath_ldexp(-m[1] / d, -e);", "  inv[1] = gmath_ldexp(-m[2] / d, -e);", GRT),
     ("rgr-domain-half", "src", RGR, "  const double bound = GSHSCENE_GRADIENT_DOMAIN * 0.5;", "  const double bound = GSHSCENE_GRADIENT_DOMAIN * 4.0;", GRT),
+]
+
+# N1's saturation (shape-scene's paint.h; Corey, 2026-10-21): the clamp's two sides, the un-premultiply's guard and
+# sign, and each point it is named at (each step of a conversion, a group's un-premultiply, every apply, a straight
+# store, G4's un-premultiply).
+SAT = ["testRender_parts", "testRender_vectors", "testRender_gradient"]
+PLANTS += [
+    ("rn1-sat-upper", "src", RC, "  return x > GSHSCENE_COLOR_SATURATION ? GSHSCENE_COLOR_SATURATION\n", "  return x > GSHSCENE_COLOR_SATURATION ? x\n", SAT),
+    ("rn1-sat-lower", "src", RC, "      : x < -GSHSCENE_COLOR_SATURATION ? -GSHSCENE_COLOR_SATURATION : x;", "      : x < -GSHSCENE_COLOR_SATURATION ? x : x;", SAT),
+    ("rn1-unpremultiply-guard", "src", RC, "  if (mc >= GSHSCENE_COLOR_SATURATION * ma) {", "  if (mc >= GSHSCENE_COLOR_SATURATION * ma && 0) {", SAT),
+    ("rn1-unpremultiply-inclusive", "src", RC, "  if (mc >= GSHSCENE_COLOR_SATURATION * ma) {", "  if (mc > 2.0 * GSHSCENE_COLOR_SATURATION * ma) {", SAT),
+    ("rn1-unpremultiply-sign", "src", RC, "    return (c < 0.0) != (a < 0.0) ? -GSHSCENE_COLOR_SATURATION", "    return (c < 0.0) ? -GSHSCENE_COLOR_SATURATION", SAT),
+    ("rn1-decode", "src", RC, "    lin[i] = gshcpu_render_saturate(gshcpu_render_decode(&c->from, in[i]));", "    lin[i] = gshcpu_render_decode(&c->from, in[i]);", SAT),
+    ("rn1-matrix", "src", RC, "    for (int i = 0; i < 3; i++) {\n      lin[i] = gshcpu_render_saturate(lin[i]);", "    for (int i = 0; i < 0; i++) {\n      lin[i] = gshcpu_render_saturate(lin[i]);", SAT),
+    ("rn1-encode", "src", RC, "    out[i] = gshcpu_render_saturate(gshcpu_render_encode(&c->to, lin[i]));", "    out[i] = gshcpu_render_encode(&c->to, lin[i]);", SAT),
+    ("rn1-group", "src", RC, "  double straight[3] = {gshcpu_render_unpremultiply(in[0], a), gshcpu_render_unpremultiply(in[1], a),\n      gshcpu_render_unpremultiply(in[2], a)};", "  double straight[3] = {in[0] / a, in[1] / a, in[2] / a};", SAT),
+    ("rn1-apply", "src", RC, "    d[i] = gshcpu_render_saturate((1.0 - m) * d[i] + m * o[i]); /* N1 */", "    d[i] = (1.0 - m) * d[i] + m * o[i]; /* N1 */", SAT),
+    ("rn1-store", "src", RC, "      w[i] = w[3] == 0.0 ? 0.0 : gshcpu_render_unpremultiply(w[i], w[3]); /* N1 */", "      w[i] = w[3] == 0.0 ? 0.0 : w[i] / w[3]; /* N1 */", SAT),
+    ("rn1-g4", "src", RGR, "      c[k] = a == 0.0 ? 0.0 : gshcpu_render_unpremultiply(c[k], a); /* N1: saturated */", "      c[k] = a == 0.0 ? 0.0 : c[k] / a; /* N1: saturated */", SAT),
 ]
 
 # The generated plants (tools/gen-render-plants.py): the mutations of src/render the sweep was seen to catch, and

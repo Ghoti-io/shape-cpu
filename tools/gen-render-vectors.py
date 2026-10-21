@@ -58,6 +58,12 @@ OUT = Path(__file__).resolve().parent.parent / "tests" / "render_vectors.h"
 
 ZERO = F(0)
 ONE = F(1)
+SATURATION = F(2) ** 64
+
+
+def sat(x):
+    """N1 (shape-scene's paint.h): x clamped to [-2^64, 2^64], exactly."""
+    return SATURATION if x > SATURATION else -SATURATION if x < -SATURATION else x
 NEAR = F(1, 10**9)  # D7: a value this close to a rounding boundary may land on either side
 
 # --- N1: the gamuts (CIE xy of red, green, blue; the white is D65 for all) ----------------------------
@@ -143,11 +149,12 @@ def convert(rgb, a, b, ex):
     """N3: a straight color; untouched when the spaces are equal."""
     if a == b:
         return list(rgb)
-    lin = [decode(a, c, ex) for c in rgb]
+    # N1: saturated after each step.
+    lin = [sat(decode(a, c, ex)) for c in rgb]
     if a[0] != b[0]:
         ex.flag = True
-        lin = mat_vec(inv3(to_xyz(b[0])), mat_vec(to_xyz(a[0]), lin))
-    return [encode(b, c, ex) for c in lin]
+        lin = [sat(v) for v in mat_vec(inv3(to_xyz(b[0])), mat_vec(to_xyz(a[0]), lin))]
+    return [sat(encode(b, c, ex)) for c in lin]
 
 
 def convert_pre(px, a, b, ex):
@@ -155,7 +162,7 @@ def convert_pre(px, a, b, ex):
         return list(px)
     if px[3] == 0:
         return [ZERO] * 4
-    c = convert([px[i] / px[3] for i in range(3)], a, b, ex)
+    c = convert([sat(px[i] / px[3]) for i in range(3)], a, b, ex)
     return [c[0] * px[3], c[1] * px[3], c[2] * px[3], px[3]]
 
 
@@ -177,7 +184,7 @@ def apply(d, s, m, op):
     else:
         fa, fb = factors(op, s[3], d[3])
         o = [fa * s[i] + fb * d[i] for i in range(4)]
-    return [(1 - m) * d[i] + m * o[i] for i in range(4)]
+    return [sat((1 - m) * d[i] + m * o[i]) for i in range(4)]
 
 
 # --- shape-cpu's definitions (render.h, S11, D8) ---------------------------------------------------------
@@ -370,7 +377,7 @@ def write_of(fmt, value, touched, stored):
         return list(stored), list(stored)
     v = list(value)
     if fmt in (1, 3):
-        v = [ZERO if v[3] == 0 else v[i] / v[3] for i in range(3)] + [v[3]]
+        v = [ZERO if v[3] == 0 else sat(v[i] / v[3]) for i in range(3)] + [v[3]]
     want, alt = [], []
     for x in v:
         w, a = store8(x) if fmt in (1, 2) else storef(x)
@@ -463,6 +470,21 @@ def cases():
         fg={"rgba": [0.5, 0.25, 0.75, 1.0], "space": P3})
     add("nested groups in two gammas of one gamut",
         [group(0.9, 0, (3, GAMMA, 1.8)), group(0.8, 0, P3_GAMMA), fill([0.6, 0.3, 0.2, 0.7]), UNGROUP, UNGROUP])
+    # N1's saturation (Corey, 2026-10-21): colors at the bound 2^16 in spaces whose transfer raises them, a plus that
+    # passes 2^64 and cancels after it, and a straight store whose un-premultiply passes it.
+    g10, g8, g01 = (1, GAMMA, 10.0), (1, GAMMA, 8.0), (1, GAMMA, 0.1)
+    k16 = 2.0 ** 16
+    add("N1: a gamma-10 paint at the bound into a linear group", [group(1.0, 0, LIN), fill([k16, -k16, 0.5, 0.5], 64, g10),
+                                                                  UNGROUP], target=LIN, backdrop=(0, 0, 0, 0))
+    add("N1: a linear paint at the bound into a gamma-0.1 group", [group(1.0, 0, g01), fill([k16, -k16, 0.25, 1.0], 64, LIN),
+                                                                   UNGROUP], target=LIN, backdrop=(0, 0, 0, 0))
+    add("N1: plus past the saturation, then cancelled", [
+        group(1.0, 0, LIN), fill([-256.0, 0, 0, 1.0], 64, g8), group(1.0, 12), fill([-256.0, 0, 0, 1.0], 64, g8), UNGROUP,
+        group(1.0, 12), fill([256.0, 0, 0, 1.0], 64, g8), UNGROUP, group(1.0, 12), fill([0.5, 0, 0, 1.0], 64, LIN), UNGROUP,
+        UNGROUP], target=LIN, backdrop=(0, 0, 0, 0))
+    add("N1: a straight store past the saturation", [
+        fill([-256.0, 0, 0, 0.5], 64, g8), clip(32), group(1.0, 12), fill([-256.0, 0, 0, 1.0], 64, g8), UNGROUP, UNCLIP],
+        target=LIN, backdrop=(0, 0, 0, 0))
     add("an xor group under two clips", [clip(60), clip(24), group(0.9, 11, P3), fill([0.3, 0.9, 0.1, 0.8], 56), UNGROUP,
                                          UNCLIP, UNCLIP], backdrop=BACKDROPS[3])
     return out

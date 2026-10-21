@@ -36,6 +36,23 @@
 
 #include <string.h>
 
+/* --- N1: the saturation ------------------------------------------------------------- */
+
+double gshcpu_render_saturate(double x) {
+  return x > GSHSCENE_COLOR_SATURATION ? GSHSCENE_COLOR_SATURATION
+      : x < -GSHSCENE_COLOR_SATURATION ? -GSHSCENE_COLOR_SATURATION : x;
+}
+
+double gshcpu_render_unpremultiply(double c, double a) {
+  /* Past the bound the quotient is never formed, so no infinity is: 2^64 |a| is exact (a power-of-two scaling). */
+  double mc = c < 0.0 ? -c : c;
+  double ma = a < 0.0 ? -a : a;
+  if (mc >= GSHSCENE_COLOR_SATURATION * ma) {
+    return (c < 0.0) != (a < 0.0) ? -GSHSCENE_COLOR_SATURATION : GSHSCENE_COLOR_SATURATION;
+  }
+  return c / a;
+}
+
 /* --- N2: the transfer functions ----------------------------------------------------- */
 
 /** sRGB: the encoded value below which the curve is linear. */
@@ -185,17 +202,21 @@ void gshcpu_render_convert_straight(const GSHCPU_Convert * c, const double in[3]
     memmove(out, in, 3 * sizeof *in);
     return;
   }
+  /* N1: saturated after each step, so that a power only ever takes a value of magnitude at most 2^64. */
   double lin[3];
   for (int i = 0; i < 3; i++) {
-    lin[i] = gshcpu_render_decode(&c->from, in[i]);
+    lin[i] = gshcpu_render_saturate(gshcpu_render_decode(&c->from, in[i]));
   }
   if (c->matrix) {
     /* When only the transfers differ the two matrices cancel and are not applied (N3). */
     mul3(&c->to_xyz, lin, lin);
     mul3(&c->from_xyz, lin, lin);
+    for (int i = 0; i < 3; i++) {
+      lin[i] = gshcpu_render_saturate(lin[i]);
+    }
   }
   for (int i = 0; i < 3; i++) {
-    out[i] = gshcpu_render_encode(&c->to, lin[i]);
+    out[i] = gshcpu_render_saturate(gshcpu_render_encode(&c->to, lin[i]));
   }
 }
 
@@ -209,7 +230,8 @@ void gshcpu_render_convert_premultiplied(const GSHCPU_Convert * c, const double 
     out[0] = out[1] = out[2] = out[3] = 0.0;
     return;
   }
-  double straight[3] = {in[0] / a, in[1] / a, in[2] / a};
+  double straight[3] = {gshcpu_render_unpremultiply(in[0], a), gshcpu_render_unpremultiply(in[1], a),
+      gshcpu_render_unpremultiply(in[2], a)};
   gshcpu_render_convert_straight(c, straight, straight);
   out[0] = straight[0] * a;
   out[1] = straight[1] * a;
@@ -293,7 +315,7 @@ void gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op) 
     }
   }
   for (int i = 0; i < 4; i++) {
-    d[i] = (1.0 - m) * d[i] + m * o[i];
+    d[i] = gshcpu_render_saturate((1.0 - m) * d[i] + m * o[i]); /* N1 */
   }
 }
 
@@ -359,7 +381,7 @@ void gshcpu_render_store(GSHCPU_Format format, unsigned char * row, size_t x, co
   memcpy(w, v, sizeof w);
   if (!premultiplied(format)) {
     for (int i = 0; i < 3; i++) {
-      w[i] = w[3] == 0.0 ? 0.0 : w[i] / w[3];
+      w[i] = w[3] == 0.0 ? 0.0 : gshcpu_render_unpremultiply(w[i], w[3]); /* N1 */
     }
   }
   if (gshcpu_render_pixel_bytes(format) == 4u) {

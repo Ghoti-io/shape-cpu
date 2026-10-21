@@ -468,7 +468,7 @@ void gshcpu_render_gradient_color(const GSHCPU_Gradient * g, double t, double ou
   if (g->premultiplied) {
     double a = c[3];
     for (int k = 0; k < 3; k++) {
-      c[k] = a == 0.0 ? 0.0 : c[k] / a;
+      c[k] = a == 0.0 ? 0.0 : gshcpu_render_unpremultiply(c[k], a); /* N1: saturated */
     }
   }
   c[3] = c[3] * g->alpha;

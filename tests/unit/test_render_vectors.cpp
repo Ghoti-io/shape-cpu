@@ -31,6 +31,7 @@
 #include <ghoti.io/shape-geometry/shape-geometry.h>
 #include <ghoti.io/shape-scene/shape-scene.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -75,7 +76,8 @@ void expect_pre(const double got[4], const double want[4], bool exact, const std
     if (exact) {
       EXPECT_TRUE(same_bits(got[i], want[i])) << where << " channel " << i << ": " << got[i] << " want " << want[i];
     } else {
-      double e = std::fabs(got[i] - want[i]);
+      // Relative past 1: N1's saturation cases hold values up to 2^64.
+      double e = std::fabs(got[i] - want[i]) / std::max(1.0, std::fabs(want[i]));
       EXPECT_LE(e, kTolerance) << where << " channel " << i << ": " << got[i] << " want " << want[i];
       worst.see(e, where);
     }

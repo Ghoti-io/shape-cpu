@@ -117,16 +117,23 @@ The full text is in render.h. In short (D7, D8):
 - Transfers are `math`'s `gmath_pow`; the gamut matrices are computed in
   `double` from N1's chromaticities; nothing comes from libm, no `long double`,
   and `float` only at the float store.
+- Saturation (shape-scene's N1, Corey 2026-10-21): each decode, matrix result and
+  encode of a conversion, every un-premultiply (a group's, G4's, a straight
+  store's) and every `apply` is clamped to `[-2^64, 2^64]`; an un-premultiply
+  past the bound is not divided, so no infinity is formed and every value a
+  float target receives is finite.
 - The one rounding of a render is the write of a touched pixel: to 8 bits,
   `floor(v * 255 + 1/2)` clamped (of `C / A` for a straight target, 0 where `A`
   is 0); to `float`, rounded once. A pixel no unit touched is not written.
-- Tolerance: before the write within `1e-12` of the rational oracle and exact
-  where the case is dyadic with no transfer or matrix; after it, the oracle
-  rounded the same way, or the other side within `1e-9` of a boundary.
+- Tolerance: before the write within `1e-12` times `max(1, |v|)` of the
+  rational oracle and exact where the case is dyadic with no transfer or matrix;
+  after it, the oracle rounded the same way, or the other side within `1e-9` of
+  a boundary.
 
 Measured (story 13b's gate, `tests/unit/test_render_vectors.cpp`): the worst
 error before the write is 1.22e-15 over shape-scene's 82 composite vectors and
-this library's 77 render vectors on four formats; every exact case is equal bit
+this library's 77 render vectors on four formats (with N1's saturation cases
+since, 99 and 81, the worst is unchanged); every exact case is equal bit
 for bit, and every stored value is the oracle's rounding.
 
 ### Gradients (color-paint story P2)

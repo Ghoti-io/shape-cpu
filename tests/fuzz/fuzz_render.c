@@ -39,7 +39,11 @@
  * premultiplied or not, no stops to five (unsorted, equal offsets, foreground
  * and palette stops), under gradient maps that turn, flatten (G11) or carry the
  * fill out of the sampling domain (G14, the sink's own limit), and values past
- * G14's bounds (refused at intern, the fill then solid).
+ * G14's bounds (refused at intern, the fill then solid).  N1 (Corey, 2026-10-21):
+ * a solid paint's byte may give a component at `2^16` or one step past it in a
+ * gamma-10 or gamma-0.1 space (past it the fill is refused, `ERR_LIMIT`; at it
+ * the conversions reach the saturation), and a group may blend in gamma 0.1; a
+ * float target's every stored value is then finite.
  *
  * After the render the sink's stated properties are checked, and a violation is
  * an `abort`:
@@ -86,7 +90,7 @@
 enum {
   OUT_OK = 0, OUT_REFUSED_WHILE_DRAWING, OUT_STRICT, OUT_LIMIT_REGION, OUT_CANCEL_MID, OUT_OOM, OUT_CALLER_MEMORY,
   OUT_WORKSPACE_SHORT, OUT_DAMAGE, OUT_GLYPHS_FAST, OUT_GLYPHS_GENERAL, OUT_FLOAT_TARGET, OUT_NESTED_GROUP,
-  OUT_GRADIENT_DRAWN, OUT_GRADIENT_NOTICE, OUT_GRADIENT_LIMIT, OUT_COUNT
+  OUT_GRADIENT_DRAWN, OUT_GRADIENT_NOTICE, OUT_GRADIENT_LIMIT, OUT_COLOR_LIMIT, OUT_COLOR_AT_BOUND, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -94,7 +98,8 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a render in caller memory", "a workspace a byte short", "a damage-limited render equal to the whole",
     "glyphs on the fast tier", "glyphs on the general route", "a float target", "a group inside a group",
     "a render with a gradient fill", "a gradient fill that draws nothing (a notice)",
-    "a gradient past G14's bounds, refused at intern"};
+    "a gradient past G14's bounds, refused at intern", "a fill's color past N1's bound, refused",
+    "a render with a color at N1's bound in a gamma space"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -198,6 +203,7 @@ static void on_progress(void * ctx, const GSHSCENE_Job * job, size_t processed) 
 typedef struct World {
   GSHSCENE_Store * store;            /* where a gradient paint is interned */
   size_t gradients;                  /* gradient fills recorded */
+  size_t at_bound;                   /* fills recorded with a component at N1's bound, in a gamma space */
   const GSHSCENE_Resource * paths[MAX_PATHS];
   size_t path_count;
   const GSHSCENE_Resource * runs[2]; /* from a face with the fast tier, and from one without */
@@ -446,6 +452,13 @@ static void paint_of(Input * in, World * w, GSHSCENE_Paint * paint, const GSHSCE
   if (b % 4 == 0) {
     paint->space.primaries = GCOL_PRIMARIES_DISPLAY_P3;
     paint->space.transfer = GCOL_TRANSFER_SRGB;
+  } else if (b % 4 == 2 && (b & 0x80)) {
+    /* N1: at 2^16 or one step past it, in a space whose transfer raises it to the tenth power or not. */
+    static const double bound[4] = {0x1p16, -0x1p16, 0x1.0000000000001p16, -0x1.0000000000001p16};
+    paint->rgba[(b >> 6) & 1] = bound[(b >> 4) & 3];
+    paint->space.primaries = GCOL_PRIMARIES_SRGB;
+    paint->space.transfer = GCOL_TRANSFER_GAMMA;
+    paint->space.gamma = (b & 8) ? 10.0 : 0.1;
   } else if (b % 4 == 1 && w->store) {
     const GSHSCENE_Resource * g = gradient_of(in, w->store);
     if (g) {
@@ -477,7 +490,20 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
       map_of(in, &map);
       const GSHSCENE_Resource * held = NULL;
       paint_of(in, w, &paint, &held);
-      gshscene_list_fill(list, r, &map, next(in) & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint, 0, 0.0);
+      int past = 0;
+      for (int k = 0; k < 3; k++) {
+        past |= !(paint.rgba[k] >= -0x1p16 && paint.rgba[k] <= 0x1p16);
+      }
+      GSHSCENE_Result fr =
+          gshscene_list_fill(list, r, &map, next(in) & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint, 0, 0.0);
+      if (past) {
+        CHECK(fr == GSHSCENE_ERR_LIMIT || fr == GSHSCENE_ERR_OOM); /* N1: never recorded */
+        outcomes[OUT_COLOR_LIMIT] += fr == GSHSCENE_ERR_LIMIT;
+      } else if (fr == GSHSCENE_OK && paint.space.transfer == GCOL_TRANSFER_GAMMA &&
+                 (paint.rgba[0] == 0x1p16 || paint.rgba[0] == -0x1p16 || paint.rgba[1] == 0x1p16 ||
+                     paint.rgba[1] == -0x1p16)) {
+        w->at_bound++;
+      }
       gshscene_resource_release(held); /* the list holds its own reference */
     } else if (op == 4 && r && depth < 16) {
       map_of(in, &map);
@@ -491,9 +517,15 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
       memset(&group, 0, sizeof group);
       group.opacity = (double)(next(in) % 5) / 4.0;
       group.composite = next(in) % GSHSCENE_COMPOSITE_COUNT;
-      if (next(in) % 3 == 0) {
+      const uint8_t blend = next(in);
+      if (blend % 3 == 0) {
         group.blend_space.primaries = GCOL_PRIMARIES_SRGB;
         group.blend_space.transfer = GCOL_TRANSFER_LINEAR;
+      } else if (blend % 3 == 1 && (blend & 0x40)) {
+        /* N1: a gamma-0.1 group, whose encode raises a fill's color to the tenth power. */
+        group.blend_space.primaries = GCOL_PRIMARIES_SRGB;
+        group.blend_space.transfer = GCOL_TRANSFER_GAMMA;
+        group.blend_space.gamma = 0.1;
       }
       if (gshscene_list_group_push(list, &group, 0, 0.0) == GSHSCENE_OK) {
         open[depth++] = 1;
@@ -774,6 +806,19 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   }
   outcomes[OUT_REFUSED_WHILE_DRAWING] += summary.by_class[GSHSCENE_ENTRY_REFUSED] > 0 && r != GSHSCENE_ERR_OOM;
   outcomes[OUT_GRADIENT_DRAWN] += world.gradients > 0 && r == GSHSCENE_OK;
+  outcomes[OUT_COLOR_AT_BOUND] += world.at_bound > 0 && r == GSHSCENE_OK;
+  if ((target_byte & 3) >= 2) {
+    /* N1: every value a float target holds after a render is finite (the backdrop is, and the saturation keeps it). */
+    const size_t stride = gimg_raster_stride_bytes(raster);
+    const uint8_t * bytes = gimg_raster_pixels_const(raster);
+    for (uint32_t y = 0; y < height; y++) {
+      for (uint32_t x = 0; x < width * 4; x++) {
+        float v;
+        memcpy(&v, bytes + (size_t)y * stride + (size_t)x * sizeof v, sizeof v);
+        CHECK(v - v == 0.0f);
+      }
+    }
+  }
   outcomes[OUT_GRADIENT_NOTICE] += summary.by_class[GSHSCENE_ENTRY_NOTICE] > 0;
   if (gcu_atomic_size_load(&tp.fast_calls) > 0) {
     outcomes[OUT_GLYPHS_FAST] += r == GSHSCENE_OK;

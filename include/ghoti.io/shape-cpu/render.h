@@ -140,13 +140,21 @@
  *   matrix and then the inverse of the destination's.  Nothing comes from libm;
  *   there is no `long double`, no fused multiply-add and no `float` but the
  *   float store.
+ * - **Saturation (shape-scene's N1, Corey 2026-10-21).**  Each decode, each
+ *   matrix result and each encode of a conversion, every un-premultiply (a
+ *   group's conversion, G4's flag, a straight store) and every `apply` is clamped
+ *   to `[-2^64, 2^64]`, on the double result, at those points and no others.  An
+ *   un-premultiply `C / A` with `|C| >= 2^64 |A|` is `sign(C / A) 2^64` without
+ *   dividing, so no infinity is formed; a power only ever takes a value of
+ *   magnitude at most `2^64` (the worst is `2^640`), so no conversion overflows.
  * - **The write.**  The one rounding of a render is the write of a touched pixel
  *   to the target, in the target's alpha form: to 8 bits, `floor(v * 255 + 1/2)`
- *   clamped to `[0, 255]` (round half up; a straight color is `C / A`, and 0 where
- *   `A` is 0); to `float`, the `double` rounded once (round to nearest), with no
- *   clamp.  A pixel no unit touched is not written.
- * - **Tolerance (D7, AD-18).**  Before the write, a value is within `1e-12` of
- *   the rational oracle's (shape-scene's `tests/composite_vectors.h`, and this
+ *   clamped to `[0, 255]` (round half up; a straight color is `C / A`, saturated,
+ *   and 0 where `A` is 0); to `float`, the `double` rounded once (round to
+ *   nearest), with no clamp but the saturation.  A pixel no unit touched is not written.
+ * - **Tolerance (D7, AD-18).**  Before the write, a value is within `1e-12`
+ *   times `max(1, |v|)` of the rational oracle's (shape-scene's
+ *   `tests/composite_vectors.h`, and this
  *   library's `tests/render_vectors.h` for the D8 weights), and equal to it where
  *   no transfer or matrix is evaluated and the values are dyadic.  After it, a
  *   stored value is the oracle's rounded the same way, except that a value within

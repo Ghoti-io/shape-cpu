@@ -51,6 +51,12 @@ extern "C" {
 
 /* --- compositing (compose.c) ------------------------------------------------------ */
 
+/** N1: `sat(x)`, @p x clamped to `[-2^64, 2^64]` (a value inside is returned bit for bit). */
+double gshcpu_render_saturate(double x);
+
+/** N1: `sat(c / a)` for a nonzero @p a, never forming an infinity (past the bound nothing is divided). */
+double gshcpu_render_unpremultiply(double c, double a);
+
 /** N2: an encoded component to linear light, in @p space (a concrete space). */
 double gshcpu_render_decode(const GSHSCENE_Color_Space * space, double x);
 

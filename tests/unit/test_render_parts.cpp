@@ -11,6 +11,8 @@
 
 #include "render_helpers.h"
 
+#include <ghoti.io/math/elementary.h>
+
 #include <cmath>
 #include <limits>
 #include <random>
@@ -747,6 +749,139 @@ TEST(RenderArithmetic, TransfersAndTheirKnees) {
   EXPECT_NEAR(s709.m[0][0], 0.41239079926595934, 1e-14) << "the published sRGB matrix";
   EXPECT_NEAR(s709.m[1][1], 0.71516867876775593, 1e-14);
   EXPECT_NEAR(s709.m[2][2], 0.95053215224966058, 1e-14);
+}
+
+// --- N1's saturation (shape-scene's paint.h; Corey, 2026-10-21) ---------------------------------------------------------
+
+namespace {
+
+GSHSCENE_Color_Space gspace(GCOL_Primaries p, double g) {
+  GSHSCENE_Color_Space s{};
+  s.primaries = p;
+  s.transfer = GCOL_TRANSFER_GAMMA;
+  s.gamma = g;
+  return s;
+}
+
+const double kSat = 0x1p64;
+const double k16 = 0x1p16;
+
+}  // namespace
+
+TEST(RenderSaturation, TheClampAndTheUnpremultiply) {
+  EXPECT_EQ(gshcpu_render_saturate(kSat), kSat);
+  EXPECT_EQ(gshcpu_render_saturate(std::nextafter(kSat, INFINITY)), kSat);
+  EXPECT_EQ(gshcpu_render_saturate(-std::nextafter(kSat, INFINITY)), -kSat);
+  EXPECT_EQ(gshcpu_render_saturate(-INFINITY), -kSat);
+  EXPECT_EQ(gshcpu_render_saturate(1.5), 1.5);
+  EXPECT_TRUE(std::signbit(gshcpu_render_saturate(-0.0))) << "a value inside, bit for bit";
+  EXPECT_EQ(gshcpu_render_unpremultiply(3.0, 4.0), 0.75);
+  EXPECT_EQ(gshcpu_render_unpremultiply(1.0, -0.5), -2.0);
+  EXPECT_EQ(gshcpu_render_unpremultiply(0x1p63, 0.5), kSat) << "exactly at the bound";
+  EXPECT_EQ(gshcpu_render_unpremultiply(std::nextafter(0x1p63, 0.0), 0.5), std::nextafter(kSat, 0.0)) << "just inside";
+  EXPECT_EQ(gshcpu_render_unpremultiply(kSat, 0.5), kSat);
+  EXPECT_EQ(gshcpu_render_unpremultiply(-1.0, 0x1p-1074), -kSat) << "a division that would overflow is not taken";
+  EXPECT_EQ(gshcpu_render_unpremultiply(1.0, -0x1p-1074), -kSat);
+}
+
+TEST(RenderSaturation, EachStepOfAConversionSaturates) {
+  const GSHSCENE_Color_Space g10 = gspace(GCOL_PRIMARIES_SRGB, 10.0);
+  const GSHSCENE_Color_Space g01 = gspace(GCOL_PRIMARIES_SRGB, 0.1);
+  const GSHSCENE_Color_Space g2 = gspace(GCOL_PRIMARIES_SRGB, 2.0);
+  const GSHSCENE_Color_Space bt_g10 = gspace(GCOL_PRIMARIES_BT2020, 10.0);
+  GSHSCENE_Color_Space lin{};
+  lin.primaries = GCOL_PRIMARIES_SRGB;
+  lin.transfer = GCOL_TRANSFER_LINEAR;
+  GSHCPU_Convert c;
+  double out[3];
+  // The decode: 2^160 saturates to 2^64 before a gamma-2 encode, which gives 2^32 (2^80 without it).
+  const double at[3] = {k16, -k16, 0.0};
+  gshcpu_render_convert_prepare(&c, &g10, &g2);
+  gshcpu_render_convert_straight(&c, at, out);
+  EXPECT_EQ(out[0], 0x1p32);
+  EXPECT_EQ(out[1], -0x1p32);
+  // The encode: a linear 2^16 into gamma 0.1 is 2^160, saturated.
+  gshcpu_render_convert_prepare(&c, &lin, &g01);
+  gshcpu_render_convert_straight(&c, at, out);
+  EXPECT_EQ(out[0], kSat);
+  EXPECT_EQ(out[1], -kSat);
+  // Both: gamma 10 to gamma 0.1 would be the 100th power.
+  gshcpu_render_convert_prepare(&c, &g10, &g01);
+  gshcpu_render_convert_straight(&c, at, out);
+  EXPECT_EQ(out[0], kSat);
+  EXPECT_EQ(out[1], -kSat);
+  // The matrix: BT.2020 to sRGB takes (2^64, -2^64, -2^64) to (2.32, -1.25, -1.04) times 2^64, each saturated, so
+  // the gamma-10 encode is (2^64)^(1/10) on each.
+  const double bt[3] = {k16, -k16, -k16};
+  gshcpu_render_convert_prepare(&c, &bt_g10, &g10);
+  ASSERT_TRUE(c.matrix);
+  gshcpu_render_convert_straight(&c, bt, out);
+  const double tenth = gmath_pow(kSat, 1.0 / 10.0);
+  EXPECT_EQ(out[0], tenth);
+  EXPECT_EQ(out[1], -tenth);
+  EXPECT_EQ(out[2], -tenth);
+  // The un-premultiply of a group's conversion: -2^64 at alpha 1/2 is -2^65, saturated before the decode.
+  const double pre[4] = {-kSat, 0.0, 0.0, 0.5};
+  double moved[4];
+  gshcpu_render_convert_prepare(&c, &g01, &lin);
+  gshcpu_render_convert_premultiplied(&c, pre, moved);
+  EXPECT_EQ(moved[0], -gmath_pow(kSat, 0.1) * 0.5);
+  EXPECT_EQ(moved[3], 0.5);
+}
+
+TEST(RenderSaturation, EveryApplySaturatesAndAStraightStoreToo) {
+  // PLUS of two values at -2^64 (alpha clamped to 1 from above).
+  double d[4] = {-kSat, 0.5, 0.0, 1.0};
+  const double s[4] = {-kSat, 0.75, 0.0, 1.0};
+  gshcpu_render_apply(d, s, 1.0, GSHSCENE_COMPOSITE_PLUS);
+  EXPECT_EQ(d[0], -kSat);
+  EXPECT_EQ(d[1], 1.0);
+  EXPECT_EQ(d[3], 1.0);
+  // A float backdrop past the bound: source-over at half weight saturates the result.
+  double big[4] = {0x1p100, 0.0, 0.0, 1.0};
+  const double none[4] = {0.0, 0.0, 0.0, 0.0};
+  gshcpu_render_apply(big, none, 0.5, GSHSCENE_COMPOSITE_SRC_OVER);
+  EXPECT_EQ(big[0], kSat);
+  // A straight store whose C / A passes the bound.
+  unsigned char px[16];
+  const double v[4] = {-kSat, kSat, 0.25, 0.5};
+  gshcpu_render_store(GSHCPU_FORMAT_RGBAF32_STRAIGHT, px, 0, v);
+  float f[4];
+  std::memcpy(f, px, sizeof f);
+  EXPECT_EQ(f[0], -0x1p64f);
+  EXPECT_EQ(f[1], 0x1p64f);
+  EXPECT_EQ(f[2], 0.5f);
+  EXPECT_EQ(f[3], 0.5f);
+}
+
+TEST(RenderSaturation, AGradientsUnpremultiplySaturatesWhereDoublesWouldPassTheBound) {
+  // G4 with the flag: stops of color 2^64 and alphas of one and two subnormal steps.  At t = 1/4 the alpha rounds to
+  // 2^-1074 while the interpolant of the color is exact, so a plain division would give 1.25 * 2^64.
+  GSHSCENE_Gradient g{};
+  g.kind = GSHSCENE_GRADIENT_LINEAR;
+  g.p1[0] = 4.0;
+  g.premultiplied = 1;
+  g.stop_count = 2;
+  GSHCPU_Stop stops[2];
+  std::memset(stops, 0, sizeof stops);
+  stops[0].offset = 0.0;
+  stops[1].offset = 1.0;
+  for (int k = 0; k < 2; k++) {
+    stops[k].rgba[0] = kSat;
+    stops[k].rgba[1] = -kSat;
+  }
+  stops[0].rgba[3] = 0x1p-1074;
+  stops[1].rgba[3] = 0x1p-1073;
+  gshcpu_render_gradient_stops(stops, 2, 1);
+  GSHGEOM_Map id;
+  gshgeom_map_identity(2, &id);
+  GSHCPU_Gradient gr;
+  ASSERT_EQ(gshcpu_render_gradient_prepare(&gr, &g, stops, &id, 1.0), GSHCPU_OK);
+  double out[4];
+  gshcpu_render_gradient_color(&gr, 0.25, out);
+  EXPECT_EQ(out[0], kSat);
+  EXPECT_EQ(out[1], -kSat);
+  EXPECT_EQ(out[3], 0x1p-1074);
 }
 
 int main(int argc, char ** argv) {

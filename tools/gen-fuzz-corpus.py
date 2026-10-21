@@ -173,6 +173,17 @@ def scripted():
     out["scripted-gradient-notice.bin"] = header(request=STRICT) + body([fill(0), fill(1, gradient=DEGENERATE)])
     out["scripted-gradient-past-bound.bin"] = header() + body([fill(0, gradient=PAST)])
     out["scripted-gradient-domain.bin"] = header(request=DAMAGE) + body([fill(1), fill(0, gradient=OUT_OF_DOMAIN)])
+    # N1 (Corey, 2026-10-21): a solid paint byte of 2 mod 4 with its high bit set takes a component (bit 6: green) at
+    # 2^16 or one step past it ((b >> 4) & 3: 0 and 1 at it, 2 and 3 past it) in gamma 10 (bit 3) or gamma 0.1; a
+    # group's blend byte of 1 mod 3 with bit 6 set blends in gamma 0.1.  At the bound into a gamma-0.1 group and onto a
+    # float target, and one step past it (refused, the render goes on).
+    def bound_fill(pick, b):
+        return bytes([0, pick]) + b"\x00" + bytes([200, 100, 50, 255, b, 0])
+    gamma01_group = bytes([5, 0, 4, 0, 0x40])  # 64 % 3 == 1, bit 6 set
+    bound = [bound_fill(0, 0x80 | 0x08 | 2), gamma01_group, bound_fill(1, 0x80 | 0x10 | 2), POP,
+             bound_fill(0, 0x80 | 0x20 | 2), bound_fill(1, 0x80 | 0x40 | 0x30 | 0x08 | 2)]
+    out["scripted-color-bound.bin"] = header() + body(bound)
+    out["scripted-color-bound-float.bin"] = header(target=T64 | 3) + body(bound)
     # Found by the first libFuzzer soak (story 16): strict, a damage and a small cell cap. The damage-limited render
     # passed and the whole render met the cap outside the damage, so it was refused. Since 2026-10-21 the cap is met
     # over the whole render's region whatever the damage (S4), and the harness requires both to agree.
