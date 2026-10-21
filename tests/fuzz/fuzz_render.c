@@ -43,7 +43,9 @@
  * a solid paint's byte may give a component at `2^16` or one step past it in a
  * gamma-10 or gamma-0.1 space (past it the fill is refused, `ERR_LIMIT`; at it
  * the conversions reach the saturation), and a group may blend in gamma 0.1; a
- * float target's every stored value is then finite.
+ * float target's every stored value is then finite.  Strokes story S1: a fill whose rule byte has bits 1 and 2 set
+ * is a stroke of the shape instead, which this sink refuses for its kind until it draws strokes (S4); every entry it
+ * refuses for its kind is checked to be a stroke.
  *
  * After the render the sink's stated properties are checked, and a violation is
  * an `abort`:
@@ -91,7 +93,7 @@ enum {
   OUT_OK = 0, OUT_REFUSED_WHILE_DRAWING, OUT_STRICT, OUT_LIMIT_REGION, OUT_CANCEL_MID, OUT_OOM, OUT_CALLER_MEMORY,
   OUT_WORKSPACE_SHORT, OUT_DAMAGE, OUT_GLYPHS_FAST, OUT_GLYPHS_GENERAL, OUT_FLOAT_TARGET, OUT_NESTED_GROUP,
   OUT_GRADIENT_DRAWN, OUT_GRADIENT_NOTICE, OUT_GRADIENT_LIMIT, OUT_COLOR_LIMIT, OUT_COLOR_AT_BOUND, OUT_BLEND_DRAWN,
-  OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_COUNT
+  OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_STROKE_REFUSED, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -101,7 +103,8 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a render with a gradient fill", "a gradient fill that draws nothing (a notice)",
     "a gradient past G14's bounds, refused at intern", "a fill's color past N1's bound, refused",
     "a render with a color at N1's bound in a gamma space", "a render with a blend-mode group",
-    "a blend-mode group on a float target", "a group of PDF's fields refused (S19)"};
+    "a blend-mode group on a float target", "a group of PDF's fields refused (S19)",
+    "a stroke refused for its kind (strokes story S1: drawn from S4)"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -210,6 +213,8 @@ typedef struct World {
   const GSHSCENE_Resource * paths[MAX_PATHS];
   size_t path_count;
   const GSHSCENE_Resource * runs[2]; /* from a face with the fast tier, and from one without */
+  const GSHSCENE_Resource * style;   /* a stroke style, made on first use (strokes story S1) */
+  size_t strokes;                    /* strokes recorded */
 } World;
 
 static void intern_paths(Input * in, GSHSCENE_Store * store, const GSHGEOM_Allocator * alloc, World * w) {
@@ -497,8 +502,20 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
       for (int k = 0; k < 3; k++) {
         past |= !(paint.rgba[k] >= -0x1p16 && paint.rgba[k] <= 0x1p16);
       }
-      GSHSCENE_Result fr =
-          gshscene_list_fill(list, r, &map, next(in) & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint, 0, 0.0);
+      /* The rule byte's bits 1 and 2 both set: a stroke of the shape instead (strokes story S1), which this sink
+       * refuses for its kind until it draws strokes (S4). */
+      const uint8_t rule = next(in);
+      if ((rule & 6) == 6 && !w->style) {
+        GSHSCENE_Stroke_Style st;
+        gshscene_stroke_style_init(&st);
+        st.join = GSHSCENE_STROKE_JOIN_ROUND;
+        GSHSCENE_Result sr = gshscene_store_intern_stroke_style(w->store, &st, &w->style);
+        CHECK(sr == GSHSCENE_OK || sr == GSHSCENE_ERR_OOM || sr == GSHSCENE_ERR_LIMIT);
+      }
+      GSHSCENE_Result fr = (rule & 6) == 6
+          ? (w->style ? gshscene_list_stroke(list, r, w->style, &map, &paint, 0, 0.0) : GSHSCENE_ERR_OOM)
+          : gshscene_list_fill(list, r, &map, rule & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint, 0, 0.0);
+      w->strokes += (rule & 6) == 6 && fr == GSHSCENE_OK;
       if (past) {
         CHECK(fr == GSHSCENE_ERR_LIMIT || fr == GSHSCENE_ERR_OOM); /* N1: never recorded */
         outcomes[OUT_COLOR_LIMIT] += fr == GSHSCENE_ERR_LIMIT;
@@ -826,6 +843,13 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
       CHECK(e.entry_class == GSHSCENE_ENTRY_REFUSED);
       outcomes[OUT_PDF_REFUSED]++;
     }
+    if (e.reason == GSHSCENE_REASON_ITEM_KIND) {
+      /* The sink claims the six kinds it draws and no other: what it refuses for its kind is a stroke. */
+      const GSHSCENE_Item * item = NULL;
+      CHECK(e.entry_class == GSHSCENE_ENTRY_REFUSED && e.chain_count == 1);
+      CHECK(gshscene_list_item(list, e.chain[0], &item) == GSHSCENE_OK && item->kind == GSHSCENE_ITEM_STROKE);
+      outcomes[OUT_STROKE_REFUSED]++;
+    }
   }
   if (r == GSHSCENE_OK && (target_byte & 3) >= 2) {
     /* No NaN reaches a store (B9, N1): every float the render wrote is a number. */
@@ -930,6 +954,7 @@ done:
   }
   gshscene_resource_release(world.runs[0]);
   gshscene_resource_release(world.runs[1]);
+  gshscene_resource_release(world.style);
   gshscene_report_destroy(report);
   if (sink) {
     gshscene_sink_destroy(sink);

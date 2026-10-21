@@ -195,6 +195,11 @@ def scripted():
     out["scripted-blend-modes-float.bin"] = header(target=T64 | 3) + body(blends)
     pdf = [fill(0), bytes([5, 0, 4, 23, 0xA1]), fill(1), POP, bytes([5, 0, 4, 0, 0x81]), fill(0), POP]
     out["scripted-pdf-refused.bin"] = header() + body(pdf)
+    # Strokes story S1: a fill whose rule byte has bits 1 and 2 set is a stroke of the shape instead, which this sink
+    # refuses for its kind until it draws strokes (S4); under strict the render is refused before it starts.
+    strokes = [fill(0), fill(1, rule=6), fill(0, ROTATED, rule=7)]
+    out["scripted-stroke-refused.bin"] = header() + body(strokes)
+    out["scripted-stroke-strict.bin"] = header(request=STRICT) + body(strokes)
     # Found by the first libFuzzer soak (story 16): strict, a damage and a small cell cap. The damage-limited render
     # passed and the whole render met the cap outside the damage, so it was refused. Since 2026-10-21 the cap is met
     # over the whole render's region whatever the damage (S4), and the harness requires both to agree.
