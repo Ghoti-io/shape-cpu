@@ -74,7 +74,9 @@ bool same_bits(double a, double b) {
 void expect_pre(const double got[4], const double want[4], bool exact, const std::string & where, Worst & worst) {
   for (int i = 0; i < 4; i++) {
     if (exact) {
-      EXPECT_TRUE(same_bits(got[i], want[i])) << where << " channel " << i << ": " << got[i] << " want " << want[i];
+      // The values are reals (D7): a zero's sign is not one of them.
+      EXPECT_TRUE(same_bits(got[i], want[i]) || (got[i] == 0.0 && want[i] == 0.0))
+          << where << " channel " << i << ": " << got[i] << " want " << want[i];
     } else {
       // Relative past 1: N1's saturation cases hold values up to 2^64.
       double e = std::fabs(got[i] - want[i]) / std::max(1.0, std::fabs(want[i]));
@@ -185,6 +187,36 @@ TEST(RenderVectors, ThePrimitivesMeetTheCompositeVectors) {
   EXPECT_EQ(exact, kExactCaseCount);
   std::printf("composite_vectors through the primitives: %zu cases, %d exact; worst error %.3g (%s)\n",
       sizeof kCases / sizeof kCases[0], exact, worst.error, worst.where.c_str());
+}
+
+/* --- the blend modes' mixing function (color-paint story P3, B7 to B9) -------------------------------------------- */
+
+TEST(RenderVectors, TheMixingFunctionMeetsTheTable) {
+  // shape-scene's kMix: B(Cb, Cs) after B9's saturation at every branch, threshold, out-of-range value, pole and corner.
+  // Bit for bit where every step is exact in doubles (STOP-2), else within the tolerance; the worst per family.
+  using namespace composite_vectors;
+  Worst polynomial, quotient, root, non_separable;
+  int exact = 0;
+  for (int n = 0; n < kMixCount; n++) {
+    const VMix & m = kMix[n];
+    double got[3];
+    gshcpu_render_mix((uint32_t)m.mode, m.cb, m.cs, got);
+    double got4[4] = {got[0], got[1], got[2], 0.0}, want4[4] = {m.want[0], m.want[1], m.want[2], 0.0};
+    Worst & w = m.mode >= GSHSCENE_COMPOSITE_HUE ? non_separable
+        : m.mode == GSHSCENE_COMPOSITE_SOFT_LIGHT ? root
+        : (m.mode == GSHSCENE_COMPOSITE_COLOR_DODGE || m.mode == GSHSCENE_COMPOSITE_COLOR_BURN) ? quotient
+                                                                                                 : polynomial;
+    expect_pre(got4, want4, m.exact, "kMix[" + std::to_string(n) + "] " + gshscene_composite_string((GSHSCENE_Composite)m.mode),
+        w);
+    for (double v : got) {
+      EXPECT_TRUE(std::isfinite(v) && std::fabs(v) <= 0x1p64) << n;
+    }
+    exact += m.exact ? 1 : 0;
+  }
+  EXPECT_EQ(exact, kMixExactCount);
+  std::printf("kMix through shape-cpu: %d samples, %d exact; worst relative error: polynomial and min/max %.3g, dodge "
+              "and burn %.3g, soft-light %.3g, non-separable %.3g\n", kMixCount, exact, polynomial.error, quotient.error,
+      root.error, non_separable.error);
 }
 
 /* --- through whole renders ----------------------------------------------------------------------------- */
@@ -306,15 +338,23 @@ Seen render(const GSHSCENE_List * list, GIMG_Raster * raster, GSHSCENE_Color_Spa
   return seen;
 }
 
-/** The value a float target stores for @p v: rounded once, or the float on the other side within 1e-9 of halfway. */
-bool float_store_ok(float got, double v) {
+/**
+ * The value a float target stores for @p v: rounded once, or the float on the other side within 1e-9 of halfway.  When
+ * the value before the write is not exact (D7: within the tolerance of @p v), the store is the one rounding of a value
+ * within that tolerance: near zero, where floats are far finer than the tolerance, that is a range of floats.
+ */
+bool float_store_ok(float got, double v, bool exact) {
   float want = (float)v;
   if (got == want) {
     return true;
   }
   float other = std::nextafter(want, (double)want < v ? INFINITY : -INFINITY);
   double mid = ((double)want + (double)other) / 2.0;
-  return got == other && std::fabs(v - mid) < 1e-9;
+  if (got == other && std::fabs(v - mid) < 1e-9) {
+    return true;
+  }
+  double tol = kTolerance * std::max(1.0, std::fabs(v));
+  return !exact && got >= (float)(v - tol) && got <= (float)(v + tol);
 }
 
 TEST(RenderVectors, RendersMeetTheCompositeVectorsWhereTheCoverageIsWhole) {
@@ -371,7 +411,7 @@ TEST(RenderVectors, RendersMeetTheCompositeVectorsWhereTheCoverageIsWhole) {
       expect_pre(seen.root, c.want, c.exact, c.name, worst);
       std::memcpy(px, gimg_raster_pixels_const(raster), sizeof px);
       for (int i = 0; i < 4; i++) {
-        EXPECT_TRUE(float_store_ok(px[i], c.want[i])) << c.name << " channel " << i << ": stored " << px[i];
+        EXPECT_TRUE(float_store_ok(px[i], c.want[i], c.exact)) << c.name << " channel " << i << ": stored " << px[i];
       }
     } else {
       // Nothing touched it: the oracle's answer is the backdrop, and the pixel is not written.

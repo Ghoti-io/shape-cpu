@@ -48,7 +48,10 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
       EXPECT_TRUE(caps.item_kinds & (1u << k)) << k;
     }
     EXPECT_EQ(caps.item_kinds, ((1u << GSHSCENE_ITEM_KIND_COUNT) - 1u) & ~1u) << "every kind, and no bit past them";
-    EXPECT_EQ(caps.composites, (1u << (GSHSCENE_COMPOSITE_PLUS + 1u)) - 1u) << "the twelve Porter-Duff operators and plus";
+    EXPECT_EQ(caps.composites, (1u << GSHSCENE_COMPOSITE_COUNT) - 1u)
+        << "the twelve Porter-Duff operators, plus and the fifteen blend modes (color-paint story P3)";
+    EXPECT_EQ(caps.flags & (GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT | GSHSCENE_CAP_GROUP_SOFT_MASK), 0u)
+        << "PDF's group fields are refused (S19) until they are composited";
     // The caps claim exactly what the compositor composites (color-paint story P3-12): an operator the caps claim
     // that apply does not know would be drawn as nothing, and one apply knows that the caps leave out is refused.
     for (uint32_t op = 0; op < 32u; op++) {

@@ -46,6 +46,7 @@ here with struct.pack.
     python3 tools/gen-render-vectors.py --check  # fail if it differs
 """
 
+import math
 import struct
 import sys
 from decimal import Decimal, getcontext
@@ -178,7 +179,113 @@ def factors(op, sa, da):
             11: (1 - da, 1 - sa)}[op]
 
 
+# --- B1 to B12 (shape-scene's list.h and design.md, color-paint story P3), stated here a third time -----------------
+# The mixing function B(Cb, Cs) of each mode applied to every real value as W3C writes it, then source-over, on
+# premultiplied values: o = cs (1 - ab) + cb (1 - as) + as ab sat(B), alpha as + ab (1 - as).  A square root of a value
+# that is not a rational square is taken at 80 digits; any blend that evaluates B makes the case inexact (its doubles
+# round in Lum, a quotient or a root, and a byte's backdrop is not dyadic).
+BLEND_NAMES = {13: "screen", 14: "overlay", 15: "darken", 16: "lighten", 17: "color-dodge", 18: "color-burn",
+               19: "hard-light", 20: "soft-light", 21: "difference", 22: "exclusion", 23: "multiply", 24: "hue",
+               25: "saturation", 26: "color", 27: "luminosity"}
+BOUNDED |= set(BLEND_NAMES)
+
+
+def b_root(x):
+    n, d = x.numerator, x.denominator
+    rn, rd = math.isqrt(n), math.isqrt(d)
+    if rn * rn == n and rd * rd == d:
+        return F(rn, rd)
+    return F(Decimal(n).sqrt() / Decimal(d).sqrt())
+
+
+def b_hardlight(cb, cs):
+    if cs <= F(1, 2):
+        return cb * 2 * cs
+    t = 2 * cs - 1
+    return cb + t - cb * t
+
+
+def b_separable(op, cb, cs):
+    if op == 23:
+        return cb * cs
+    if op == 13:
+        return cb + cs - cb * cs
+    if op == 14:
+        return b_hardlight(cs, cb)
+    if op == 15:
+        return cb if cb < cs else cs
+    if op == 16:
+        return cb if cb > cs else cs
+    if op == 17:
+        return ZERO if cb == 0 else ONE if cs == 1 else min(ONE, cb / (1 - cs))
+    if op == 18:
+        return ONE if cb == 1 else ZERO if cs == 0 else 1 - min(ONE, (1 - cb) / cs)
+    if op == 19:
+        return b_hardlight(cb, cs)
+    if op == 20:
+        if cs <= F(1, 2):
+            return cb - (1 - 2 * cs) * cb * (1 - cb)
+        dd = ((16 * cb - 12) * cb + 4) * cb if cb <= F(1, 4) else b_root(cb)
+        return cb + (2 * cs - 1) * (dd - cb)
+    if op == 21:
+        return abs(cb - cs)
+    return cb + cs - 2 * cb * cs  # 22, exclusion
+
+
+def b_lum(c):
+    return (30 * c[0] + 59 * c[1] + 11 * c[2]) / 100
+
+
+def b_clip(c):
+    lo, hi, l = min(c), max(c), b_lum(c)
+    if lo < 0 and lo != hi:  # every component equal is the 0/0 form, left alone
+        c = [l + (v - l) * l / (l - lo) for v in c]
+    if hi > 1 and lo != hi:
+        c = [l + (v - l) * (1 - l) / (hi - l) for v in c]
+    return c
+
+
+def b_setlum(c, l):
+    shift = l - b_lum(c)
+    return b_clip([v + shift for v in c])
+
+
+def b_setsat(c, s):
+    order = sorted(range(3), key=lambda k: c[k])
+    lo, mid, hi = order
+    out = [ZERO] * 3
+    if c[hi] > c[lo]:
+        out[mid] = (c[mid] - c[lo]) * s / (c[hi] - c[lo])
+        out[hi] = s
+    return out
+
+
+def b_mix(op, cb, cs):
+    if op == 24:
+        r = b_setlum(b_setsat(cs, max(cb) - min(cb)), b_lum(cb))
+    elif op == 25:
+        r = b_setlum(b_setsat(cb, max(cs) - min(cs)), b_lum(cb))
+    elif op == 26:
+        r = b_setlum(cs, b_lum(cb))
+    elif op == 27:
+        r = b_setlum(cb, b_lum(cs))
+    else:
+        r = [b_separable(op, cb[k], cs[k]) for k in range(3)]
+    return [sat(v) for v in r]
+
+
+BLENDED = []  # set by apply() when a blend evaluated B: the case is not exact
+
+
 def apply(d, s, m, op):
+    if op in BLEND_NAMES:
+        sa, da = s[3], d[3]
+        mixed = [ZERO] * 3
+        if sa * da != 0:
+            BLENDED.append(op)
+            mixed = b_mix(op, [sat(d[k] / da) for k in range(3)], [sat(s[k] / sa) for k in range(3)])
+        o = [s[k] * (1 - da) + d[k] * (1 - sa) + sa * da * mixed[k] for k in range(3)] + [sa + da * (1 - sa)]
+        return [sat((1 - m) * d[i] + m * o[i]) for i in range(4)]
     if op == 12:
         o = [min(ONE, s[i] + d[i]) for i in range(4)]
     else:
@@ -263,6 +370,9 @@ def evaluate(case, backdrop):
                 touched = True
         else:
             raise ValueError(kind)
+    if BLENDED:
+        ex.flag = True
+        del BLENDED[:]
     return root["layer"], touched, ex.flag, dyadic
 
 
@@ -487,6 +597,23 @@ def cases():
         target=LIN, backdrop=(0, 0, 0, 0))
     add("an xor group under two clips", [clip(60), clip(24), group(0.9, 11, P3), fill([0.3, 0.9, 0.1, 0.8], 56), UNGROUP,
                                          UNCLIP, UNCLIP], backdrop=BACKDROPS[3])
+    # Color-paint story P3: every blend mode over each backdrop, at opacity 1 and 1/2 and under a clip's weight, the
+    # non-separable modes over a grey, out-of-range sources, and a blend inside a linear parent.
+    for op in sorted(BLEND_NAMES):
+        for b in BACKDROPS:
+            add("%s over %s" % (BLEND_NAMES[op], b), [group(1.0, op), fill([0.9, 0.35, 0.1, 0.8], 48), UNGROUP], backdrop=b)
+        add("%s opacity 1/2 under a clip of 40/64" % BLEND_NAMES[op],
+            [clip(40), group(0.5, op), fill([0.2, 0.7, 0.95, 0.6]), UNGROUP, UNCLIP], backdrop=BACKDROPS[3])
+        add("%s of an out-of-range source" % BLEND_NAMES[op], [group(1.0, op), fill([1.5, -0.25, 0.5, 0.75]), UNGROUP],
+            backdrop=BACKDROPS[0])
+        add("%s in a linear parent" % BLEND_NAMES[op],
+            [group(1.0, 0, LIN), fill([0.4, 0.6, 0.2, 0.9]), group(1.0, op), fill([0.8, 0.1, 0.5, 0.7], 56), UNGROUP, UNGROUP],
+            backdrop=BACKDROPS[1])
+    for op in (24, 25, 26, 27):
+        add("%s over a grey" % BLEND_NAMES[op], [fill([0.5, 0.5, 0.5, 1.0]), group(1.0, op), fill([0.9, 0.1, 0.3, 1.0]),
+                                                  UNGROUP], backdrop=(0, 0, 0, 0))
+    add("color-dodge at its pole and the bound", [group(1.0, 17), fill([1.0 + 2.0 ** -40, 1.0, 65536.0, 1.0]), UNGROUP],
+        backdrop=(255, 0, 128, 255))
     return out
 
 

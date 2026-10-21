@@ -675,12 +675,44 @@ TEST(RenderArithmetic, TheOperatorsTableAndBoundedness) {
   EXPECT_TRUE(gshcpu_render_bounded(GSHSCENE_COMPOSITE_PLUS));
   EXPECT_FALSE(gshcpu_render_bounded(GSHSCENE_COMPOSITE_COUNT));
   // An operator apply does not know is not drawn as another (CLEAR, before): it says so and leaves D alone.
-  for (uint32_t unknown : {(uint32_t)GSHSCENE_COMPOSITE_PLUS + 1u, (uint32_t)GSHSCENE_COMPOSITE_COUNT, 31u, 255u}) {
+  for (uint32_t unknown : {(uint32_t)GSHSCENE_COMPOSITE_COUNT, 31u, 255u}) {
     double e[4];
     std::memcpy(e, d0, sizeof e);
     EXPECT_EQ(gshcpu_render_apply(e, s, 1.0, unknown), 0) << unknown;
     EXPECT_EQ(std::memcmp(e, d0, sizeof e), 0) << "D untouched by unknown operator " << unknown;
   }
+}
+
+TEST(RenderArithmetic, EveryBlendModeIsBoundedAndFiniteAtTheCorners) {
+  // B3: op_X(0, D) = D exactly, so a group of a blend mode leaves the backdrop where it drew nothing; B9: at the corners
+  // +-2^64 every mode is finite and within the saturation.
+  const double d0[4] = {0.25, -0.5, 2.0, 0.75};
+  const double zero[4] = {0, 0, 0, 0};
+  const double corner[] = {0x1p64, -0x1p64, 0.0, 1.0};
+  for (uint32_t op = GSHSCENE_COMPOSITE_SCREEN; op <= GSHSCENE_COMPOSITE_LUMINOSITY; op++) {
+    EXPECT_TRUE(gshcpu_render_bounded(op)) << op;
+    EXPECT_TRUE(gshcpu_render_blends(op)) << op;
+    double d[4];
+    std::memcpy(d, d0, sizeof d);
+    ASSERT_EQ(gshcpu_render_apply(d, zero, 1.0, op), 1);
+    EXPECT_EQ(std::memcmp(d, d0, sizeof d), 0) << "bounded: " << op;
+    for (double a : corner) {
+      for (double b : corner) {
+        double cb[3] = {a, b, 0.5}, cs[3] = {b, 0.25, a}, out[3];
+        gshcpu_render_mix(op, cb, cs, out);
+        for (double v : out) {
+          EXPECT_TRUE(std::isfinite(v) && std::fabs(v) <= 0x1p64) << op;
+        }
+        double s4[4] = {b, a, 0.25, 1.0}, d4[4] = {a, b, -a, 1.0};
+        gshcpu_render_apply(d4, s4, 0.5, op);
+        for (double v : d4) {
+          EXPECT_TRUE(std::isfinite(v)) << op;
+        }
+      }
+    }
+  }
+  EXPECT_FALSE(gshcpu_render_blends(GSHSCENE_COMPOSITE_PLUS));
+  EXPECT_FALSE(gshcpu_render_blends(GSHSCENE_COMPOSITE_COUNT));
 }
 
 TEST(RenderArithmetic, AConversionBetweenEqualSpacesCopies) {

@@ -90,7 +90,8 @@
 enum {
   OUT_OK = 0, OUT_REFUSED_WHILE_DRAWING, OUT_STRICT, OUT_LIMIT_REGION, OUT_CANCEL_MID, OUT_OOM, OUT_CALLER_MEMORY,
   OUT_WORKSPACE_SHORT, OUT_DAMAGE, OUT_GLYPHS_FAST, OUT_GLYPHS_GENERAL, OUT_FLOAT_TARGET, OUT_NESTED_GROUP,
-  OUT_GRADIENT_DRAWN, OUT_GRADIENT_NOTICE, OUT_GRADIENT_LIMIT, OUT_COLOR_LIMIT, OUT_COLOR_AT_BOUND, OUT_COUNT
+  OUT_GRADIENT_DRAWN, OUT_GRADIENT_NOTICE, OUT_GRADIENT_LIMIT, OUT_COLOR_LIMIT, OUT_COLOR_AT_BOUND, OUT_BLEND_DRAWN,
+  OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -99,7 +100,8 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "glyphs on the fast tier", "glyphs on the general route", "a float target", "a group inside a group",
     "a render with a gradient fill", "a gradient fill that draws nothing (a notice)",
     "a gradient past G14's bounds, refused at intern", "a fill's color past N1's bound, refused",
-    "a render with a color at N1's bound in a gamma space"};
+    "a render with a color at N1's bound in a gamma space", "a render with a blend-mode group",
+    "a blend-mode group on a float target", "a group of PDF's fields refused (S19)"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -204,6 +206,7 @@ typedef struct World {
   GSHSCENE_Store * store;            /* where a gradient paint is interned */
   size_t gradients;                  /* gradient fills recorded */
   size_t at_bound;                   /* fills recorded with a component at N1's bound, in a gamma space */
+  size_t blends;                     /* groups recorded with a blend mode (color-paint story P3) */
   const GSHSCENE_Resource * paths[MAX_PATHS];
   size_t path_count;
   const GSHSCENE_Resource * runs[2]; /* from a face with the fast tier, and from one without */
@@ -527,9 +530,16 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
         group.blend_space.transfer = GCOL_TRANSFER_GAMMA;
         group.blend_space.gamma = 0.1;
       }
+      /* T1, S19: PDF's group fields, which shape-cpu refuses (its planning pass), never drawing them as a default. */
+      if ((blend & 0xA0) == 0xA0) {
+        group.knockout = 1;
+      } else if ((blend & 0xA0) == 0x80) {
+        group.isolation = GSHSCENE_ISOLATION_NON_ISOLATED;
+      }
       if (gshscene_list_group_push(list, &group, 0, 0.0) == GSHSCENE_OK) {
         open[depth++] = 1;
         groups++;
+        w->blends += group.composite >= GSHSCENE_COMPOSITE_SCREEN;
         int nested = 0;
         for (int k = 0; k < depth; k++) {
           nested += open[k];
@@ -807,6 +817,28 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   outcomes[OUT_REFUSED_WHILE_DRAWING] += summary.by_class[GSHSCENE_ENTRY_REFUSED] > 0 && r != GSHSCENE_ERR_OOM;
   outcomes[OUT_GRADIENT_DRAWN] += world.gradients > 0 && r == GSHSCENE_OK;
   outcomes[OUT_COLOR_AT_BOUND] += world.at_bound > 0 && r == GSHSCENE_OK;
+  outcomes[OUT_BLEND_DRAWN] += world.blends > 0 && r == GSHSCENE_OK;
+  for (size_t i = 0; i < gshscene_report_count(report); i++) {
+    GSHSCENE_Report_Entry e;
+    CHECK(gshscene_report_entry(report, i, &e) == GSHSCENE_OK);
+    if (e.reason == GSHSCENE_REASON_GROUP_ISOLATION || e.reason == GSHSCENE_REASON_GROUP_KNOCKOUT ||
+        e.reason == GSHSCENE_REASON_SOFT_MASK) {
+      CHECK(e.entry_class == GSHSCENE_ENTRY_REFUSED);
+      outcomes[OUT_PDF_REFUSED]++;
+    }
+  }
+  if (r == GSHSCENE_OK && (target_byte & 3) >= 2) {
+    /* No NaN reaches a store (B9, N1): every float the render wrote is a number. */
+    const size_t stride = gimg_raster_stride_bytes(raster);
+    const uint8_t * bytes = gimg_raster_pixels_const(raster);
+    for (uint32_t y = 0; y < height; y++) {
+      const float * row = (const float *)(bytes + (size_t)y * stride);
+      for (uint32_t x = 0; x < width * 4; x++) {
+        CHECK(row[x] == row[x]);
+      }
+    }
+    outcomes[OUT_BLEND_FLOAT] += world.blends > 0;
+  }
   if ((target_byte & 3) >= 2) {
     /* N1: every value a float target holds after a render is finite (the backdrop is, and the saturation keeps it). */
     const size_t stride = gimg_raster_stride_bytes(raster);

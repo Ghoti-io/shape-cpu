@@ -184,6 +184,17 @@ def scripted():
              bound_fill(0, 0x80 | 0x20 | 2), bound_fill(1, 0x80 | 0x40 | 0x30 | 0x08 | 2)]
     out["scripted-color-bound.bin"] = header() + body(bound)
     out["scripted-color-bound-float.bin"] = header(target=T64 | 3) + body(bound)
+    # Color-paint story P3: a group's composite byte is the operator modulo 28 (13 to 27 the blend modes), and its
+    # blend byte with bits 7 and 5 set (0xA0) makes it knockout, with bit 7 alone (0x80) non-isolated: shape-cpu
+    # refuses both (S19).  Each blend mode over the standard backdrop, on an 8-bit and a float target, and the two
+    # refused groups.
+    blends = [fill(0)]
+    for mode in range(13, 28):
+        blends += [bytes([5, 0, 3 + mode % 2, mode, 1]), fill(1 if mode % 3 else 0), POP]
+    out["scripted-blend-modes.bin"] = header() + body(blends)
+    out["scripted-blend-modes-float.bin"] = header(target=T64 | 3) + body(blends)
+    pdf = [fill(0), bytes([5, 0, 4, 23, 0xA1]), fill(1), POP, bytes([5, 0, 4, 0, 0x81]), fill(0), POP]
+    out["scripted-pdf-refused.bin"] = header() + body(pdf)
     # Found by the first libFuzzer soak (story 16): strict, a damage and a small cell cap. The damage-limited render
     # passed and the whole render met the cap outside the damage, so it was refused. Since 2026-10-21 the cap is met
     # over the whole render's region whatever the damage (S4), and the harness requires both to agree.

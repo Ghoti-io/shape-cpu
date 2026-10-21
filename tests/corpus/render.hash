@@ -69,5 +69,17 @@ render gradient-paints rgba8 e2538d1493f81206
 render gradient-paints rgba8-premultiplied 027be95b4c3500f6
 render gradient-paints rgbaf32 cc313be58e8094f3
 render gradient-paints rgbaf32-premultiplied db44b85183887a36
-hash 7a1a5d7c6a1211ff
-count 68
+render blend-separable rgba8 6393516fe4306bf2
+render blend-separable rgba8-premultiplied 8b18f14797ea72e8
+render blend-separable rgbaf32 fc05e62ec52dc866
+render blend-separable rgbaf32-premultiplied 38f4215ba28425c4
+render blend-non-separable rgba8 9f721d3454d560cf
+render blend-non-separable rgba8-premultiplied 4146b3fdd0dcc8f8
+render blend-non-separable rgbaf32 7cdabc79aa32470d
+render blend-non-separable rgbaf32-premultiplied c7e6ca56ae6a033c
+render blend-out-of-range rgba8 fe6af0aaa0f0f474
+render blend-out-of-range rgba8-premultiplied a3584eb347f8f02b
+render blend-out-of-range rgbaf32 659ddba7c8433d05
+render blend-out-of-range rgbaf32-premultiplied c086d5f464ace710
+hash ab5d7d8e8600ca19
+count 80

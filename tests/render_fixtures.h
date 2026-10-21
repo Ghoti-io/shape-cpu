@@ -33,7 +33,7 @@
  * | clip-leaf | a clip around two overlapping fills: each is weighed by it (N9, D8) |
  * | clip-group | the same fills in a group inside the clip: weighed once |
  * | opacity-group | two overlapping opaque fills in a group of opacity 0.6 |
- * | operators | each of the thirteen operators, a group per cell, each cell clipped |
+ * | operators | each of the thirteen operators of N4, a group per cell, each cell clipped |
  * | order | a depth group with a tie broken by layer, and an overlay group |
  * | blend-spaces | groups in linear sRGB, Display P3 and a gamma, nested, with paints in Adobe RGB, BT.2020 and P3 |
  * | foreground | foreground paints, the list's foreground in Display P3 |
@@ -46,6 +46,9 @@
  * | gradient-radial | the two-circle cone (the start circle outside the end), concentric repeat, a negative start radius under reflect, a strip |
  * | gradient-sweep | sweeps in degrees (pad), turns (repeat), radians (reflect) and with equal angles (pad's step) |
  * | gradient-paints | interpolation in linear sRGB premultiplied and in a P3 gamma, foreground and palette stops, equal offsets, a group in another blend space under a clip, a picture instanced turned, and two fills that draw nothing (degenerate, a flat map) |
+ * | blend-separable | (color-paint story P3) each of the eleven separable blend modes, a group per cell over a partly transparent backdrop, with partial coverage, a clip, and opacity 0.8 on every other cell |
+ * | blend-non-separable | the four non-separable modes over a saturated and a grey backdrop, in the target's sRGB-encoded space and inside a linear-light parent group (B5), and a blending group with a space of its own |
+ * | blend-out-of-range | blend modes on sources out of range (negative, above 1, the recorded bound 2^16), dodge and burn past their poles, ClipColor with both steps, in a gamma-0.1 parent, nested blending groups, and a blend over the backdrop's transparent pixels |
  */
 
 #ifndef GHOTI_IO_GSHCPU_TEST_RENDER_FIXTURES_H
@@ -292,7 +295,8 @@ static inline GSHSCENE_List * rf_opacity_group(RF_Ctx * c) {
 
 static inline GSHSCENE_List * rf_operators(RF_Ctx * c) {
   GSHSCENE_List * l = rf_open(c);
-  for (uint32_t op = 0; op < GSHSCENE_COMPOSITE_COUNT; op++) {
+  /* The thirteen of N4, pinned: the blend modes (B1) have fixtures of their own, and this golden stays what it was. */
+  for (uint32_t op = 0; op <= GSHSCENE_COMPOSITE_PLUS; op++) {
     double x = 1.0 + 9.0 * (double)(op % 5);
     double y = 1.0 + 13.0 * (double)(op / 5);
     GSHSCENE_Group g = rf_group(op % 2 ? 0.8 : 1.0, op);
@@ -772,6 +776,87 @@ static inline GSHSCENE_List * rf_gradient_paints(RF_Ctx * c) {
 /** The fixtures, in their committed order. */
 typedef GSHSCENE_List * (*RF_Build)(RF_Ctx * c);
 
+/* --- blend modes (color-paint story P3, B1 to B14) ----------------------------------------------------------------- */
+
+/** One cell of a blend fixture: a clipped backdrop fill, then a group of @p op over it holding @p src. */
+static inline void rf_blend_cell(RF_Ctx * c, GSHSCENE_List * l, uint32_t op, double x, double y, double opacity,
+    GSHSCENE_Paint back, GSHSCENE_Paint src, const GSHSCENE_Color_Space * group_space) {
+  GSHSCENE_Group g = rf_group(opacity, op);
+  if (group_space) {
+    g.blend_space = *group_space;
+  }
+  rf_check(c, gshscene_list_clip_push(l, rf_rect(c, x, y, x + 8.5, y + 12.25), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) ==
+      GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, x, y + 1.5, x + 6.0, y + 9.0), NULL, GSHGEOM_FILL_NONZERO, back, 0, 0.0);
+  rf_check(c, gshscene_list_group_push(l, &g, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, rf_blob(c, x + 2.25, y + 3.75, 6.5), NULL, GSHGEOM_FILL_NONZERO, src, 0, 0.0);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+}
+
+static inline GSHSCENE_List * rf_blend_separable(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  for (uint32_t i = 0; i <= GSHSCENE_COMPOSITE_MULTIPLY - GSHSCENE_COMPOSITE_SCREEN; i++) {
+    double x = 1.0 + 9.0 * (double)(i % 5);
+    double y = 1.0 + 13.0 * (double)(i / 5);
+    rf_blend_cell(c, l, GSHSCENE_COMPOSITE_SCREEN + i, x, y, i % 2 ? 0.8 : 1.0, rf_solid(0.2, 0.55, 0.9, 0.85),
+        rf_solid(0.95, 0.45, 0.1, 0.7), NULL);
+  }
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_blend_non_separable(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  GSHSCENE_Group linear = rf_group(1.0, GSHSCENE_COMPOSITE_SRC_OVER);
+  linear.blend_space = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_LINEAR, 0.0);
+  const GSHSCENE_Color_Space p3 = rf_space(GCOL_PRIMARIES_DISPLAY_P3, GCOL_TRANSFER_LINEAR, 0.0);
+  for (uint32_t i = 0; i < 4; i++) {
+    uint32_t op = GSHSCENE_COMPOSITE_HUE + i;
+    double x = 1.0 + 9.0 * (double)i;
+    /* Row 1: in the target's space, over a saturated backdrop; row 2: over a grey one; row 3: inside a linear parent. */
+    rf_blend_cell(c, l, op, x, 1.0, 1.0, rf_solid(0.9, 0.2, 0.3, 0.9), rf_solid(0.2, 0.4, 0.95, 0.8), NULL);
+    rf_blend_cell(c, l, op, x, 14.0, 0.8, rf_solid(0.5, 0.5, 0.5, 1.0), rf_solid(0.1, 0.8, 0.3, 0.75), NULL);
+    rf_check(c, gshscene_list_group_push(l, &linear, 0, 0.0) == GSHSCENE_OK);
+    rf_blend_cell(c, l, op, x, 27.0, 1.0, rf_solid(0.9, 0.2, 0.3, 0.9), rf_solid(0.2, 0.4, 0.95, 0.8), i == 3 ? &p3 : NULL);
+    rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  }
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_blend_out_of_range(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  static const uint32_t ops[5] = {GSHSCENE_COMPOSITE_COLOR_DODGE, GSHSCENE_COMPOSITE_COLOR_BURN,
+      GSHSCENE_COMPOSITE_SOFT_LIGHT, GSHSCENE_COMPOSITE_LUMINOSITY, GSHSCENE_COMPOSITE_DIFFERENCE};
+  for (uint32_t i = 0; i < 5; i++) {
+    double x = 1.0 + 9.0 * (double)i;
+    /* Above 1 and negative, the recorded bound, and dodge's pole approached from above (Cs = 1 + 2^-40). */
+    rf_blend_cell(c, l, ops[i], x, 1.0, 1.0, rf_solid(0.6, 0.3, 0.8, 0.9), rf_solid(1.5, -0.25, 2.0, 0.75), NULL);
+    rf_blend_cell(c, l, ops[i], x, 14.0, 1.0, rf_solid(-0.5, 1.25, 0.5, 1.0),
+        rf_solid(65536.0, 1.0 + 0x1p-40, -65536.0, 0.5), NULL);
+  }
+  /* In a gamma-0.1 parent (its encode raises the out-of-range values toward the saturation), nested blending groups. */
+  GSHSCENE_Group gamma = rf_group(1.0, GSHSCENE_COMPOSITE_SRC_OVER);
+  gamma.blend_space = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_GAMMA, 0.1);
+  GSHSCENE_Group outer = rf_group(0.9, GSHSCENE_COMPOSITE_MULTIPLY);
+  rf_check(c, gshscene_list_group_push(l, &gamma, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, 1.0, 27.5, 30.0, 39.0), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1.25, 0.5, -0.5, 0.8), 0, 0.0);
+  rf_check(c, gshscene_list_group_push(l, &outer, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, rf_blob(c, 4.0, 28.0, 10.0), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.75, 1.5, 0.25, 0.9), 0, 0.0);
+  rf_blend_cell(c, l, GSHSCENE_COMPOSITE_HARD_LIGHT, 14.0, 27.0, 1.0, rf_solid(0.3, -0.2, 0.9, 0.7),
+      rf_solid(-1.0, 0.5, 3.0, 0.6), NULL);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  /* Over the backdrop alone (its transparent and partial pixels): no fill under the blend. */
+  GSHSCENE_Group screen = rf_group(1.0, GSHSCENE_COMPOSITE_SCREEN);
+  rf_check(c, gshscene_list_group_push(l, &screen, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, 31.0, 27.5, 47.0, 39.5), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.4, 0.9, -0.3, 0.65), 0, 0.0);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  rf_close(c, l);
+  return l;
+}
+
 typedef struct RF_Fixture {
   const char * name;
   RF_Build build;
@@ -795,6 +880,9 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"gradient-radial", rf_gradient_radial},
     {"gradient-sweep", rf_gradient_sweep},
     {"gradient-paints", rf_gradient_paints},
+    {"blend-separable", rf_blend_separable},
+    {"blend-non-separable", rf_blend_non_separable},
+    {"blend-out-of-range", rf_blend_out_of_range},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

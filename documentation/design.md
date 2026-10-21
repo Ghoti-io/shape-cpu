@@ -87,7 +87,8 @@ keeps its own spelling, which is committed in its goldens.
 `gshcpu_sink_create` makes a `GSHSCENE_Sink` (shape-scene's sink.h, S1 to S16).
 It draws `RASTER` targets of RGBA, interleaved, 8-bit unsigned normalized or
 32-bit float, straight or premultiplied as the raster's format says; every other
-target is `ERR_UNSUPPORTED`. Its caps are every item kind and every operator,
+target is `ERR_UNSUPPORTED`. Its caps are every item kind and every operator it composites, named one by one (the
+Porter-Duff operators, `PLUS` and the fifteen blend modes; none of PDF's group fields, which the plan refuses),
 `CAN_BLOCK`, `CALLER_MEMORY`, `CLIP_AA`, `BLEND_SPACES`, `READBACK`,
 `GLYPHS_FROM_FONT` (story 14a), every gradient kind with `GRADIENT_SPACES`
 (color-paint story P2), and cancel between units with a bound of
@@ -166,6 +167,25 @@ a color component is 6.11e-16 (linear), 7.77e-16 (radial) and 2.22e-16 (sweep), 
 tolerance of `1e-12` (`GSHCPU_RENDER_GRADIENT_TOLERANCE`); all 343 exact cases are equal bit for bit, and every
 point the oracle says draws nothing is drawn as nothing. No dithering: the goldens are bit-identical on every
 target.
+
+### Blend modes (color-paint story P3)
+
+A group of a blend mode composites at its pop by `apply` with shape-scene's `op_X` (B2), in the enclosing layer's
+space (B5): both colors un-premultiplied by N1's evaluation, the mixing function evaluated as B7 and B8 write it in the
+order `render.h` states (S11), saturated (B9), weighted, applied, with one rounding at the write. Dodge's and burn's
+quotients are never formed past `2^66`; ClipColor's `0 / 0` form is decided by "all components equal", which a double
+evaluation decides exactly (stated as `n = L`, the doubles of `Lum` would make it the quotient of two roundings);
+`Lum`'s constants are the doubles nearest `0.3, 0.59, 0.11`. The caps were narrowed to name the operators `apply`
+knows before shape-scene's enum grew, and `apply` has no silent default, so an operator it does not know is refused by
+the plan and could not be drawn as `CLEAR`.
+
+Measured against shape-scene's `kMix` (1863 samples of the mixing function, 897 exact) and its 417 blend cases: every
+exact sample equal bit for bit (a zero's sign aside: the values are reals), and the worst relative error of the
+others 4.4e-16 (polynomial modes, `min`, `max`), 1.3e-16 (dodge and burn), 7.1e-15 (soft-light's root) and 1.4e-15
+(the non-separable modes), against the `1e-12` of D7. A sample whose evaluation in this order cannot meet the
+tolerance (`2^64 + 1 - 2^64` in screen, a value within its own error of one of B10's jumps) is not in the table: the
+generator refuses it. Three fixtures (`blend-separable`, `blend-non-separable`, `blend-out-of-range`) add twelve
+goldens; every earlier golden is unchanged.
 
 ### Why the layers cover the region, not bands of it
 

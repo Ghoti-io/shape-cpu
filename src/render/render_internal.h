@@ -98,8 +98,14 @@ void gshcpu_render_convert_premultiplied(const GSHCPU_Convert * c, const double 
  */
 int gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op);
 
-/** N4: nonzero for an operator with `op(0, D) = D` for every `D`. */
+/** N4: nonzero for an operator with `op(0, D) = D` for every `D` (every blend mode, B3). */
 int gshcpu_render_bounded(uint32_t op);
+
+/** B1: nonzero for a blend mode (13 to 27). */
+int gshcpu_render_blends(uint32_t op);
+
+/** B7 to B9: the mixing function of blend mode @p op on straight colors, each component saturated. */
+void gshcpu_render_mix(uint32_t op, const double cb[3], const double cs[3], double out[3]);
 
 /** D8: the weight of a coverage under one more clip, `(m8 * c8 + 127) / 255`. */
 uint32_t gshcpu_render_weigh(uint32_t m8, uint32_t c8);

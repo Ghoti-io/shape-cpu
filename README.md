@@ -18,7 +18,8 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
 - The CPU sink (`render.h`): `gshcpu_sink_create` makes a `shape-scene` sink that
   renders closed lists into RGBA8 and RGBAF32 rasters, straight or
   premultiplied: fills under both rules, clips, opacity groups in their blend
-  spaces with every Porter-Duff operator and plus, linear, radial (the two-circle cone) and sweep gradients in
+  spaces with every Porter-Duff operator, plus and the fifteen blend modes (W3C's, numbered as COLRv1
+  numbers them), linear, radial (the two-circle cone) and sweep gradients in
   their interpolation spaces, the foreground, palette entries
   (a fill whose entry is missing is refused, as the plan says), pictures and
   outline glyph runs, in premultiplied `double` with one rounding at the write.

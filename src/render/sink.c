@@ -459,8 +459,11 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   }
   /* Exactly the operators gshcpu_render_apply composites, named rather than counted up to the enum's end: a
    * shape-scene whose enum has grown past them must not find them claimed here (they would be refused by nothing and
-   * composited as no operator at all). */
+   * composited as no operator at all).  The Porter-Duff operators and PLUS, then the blend modes (B1, story P3). */
   for (uint32_t c = GSHSCENE_COMPOSITE_SRC_OVER; c <= GSHSCENE_COMPOSITE_PLUS; c++) {
+    out->composites |= UINT32_C(1) << c;
+  }
+  for (uint32_t c = GSHSCENE_COMPOSITE_SCREEN; c <= GSHSCENE_COMPOSITE_LUMINOSITY; c++) {
     out->composites |= UINT32_C(1) << c;
   }
   out->flags = GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA | GSHSCENE_CAP_BLEND_SPACES |

@@ -34,8 +34,11 @@
  * assumed).  Every other format (gray, CMYK, planar, 12 or 16 bits), a `STREAM`
  * target and the reserved GPU kinds are ::GSHSCENE_ERR_UNSUPPORTED.  For a target
  * it draws, the caps are: every item kind and the composite operators it
- * composites, named one by one (the twelve Porter-Duff operators and `PLUS`;
- * an operator past them is refused by the planning pass, never drawn as another);
+ * composites, named one by one (the twelve Porter-Duff operators, `PLUS` and the
+ * fifteen blend modes of color-paint story P3; an operator past them is refused
+ * by the planning pass, never drawn as another); none of PDF's group fields
+ * (non-isolated, knockout, a soft mask: shape-scene's T1 to T7), so the planning
+ * pass refuses a group that sets one (S19);
  * `CAN_BLOCK` (it completes inside `begin`), `CALLER_MEMORY`, `CLIP_AA`,
  * `BLEND_SPACES`, `READBACK` and `GLYPHS_FROM_FONT` (story 14a: a run from a font
  * is drawn through its face's provider by shape-scene's route, glyph.h, the fast
@@ -132,6 +135,36 @@
  *   with a bounded operator does not touch a pixel where its scaled result is
  *   `(0, 0, 0, 0)` (there `apply` is exactly the backdrop); an unbounded one
  *   applies wherever its weight is above zero.
+ * - **Blend modes (shape-scene's B1 to B14; color-paint story P3).**  A
+ *   group of blend mode `X` composites by `apply` with `op_X(S, D)`, in the
+ *   enclosing layer's space (B5): `Cs` and `Cb` are `S` and `D` un-premultiplied
+ *   by N1's evaluation (no division past the bound; where `As Ab` is 0, `B` is
+ *   not evaluated and its term is 0), `B_X(Cb, Cs)` is evaluated as B7 and B8
+ *   write it, each component saturated (B9), and `op_X` is
+ *   `(cs * (1 - Ab) + cb * (1 - As)) + (As * Ab) * B` with alpha
+ *   `As + Ab * (1 - As)`, then `apply`'s `(1 - m) * D + m * o`, saturated, with
+ *   one rounding at the write.  The order of operations is the formulas' as
+ *   written, left to right: screen `(b + s) - b * s`; hard-light `b * (2 * s)`
+ *   or screen of `b` and `2 * s - 1`; overlay hard-light with `b` and `s`
+ *   exchanged; soft-light `b - ((1 - 2 * s) * b) * (1 - b)`, else
+ *   `b + (2 * s - 1) * (d - b)` with `d` the polynomial
+ *   `((16 * b - 12) * b + 4) * b` or `gmath_sqrt(b)`; exclusion
+ *   `(b + s) - (2 * b) * s`; dodge's and burn's quotients `b / (1 - s)` and
+ *   `(1 - b) / s` taken as `sign * 2^66` once the numerator is at least `2^66`
+ *   times the denominator (exact, and nothing past it is formed); `Lum` with the
+ *   doubles nearest `0.3, 0.59, 0.11`; ClipColor's steps only when the components
+ *   are not all equal (B10's `0 / 0`, decided exactly); SetSat by a three-swap
+ *   sort.  No silent default: an operator the compositor does not know fails the
+ *   render, and the caps claim exactly those it knows.  Before the write a value
+ *   is equal to shape-scene's oracle where every step of this evaluation is exact
+ *   (STOP-2: the vectors mark those), and otherwise within `1e-12` times
+ *   `max(1, |v|)` (the vectors leave out the samples whose evaluation in this
+ *   order cannot meet it: a cancellation at large magnitude, or a value within
+ *   its error of a discontinuity of B10).  Measured over shape-scene's 1863
+ *   samples of `B` and 417 blend cases: polynomial and `min`/`max` modes within
+ *   `4.5e-16`, dodge and burn `1.4e-16`, soft-light `7.2e-15` (its root), the
+ *   non-separable modes `1.5e-15`.  A value at the corners `+-2^64` is finite and
+ *   within the saturation.
  * - **Groups (N8).**  At a group's pop its layer is converted per pixel to the
  *   enclosing layer's space (un-premultiplied, converted, premultiplied again;
  *   alpha 0 gives 0), and not at all when the spaces are equal (N3); then scaled
@@ -158,9 +191,12 @@
  *   times `max(1, |v|)` of the rational oracle's (shape-scene's
  *   `tests/composite_vectors.h`, and this
  *   library's `tests/render_vectors.h` for the D8 weights), and equal to it where
- *   no transfer or matrix is evaluated and the values are dyadic.  After it, a
- *   stored value is the oracle's rounded the same way, except that a value within
- *   `1e-9` of a rounding boundary may land on either side.
+ *   no transfer or matrix is evaluated and the values are dyadic (a blend: see
+ *   above).  After it, a stored value is the oracle's rounded the same way, except
+ *   that a value within `1e-9` of a rounding boundary may land on either side; a
+ *   float store of an inexact value is the one rounding of a value within the
+ *   tolerance, which near zero, where floats are far finer than it, is a range of
+ *   floats.
  *
  * ### Memory (S9)
  *

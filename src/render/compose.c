@@ -32,6 +32,7 @@
 
 #include "render_internal.h"
 
+#include <ghoti.io/math/basic.h>
 #include <ghoti.io/math/elementary.h>
 
 #include <string.h>
@@ -239,6 +240,202 @@ void gshcpu_render_convert_premultiplied(const GSHCPU_Convert * c, const double 
   out[3] = a;
 }
 
+/* --- B1 to B12: the blend modes, in S11's order of operations ------------------------------- */
+
+/** B9: the magnitude past which dodge's and burn's quotients are not formed. */
+#define QUOTIENT_CAP 0x1p66
+/** B8: Lum's coefficients, the doubles nearest W3C's 0.3, 0.59 and 0.11. */
+#define LUM_R 0.3
+#define LUM_G 0.59
+#define LUM_B 0.11
+
+/** B9: @p n / @p d, taken as sign * 2^66 once |n| >= 2^66 |d| (@p d is not 0), so no infinity is formed. */
+static double capped_quotient(double n, double d) {
+  double mn = n < 0.0 ? -n : n;
+  double md = d < 0.0 ? -d : d;
+  if (mn >= QUOTIENT_CAP * md) {
+    return (n < 0.0) != (d < 0.0) ? -QUOTIENT_CAP : QUOTIENT_CAP;
+  }
+  return n / d;
+}
+
+static double mix_screen(double b, double s) {
+  return b + s - b * s;
+}
+
+static double mix_hard_light(double b, double s) {
+  return s <= 0.5 ? b * (2.0 * s) : mix_screen(b, 2.0 * s - 1.0);
+}
+
+/** B7: one channel of a separable mode (W3C's, literally, on any real value). */
+static double mix_separable(uint32_t op, double b, double s) {
+  switch (op) {
+    case GSHSCENE_COMPOSITE_MULTIPLY:
+      return b * s;
+    case GSHSCENE_COMPOSITE_SCREEN:
+      return mix_screen(b, s);
+    case GSHSCENE_COMPOSITE_OVERLAY:
+      return mix_hard_light(s, b); /* hard-light with backdrop and source exchanged */
+    case GSHSCENE_COMPOSITE_DARKEN:
+      return b < s ? b : s;
+    case GSHSCENE_COMPOSITE_LIGHTEN:
+      return b > s ? b : s;
+    case GSHSCENE_COMPOSITE_COLOR_DODGE: {
+      if (b == 0.0) {
+        return 0.0;
+      }
+      if (s == 1.0) {
+        return 1.0;
+      }
+      double q = capped_quotient(b, 1.0 - s);
+      return q < 1.0 ? q : 1.0; /* B10: a negative quotient is kept */
+    }
+    case GSHSCENE_COMPOSITE_COLOR_BURN: {
+      if (b == 1.0) {
+        return 1.0;
+      }
+      if (s == 0.0) {
+        return 0.0;
+      }
+      double q = capped_quotient(1.0 - b, s);
+      return 1.0 - (q < 1.0 ? q : 1.0);
+    }
+    case GSHSCENE_COMPOSITE_HARD_LIGHT:
+      return mix_hard_light(b, s);
+    case GSHSCENE_COMPOSITE_SOFT_LIGHT: {
+      if (s <= 0.5) {
+        return b - (1.0 - 2.0 * s) * b * (1.0 - b);
+      }
+      /* B10: the root only where b > 1/4, so its argument is positive; the polynomial for every other b. */
+      double d = b <= 0.25 ? ((16.0 * b - 12.0) * b + 4.0) * b : gmath_sqrt(b);
+      return b + (2.0 * s - 1.0) * (d - b);
+    }
+    case GSHSCENE_COMPOSITE_DIFFERENCE:
+      return b - s < 0.0 ? s - b : b - s;
+    default: /* GSHSCENE_COMPOSITE_EXCLUSION: the callers pass only separable modes */
+      return b + s - 2.0 * b * s;
+  }
+}
+
+static double lum(const double c[3]) {
+  return LUM_R * c[0] + LUM_G * c[1] + LUM_B * c[2];
+}
+
+/** B8: L, n and x read once, on entry; each step only when the components are not all equal (B10's 0/0 form). */
+static void clip_color(double c[3]) {
+  double l = lum(c);
+  double n = c[0] < c[1] ? c[0] : c[1];
+  n = c[2] < n ? c[2] : n;
+  double x = c[0] > c[1] ? c[0] : c[1];
+  x = c[2] > x ? c[2] : x;
+  if (n < 0.0 && n != x) {
+    for (int i = 0; i < 3; i++) {
+      c[i] = l + (c[i] - l) * l / (l - n);
+    }
+  }
+  if (x > 1.0 && n != x) {
+    for (int i = 0; i < 3; i++) {
+      c[i] = l + (c[i] - l) * (1.0 - l) / (x - l);
+    }
+  }
+}
+
+static void set_lum(double c[3], double l) {
+  double d = l - lum(c);
+  for (int i = 0; i < 3; i++) {
+    c[i] += d;
+  }
+  clip_color(c);
+}
+
+static double sat_of(const double c[3]) {
+  double n = c[0] < c[1] ? c[0] : c[1];
+  double x = c[0] > c[1] ? c[0] : c[1];
+  return (c[2] > x ? c[2] : x) - (c[2] < n ? c[2] : n);
+}
+
+/** B8: the components holding the smallest, middle and largest values; how ties are named changes nothing. */
+static void set_sat(double c[3], double s) {
+  int i0 = 0, i1 = 1, i2 = 2, t;
+  if (c[i0] > c[i1]) {
+    t = i0;
+    i0 = i1;
+    i1 = t;
+  }
+  if (c[i1] > c[i2]) {
+    t = i1;
+    i1 = i2;
+    i2 = t;
+  }
+  if (c[i0] > c[i1]) {
+    t = i0;
+    i0 = i1;
+    i1 = t;
+  }
+  double out[3] = {0.0, 0.0, 0.0};
+  if (c[i2] > c[i0]) {
+    out[i1] = (c[i1] - c[i0]) * s / (c[i2] - c[i0]);
+    out[i2] = s;
+  }
+  memcpy(c, out, sizeof out);
+}
+
+int gshcpu_render_blends(uint32_t op) {
+  return op >= GSHSCENE_COMPOSITE_SCREEN && op <= GSHSCENE_COMPOSITE_LUMINOSITY;
+}
+
+void gshcpu_render_mix(uint32_t op, const double cb[3], const double cs[3], double out[3]) {
+  double c[3];
+  switch (op) {
+    case GSHSCENE_COMPOSITE_HUE:
+      memcpy(c, cs, sizeof c);
+      set_sat(c, sat_of(cb));
+      set_lum(c, lum(cb));
+      break;
+    case GSHSCENE_COMPOSITE_SATURATION:
+      memcpy(c, cb, sizeof c);
+      set_sat(c, sat_of(cs));
+      set_lum(c, lum(cb));
+      break;
+    case GSHSCENE_COMPOSITE_COLOR:
+      memcpy(c, cs, sizeof c);
+      set_lum(c, lum(cb));
+      break;
+    case GSHSCENE_COMPOSITE_LUMINOSITY:
+      memcpy(c, cb, sizeof c);
+      set_lum(c, lum(cs));
+      break;
+    default:
+      for (int i = 0; i < 3; i++) {
+        c[i] = mix_separable(op, cb[i], cs[i]);
+      }
+      break;
+  }
+  for (int i = 0; i < 3; i++) {
+    out[i] = gshcpu_render_saturate(c[i]); /* B9 */
+  }
+}
+
+/** B2: op_X(S, D) on premultiplied values: `cs (1 - Ab) + cb (1 - As) + As Ab sat(B(Cb, Cs))`, source-over's alpha. */
+static void blend(uint32_t op, const double s[4], const double d[4], double o[4]) {
+  const double sa = s[3];
+  const double da = d[3];
+  double b[3] = {0.0, 0.0, 0.0};
+  if (sa * da != 0.0) {
+    double cs[3];
+    double cb[3];
+    for (int i = 0; i < 3; i++) {
+      cs[i] = gshcpu_render_unpremultiply(s[i], sa); /* N1: saturated, never formed past it */
+      cb[i] = gshcpu_render_unpremultiply(d[i], da);
+    }
+    gshcpu_render_mix(op, cb, cs, b);
+  }
+  for (int i = 0; i < 3; i++) {
+    o[i] = s[i] * (1.0 - da) + d[i] * (1.0 - sa) + sa * da * b[i];
+  }
+  o[3] = sa + da * (1.0 - sa);
+}
+
 /* --- N4, N5: the operators and apply ---------------------------------------------------- */
 
 int gshcpu_render_bounded(uint32_t op) {
@@ -250,6 +447,22 @@ int gshcpu_render_bounded(uint32_t op) {
     case GSHSCENE_COMPOSITE_SRC_ATOP:
     case GSHSCENE_COMPOSITE_XOR:
     case GSHSCENE_COMPOSITE_PLUS:
+    /* B3: every blend mode is bounded. */
+    case GSHSCENE_COMPOSITE_SCREEN:
+    case GSHSCENE_COMPOSITE_OVERLAY:
+    case GSHSCENE_COMPOSITE_DARKEN:
+    case GSHSCENE_COMPOSITE_LIGHTEN:
+    case GSHSCENE_COMPOSITE_COLOR_DODGE:
+    case GSHSCENE_COMPOSITE_COLOR_BURN:
+    case GSHSCENE_COMPOSITE_HARD_LIGHT:
+    case GSHSCENE_COMPOSITE_SOFT_LIGHT:
+    case GSHSCENE_COMPOSITE_DIFFERENCE:
+    case GSHSCENE_COMPOSITE_EXCLUSION:
+    case GSHSCENE_COMPOSITE_MULTIPLY:
+    case GSHSCENE_COMPOSITE_HUE:
+    case GSHSCENE_COMPOSITE_SATURATION:
+    case GSHSCENE_COMPOSITE_COLOR:
+    case GSHSCENE_COMPOSITE_LUMINOSITY:
       return 1;
     default:
       return 0;
@@ -305,6 +518,27 @@ int gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op) {
       break;
     case GSHSCENE_COMPOSITE_PLUS:
       break;
+    case GSHSCENE_COMPOSITE_SCREEN:
+    case GSHSCENE_COMPOSITE_OVERLAY:
+    case GSHSCENE_COMPOSITE_DARKEN:
+    case GSHSCENE_COMPOSITE_LIGHTEN:
+    case GSHSCENE_COMPOSITE_COLOR_DODGE:
+    case GSHSCENE_COMPOSITE_COLOR_BURN:
+    case GSHSCENE_COMPOSITE_HARD_LIGHT:
+    case GSHSCENE_COMPOSITE_SOFT_LIGHT:
+    case GSHSCENE_COMPOSITE_DIFFERENCE:
+    case GSHSCENE_COMPOSITE_EXCLUSION:
+    case GSHSCENE_COMPOSITE_MULTIPLY:
+    case GSHSCENE_COMPOSITE_HUE:
+    case GSHSCENE_COMPOSITE_SATURATION:
+    case GSHSCENE_COMPOSITE_COLOR:
+    case GSHSCENE_COMPOSITE_LUMINOSITY:
+      /* B2, inside N5's apply unchanged. */
+      blend(op, s, d, o);
+      for (int i = 0; i < 4; i++) {
+        d[i] = gshcpu_render_saturate((1.0 - m) * d[i] + m * o[i]); /* N1 */
+      }
+      return 1;
     default:
       /* No silent default: an operator this does not know is never drawn as another (it would be CLEAR).  The caps
        * claim exactly the operators named above, so the planning pass refuses every other before a render reaches
