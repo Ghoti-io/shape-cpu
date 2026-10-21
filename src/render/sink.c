@@ -747,7 +747,7 @@ static GSHSCENE_Result fill_gradient(Run * run, const GSHSCENE_Item * item, cons
         continue;
       }
       double color[4];
-      if (!gshcpu_render_gradient_at(&gr, (double)x + 0.5, (double)y + 0.5, color)) {
+      if (!gshcpu_render_gradient_at(&gr, (double)(int32_t)x + 0.5, (double)(int32_t)y + 0.5, color)) {
         continue; /* G8: outside the cone, the source is zero and src-over changes nothing */
       }
       gshcpu_render_convert_straight(&c, color, color);

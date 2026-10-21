@@ -11338,8 +11338,8 @@
 "rs-750-neg",
 "srcl",
 "src/render/sink.c",
-"750:(!gshcpu_render_gradient_at(&gr, (double)x + 0.5, (double)y + 0.5, color))",
-"(!(!gshcpu_render_gradient_at(&gr, (double)x + 0.5, (double)y + 0.5, color)))",
+"750:(!gshcpu_render_gradient_at(&gr, (double)(int32_t)x + 0.5, (double)(int32_t)y + 0.5, color))",
+"(!(!gshcpu_render_gradient_at(&gr, (double)(int32_t)x + 0.5, (double)(int32_t)y + 0.5, color)))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -14568,8 +14568,8 @@
 "rd-150-neg",
 "srcl",
 "src/render/gradient.c",
-"150:(!finite(m[i]))",
-"(!(!finite(m[i])))",
+"150:(!is_finite(m[i]))",
+"(!(!is_finite(m[i])))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -14602,8 +14602,8 @@
 "rd-155-neg",
 "srcl",
 "src/render/gradient.c",
-"155:(largest == 0.0 || !finite(f->t[0]) || !finite(f->t[1]))",
-"(!(largest == 0.0 || !finite(f->t[0]) || !finite(f->t[1])))",
+"155:(largest == 0.0 || !is_finite(f->t[0]) || !is_finite(f->t[1]))",
+"(!(largest == 0.0 || !is_finite(f->t[0]) || !is_finite(f->t[1])))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -14891,8 +14891,8 @@
 "rd-178-neg",
 "srcl",
 "src/render/gradient.c",
-"178:(!finite(inv[i]) || (inv[i] == 0.0 && from[i] != 0.0))",
-"(!(!finite(inv[i]) || (inv[i] == 0.0 && from[i] != 0.0)))",
+"178:(!is_finite(inv[i]) || (inv[i] == 0.0 && from[i] != 0.0))",
+"(!(!is_finite(inv[i]) || (inv[i] == 0.0 && from[i] != 0.0)))",
 [
 "testRender_vectors",
 "testRender_parts",

@@ -134,7 +134,7 @@ static void grow_square_of_difference(Expansion * x, double a, double b, double 
 
 /* --- the map ----------------------------------------------------------------------------------------------- */
 
-static int finite(double x) {
+static int is_finite(double x) {
   return x - x == 0.0;
 }
 
@@ -147,12 +147,12 @@ static int invert(const GSHGEOM_Map * f, double inv[6]) {
   double largest = 0.0;
   for (int i = 0; i < 4; i++) {
     double a = m[i] < 0.0 ? -m[i] : m[i];
-    if (!finite(m[i])) {
+    if (!is_finite(m[i])) {
       return 0;
     }
     largest = a > largest ? a : largest;
   }
-  if (largest == 0.0 || !finite(f->t[0]) || !finite(f->t[1])) {
+  if (largest == 0.0 || !is_finite(f->t[0]) || !is_finite(f->t[1])) {
     return 0;
   }
   int e = 0;
@@ -175,7 +175,7 @@ static int invert(const GSHGEOM_Map * f, double inv[6]) {
   inv[5] = f->t[1];
   const double from[4] = {m[3], m[1], m[2], m[0]};
   for (int i = 0; i < 4; i++) {
-    if (!finite(inv[i]) || (inv[i] == 0.0 && from[i] != 0.0)) {
+    if (!is_finite(inv[i]) || (inv[i] == 0.0 && from[i] != 0.0)) {
       return 0; /* an entry of the inverse past the double range, or lost below it */
     }
   }
@@ -305,8 +305,8 @@ int gshcpu_render_gradient_in_domain(const GSHCPU_Gradient * g, GSHCPU_Rect r) {
   /* The map is affine, so the farthest point of the rectangle's centers is a corner; half the domain leaves room for
    * the rounding of the points between. */
   const double bound = GSHSCENE_GRADIENT_DOMAIN * 0.5;
-  const double xs[2] = {(double)r.x0 + 0.5, (double)r.x1 - 0.5};
-  const double ys[2] = {(double)r.y0 + 0.5, (double)r.y1 - 0.5};
+  const double xs[2] = {(double)(int32_t)r.x0 + 0.5, (double)(int32_t)r.x1 - 0.5};
+  const double ys[2] = {(double)(int32_t)r.y0 + 0.5, (double)(int32_t)r.y1 - 0.5}; /* 32-bit: no x87 (AD-17) */
   for (int i = 0; i < 2; i++) {
     for (int j = 0; j < 2; j++) {
       double px;
