@@ -160,8 +160,7 @@ static int invert(const GSHGEOM_Map * f, double inv[6]) {
   for (int i = 0; i < 4; i++) {
     m[i] = gmath_ldexp(m[i], -e);
   }
-  Expansion det;
-  det.n = 0;
+  Expansion det = {{0.0}, 0};
   grow_product(&det, m[0], m[3]);
   grow_product(&det, -m[1], m[2]);
   double d = approximate(&det);
@@ -227,8 +226,7 @@ GSHCPU_Result gshcpu_render_gradient_prepare(GSHCPU_Gradient * out, const GSHSCE
       /* G7: n_d = (-d_y, d_x), or p1 - p0 when d is zero; the denominator (p1 - p0) . n_d, exactly. */
       out->p[0] = g->p0[0];
       out->p[1] = g->p0[1];
-      Expansion den;
-      den.n = 0;
+      Expansion den = {{0.0}, 0};
       double dx_hi;
       double dx_lo;
       double dy_hi;
@@ -260,8 +258,7 @@ GSHCPU_Result gshcpu_render_gradient_prepare(GSHCPU_Gradient * out, const GSHSCE
       out->n[0] = g->c1[0] - g->c0[0];
       out->n[1] = g->c1[1] - g->c0[1];
       out->dr = g->r1 - g->r0;
-      Expansion a;
-      a.n = 0;
+      Expansion a = {{0.0}, 0};
       grow_square_of_difference(&a, g->c1[0], g->c0[0], 1.0);
       grow_square_of_difference(&a, g->c1[1], g->c0[1], 1.0);
       grow_square_of_difference(&a, g->r1, g->r0, -1.0);

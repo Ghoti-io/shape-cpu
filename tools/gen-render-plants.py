@@ -42,9 +42,10 @@ FILES = {
     "src/render/arena.c": "ra",
     "src/render/hash.c": "rh",
     "src/render/sink.c": "rs",
+    "src/render/gradient.c": "rd",
 }
 # The order is the cost: the quick and the likely first, the sweep stops at the first that fails.
-TESTS = ["testRender_vectors", "testRender_parts", "testRender", "testRender_limits", "testRender_conformance", "testGlyph_render", "probe"]
+TESTS = ["testRender_vectors", "testRender_parts", "testRender_gradient", "testRender", "testRender_limits", "testRender_conformance", "testGlyph_render", "probe"]
 TESTS_BY_FILE = {path: TESTS for path in FILES}
 
 REL = [("==", "!="), ("!=", "=="), ("<=", "<"), (">=", ">"), ("<", "<="), (">", ">=")]

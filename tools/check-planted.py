@@ -113,8 +113,34 @@ zeroed Cover already holds, since it runs before any band).  The first sweep
 of those lines left fourteen mutants no test caught (a crossing just right of
 the walk counted, the bound's clamps, minimum, last edge and early stop, the
 shortcut's guard and its cap test, the clips' reach in the whole render, a
-workspace of exactly the block); each is caught by a test since.  The
-survivors, by kind:
+workspace of exactly the block); each is caught by a test since.
+
+Color-paint story P2 (gradients) changed sink.c and added gradient.c: sink.c's
+526 candidates were swept again on its tree in ghoti-build:gcc16, 93 do not
+compile, 389 are caught (they replace sink.c's in tools/render-plants.json) and
+44 survive, the 31 of before by kind and, on the story's lines, the gradient
+table's sizing guards (an overflow no list of the store's limits reaches, a
+table one slot larger, a field the layout's memset already zeroed), the
+resolved table's bookkeeping (a gradient resolved again instead of found gives
+the same stops: once per render has no witness but the time), the item's map
+written again where the geometry wrote it, and a gradient fill's work count.
+gradient.c's 228 (``rd-``), after the first sweep's gaps were closed: 31 do not
+compile, 175 are caught and 22 survive: ties at equal values (the largest
+entry, the two roots, the domain's edges, the clamp at exactly 2^431, the
+absolute value's zero), sign tests where zero was handled before (the angle's
+axes, ``rad < 0``), the guards of the color line that only rounding reaches (the
+clamp into the line, the loop's reach to the last stop), the square of a low
+part (below a double's resolution unless every larger term cancels), the
+memset of the prepared gradient (every field read is set) and the radial
+degenerate flag (the plan's notice skips those fills first).  The first sweep
+of the story's lines found eight mutants no test caught (a low part of each
+difference, the twice-hi-lo term, an isoline along an axis, the pad below equal
+first stops, the smaller root, the pool's offset between two gradients, the
+clip's weight of a gradient fill); each is caught by a test since, and three
+hand plants were rewritten to compile or dropped (the stated tolerance is the
+test's constant, so no library build can move it).
+
+The survivors, by kind:
 
   - a tie between equal values: `<` for `<=` where both sides choosing the same
     value is the same answer (the rectangles' meet and join, the lowest and
@@ -685,8 +711,10 @@ PLANTS += [
     ("r-group-convert-way", "src", RS, "gshcpu_render_convert_prepare(&c, &f->space, &parent->space);", "gshcpu_render_convert_prepare(&c, &parent->space, &f->space);", RT),
     ("r-group-outer-clips", "src", RS, "uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);", "uint32_t m8 = 255u;", RT),
     ("r-group-unbounded-region", "src", RS, "GSHCPU_Rect region = bounded ? f->dirty : run->layout.region;", "GSHCPU_Rect region = f->dirty;", RT),
-    ("r-fill-weight", "src", RS, "gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);",
-     "gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 256.0, GSHSCENE_COMPOSITE_SRC_OVER);", RT),
+    ("r-fill-weight", "src", RS, "        continue;\n      }\n      size_t p = at(run, x, y);\n      gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);",
+     "        continue;\n      }\n      size_t p = at(run, x, y);\n      gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 256.0, GSHSCENE_COMPOSITE_SRC_OVER);", RT),
+    ("rgr-fill-weight", "src", RS, "      size_t p = at(run, x, y);\n      gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);\n      if (run->top == 0) {\n        run->touched[p] = 1;\n      }\n    }\n  }\n  run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);\n  return GSHSCENE_OK;\n}\n\nstatic GSHSCENE_Result fill(", "      size_t p = at(run, x, y);\n      gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 256.0, GSHSCENE_COMPOSITE_SRC_OVER);\n      if (run->top == 0) {\n        run->touched[p] = 1;\n      }\n    }\n  }\n  run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);\n  return GSHSCENE_OK;\n}\n\nstatic GSHSCENE_Result fill(", ["testRender_gradient"] + RT),
+    ("rgr-clips-unweighed", "src", RS, "      m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);\n      if (m8 == 0) {\n        continue;\n      }\n      double color[4];", "      if (m8 == 0) {\n        continue;\n      }\n      double color[4];", ["testRender_gradient"] + RT),
     ("r-touched", "src", RS, "      if (run->touched[p]) {", "      if (1) {", RT),
     ("r-clip-memory", "src", RS, "clip->coverage = run->clip_memory + run->clip_count * run->layout.pixels;", "clip->coverage = run->clip_memory;", RT),
     # What a render makes ready (widen, ready_span): the whole region on every frame changes no pixel, only the bytes
@@ -762,8 +790,8 @@ PLANTS += [
     ("rgr-paint-alpha", "src", RS, "&composed, item->paint.rgba[3]) != GSHCPU_OK", "&composed, 1.0) != GSHCPU_OK", GRT),
     ("rgr-pool-offset", "src", RS, "run->pool + e->first, &composed", "run->pool, &composed", GRT),
     ("rgr-pool-unadvanced", "src", RS, "    run->pooled += g->stop_count;\n", "", GRT),
-    ("rgr-interpolant-straight", "src", RGR, "  if (!premultiplied) {\n    return; /* G4", "  if (1) {\n    return; /* G4", GRT),
-    ("rgr-unpremultiplied-not", "src", RGR, "      c[k] = a == 0.0 ? 0.0 : c[k] / a;", "      c[k] = c[k];", GRT),
+    ("rgr-interpolant-straight", "src", RGR, "      stops[i].rgba[k] = stops[i].rgba[k] * a;", "      stops[i].rgba[k] = stops[i].rgba[k] * (a > 2.0 ? a : 1.0);", GRT),
+    ("rgr-unpremultiplied-not", "src", RGR, "      c[k] = a == 0.0 ? 0.0 : c[k] / a;", "      c[k] = a == 0.0 ? 0.0 : c[k];", GRT),
     ("rgr-paint-alpha-unread", "src", RGR, "  c[3] = c[3] * g->alpha;", "  c[3] = c[3];", GRT),
     ("rgr-linear-normal", "src", RGR, "        out->n[0] = -g->d[1];", "        out->n[0] = g->d[1];", GRT),
     ("rgr-linear-den", "src", RGR, "        grow_square_of_difference(&den, g->p1[1], g->p0[1], 1.0);", "", GRT),
@@ -787,7 +815,6 @@ PLANTS += [
     ("rgr-invert-translation", "src", RGR, "  double u = qx - g->inv[4];", "  double u = qx;", GRT),
     ("rgr-invert-row", "src", RGR, "  inv[1] = gmath_ldexp(-m[1] / d, -e);", "  inv[1] = gmath_ldexp(-m[2] / d, -e);", GRT),
     ("rgr-domain-half", "src", RGR, "  const double bound = GSHSCENE_GRADIENT_DOMAIN * 0.5;", "  const double bound = GSHSCENE_GRADIENT_DOMAIN * 4.0;", GRT),
-    ("rgr-tolerance", "hdr", RHD, "#define GSHCPU_RENDER_GRADIENT_TOLERANCE 1e-12", "#define GSHCPU_RENDER_GRADIENT_TOLERANCE 1e-16", GRT),
 ]
 
 # The generated plants (tools/gen-render-plants.py): the mutations of src/render the sweep was seen to catch, and

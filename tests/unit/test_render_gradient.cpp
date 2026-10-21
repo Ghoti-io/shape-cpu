@@ -442,6 +442,48 @@ TEST(RenderGradientSink, ParameterStopsResolveAgainstTheDrawingList) {
   }
 }
 
+// Each gradient keeps its own stops when another is resolved between two of its fills, and a clip weighs a gradient
+// fill as it weighs a solid one (D8).
+TEST(RenderGradientSink, GradientsKeepTheirStopsAndClipsWeighThem) {
+  Store s;
+  GSHSCENE_Gradient g{};
+  g.kind = GSHSCENE_GRADIENT_LINEAR;
+  g.p1[0] = 16;
+  const GSHSCENE_Resource * a = intern(s, g, {GSHSCENE_Gradient_Stop{0.0, solid_in(1, 0, 0, 1, GSHSCENE_Color_Space{})},
+      GSHSCENE_Gradient_Stop{1.0, solid_in(1, 1, 0, 1, GSHSCENE_Color_Space{})}});
+  const GSHSCENE_Resource * b = intern(s, g, {GSHSCENE_Gradient_Stop{0.0, solid_in(0, 0, 1, 1, GSHSCENE_Color_Space{})},
+      GSHSCENE_Gradient_Stop{1.0, solid_in(0, 1, 1, 1, GSHSCENE_Color_Space{})}});
+  GSHSCENE_List * l = s.open();
+  GSHSCENE_Paint pa = gradient_paint(a, 1.0);
+  GSHSCENE_Paint pb = gradient_paint(b, 1.0);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, 16, 2), nullptr, GSHGEOM_FILL_NONZERO, &pa, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 2, 16, 4), nullptr, GSHGEOM_FILL_NONZERO, &pb, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 4, 16, 6), nullptr, GSHGEOM_FILL_NONZERO, &pa, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_push(l, s.rect(0, 0, 7.5, 10), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 6, 16, 8), nullptr, GSHGEOM_FILL_NONZERO, &pb, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_pop(l), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  SinkRef sink;
+  RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 16, 10));
+  RasterRef fresh(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 16, 10));
+  GSHSCENE_Target t = target_of(r.raster);
+  ReportRef report;
+  GSHSCENE_Render_Request req = request_of(l, &t, report.report);
+  ASSERT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK);
+  for (uint32_t x = 0; x < 16; x++) {
+    EXPECT_EQ(r.pixel(x, 0), r.pixel(x, 4)) << "a's fills, before and after b's, at column " << x;
+    EXPECT_NE(r.pixel(x, 0), r.pixel(x, 2)) << "a and b differ at column " << x;
+    if (x < 7) {
+      EXPECT_EQ(r.pixel(x, 6), r.pixel(x, 2)) << "inside the clip, b as unclipped, column " << x;
+    } else if (x == 7) {
+      EXPECT_NE(r.pixel(x, 6), r.pixel(x, 2)) << "half inside the clip: weighed by it";
+      EXPECT_NE(r.pixel(x, 6), fresh.pixel(x, 6)) << "half inside the clip: drawn";
+    } else {
+      EXPECT_EQ(r.pixel(x, 6), fresh.pixel(x, 6)) << "outside the clip, the backdrop, column " << x;
+    }
+  }
+}
+
 /* --- what draws nothing, and the sink's own limit ------------------------------------------------------------------ */
 
 // G10 and G11: a degenerate gradient or a flat map draws nothing; the plan's notice says so; strict is OK.
@@ -594,6 +636,102 @@ TEST(RenderGradientParts, TheZeroTestsAreExact) {
   ASSERT_EQ(gshcpu_render_gradient_prepare(&gr, &lin, stops, &id, 1.0), GSHCPU_OK);
   EXPECT_NE(gr.den, 0.0);
   EXPECT_FALSE(gr.degenerate);
+  // A difference no double holds: p1 - p0 = (1 + 2^-60, 1) against d = (1, 1) is exactly -2^-60, which the rounded
+  // differences make zero; and the same in y.
+  GSHSCENE_Gradient lx{};
+  lx.kind = GSHSCENE_GRADIENT_LINEAR;
+  lx.p0[0] = -0x1p-60;
+  lx.p1[0] = 1.0;
+  lx.p1[1] = 1.0;
+  lx.d[0] = 1.0;
+  lx.d[1] = 1.0;
+  ASSERT_EQ(gshcpu_render_gradient_prepare(&gr, &lx, stops, &id, 1.0), GSHCPU_OK);
+  EXPECT_EQ(gr.den, -0x1p-60);
+  GSHSCENE_Gradient ly = lx;
+  ly.p0[0] = 0.0;
+  ly.p0[1] = -0x1p-60;
+  ASSERT_EQ(gshcpu_render_gradient_prepare(&gr, &ly, stops, &id, 1.0), GSHCPU_OK);
+  EXPECT_EQ(gr.den, 0x1p-60);
+  // With d zero the denominator is |p1 - p0|^2 of the exact difference.
+  GSHSCENE_Gradient sq{};
+  sq.kind = GSHSCENE_GRADIENT_LINEAR;
+  sq.p0[0] = -0x1p-60;
+  sq.p1[0] = 1.0;
+  ASSERT_EQ(gshcpu_render_gradient_prepare(&gr, &sq, stops, &id, 1.0), GSHCPU_OK);
+  EXPECT_EQ(gr.den, 1.0 + 0x1p-59);
+  // G8's a of a center difference no double holds: |(1 + 2^-60, 0)|^2 - 1 = 2^-59 + 2^-120, not zero.
+  GSHSCENE_Gradient ra{};
+  ra.kind = GSHSCENE_GRADIENT_RADIAL;
+  ra.c0[0] = -0x1p-60;
+  ra.c1[0] = 1.0;
+  ra.r1 = 1.0;
+  ASSERT_EQ(gshcpu_render_gradient_prepare(&gr, &ra, stops, &id, 1.0), GSHCPU_OK);
+  EXPECT_EQ(gr.a, 0x1p-59);
+}
+
+// G7: an isoline direction along an axis is the perpendicular of that axis, not p1 - p0's.
+TEST(RenderGradientParts, AnAxisIsolineIsReadAsGiven) {
+  GSHCPU_Stop stops[2] = {};
+  stops[1].offset = 1;
+  GSHGEOM_Map id = matrix(1, 0, 0, 1, 0, 0);
+  for (int axis = 0; axis < 2; axis++) {
+    GSHSCENE_Gradient g{};
+    g.kind = GSHSCENE_GRADIENT_LINEAR;
+    g.p1[0] = 4.0;
+    g.p1[1] = 2.0;
+    g.d[axis] = 1.0;
+    GSHCPU_Gradient gr;
+    ASSERT_EQ(gshcpu_render_gradient_prepare(&gr, &g, stops, &id, 1.0), GSHCPU_OK);
+    double t = 0;
+    ASSERT_EQ(gshcpu_render_gradient_param(&gr, 2.0, 7.0, &t), 1);
+    // d = (0, 1): isolines are vertical, t = x / 4; d = (1, 0): horizontal, t = y / 2.
+    EXPECT_EQ(t, axis == 1 ? 0.5 : 3.5) << "axis " << axis;
+  }
+}
+
+// G4, G5: among stops at one offset the last given holds at that offset, inside the line and at its start.
+TEST(RenderGradientParts, AtAnOffsetOfEqualStopsTheLastGivenHolds) {
+  GSHCPU_Stop stops[5] = {};
+  const double offsets[5] = {0.0, 0.0, 0.5, 0.5, 1.0};
+  for (int i = 0; i < 5; i++) {
+    stops[i].offset = offsets[i];
+    stops[i].rgba[i < 4 ? i : 0] = 1.0;
+    stops[i].rgba[3] = 1.0;
+  }
+  GSHGEOM_Map id = matrix(1, 0, 0, 1, 0, 0);
+  GSHSCENE_Gradient g{};
+  g.kind = GSHSCENE_GRADIENT_LINEAR;
+  g.p1[0] = 1.0;
+  g.stop_count = 5;
+  GSHCPU_Gradient gr;
+  ASSERT_EQ(gshcpu_render_gradient_prepare(&gr, &g, stops, &id, 1.0), GSHCPU_OK);
+  double c[4];
+  gshcpu_render_gradient_color(&gr, 0.5, c);
+  EXPECT_EQ(c[3], 1.0);
+  EXPECT_EQ(c[2], 0.0) << "the stop given third is past";
+  EXPECT_EQ(c[0], 0.0);
+  EXPECT_EQ(stops[3].rgba[3], 1.0);
+  EXPECT_EQ(c[1] + c[2] + c[0], 0.0) << "the fourth stop (alpha only) holds at 0.5";
+  gshcpu_render_gradient_color(&gr, 0.0, c);
+  EXPECT_EQ(c[1], 1.0) << "the second stop holds at 0";
+  gshcpu_render_gradient_color(&gr, -1.0, c);
+  EXPECT_EQ(c[0], 1.0) << "pad below is the first stop";
+}
+
+// G8: the larger root whose radius is not positive is passed over for the smaller.
+TEST(RenderGradientParts, TheLargestRootWithAPositiveRadiusIsTaken) {
+  GSHCPU_Stop stops[2] = {};
+  stops[1].offset = 1;
+  GSHGEOM_Map id = matrix(1, 0, 0, 1, 0, 0);
+  GSHSCENE_Gradient g{};
+  g.kind = GSHSCENE_GRADIENT_RADIAL;
+  g.r0 = 3.0;
+  g.r1 = 1.0; // r(w) = 3 - 2w: at |p| = 4, w = 3.5 has r = -4 and w = -0.5 has r = 4
+  GSHCPU_Gradient gr;
+  ASSERT_EQ(gshcpu_render_gradient_prepare(&gr, &g, stops, &id, 1.0), GSHCPU_OK);
+  double t = 0;
+  ASSERT_EQ(gshcpu_render_gradient_param(&gr, 4.0, 0.0, &t), 1);
+  EXPECT_EQ(t, -0.5);
 }
 
 // P2-4: a parameter past the double's reach is taken at that end, and no NaN reaches a color.
@@ -626,10 +764,15 @@ TEST(RenderGradientParts, AParameterPastTheRangeIsTakenAtItsEnd) {
     }
     double hi[4];
     double lim[4];
+    double lo[4];
+    double low_lim[4];
     gshcpu_render_gradient_color(&gr, INFINITY, hi);
     gshcpu_render_gradient_color(&gr, GSHCPU_RENDER_T_LIMIT, lim);
+    gshcpu_render_gradient_color(&gr, -INFINITY, lo);
+    gshcpu_render_gradient_color(&gr, -GSHCPU_RENDER_T_LIMIT, low_lim);
     for (int k = 0; k < 4; k++) {
-      EXPECT_EQ(hi[k], lim[k]);
+      EXPECT_EQ(hi[k], lim[k]) << "extend " << extend;
+      EXPECT_EQ(lo[k], low_lim[k]) << "extend " << extend;
     }
   }
 }
