@@ -72,6 +72,63 @@ void measure(const GSHSCENE_List * list, size_t index, int64_t width, int64_t he
   gshcpu_render_geometry_release(&g, alloc);
 }
 
+/** What a render refused and where it stopped: each entry's class, reason, second and chain; the result; the stop. */
+struct Refusals {
+  std::vector<std::vector<size_t>> rows;
+  GSHSCENE_Result result = GSHSCENE_ERR_INTERNAL;
+  std::vector<size_t> failure;
+  uint64_t work_max = 0;
+  bool operator==(const Refusals & o) const {
+    return rows == o.rows && result == o.result && failure == o.failure;
+  }
+};
+
+/** Render @p list into @p raster with @p damage (NULL: the whole render) and @p flags; what it refused. */
+Refusals render_damaged(GSHSCENE_Sink * sink, const GSHSCENE_List * list, GIMG_Raster * raster,
+    const GSHSCENE_Rect * damage, uint32_t flags = 0) {
+  ReportRef report;
+  GSHSCENE_Target t = target_of(raster);
+  t.damage = damage;
+  GSHSCENE_Render_Request req = request_of(list, &t, report.report);
+  req.flags = flags;
+  Refusals out;
+  out.result = gshscene_sink_render(sink, &req);
+  for (const GSHSCENE_Report_Entry & e : report.entries()) {
+    std::vector<size_t> row{(size_t)e.entry_class, (size_t)e.reason, e.second};
+    row.insert(row.end(), e.chain, e.chain + e.chain_count);
+    out.rows.push_back(row);
+  }
+  GSHSCENE_Report_Summary sum = report.summary();
+  out.failure.assign(sum.failure.chain, sum.failure.chain + sum.failure.chain_count);
+  out.work_max = sum.work_max;
+  return out;
+}
+
+/** The deposits of item @p index of @p list (no instances) over the pixels of its box that meet @p rect. */
+uint64_t cells_in(const GSHSCENE_List * list, size_t index, GSHCPU_Rect rect) {
+  const GSHSCENE_Item * item = nullptr;
+  EXPECT_EQ(gshscene_list_item(list, index, &item), GSHSCENE_OK);
+  GSHGEOM_Map maps[4];
+  GSHGEOM_Map identity;
+  gshgeom_map_identity(2, &identity);
+  GSHGEOM_Limits limits;
+  gshgeom_limits_default(&limits);
+  GSHCPU_Item_Geometry g;
+  const GSHGEOM_Allocator * alloc = gshgeom_allocator_default();
+  EXPECT_EQ(gshcpu_render_geometry(item, maps, 0, &identity, alloc, &limits, &g), GSHCPU_OK);
+  GSHCPU_Rect r = gshcpu_render_rect_meet(g.box, rect);
+  uint64_t cells = 0;
+  if (!gshcpu_render_rect_empty(r)) {
+    std::vector<uint8_t> out((size_t)((r.x1 - r.x0) * (r.y1 - r.y0)));
+    std::vector<int64_t> acc(2 * (size_t)(r.x1 - r.x0 + 1) * GSHCPU_RENDER_BAND_ROWS);
+    EXPECT_EQ(gshcpu_render_cover((const GSHGEOM_Flat_Path * const *)g.paths, g.count, item->fill_rule, r, out.data(),
+                  acc.data(), UINT64_MAX, &cells),
+        GSHCPU_OK);
+  }
+  gshcpu_render_geometry_release(&g, alloc);
+  return cells;
+}
+
 /** A zigzag of @p n points across the raster (lines only, so the flattened path holds exactly n points). */
 const GSHSCENE_Resource * zigzag(Store & s, int n, double w, double h) {
   GSHGEOM_Path * p = nullptr;
@@ -502,6 +559,89 @@ TEST(RenderLimits, TheWorkOfAUnitIsItsPointsCellsAndPixels) {
   ASSERT_EQ(gshscene_list_close(m), GSHSCENE_OK);
   o = render(sink.sink, m, r.raster);
   EXPECT_EQ(o.summary.work_max, (uint64_t)RF_WIDTH * RF_HEIGHT);
+}
+
+TEST(RenderLimits, ACellCapRefusesTheSameItemsWithAndWithoutTheDamage) {
+  // S4: whether an item is refused for the cell cap does not depend on the damage; the cap is met over what the whole
+  // render draws of the item (the extent, and the clips' reach in it).  Story 16's soak found a damage-limited render
+  // counting only the cells inside the damage: under a cap between the two counts an item across the damage's edge,
+  // or wholly outside it, was refused by the whole render and drawn (or passed over) by the damage-limited one.
+  Store s;
+  GSHSCENE_Paint red = solid(1, 0, 0, 1);
+  GSHSCENE_Paint blue = solid(0, 0, 1, 0.5);
+  GSHSCENE_List * l = s.open();
+  ASSERT_EQ(gshscene_list_fill(l, zigzag(s, 64, 40.0, 30.0), nullptr, GSHGEOM_FILL_EVEN_ODD, &blue, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(36.5, 28.5, 47.5, 39.5), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_push(l, s.rect(4, 4, 44, 36), nullptr, GSHGEOM_FILL_NONZERO, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, 48, 40), nullptr, GSHGEOM_FILL_NONZERO, &blue, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_pop(l), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(12, 10, 20, 16), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  const GSHSCENE_Rect damage{10, 8, 30, 24};
+  const GSHCPU_Rect region{0, 0, RF_WIDTH, RF_HEIGHT};
+  const uint64_t across = cells_in(l, 0, region);     // the zigzag, across the damage
+  const uint64_t inside = cells_in(l, 0, damage);
+  const uint64_t outside = cells_in(l, 1, region);    // the rectangle wholly outside the damage
+  ASSERT_LT(inside + 10, across) << "most of the zigzag's cells lie outside the damage";
+  ASSERT_EQ(cells_in(l, 1, damage), 0u);
+  ASSERT_GT(outside, 10u);
+  ASSERT_LT(outside, inside);
+  // Caps where a count inside the damage and one over the whole differ: each item refused by the whole render is
+  // refused by the damage-limited one, under best effort and under strict; inside the damage the pixels are the
+  // whole render's, outside it the target's.
+  size_t refusing = 0;
+  for (uint64_t cap : {outside - 1, outside, inside, (across + inside) / 2, across - 1, across}) {
+    GSHCPU_Limits limits;
+    gshcpu_limits_default(&limits);
+    limits.max_cells = (size_t)cap;
+    SinkRef sink(&limits);
+    for (uint32_t flags : {0u, (uint32_t)GSHSCENE_RENDER_STRICT}) {
+      RasterRef whole(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+      RasterRef part(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+      RasterRef fresh(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+      Refusals w = render_damaged(sink.sink, l, whole.raster, nullptr, flags);
+      Refusals p = render_damaged(sink.sink, l, part.raster, &damage, flags);
+      EXPECT_TRUE(w == p) << "cap " << cap << (flags ? " strict" : "") << ": the whole render " << w.result << " with "
+                          << w.rows.size() << " entries, the damage-limited one " << p.result << " with "
+                          << p.rows.size();
+      refusing += !w.rows.empty();
+      for (uint32_t y = 0; y < RF_HEIGHT; y++) {
+        for (uint32_t x = 0; x < RF_WIDTH; x++) {
+          bool in = (int64_t)x >= damage.x0 && (int64_t)x < damage.x1 && (int64_t)y >= damage.y0 && (int64_t)y < damage.y1;
+          ASSERT_EQ(part.pixel(x, y), in ? whole.pixel(x, y) : fresh.pixel(x, y))
+              << "cap " << cap << (flags ? " strict" : "") << " at " << x << "," << y;
+        }
+      }
+    }
+  }
+  EXPECT_GE(refusing, 8u);
+  // The item wholly outside the damage is counted where the cap could be met, and costs no cells where it cannot:
+  // at the default cap the bound from its edges settles it.
+  GSHSCENE_List * one = s.open();
+  ASSERT_EQ(gshscene_list_fill(one, s.rect(36.5, 28.5, 47.5, 39.5), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(one), GSHSCENE_OK);
+  uint64_t cells = 0;
+  size_t points = 0;
+  measure(one, 0, RF_WIDTH, RF_HEIGHT, &cells, &points);
+  ASSERT_EQ(cells, outside);
+  {
+    SinkRef sink;
+    RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+    Refusals o = render_damaged(sink.sink, one, r.raster, &damage);
+    EXPECT_EQ(o.result, GSHSCENE_OK);
+    EXPECT_EQ(o.work_max, points) << "outside the damage, under a cap it cannot meet: its points and nothing else";
+  }
+  for (uint64_t cap : {outside, outside - 1}) {
+    GSHCPU_Limits limits;
+    gshcpu_limits_default(&limits);
+    limits.max_cells = (size_t)cap;
+    SinkRef sink(&limits);
+    RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+    Refusals o = render_damaged(sink.sink, one, r.raster, &damage);
+    EXPECT_EQ(o.result, GSHSCENE_OK);
+    EXPECT_EQ(o.rows.size(), cap == outside ? 0u : 1u) << cap;
+    EXPECT_EQ(o.work_max, points + cap) << "near the cap its cells are counted, to the cap";
+  }
 }
 
 TEST(RenderMemory, TheNeedIsTheBlockAndTheLargestItemNotTheirSum) {

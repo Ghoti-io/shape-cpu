@@ -60,7 +60,10 @@
  * is one shape: its glyphs' windings add.  A point more than 2^24 pixels from the
  * device origin, a map or a device path `shape-geometry` refuses, a flattened
  * path past `max_points` and more than `max_cells` cell deposits are the sink's
- * resource limits: the item is refused while drawing (S6).
+ * resource limits: the item is refused while drawing (S6).  The cells are counted
+ * over what the whole render draws of the item (its pixels meet the extent and
+ * its clips' reach there), whatever the damage, so a damage-limited render
+ * refuses the items the whole render refuses (S4).
  *
  * A run from a font is one shape too.  On the fast tier each glyph's device path is
  * the face's provider's (glyph.h), moved by the whole pixel of its origin; on the

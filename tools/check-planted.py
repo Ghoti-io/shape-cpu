@@ -698,6 +698,10 @@ PLANTS += [
     ("rule-S9-need-short", "src", RS, "      return gcu_safe_add_size(L.fixed, peak, out) ? GSHCPU_OK : GSHCPU_ERR_LIMIT;\n    }",
      "      return gcu_safe_add_size(L.fixed, 0, out) ? GSHCPU_OK : GSHCPU_ERR_LIMIT;\n    }", CONF),
     ("rule-S9-arena-short", "src", RS, "raw_bytes - (size_t)(base - raw) - L.at_items);", "raw_bytes - (size_t)(base - raw) - L.at_items - 16);", CONF),
+    # 2026-10-21 (story 16's decision): the behaviour before the fix, planted back.  S4: the cell cap met only where a
+    # damage-limited render draws (the walk is the rectangle drawn), and the bound that lets it skip the count too low.
+    ("rule-S4-cells-in-damage", "src", RS, "*rect, walk, out, run->acc", "*rect, *rect, out, run->acc", RT),
+    ("rule-S4-cells-bound-low", "src", RV, "  return rows + columns;", "  return rows;", RT),
     ("rule-S10-keeps-a-reference", "src", RS, "  double s[4];\n  source_of(run, item, frame, s);",
      "  double s[4];\n  gshscene_resource_retain(item->resource);\n  source_of(run, item, frame, s);", CONF),
     ("rule-S11-src-over", "src", RC, "      fa = 1.0;\n      fb = 1.0 - sa;", "      fa = 1.0;\n      fb = 1.0 - sa * 0.5;", RT),

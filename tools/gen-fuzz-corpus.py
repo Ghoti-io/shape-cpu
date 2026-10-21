@@ -122,14 +122,15 @@ def scripted():
     out["scripted-damage.bin"] = header(request=DAMAGE | EXTENT) + body(STANDARD)
     out["scripted-damage-float.bin"] = header(target=T64 | 2, request=DAMAGE | CALLER_MEMORY) + body(STANDARD)
     # Found by the first libFuzzer soak (story 16): strict, a damage and a small cell cap. The damage-limited render
-    # passes and the whole render meets the cap outside the damage, so it is refused; the harness had allowed only a
-    # region limit there.
+    # passed and the whole render met the cap outside the damage, so it was refused. Since 2026-10-21 the cap is met
+    # over the whole render's region whatever the damage (S4), and the harness requires both to agree.
     out["regression-strict-cells-outside-damage.bin"] = base64.b64decode(
         "cQsAMplAJm0ZT3ZmwR6Jf2Fd7lDCRLR/QSt6/zbm6uHj7bR6JLZqECw6JO+wOwclMCTHsAvBvaXFi6p+svmrTJ+KgxAuG0woagxRNjJeiGcC"
         "myM9FiyKlJxCJFFWzIkK8SvFqHMplT7Bdyd9VFOqgVUfzMjmgcV+F/qsYJOfKS/fHjRpgYuTPZ9DGeivfs7ibhEb5CtwDwGioZomrmEA7NLX"
         "H5rRQNlNKpMl8Og98ySqsAWGgpW+WBAM1grAFdQqD5fiB4thMQSas5I3pmv8sPE=")
-    # Found by the second soak: a cell cap met in the whole render and not in the damage-limited one, so an item is
-    # refused in one and drawn in the other and the pixels inside the damage differ (Implementation Notes of story 16).
+    # Found by the second soak: a cell cap met in the whole render and not in the damage-limited one, so an item was
+    # refused in one and drawn in the other and the pixels inside the damage differed (Implementation Notes of story
+    # 16). Fixed 2026-10-21 (S4); the harness compares inside the damage with no tolerance for it.
     out["regression-cells-damage-differs.bin"] = base64.b64decode(
         "9BgAWsyop3vto1FSswDDWgVM3Wc837Z/Bhr8trLLWZ+T+zR4Kv4uM8LbHINihtt8J+Yff5kQmyh+3NASYQKDo4hSD1YkaL2jnZauWqEjRcW5S+MV"
         "TYEs5O3+VcU8cwKp97YVqjP+tkKYlPe40dOONqAWqnu2fwYa/Layy1mfk/s0eCr+LjPCg2KG23wn5h9/mb/Zk6LFN3COUCe4RAEAAAAAAAAzLrJp"

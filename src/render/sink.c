@@ -71,6 +71,7 @@ typedef struct Frame {
 /** A clip in force: its coverage inside its rectangle (0 outside it). */
 typedef struct Clip {
   GSHCPU_Rect rect;
+  GSHCPU_Rect whole;         /* its rectangle in the whole render (the extent, not the damage): where cells are met */
   uint8_t * coverage;        /* rect's width by height */
 } Clip;
 
@@ -84,6 +85,7 @@ typedef struct Skip {
 /** The sizes and places of a render's memory (render.h, Memory). */
 typedef struct Layout {
   GSHCPU_Rect region;
+  GSHCPU_Rect whole;         /* the region of the whole render: the extent, whatever the damage (S4) */
   size_t width;
   size_t height;
   size_t pixels;
@@ -213,10 +215,18 @@ static GSHCPU_Rect region_of(const GSHSCENE_Target * target) {
   return r;
 }
 
+/** The region the whole render draws: the extent (S4: the damage changes what is drawn, never what is refused). */
+static GSHCPU_Rect whole_of(const GSHSCENE_Target * target) {
+  GSHSCENE_Target whole = *target;
+  whole.damage = NULL;
+  return region_of(&whole);
+}
+
 /** Lay out a render of @p list on @p target; ::GSHCPU_ERR_LIMIT past a limit or when a size overflows. */
 static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, const GSHSCENE_Target * target, Layout * L) {
   memset(L, 0, sizeof *L);
   L->region = region_of(target);
+  L->whole = whole_of(target);
   L->width = (size_t)(L->region.x1 - L->region.x0);
   L->height = (size_t)(L->region.y1 - L->region.y0);
   if (L->region.x1 > (int64_t)GSHCPU_MAX_DIMENSION_CEILING || L->region.y1 > (int64_t)GSHCPU_MAX_DIMENSION_CEILING ||
@@ -504,10 +514,13 @@ static uint32_t clip_at(const Clip * clip, int64_t x, int64_t y) {
 
 /**
  * The geometry and the coverage of a fill or clip push, into @p out over @p rect (the item's pixels meet what it
- * can reach).  @return ::GSHSCENE_OK; ::GSHSCENE_ERR_LIMIT for a resource limit (the caller refuses the item); OOM.
+ * can reach), and in @p whole_rect the rectangle the whole render draws of it (its pixels meet @p whole, what it can
+ * reach there).  The cell cap is met over that one, so that a damage-limited render refuses the items the whole
+ * render refuses (S4); a bound from its edges skips the count where the cap cannot be met.
+ * @return ::GSHSCENE_OK; ::GSHSCENE_ERR_LIMIT for a resource limit (the caller refuses the item); OOM.
  */
 static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count,
-    GSHCPU_Rect reach, uint8_t * out, GSHCPU_Rect * rect) {
+    GSHCPU_Rect reach, GSHCPU_Rect whole, uint8_t * out, GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect) {
   GSHCPU_Item_Geometry g;
   if (run->item_alloc == &run->arena.self) {
     gshcpu_render_arena_reset(&run->arena);
@@ -534,14 +547,24 @@ static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t
     }
   }
   if (r == GSHCPU_OK) {
+    const GSHGEOM_Flat_Path * const * paths = (const GSHGEOM_Flat_Path * const *)g.paths;
     *rect = gshcpu_render_rect_meet(g.box, reach);
     if (gshcpu_render_rect_empty(*rect)) {
       rect->x1 = rect->x0;
       rect->y1 = rect->y0;
-    } else {
+    }
+    GSHCPU_Rect walk = gshcpu_render_rect_meet(g.box, whole);
+    *whole_rect = walk;
+    if (!gshcpu_render_rect_empty(walk)) {
       uint64_t cells = 0;
-      r = gshcpu_render_cover((const GSHGEOM_Flat_Path * const *)g.paths, g.count, item->fill_rule, *rect, out,
-          run->acc, run->cs->max_cells, &cells);
+      /* Drawn in part (a damage): unless the bound says the cap cannot be met over the whole, count only where it
+       * is drawn; else count the whole while drawing the part. */
+      if ((rect->x0 != walk.x0 || rect->y0 != walk.y0 || rect->x1 != walk.x1 || rect->y1 != walk.y1) &&
+          gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_cells) <= run->cs->max_cells) {
+        walk = *rect;
+      }
+      r = gshcpu_render_cover_counted(paths, g.count, item->fill_rule, *rect, walk, out, run->acc, run->cs->max_cells,
+          &cells);
       run->work += cells;
     }
   }
@@ -554,6 +577,15 @@ static GSHCPU_Rect reach_of(const Run * run, size_t from, size_t to) {
   GSHCPU_Rect r = run->layout.region;
   for (size_t i = from; i < to; i++) {
     r = gshcpu_render_rect_meet(r, run->clips[i].rect);
+  }
+  return r;
+}
+
+/** reach_of in the whole render (S4): the extent meet the clips' rectangles there. */
+static GSHCPU_Rect whole_reach_of(const Run * run, size_t from, size_t to) {
+  GSHCPU_Rect r = run->layout.whole;
+  for (size_t i = from; i < to; i++) {
+    r = gshcpu_render_rect_meet(r, run->clips[i].whole);
   }
   return r;
 }
@@ -593,7 +625,9 @@ static void source_of(const Run * run, const GSHSCENE_Item * item, const Frame *
 static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
   Frame * frame = &run->frames[run->top];
   GSHCPU_Rect rect;
-  GSHSCENE_Result r = shape(run, item, chain, count, reach_of(run, frame->clip_base, run->clip_count), run->coverage, &rect);
+  GSHCPU_Rect whole;
+  GSHSCENE_Result r = shape(run, item, chain, count, reach_of(run, frame->clip_base, run->clip_count),
+      whole_reach_of(run, frame->clip_base, run->clip_count), run->coverage, &rect, &whole);
   if (r == GSHSCENE_ERR_LIMIT) {
     return refuse(run, item, chain, count);
   }
@@ -626,8 +660,8 @@ static GSHSCENE_Result clip_push(Run * run, const GSHSCENE_Item * item, const si
   Frame * frame = &run->frames[run->top];
   Clip * clip = &run->clips[run->clip_count];
   clip->coverage = run->clip_memory + run->clip_count * run->layout.pixels;
-  GSHSCENE_Result r =
-      shape(run, item, chain, count, reach_of(run, frame->clip_base, run->clip_count), clip->coverage, &clip->rect);
+  GSHSCENE_Result r = shape(run, item, chain, count, reach_of(run, frame->clip_base, run->clip_count),
+      whole_reach_of(run, frame->clip_base, run->clip_count), clip->coverage, &clip->rect, &clip->whole);
   if (r == GSHSCENE_ERR_LIMIT) {
     return refuse(run, item, chain, count);
   }

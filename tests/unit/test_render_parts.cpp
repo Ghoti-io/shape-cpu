@@ -213,6 +213,86 @@ TEST(RenderCover, ACellIsACrossingOfNonzeroHeight) {
   EXPECT_EQ(cells, 2u) << "left of the window: one folded cell a row; right of it: none";
 }
 
+TEST(RenderCover, CountedOverALargerRectangleItDrawsTheSmallerAndCountsTheLarger) {
+  // S4: a damage-limited render draws a part of what the whole render would (rect) and meets the cell cap over the
+  // whole of it (walk).  The coverage is the smaller rectangle's, byte for byte; the count, and so the refusal, is the
+  // larger's, to the cell; the bound from the edges is never below it.
+  std::mt19937 rng(1621);
+  int windows = 0;
+  int below_bound = 0;
+  for (int round = 0; round < 300; round++) {
+    Device d;
+    random_path(rng, d, -10 * 64, 50 * 64);
+    const GSHGEOM_Flat_Path * paths[2] = {d.flat, nullptr};
+    for (int k = 0; k < 8; k++) {
+      int64_t x0 = -12 + (int64_t)(rng() % 64);
+      int64_t y0 = -12 + (int64_t)(rng() % 64);
+      int64_t x1 = x0 + 1 + (int64_t)(rng() % (uint32_t)(52 - x0));
+      int64_t y1 = y0 + 1 + (int64_t)(rng() % (uint32_t)(52 - y0));
+      GSHCPU_Rect walk{x0, y0, x1, y1};
+      // A rectangle inside the walk, or an empty one (the item wholly outside the damage).
+      GSHCPU_Rect rect{0, 0, 0, 0};
+      if (k % 4 != 3) {
+        rect.x0 = x0 + (int64_t)(rng() % (uint32_t)(x1 - x0));
+        rect.y0 = y0 + (int64_t)(rng() % (uint32_t)(y1 - y0));
+        rect.x1 = rect.x0 + 1 + (int64_t)(rng() % (uint32_t)(x1 - rect.x0));
+        rect.y1 = rect.y0 + 1 + (int64_t)(rng() % (uint32_t)(y1 - rect.y0));
+      }
+      GSHGEOM_Fill_Rule rule = k & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO;
+      uint64_t walk_cells = 0;
+      cover(d.flat, rule, walk, &walk_cells);
+      std::vector<uint8_t> want;
+      if (!gshcpu_render_rect_empty(rect)) {
+        want = cover(d.flat, rule, rect);
+      }
+      size_t w = gshcpu_render_rect_empty(rect) ? 0 : (size_t)(rect.x1 - rect.x0);
+      size_t h = gshcpu_render_rect_empty(rect) ? 0 : (size_t)(rect.y1 - rect.y0);
+      std::vector<uint8_t> out(w * h + 1, 0xee);
+      std::vector<int64_t> acc(2 * (w + 1) * GSHCPU_RENDER_BAND_ROWS + 1, 77);
+      uint64_t n = 0;
+      ASSERT_EQ(gshcpu_render_cover_counted(paths, 2, rule, rect, walk, out.data(), acc.data(), UINT64_MAX, &n), GSHCPU_OK);
+      EXPECT_EQ(n, walk_cells) << round << " " << k;
+      for (size_t i = 0; i < w * h; i++) {
+        ASSERT_EQ(out[i], want[i]) << round << " " << k << " at " << i;
+      }
+      EXPECT_EQ(out[w * h], 0xee) << "past the rectangle drawn";
+      // The cap is met over the walk, to the cell.
+      if (walk_cells > 0) {
+        EXPECT_EQ(gshcpu_render_cover_counted(paths, 2, rule, rect, walk, out.data(), acc.data(), walk_cells, &n), GSHCPU_OK);
+        EXPECT_EQ(gshcpu_render_cover_counted(paths, 2, rule, rect, walk, out.data(), acc.data(), walk_cells - 1, &n),
+            GSHCPU_ERR_LIMIT)
+            << round << " " << k;
+      }
+      uint64_t bound = gshcpu_render_cells_bound(paths, 2, walk, UINT64_MAX);
+      EXPECT_GE(bound, walk_cells) << round << " " << k;
+      below_bound += bound > walk_cells;
+      if (bound > 1) {
+        EXPECT_GT(gshcpu_render_cells_bound(paths, 2, walk, bound / 2), bound / 2) << "past its limit, it says so";
+      }
+      windows++;
+    }
+  }
+  EXPECT_EQ(windows, 300 * 8);
+  EXPECT_GT(below_bound, 0);
+  EXPECT_EQ(gshcpu_render_cells_bound(nullptr, 0, GSHCPU_Rect{0, 0, 10, 10}, 0), 0u);
+}
+
+TEST(RenderCover, TheCellBoundHoldsForLongAndHugeEdges) {
+  // Edges far outside the walk on every side, steep and shallow: the bound stays above the count and is not
+  // overflowed by a width times a height.
+  std::mt19937 rng(77);
+  for (int round = 0; round < 200; round++) {
+    Device d;
+    random_path(rng, d, -4000000 * 64 / 1000, 4000000 * 64 / 1000);
+    const GSHGEOM_Flat_Path * paths[1] = {d.flat};
+    for (GSHCPU_Rect walk : {GSHCPU_Rect{-3, -5, 9, 11}, GSHCPU_Rect{-400, -700, 600, 500}, GSHCPU_Rect{-4000, 0, 4000, 1}}) {
+      uint64_t cells = 0;
+      cover(d.flat, GSHGEOM_FILL_NONZERO, walk, &cells);
+      EXPECT_GE(gshcpu_render_cells_bound(paths, 1, walk, UINT64_MAX), cells) << round;
+    }
+  }
+}
+
 TEST(RenderCover, Rectangles) {
   GSHCPU_Rect a{0, 0, 10, 10};
   GSHCPU_Rect b{5, -2, 20, 7};

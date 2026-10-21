@@ -46,7 +46,8 @@
  *   workspace gives the bytes of the default render, and a byte less is
  *   `ERR_LIMIT`;
  * - pixels outside the extent and the damage are never touched, and inside the
- *   damage the render equals the whole render;
+ *   damage the render equals the whole render, which refuses the same items for
+ *   the sink's limits (S4);
  * - a cancel at unit k stops after exactly k units;
  * - nothing leaks: the sink, the store, the list and the report take every byte
  *   from a counting allocator, which also fails the chosen call.
@@ -414,15 +415,22 @@ static GIMG_Pixel_Format format_of(int index) {
   return f;
 }
 
-/** How many items the render refused for a sink's own limit while drawing (RESOURCE_LIMIT). */
-static size_t limit_refusals(const GSHSCENE_Report * report) {
-  size_t n = 0;
+/** FNV-1a 64 of the report's entries (class, reason, chain, second): what was refused, approximated and tied. */
+static uint64_t entries_hash(const GSHSCENE_Report * report) {
+  uint64_t h = 0xcbf29ce484222325ull;
   for (size_t i = 0; i < gshscene_report_count(report); i++) {
     GSHSCENE_Report_Entry e;
     CHECK(gshscene_report_entry(report, i, &e) == GSHSCENE_OK);
-    n += e.reason == GSHSCENE_REASON_RESOURCE_LIMIT;
+    uint64_t words[3] = {(uint64_t)e.entry_class, (uint64_t)e.reason, (uint64_t)e.second};
+    for (size_t k = 0; k < 3 + e.chain_count; k++) {
+      uint64_t w = k < 3 ? words[k] : (uint64_t)e.chain[k - 3];
+      for (int b = 0; b < 8; b++) {
+        h = (h ^ (uint8_t)(w >> (8 * b))) * 0x100000001b3ull;
+      }
+    }
+    h = (h ^ 0xff) * 0x100000001b3ull; /* the entry's end */
   }
-  return n;
+  return h;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size);
@@ -636,7 +644,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     }
   }
 
-  const size_t first_limits = limit_refusals(report);
+  const uint64_t first_entries = entries_hash(report);
   if (r == GSHSCENE_OK) {
     outcomes[OUT_OK]++;
     outcomes[OUT_CALLER_MEMORY] += (request.flags & GSHSCENE_RENDER_CALLER_MEMORY) != 0;
@@ -661,15 +669,12 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
           memcpy(gimg_raster_pixels(again), gimg_raster_pixels_const(backdrop), raster_bytes(backdrop));
           target.damage = NULL;
           r2 = gshscene_sink_render(sink, &request);
-          /* The whole region can be past a region limit the damage's was within, and under strict an item can meet
-           * a per-item limit (cells, points) outside the damage that it never reached inside it. */
-          CHECK(r2 == GSHSCENE_OK || r2 == GSHSCENE_ERR_OOM || (r2 == GSHSCENE_ERR_LIMIT && (limit_byte & 7) >= 3) ||
-                (r2 == GSHSCENE_ERR_REFUSED && (request.flags & GSHSCENE_RENDER_STRICT)));
-          /* A cell cap is met per region drawn (cover.c counts the deposits inside it), so an item can be refused
-           * in the whole render and drawn in the damage-limited one: S4's "inside the damage equals the whole
-           * render" holds when neither render refused an item for its own limit (story 16's soak found the
-           * other case; Implementation Notes, for Corey). */
-          if (r2 == GSHSCENE_OK && first_limits == 0 && limit_refusals(report) == 0) {
+          /* The whole region can be past a region limit (dimension, bytes) the damage's was within.  A per-item limit
+           * (cells, points) is met over the whole render's region whatever the damage (S4), so the whole render
+           * refuses the items the damage-limited one did, and is not refused where it was not. */
+          CHECK(r2 == GSHSCENE_OK || r2 == GSHSCENE_ERR_OOM || (r2 == GSHSCENE_ERR_LIMIT && (limit_byte & 7) >= 3));
+          if (r2 == GSHSCENE_OK) {
+            CHECK(entries_hash(report) == first_entries);
             for (int64_t y = damage.y0; y < damage.y1 && y < (int64_t)height; y++) {
               for (int64_t x = damage.x0; x < damage.x1 && x < (int64_t)width; x++) {
                 CHECK(same_pixel(raster, again, (uint32_t)x, (uint32_t)y, bpp));

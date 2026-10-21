@@ -139,6 +139,23 @@ GSHCPU_Rect gshcpu_render_rect_join(GSHCPU_Rect a, GSHCPU_Rect b);
 GSHCPU_Result gshcpu_render_cover(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
     GSHCPU_Rect rect, uint8_t * out, int64_t * acc, uint64_t max_cells, uint64_t * cells);
 
+/**
+ * ::gshcpu_render_cover over @p rect, with the cell deposits counted (and @p max_cells met) over @p walk, which holds
+ * @p rect (S4: the rectangle the whole render would draw of the item, so that the item's refusal does not depend on
+ * the damage).  @p out is what ::gshcpu_render_cover over @p rect writes; @p cells is what it counts over @p walk.
+ * @p rect may be empty (nothing is drawn, and @p walk is counted).
+ */
+GSHCPU_Result gshcpu_render_cover_counted(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_cells, uint64_t * cells);
+
+/**
+ * A bound, from the edges alone, of the cell deposits of the paths over @p walk (what ::gshcpu_render_cover over
+ * @p walk counts): never less than that count, and found without a pass over the cells.  It stops adding once it
+ * passes @p limit (a result past @p limit says only that).  @p walk lies within ::GSHCPU_RENDER_COORD_LIMIT.
+ */
+uint64_t gshcpu_render_cells_bound(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHCPU_Rect walk,
+    uint64_t limit);
+
 /* --- the workspace arena (arena.c) ------------------------------------------------- */
 
 /**

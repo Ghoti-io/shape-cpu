@@ -23,7 +23,19 @@ GSHSCENE_Sink * make_cpu(const GSHSCENE_Allocator * alloc, const GSHSCENE_Limits
   return sink;
 }
 
-const sinkconf::Fixture kCpu{"shape_cpu", make_cpu, {GSHSCENE_TARGET_RASTER}, nullptr};
+/** shape-cpu with its cell cap at @p level (S4's refusal rule): the cap is the limit an item can meet in part. */
+GSHSCENE_Sink * make_cpu_limited(const GSHSCENE_Allocator * alloc, unsigned level) {
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  limits.max_cells = level;
+  GSHSCENE_Sink * sink = nullptr;
+  if (gshcpu_sink_create(alloc, nullptr, &limits, &sink) != GSHCPU_OK) {
+    return nullptr;
+  }
+  return sink;
+}
+
+const sinkconf::Fixture kCpu{"shape_cpu", make_cpu, {GSHSCENE_TARGET_RASTER}, nullptr, make_cpu_limited};
 
 } // namespace
 

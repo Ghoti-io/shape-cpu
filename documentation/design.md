@@ -196,6 +196,19 @@ an item makes at most `max_cells` cell deposits. Past any of them, or when
 drawing: a `RESOURCE_LIMIT` entry, the item's block skipped, and under strict the
 render stops there with the finished prefix in the target.
 
+The cells are counted over what the whole render draws of the item (its pixels
+meet the extent and the reach of its clips there), never only over the damage, so
+a damage-limited render refuses exactly the items the whole render refuses (S4,
+decided 2026-10-21 after story 16's soak found the two disagreeing under a small
+cap). Where a damage leaves part of an item undrawn, a bound from its edges alone
+(`gshcpu_render_cells_bound`: per edge, its rows in the rectangle plus the
+columns its row pieces can cross) settles an item whose count cannot reach the
+cap, and the cells are then counted only where they are drawn; otherwise the
+scan converter walks the whole rectangle, counting every crossing, and draws the
+part (`gshcpu_render_cover_counted`, which draws what the part alone gives). So
+at the default cap an item outside the damage costs its geometry and not a pass
+over its cells, and a whole render is unchanged.
+
 ### Memory
 
 A render takes one block (the walk, the frames, the layers, the maps, the
