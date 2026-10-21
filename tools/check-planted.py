@@ -169,6 +169,15 @@ array: undefined behavior only a sanitizer sees, and the sweep builds without on
 would).  The hand plants above (``r-b-``) put a defect in each mode, a branch, a constant, a clamp, Lum, ClipColor,
 SetSat, B9's saturation and cap, B2's terms and alpha, the bounded list, the caps and the compositor's missing case.
 
+ClipColor was then written again from the differences C - n (B10).  The eight generated plants on its old lines were
+dropped, and its 22 new candidates swept (``rcl-``): 13 are caught and kept, 2 do not compile (two of its loops run to
+`i <= 3`, which GCC now proves out of bounds) and 7 survive, equivalent in the definition: the minimum's and
+maximum's choice between equal components (four), the early return's `x > 1` against `x >= 1` (at x = 1 neither step
+moves anything), and the steps' `n < 0` and `x > 1` against `<= 0` and `>= 1` (at n = 0 the factor `L / (L - n)` is
+1, at x = 1 the factor `(1 - L) / (x - L)` is 1: the identity in the reals, last bits in doubles).  Two generated
+plants that deleted the copy into the working triple of COLOR and LUMINOSITY (``rc-401-del``, ``rc-405-del``) no
+longer compile, GCC now seeing the uninitialized read through the inlined ClipColor, and are dropped.
+
 The survivors, by kind:
 
   - a tie between equal values: `<` for `<=` where both sides choosing the same
