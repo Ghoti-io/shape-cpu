@@ -256,7 +256,7 @@ int gshcpu_render_bounded(uint32_t op) {
   }
 }
 
-void gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op) {
+int gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op) {
   const double sa = s[3];
   const double da = d[3];
   double fa = 0.0;
@@ -303,8 +303,13 @@ void gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op) 
       fa = 1.0 - da;
       fb = 1.0 - sa;
       break;
-    default:
+    case GSHSCENE_COMPOSITE_PLUS:
       break;
+    default:
+      /* No silent default: an operator this does not know is never drawn as another (it would be CLEAR).  The caps
+       * claim exactly the operators named above, so the planning pass refuses every other before a render reaches
+       * here; the caller fails the render if one does. */
+      return 0;
   }
   for (int i = 0; i < 4; i++) {
     if (op == GSHSCENE_COMPOSITE_PLUS) {
@@ -317,6 +322,7 @@ void gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op) 
   for (int i = 0; i < 4; i++) {
     d[i] = gshcpu_render_saturate((1.0 - m) * d[i] + m * o[i]); /* N1 */
   }
+  return 1;
 }
 
 /* --- D8: the weight under a clip ------------------------------------------------------------- */

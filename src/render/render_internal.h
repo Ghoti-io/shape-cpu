@@ -90,8 +90,13 @@ void gshcpu_render_convert_straight(const GSHCPU_Convert * c, const double in[3]
 /** N3: a premultiplied value (un-premultiplied, converted, premultiplied again; alpha 0 gives 0). */
 void gshcpu_render_convert_premultiplied(const GSHCPU_Convert * c, const double in[4], double out[4]);
 
-/** N5: `d = (1 - m) d + m op(s, d)`, componentwise; @p op a ::GSHSCENE_Composite. */
-void gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op);
+/**
+ * N5: `d = (1 - m) d + m op(s, d)`, componentwise; @p op a ::GSHSCENE_Composite.
+ *
+ * @return 1; or 0, with @p d untouched, for an operator it does not composite.  The caps claim exactly the operators
+ *   it composites, so the planning pass refuses every other first and a render never meets one.
+ */
+int gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op);
 
 /** N4: nonzero for an operator with `op(0, D) = D` for every `D`. */
 int gshcpu_render_bounded(uint32_t op);

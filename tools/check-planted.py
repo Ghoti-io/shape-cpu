@@ -651,6 +651,11 @@ PLANTS += [
     ("r-bounded-dest", "src", RC, "    case GSHSCENE_COMPOSITE_DEST:\n    case GSHSCENE_COMPOSITE_SRC_OVER:\n",
      "    case GSHSCENE_COMPOSITE_SRC_OVER:\n", RT),
     ("r-bounded-plus", "src", RC, "    case GSHSCENE_COMPOSITE_PLUS:\n      return 1;", "      return 1;\n    case GSHSCENE_COMPOSITE_PLUS:", RT),
+    # P3-12: no silent default, and caps that claim exactly what apply composites.
+    ("r-op-unknown-is-clear", "src", RC, "      return 0;\n  }\n  for (int i = 0; i < 4; i++) {\n    if (op == GSHSCENE_COMPOSITE_PLUS) {",
+     "      break;\n  }\n  for (int i = 0; i < 4; i++) {\n    if (op == GSHSCENE_COMPOSITE_PLUS) {", RT),
+    ("r-caps-past-plus", "src", RS, "for (uint32_t c = GSHSCENE_COMPOSITE_SRC_OVER; c <= GSHSCENE_COMPOSITE_PLUS; c++) {",
+     "for (uint32_t c = GSHSCENE_COMPOSITE_SRC_OVER; c <= GSHSCENE_COMPOSITE_PLUS + 1u; c++) {", RT),
     ("r-bounded-src-in", "src", RC, "    case GSHSCENE_COMPOSITE_XOR:\n    case GSHSCENE_COMPOSITE_PLUS:\n      return 1;",
      "    case GSHSCENE_COMPOSITE_XOR:\n    case GSHSCENE_COMPOSITE_SRC_IN:\n    case GSHSCENE_COMPOSITE_PLUS:\n      return 1;", RT),
     # --- D8 and the write -----------------------------------------------------------------------------------------------

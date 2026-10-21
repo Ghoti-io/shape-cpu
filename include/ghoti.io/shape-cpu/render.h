@@ -33,7 +33,9 @@
  * premultiplied alpha form the raster's format records (it is read, never
  * assumed).  Every other format (gray, CMYK, planar, 12 or 16 bits), a `STREAM`
  * target and the reserved GPU kinds are ::GSHSCENE_ERR_UNSUPPORTED.  For a target
- * it draws, the caps are: every item kind and every composite operator;
+ * it draws, the caps are: every item kind and the composite operators it
+ * composites, named one by one (the twelve Porter-Duff operators and `PLUS`;
+ * an operator past them is refused by the planning pass, never drawn as another);
  * `CAN_BLOCK` (it completes inside `begin`), `CALLER_MEMORY`, `CLIP_AA`,
  * `BLEND_SPACES`, `READBACK` and `GLYPHS_FROM_FONT` (story 14a: a run from a font
  * is drawn through its face's provider by shape-scene's route, glyph.h, the fast

@@ -674,10 +674,13 @@ TEST(RenderArithmetic, TheOperatorsTableAndBoundedness) {
   EXPECT_EQ(d[3], 1.0);
   EXPECT_TRUE(gshcpu_render_bounded(GSHSCENE_COMPOSITE_PLUS));
   EXPECT_FALSE(gshcpu_render_bounded(GSHSCENE_COMPOSITE_COUNT));
-  double e[4];
-  std::memcpy(e, d0, sizeof e);
-  gshcpu_render_apply(e, s, 1.0, GSHSCENE_COMPOSITE_COUNT); // outside the enum: (0, 0), the caps refuse it first
-  EXPECT_EQ(e[0], 0.0);
+  // An operator apply does not know is not drawn as another (CLEAR, before): it says so and leaves D alone.
+  for (uint32_t unknown : {(uint32_t)GSHSCENE_COMPOSITE_PLUS + 1u, (uint32_t)GSHSCENE_COMPOSITE_COUNT, 31u, 255u}) {
+    double e[4];
+    std::memcpy(e, d0, sizeof e);
+    EXPECT_EQ(gshcpu_render_apply(e, s, 1.0, unknown), 0) << unknown;
+    EXPECT_EQ(std::memcmp(e, d0, sizeof e), 0) << "D untouched by unknown operator " << unknown;
+  }
 }
 
 TEST(RenderArithmetic, AConversionBetweenEqualSpacesCopies) {

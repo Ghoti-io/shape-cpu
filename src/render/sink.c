@@ -457,7 +457,10 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   for (uint32_t k = GSHSCENE_ITEM_FILL; k < GSHSCENE_ITEM_KIND_COUNT; k++) {
     out->item_kinds |= UINT32_C(1) << k;
   }
-  for (uint32_t c = 0; c < GSHSCENE_COMPOSITE_COUNT; c++) {
+  /* Exactly the operators gshcpu_render_apply composites, named rather than counted up to the enum's end: a
+   * shape-scene whose enum has grown past them must not find them claimed here (they would be refused by nothing and
+   * composited as no operator at all). */
+  for (uint32_t c = GSHSCENE_COMPOSITE_SRC_OVER; c <= GSHSCENE_COMPOSITE_PLUS; c++) {
     out->composites |= UINT32_C(1) << c;
   }
   out->flags = GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA | GSHSCENE_CAP_BLEND_SPACES |
@@ -828,7 +831,7 @@ static void group_push(Run * run, const GSHSCENE_Item * item) {
   run->work += run->layout.pixels;
 }
 
-static void group_pop(Run * run) {
+static GSHSCENE_Result group_pop(Run * run) {
   const Frame * f = &run->frames[run->top];
   Frame * parent = &run->frames[run->top - 1u];
   uint32_t op = f->group.composite;
@@ -858,7 +861,9 @@ static void group_pop(Run * run) {
       if (bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0) {
         continue;
       }
-      gshcpu_render_apply(&parent->layer[4u * p], s, (double)m8 / 255.0, op);
+      if (!gshcpu_render_apply(&parent->layer[4u * p], s, (double)m8 / 255.0, op)) {
+        return GSHSCENE_ERR_INTERNAL; /* unreachable: the planning pass refuses an operator the caps do not claim */
+      }
       if (run->top == 1u) {
         run->touched[p] = 1;
       }
@@ -869,6 +874,7 @@ static void group_pop(Run * run) {
   }
   run->top--;
   run->groups_open--;
+  return GSHSCENE_OK;
 }
 
 /** Go through one unit.  @return ::GSHSCENE_OK to go on, or the result to stop with. */
@@ -901,8 +907,7 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
       group_push(run, item);
       return GSHSCENE_OK;
     case GSHSCENE_ITEM_GROUP_POP:
-      group_pop(run);
-      return GSHSCENE_OK;
+      return group_pop(run);
     case GSHSCENE_ITEM_INSTANCE:
       run->maps[count - 1] = item->map;
       return GSHSCENE_OK;
