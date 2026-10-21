@@ -53,5 +53,21 @@ render font-general rgba8 2a379c5721d64b6e
 render font-general rgba8-premultiplied 2f3983c234c5a4eb
 render font-general rgbaf32 f8c5a63c5728f842
 render font-general rgbaf32-premultiplied 4c88b1e549baa06c
-hash 1d6a304e0fa86071
-count 52
+render gradient-linear rgba8 b56179ff8dff5b01
+render gradient-linear rgba8-premultiplied 720fa797986bd2df
+render gradient-linear rgbaf32 21ee049acb09e5ec
+render gradient-linear rgbaf32-premultiplied e08c65db88701121
+render gradient-radial rgba8 d4cdc22ac566bc50
+render gradient-radial rgba8-premultiplied df88cb16b0cfcc2f
+render gradient-radial rgbaf32 c174ad13eeb0cfce
+render gradient-radial rgbaf32-premultiplied dfef289425bd6b45
+render gradient-sweep rgba8 c7e0618ea073eaa0
+render gradient-sweep rgba8-premultiplied 5674d1632f42b172
+render gradient-sweep rgbaf32 18f63d6e1c2d07ce
+render gradient-sweep rgbaf32-premultiplied a86d5b1b881c80c0
+render gradient-paints rgba8 e2538d1493f81206
+render gradient-paints rgba8-premultiplied 027be95b4c3500f6
+render gradient-paints rgbaf32 cc313be58e8094f3
+render gradient-paints rgbaf32-premultiplied db44b85183887a36
+hash 7a1a5d7c6a1211ff
+count 68

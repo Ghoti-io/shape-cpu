@@ -732,7 +732,7 @@ PLANTS += [
 # flattener's limit as a glyph's own.  geometry.c and sink.c are also mutated by the generator.
 GLR = ["testGlyph_render", "testRender_conformance"]
 PLANTS += [
-    ("rgl-cap", "src", RS, "      GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT;", "      GSHSCENE_CAP_READBACK;", ["testRender"] + GLR),
+    ("rgl-cap", "src", RS, "      GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT | GSHSCENE_CAP_GRADIENT_SPACES;", "      GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GRADIENT_SPACES;", ["testRender"] + GLR),
     ("rgl-refused-route-drawn", "src", RS, "          route.entry_class == GSHSCENE_ENTRY_REFUSED)) {", "          0)) {", CONF),
     ("rgl-notes-unreported", "src", RS, "    if (!g.notes[i].entry_class) {\n      continue;", "    if (1) {\n      continue;", GLR),
     ("rgl-strict-goes-on", "src", RS, "        (run->request->flags & GSHSCENE_RENDER_STRICT)) {", "        0) {", GLR),
@@ -741,6 +741,53 @@ PLANTS += [
     ("rgl-general-map", "src", RG, "gshgeom_device_path_from_model(outline, &glyph_map, alloc, limits, &device);", "gshgeom_device_path_from_model(outline, map, alloc, limits, &device);", GLR),
     ("rgl-flatten-limit-unnoted", "src", RG, "      limit_note(note); /* past the flattener's points */\n", "", GLR),
     ("rgl-route-raster", "src", RG, "         gshscene_glyph_route(item->resource, &map, GSHSCENE_TARGET_RASTER, out) == GSHSCENE_OK;", "         gshscene_glyph_route(item->resource, &map, GSHSCENE_TARGET_STREAM, out) == GSHSCENE_OK;", GLR),
+]
+
+# Color-paint story P2: gradients.  The caps; the notice's skip; the sample point, the chain and its domain (S4, S6);
+# the stops' pool; the conversion and premultiplication; and in gradient.c each kind's rule, the extend, the color
+# line, the inverse and the end of the double's reach.  Both files are also mutated by the generator.
+RGR = "src/render/gradient.c"
+GRT = ["testRender_gradient"] + RT
+PLANTS += [
+    ("rgr-cap-kinds", "src", RS, "  for (uint32_t k = GSHSCENE_GRADIENT_LINEAR; k < GSHSCENE_GRADIENT_KIND_COUNT; k++) {", "  for (uint32_t k = GSHSCENE_GRADIENT_LINEAR; k < GSHSCENE_GRADIENT_SWEEP; k++) {", GRT),
+    ("rgr-cap-spaces", "src", RS, "GSHSCENE_CAP_GLYPHS_FROM_FONT | GSHSCENE_CAP_GRADIENT_SPACES;", "GSHSCENE_CAP_GLYPHS_FROM_FONT;", GRT),
+    ("rgr-notice-drawn", "src", RS, "  if (gshscene_gradient_notice(item, run->maps, count - 1, &run->job->target.map)) {", "  if (0) {", GRT),
+    ("rgr-sample-corner", "src", RS, "(double)x + 0.5, (double)y + 0.5, color)", "(double)x, (double)y, color)", GRT),
+    ("rgr-chain-no-gradient-map", "src", RS, "gshgeom_map_compose_chain(run->maps, count + 1, &run->job->target.map, &composed)", "gshgeom_map_compose_chain(run->maps, count, &run->job->target.map, &composed)", GRT),
+    ("rgr-chain-no-target", "src", RS, "gshgeom_map_compose_chain(run->maps, count + 1, &run->job->target.map, &composed)", "gshgeom_map_compose_chain(run->maps, count + 1, NULL, &composed)", GRT),
+    ("rgr-domain-unchecked", "src", RS, " ||\n      !gshcpu_render_gradient_in_domain(&gr, whole)) {", ") {", GRT),
+    ("rgr-domain-in-damage", "src", RS, "!gshcpu_render_gradient_in_domain(&gr, whole)) {", "!gshcpu_render_gradient_in_domain(&gr, rect)) {", GRT),
+    ("rgr-convert-skipped", "src", RS, "      gshcpu_render_convert_straight(&c, color, color);\n", "", GRT),
+    ("rgr-not-premultiplied", "src", RS, "      double s[4] = {color[0] * color[3], color[1] * color[3], color[2] * color[3], color[3]};", "      double s[4] = {color[0], color[1], color[2], color[3]};", GRT),
+    ("rgr-paint-alpha", "src", RS, "&composed, item->paint.rgba[3]) != GSHCPU_OK", "&composed, 1.0) != GSHCPU_OK", GRT),
+    ("rgr-pool-offset", "src", RS, "run->pool + e->first, &composed", "run->pool, &composed", GRT),
+    ("rgr-pool-unadvanced", "src", RS, "    run->pooled += g->stop_count;\n", "", GRT),
+    ("rgr-interpolant-straight", "src", RGR, "  if (!premultiplied) {\n    return; /* G4", "  if (1) {\n    return; /* G4", GRT),
+    ("rgr-unpremultiplied-not", "src", RGR, "      c[k] = a == 0.0 ? 0.0 : c[k] / a;", "      c[k] = c[k];", GRT),
+    ("rgr-paint-alpha-unread", "src", RGR, "  c[3] = c[3] * g->alpha;", "  c[3] = c[3];", GRT),
+    ("rgr-linear-normal", "src", RGR, "        out->n[0] = -g->d[1];", "        out->n[0] = g->d[1];", GRT),
+    ("rgr-linear-den", "src", RGR, "        grow_square_of_difference(&den, g->p1[1], g->p0[1], 1.0);", "", GRT),
+    ("rgr-linear-den-lo", "src", RGR, "        grow_product(&den, dx_lo, out->n[0]);", "", GRT),
+    ("rgr-radial-a-sign", "src", RGR, "      grow_square_of_difference(&a, g->r1, g->r0, -1.0);", "      grow_square_of_difference(&a, g->r1, g->r0, 1.0);", GRT),
+    ("rgr-radial-smaller-first", "src", RGR, "        w[nw++] = u > v ? u : v;\n        w[nw++] = u > v ? v : u;", "        w[nw++] = u > v ? v : u;\n        w[nw++] = u > v ? u : v;", GRT),
+    ("rgr-radial-radius", "src", RGR, "      if (g->r0 + w[i] * g->dr > 0.0) {", "      if (g->r0 - w[i] * g->dr > 0.0) {", GRT),
+    ("rgr-radial-linear-root", "src", RGR, "      w[nw++] = c / (2.0 * b);", "      w[nw++] = c / b;", GRT),
+    ("rgr-radial-b", "src", RGR, "    double b = x * g->n[0] + y * g->n[1] + g->r0 * g->dr;", "    double b = x * g->n[0] + y * g->n[1];", GRT),
+    ("rgr-sweep-wrap", "src", RGR, "    rad += TWO_PI;", "    rad += 0.0;", GRT),
+    ("rgr-sweep-half-turn", "src", RGR, "    return dx < 0.0 ? 0.5 * g->turn : 0.0;", "    return 0.0;", GRT),
+    ("rgr-sweep-unit", "src", RGR, "rad : rad / TWO_PI * g->turn;", "rad : rad;", GRT),
+    ("rgr-sweep-step", "src", RGR, "    *t = theta < g->a0 ? -GSHCPU_RENDER_T_LIMIT : GSHCPU_RENDER_T_LIMIT;", "    *t = theta < g->a0 ? GSHCPU_RENDER_T_LIMIT : -GSHCPU_RENDER_T_LIMIT;", GRT),
+    ("rgr-repeat", "src", RGR, "          x = x - gmath_floor(x / g->period) * g->period;", "          x = x - gmath_floor(x / g->period);", GRT),
+    ("rgr-reflect", "src", RGR, "          x = g->period - (d < 0.0 ? -d : d);", "          x = g->period - d;", GRT),
+    ("rgr-pad-below-last", "src", RGR, "      if (t < g->o_first) {\n        copy4(c, g->stops[0].rgba);", "      if (t < g->o_first) {\n        copy4(c, g->stops[g->count - 1].rgba);", GRT),
+    ("rgr-equal-offsets-first", "src", RGR, "    if (t < s[mid].offset) {", "    if (t <= s[mid].offset) {", GRT),
+    ("rgr-one-stop", "src", RGR, "  if (g->count == 1) {", "  if (0) {", GRT),
+    ("rgr-clamp-low", "src", RGR, "    t = -GSHCPU_RENDER_T_LIMIT; /* P2-4", "    t = t; /* P2-4", GRT),
+    ("rgr-invert-unscaled", "src", RGR, "    m[i] = gmath_ldexp(m[i], -e);", "    m[i] = m[i];", GRT),
+    ("rgr-invert-translation", "src", RGR, "  double u = qx - g->inv[4];", "  double u = qx;", GRT),
+    ("rgr-invert-row", "src", RGR, "  inv[1] = gmath_ldexp(-m[1] / d, -e);", "  inv[1] = gmath_ldexp(-m[2] / d, -e);", GRT),
+    ("rgr-domain-half", "src", RGR, "  const double bound = GSHSCENE_GRADIENT_DOMAIN * 0.5;", "  const double bound = GSHSCENE_GRADIENT_DOMAIN * 4.0;", GRT),
+    ("rgr-tolerance", "hdr", RHD, "#define GSHCPU_RENDER_GRADIENT_TOLERANCE 1e-12", "#define GSHCPU_RENDER_GRADIENT_TOLERANCE 1e-16", GRT),
 ]
 
 # The generated plants (tools/gen-render-plants.py): the mutations of src/render the sweep was seen to catch, and

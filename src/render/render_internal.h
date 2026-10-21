@@ -39,6 +39,7 @@
 #include <ghoti.io/shape-geometry/flatten.h>
 #include <ghoti.io/shape-scene/list.h>
 #include <ghoti.io/shape-scene/paint.h>
+#include <ghoti.io/shape-scene/resource.h>
 #include <ghoti.io/shape-scene/sink.h>
 
 #include <stddef.h>
@@ -220,6 +221,64 @@ int gshcpu_render_glyph_route(const GSHSCENE_Item * item, GSHGEOM_Map * chain, s
 
 /** Release what ::gshcpu_render_geometry made. */
 void gshcpu_render_geometry_release(GSHCPU_Item_Geometry * g, const GSHGEOM_Allocator * alloc);
+
+/* --- gradients (gradient.c; color-paint story P2) ------------------------------------------ */
+
+/** The parameter a sink takes at the ends of the double's reach (P2-4): `2^431`, past every `t` G14 allows. */
+#define GSHCPU_RENDER_T_LIMIT 0x1p431
+
+/**
+ * A stop of a resolved color line: what gshscene_gradient_resolve writes (its offset and straight color in the
+ * interpolation space), made in place its interpolant (G4: premultiplied when the gradient is) in `rgba`.
+ */
+typedef GSHSCENE_Resolved_Stop GSHCPU_Stop;
+
+/** A gradient prepared for one fill: its inverse map, its kind's constants and its color line. */
+typedef struct GSHCPU_Gradient {
+  uint32_t kind;
+  uint32_t extend;
+  uint32_t premultiplied;
+  uint32_t unit;             /* sweep: the angle unit */
+  int degenerate;            /* G10 by this sink's arithmetic (the plan's notice skips these first) */
+  double inv[6];             /* p = L^-1 (q - t): inv[0..3] row major, inv[4..5] the composed map's translation */
+  double p[2];               /* p0, c0 or the center */
+  double n[2];               /* linear: n_d; radial: c1 - c0 */
+  double den;                /* linear: (p1 - p0) . n_d, from its exact value */
+  double r0, dr, a;          /* radial: r0, r1 - r0, |c1 - c0|^2 - (r1 - r0)^2 (zero exactly when it is) */
+  double a0, a1, turn;       /* sweep: the angles and one turn in their unit */
+  const GSHCPU_Stop * stops;
+  size_t count;
+  double o_first, o_last, period;
+  double alpha;              /* the paint's alpha multiplier (G12) */
+} GSHCPU_Gradient;
+
+/** Make @p count resolved stops, in place, their interpolants (G4). */
+void gshcpu_render_gradient_stops(GSHCPU_Stop * stops, size_t count, uint32_t premultiplied);
+
+/**
+ * Prepare @p g (its stops' interpolants @p stops, sorted) for a fill whose chain composes to @p composed (the target's
+ * map last, the gradient's map first).
+ *
+ * @return ::GSHCPU_OK; ::GSHCPU_ERR_LIMIT where the composed map's inverse is not finite or its determinant is zero in
+ *   doubles (the sink's own limit, S6).
+ */
+GSHCPU_Result gshcpu_render_gradient_prepare(GSHCPU_Gradient * out, const GSHSCENE_Gradient * g,
+    const GSHCPU_Stop * stops, const GSHGEOM_Map * composed, double alpha);
+
+/** Nonzero if the centers of @p r's pixels map into G14's sampling domain (half of it, for the rounding between). */
+int gshcpu_render_gradient_in_domain(const GSHCPU_Gradient * g, GSHCPU_Rect r);
+
+/** The gradient-space point of the device point (@p qx, @p qy). */
+void gshcpu_render_gradient_unmap(const GSHCPU_Gradient * g, double qx, double qy, double * px, double * py);
+
+/** G7 to G9: the parameter at gradient-space point (@p px, @p py); 0 where nothing is drawn (G8's outside, G10). */
+int gshcpu_render_gradient_param(const GSHCPU_Gradient * g, double px, double py, double * t);
+
+/** G4, G5, G12: the straight color at @p t in the interpolation space, its alpha times the paint's. */
+void gshcpu_render_gradient_color(const GSHCPU_Gradient * g, double t, double out[4]);
+
+/** Both: the straight color at device point (@p qx, @p qy); 0 where nothing is drawn. */
+int gshcpu_render_gradient_at(const GSHCPU_Gradient * g, double qx, double qy, double out[4]);
 
 /* --- the sink (sink.c) ---------------------------------------------------------------- */
 

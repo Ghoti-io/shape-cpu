@@ -42,6 +42,10 @@
  * | maps | a skewed fill, a rotated clip, and the target's map |
  * | font-fast | (story 14a) runs from the test provider's faces on the fast tier: unhinted at a scaled map and fractional origins, hinted, and a face without a program |
  * | font-general | (story 14a) the same runs on the general route: rotated, and at a size that is no integer ppem |
+ * | gradient-linear | (color-paint story P2) linear gradients: pad, repeat with an isoline direction, reflect under a turned gradient map, a paint alpha |
+ * | gradient-radial | the two-circle cone (the start circle outside the end), concentric repeat, a negative start radius under reflect, a strip |
+ * | gradient-sweep | sweeps in degrees (pad), turns (repeat), radians (reflect) and with equal angles (pad's step) |
+ * | gradient-paints | interpolation in linear sRGB premultiplied and in a P3 gamma, foreground and palette stops, equal offsets, a group in another blend space under a clip, a picture instanced turned, and two fills that draw nothing (degenerate, a flat map) |
  */
 
 #ifndef GHOTI_IO_GSHCPU_TEST_RENDER_FIXTURES_H
@@ -524,6 +528,247 @@ static inline GSHSCENE_List * rf_maps(RF_Ctx * c) {
   return l;
 }
 
+/* --- gradients (color-paint story P2) ------------------------------------------------------------- */
+
+static inline GSHSCENE_Paint rf_gradient_paint(const GSHSCENE_Resource * g, double alpha) {
+  GSHSCENE_Paint p;
+  memset(&p, 0, sizeof p);
+  p.kind = GSHSCENE_PAINT_GRADIENT;
+  p.gradient = g;
+  p.rgba[3] = alpha;
+  return p;
+}
+
+static inline GSHSCENE_Gradient_Stop rf_stop(double offset, GSHSCENE_Paint color) {
+  GSHSCENE_Gradient_Stop s;
+  memset(&s, 0, sizeof s);
+  s.offset = offset;
+  s.color = color;
+  return s;
+}
+
+/** Intern @p g (its map the identity when its dimension is zero) with @p count stops. */
+static inline const GSHSCENE_Resource * rf_gradient(RF_Ctx * c, GSHSCENE_Gradient g, const GSHSCENE_Gradient_Stop * stops,
+    size_t count) {
+  if (g.map.dim == 0) {
+    gshgeom_map_identity(2, &g.map);
+  }
+  g.stops = stops;
+  g.stop_count = count;
+  const GSHSCENE_Resource * r = NULL;
+  rf_check(c, gshscene_store_intern_gradient(c->store, &g, &r) == GSHSCENE_OK);
+  return rf_hold(c, r);
+}
+
+static inline GSHSCENE_Gradient rf_linear(double x0, double y0, double x1, double y1, double dx, double dy, uint32_t extend) {
+  GSHSCENE_Gradient g;
+  memset(&g, 0, sizeof g);
+  g.kind = GSHSCENE_GRADIENT_LINEAR;
+  g.p0[0] = x0;
+  g.p0[1] = y0;
+  g.p1[0] = x1;
+  g.p1[1] = y1;
+  g.d[0] = dx;
+  g.d[1] = dy;
+  g.extend = extend;
+  return g;
+}
+
+static inline GSHSCENE_Gradient rf_radial(double c0x, double c0y, double r0, double c1x, double c1y, double r1,
+    uint32_t extend) {
+  GSHSCENE_Gradient g;
+  memset(&g, 0, sizeof g);
+  g.kind = GSHSCENE_GRADIENT_RADIAL;
+  g.c0[0] = c0x;
+  g.c0[1] = c0y;
+  g.r0 = r0;
+  g.c1[0] = c1x;
+  g.c1[1] = c1y;
+  g.r1 = r1;
+  g.extend = extend;
+  return g;
+}
+
+static inline GSHSCENE_Gradient rf_sweep(double cx, double cy, uint32_t unit, double a0, double a1, uint32_t extend) {
+  GSHSCENE_Gradient g;
+  memset(&g, 0, sizeof g);
+  g.kind = GSHSCENE_GRADIENT_SWEEP;
+  g.center[0] = cx;
+  g.center[1] = cy;
+  g.angle_unit = unit;
+  g.a0 = a0;
+  g.a1 = a1;
+  g.extend = extend;
+  return g;
+}
+
+static inline GSHSCENE_List * rf_gradient_linear(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Gradient_Stop three[3] = {rf_stop(0.0, rf_solid(0.9, 0.1, 0.1, 1.0)),
+      rf_stop(0.4, rf_solid(0.1, 0.8, 0.2, 0.6)), rf_stop(1.0, rf_solid(0.1, 0.2, 0.9, 1.0))};
+  const GSHSCENE_Gradient_Stop two[2] = {rf_stop(0.25, rf_solid(1.0, 0.9, 0.2, 1.0)),
+      rf_stop(0.75, rf_solid(0.2, 0.1, 0.5, 0.8))};
+  /* pad, from (6, 0) to (42, 0) */
+  rf_fill(c, l, rf_rect(c, 2, 2, 46, 13), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, rf_linear(6, 0, 42, 0, 0, 0, GSHSCENE_EXTEND_PAD), three, 3), 1.0), 0, 0.0);
+  /* repeat, with an isoline direction that slants the bands */
+  rf_fill(c, l, rf_rect(c, 2, 14, 46, 26), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, rf_linear(10, 20, 22, 20, 1.0, 2.0, GSHSCENE_EXTEND_REPEAT), two, 2), 0.8), 0, 0.0);
+  /* reflect, under a gradient map turned 30 degrees and scaled */
+  GSHSCENE_Gradient r = rf_linear(0, 0, 9, 0, 0, 0, GSHSCENE_EXTEND_REFLECT);
+  GSHGEOM_Map rot;
+  GSHGEOM_Map scale;
+  GSHGEOM_Map move;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 30.0, &rot);
+  gshgeom_map_scale(2, 1.5, 0.75, 1.0, &scale);
+  gshgeom_map_translate(2, 24.0, 32.0, 0.0, &move);
+  gshgeom_map_compose(&rot, &scale, &r.map);
+  gshgeom_map_compose(&move, &r.map, &r.map);
+  rf_fill(c, l, rf_star(c, 24.0, 32.0, 9.0), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, r, three, 3), 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_gradient_radial(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Gradient_Stop three[3] = {rf_stop(0.0, rf_solid(1.0, 1.0, 0.8, 1.0)),
+      rf_stop(0.5, rf_solid(0.9, 0.3, 0.1, 0.9)), rf_stop(1.0, rf_solid(0.2, 0.0, 0.3, 0.7))};
+  const GSHSCENE_Gradient_Stop two[2] = {rf_stop(0.0, rf_solid(0.1, 0.6, 0.9, 1.0)),
+      rf_stop(1.0, rf_solid(0.9, 0.9, 0.9, 0.5))};
+  /* a cone: the start circle lies outside the end circle */
+  rf_fill(c, l, rf_rect(c, 1, 1, 24, 20), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, rf_radial(4, 4, 2, 15, 12, 7, GSHSCENE_EXTEND_PAD), three, 3), 1.0), 0, 0.0);
+  /* concentric, repeat */
+  rf_fill(c, l, rf_blob(c, 25.0, 1.0, 20.0), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, rf_radial(35, 11, 0, 35, 11, 4.5, GSHSCENE_EXTEND_REPEAT), two, 2), 1.0), 0, 0.0);
+  /* a negative start radius (COLRv1), reflect */
+  rf_fill(c, l, rf_rect(c, 1, 21, 24, 39), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, rf_radial(8, 30, -3, 16, 28, 6, GSHSCENE_EXTEND_REFLECT), three, 3), 0.9), 0, 0.0);
+  /* a strip: equal radii, distinct centers */
+  rf_fill(c, l, rf_rect(c, 25, 21, 47, 39), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, rf_radial(28, 26, 4, 40, 34, 4, GSHSCENE_EXTEND_PAD), two, 2), 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_gradient_sweep(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Gradient_Stop four[4] = {rf_stop(0.0, rf_solid(1.0, 0.0, 0.0, 1.0)),
+      rf_stop(0.3, rf_solid(1.0, 1.0, 0.0, 1.0)), rf_stop(0.7, rf_solid(0.0, 0.6, 1.0, 0.8)),
+      rf_stop(1.0, rf_solid(0.5, 0.0, 0.5, 1.0))};
+  const GSHSCENE_Gradient_Stop two[2] = {rf_stop(0.0, rf_solid(0.0, 0.0, 0.0, 1.0)),
+      rf_stop(1.0, rf_solid(1.0, 1.0, 1.0, 1.0))};
+  rf_fill(c, l, rf_rect(c, 1, 1, 23, 20), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, rf_sweep(12, 10.5, GSHGEOM_ANGLE_DEGREES, 30, 300, GSHSCENE_EXTEND_PAD), four, 4), 1.0),
+      0, 0.0);
+  rf_fill(c, l, rf_rect(c, 25, 1, 47, 20), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, rf_sweep(36, 10, GSHGEOM_ANGLE_TURNS, 0.125, 0.375, GSHSCENE_EXTEND_REPEAT), two, 2),
+          1.0),
+      0, 0.0);
+  rf_fill(c, l, rf_rect(c, 1, 21, 23, 39), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, rf_sweep(11.5, 30, GSHGEOM_ANGLE_RADIANS, -1.0, 2.0, GSHSCENE_EXTEND_REFLECT), four, 4),
+          0.75),
+      0, 0.0);
+  rf_fill(c, l, rf_blob(c, 25.0, 21.0, 18.0), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, rf_sweep(34, 30, GSHGEOM_ANGLE_DEGREES, 135, 135, GSHSCENE_EXTEND_PAD), two, 2), 1.0),
+      0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_gradient_paints(RF_Ctx * c) {
+  GSHSCENE_Color_Space lin = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_LINEAR, 0.0);
+  GSHSCENE_Color_Space p3g = rf_space(GCOL_PRIMARIES_DISPLAY_P3, GCOL_TRANSFER_GAMMA, 2.2);
+  /* the palette of the list, and its foreground */
+  GSHSCENE_Color colors[2];
+  memset(colors, 0, sizeof colors);
+  colors[0].rgba[0] = 0.2;
+  colors[0].rgba[1] = 0.7;
+  colors[0].rgba[2] = 0.3;
+  colors[0].rgba[3] = 1.0;
+  colors[1].rgba[0] = 0.95;
+  colors[1].rgba[1] = 0.5;
+  colors[1].rgba[2] = 0.05;
+  colors[1].rgba[3] = 0.85;
+  colors[1].space = rf_space(GCOL_PRIMARIES_ADOBE_RGB, GCOL_TRANSFER_SRGB, 0.0);
+  const GSHSCENE_Resource * palette = NULL;
+  rf_check(c, gshscene_store_intern_palette(c->store, 2, colors, &palette) == GSHSCENE_OK);
+  rf_hold(c, palette);
+  GSHSCENE_Paint entry1;
+  memset(&entry1, 0, sizeof entry1);
+  entry1.kind = GSHSCENE_PAINT_PALETTE;
+  entry1.entry = 1;
+  entry1.rgba[3] = 1.0;
+  GSHSCENE_Paint current;
+  memset(&current, 0, sizeof current);
+  current.kind = GSHSCENE_PAINT_FOREGROUND;
+  current.rgba[3] = 0.7;
+  /* a picture: one gradient fill, instanced turned */
+  GSHSCENE_List * inner = rf_open(c);
+  const GSHSCENE_Gradient_Stop pic[2] = {rf_stop(0.0, current), rf_stop(1.0, rf_solid_in(0.0, 0.2, 1.0, 1.0, lin))};
+  GSHSCENE_Gradient pg = rf_linear(0, 0, 10, 10, 0, 0, GSHSCENE_EXTEND_REFLECT);
+  pg.space = lin;
+  rf_fill(c, inner, rf_rect(c, 0, 0, 10, 10), NULL, GSHGEOM_FILL_NONZERO, rf_gradient_paint(rf_gradient(c, pg, pic, 2), 1.0),
+      0, 0.0);
+  rf_close(c, inner);
+  const GSHSCENE_Resource * picture = NULL;
+  rf_check(c, gshscene_store_intern_picture(c->store, inner, &picture) == GSHSCENE_OK);
+  rf_hold(c, picture);
+  GSHSCENE_List * l = rf_open(c);
+  GSHSCENE_Color fg;
+  memset(&fg, 0, sizeof fg);
+  fg.rgba[0] = 0.85;
+  fg.rgba[1] = 0.25;
+  fg.rgba[2] = 0.6;
+  fg.rgba[3] = 0.9;
+  fg.space = rf_space(GCOL_PRIMARIES_DISPLAY_P3, GCOL_TRANSFER_SRGB, 0.0);
+  rf_check(c, gshscene_list_set_foreground(l, &fg) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_set_palette(l, palette) == GSHSCENE_OK);
+  /* linear sRGB, premultiplied, through a transparent stop; equal offsets make a hard edge */
+  const GSHSCENE_Gradient_Stop hard[4] = {rf_stop(0.0, rf_solid_in(1.0, 0.1, 0.1, 1.0, lin)),
+      rf_stop(0.5, rf_solid_in(0.0, 1.0, 0.0, 0.0, lin)), rf_stop(0.5, rf_solid_in(0.1, 0.1, 1.0, 1.0, lin)),
+      rf_stop(1.0, entry1)};
+  GSHSCENE_Gradient a = rf_linear(2, 0, 30, 0, 0, 0, GSHSCENE_EXTEND_PAD);
+  a.space = lin;
+  a.premultiplied = 1;
+  rf_fill(c, l, rf_rect(c, 1, 1, 33, 12), NULL, GSHGEOM_FILL_NONZERO, rf_gradient_paint(rf_gradient(c, a, hard, 4), 1.0), 0,
+      0.0);
+  /* a P3 gamma interpolation of a palette, a foreground and an sRGB stop, in a linear group under a clip */
+  const GSHSCENE_Gradient_Stop mix[3] = {rf_stop(-0.25, current), rf_stop(0.5, rf_solid_in(0.1, 0.9, 0.8, 1.0, rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_SRGB, 0.0))),
+      rf_stop(1.25, entry1)};
+  GSHSCENE_Gradient b = rf_radial(20, 24, 1, 22, 26, 13, GSHSCENE_EXTEND_REPEAT);
+  b.space = p3g;
+  GSHSCENE_Group grp = rf_group(0.85, GSHSCENE_COMPOSITE_SRC_OVER);
+  grp.blend_space = lin;
+  rf_check(c, gshscene_list_clip_push(l, rf_star(c, 20.0, 25.0, 14.0), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_group_push(l, &grp, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, 4, 12, 38, 39), NULL, GSHGEOM_FILL_NONZERO, rf_gradient_paint(rf_gradient(c, b, mix, 3), 0.9), 0,
+      0.0);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+  /* the picture, turned */
+  GSHGEOM_Map rot;
+  GSHGEOM_Map move;
+  GSHGEOM_Map placed;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 20.0, &rot);
+  gshgeom_map_translate(2, 36.0, 2.0, 0.0, &move);
+  gshgeom_map_compose(&move, &rot, &placed);
+  rf_check(c, gshscene_list_instance(l, picture, &placed, 0, 0.0) == GSHSCENE_OK);
+  /* two fills that draw nothing: a degenerate line, and a gradient under a flat map */
+  const GSHSCENE_Gradient_Stop two[2] = {rf_stop(0.0, rf_solid(1, 0, 0, 1)), rf_stop(1.0, rf_solid(0, 0, 1, 1))};
+  rf_fill(c, l, rf_rect(c, 36, 20, 46, 30), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, rf_linear(40, 25, 40, 25, 0, 0, GSHSCENE_EXTEND_PAD), two, 2), 1.0), 0, 0.0);
+  GSHSCENE_Gradient flat = rf_linear(0, 0, 4, 0, 0, 0, GSHSCENE_EXTEND_PAD);
+  const double m[4] = {1.0, 0.0, 2.0, 0.0};
+  const double t[2] = {0.0, 0.0};
+  gshgeom_map_from_matrix(2, m, t, &flat.map);
+  rf_fill(c, l, rf_rect(c, 36, 31, 46, 39), NULL, GSHGEOM_FILL_NONZERO, rf_gradient_paint(rf_gradient(c, flat, two, 2), 1.0),
+      0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
 /** The fixtures, in their committed order. */
 typedef GSHSCENE_List * (*RF_Build)(RF_Ctx * c);
 
@@ -546,6 +791,10 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"maps", rf_maps},
     {"font-fast", rf_font_fast},
     {"font-general", rf_font_general},
+    {"gradient-linear", rf_gradient_linear},
+    {"gradient-radial", rf_gradient_radial},
+    {"gradient-sweep", rf_gradient_sweep},
+    {"gradient-paints", rf_gradient_paints},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

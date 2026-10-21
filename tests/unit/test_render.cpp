@@ -50,7 +50,9 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
     EXPECT_EQ(caps.item_kinds, ((1u << GSHSCENE_ITEM_KIND_COUNT) - 1u) & ~1u) << "every kind, and no bit past them";
     EXPECT_EQ(caps.composites, (1u << GSHSCENE_COMPOSITE_COUNT) - 1u);
     EXPECT_EQ(caps.flags, GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA |
-        GSHSCENE_CAP_BLEND_SPACES | GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT);
+        GSHSCENE_CAP_BLEND_SPACES | GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT | GSHSCENE_CAP_GRADIENT_SPACES);
+    EXPECT_EQ(caps.gradient_kinds, (1u << GSHSCENE_GRADIENT_LINEAR) | (1u << GSHSCENE_GRADIENT_RADIAL) |
+        (1u << GSHSCENE_GRADIENT_SWEEP)) << "every gradient kind (color-paint story P2)";
     EXPECT_EQ(caps.cancel_unit, (uint32_t)GSHSCENE_CANCEL_BETWEEN_UNITS);
     EXPECT_STREQ(caps.work_measure, "cells+points+pixels");
     EXPECT_EQ(caps.cancel_work_bound, (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS + GSHCPU_LIMITS_DEFAULT_MAX_CELLS +

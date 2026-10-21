@@ -89,7 +89,8 @@ It draws `RASTER` targets of RGBA, interleaved, 8-bit unsigned normalized or
 32-bit float, straight or premultiplied as the raster's format says; every other
 target is `ERR_UNSUPPORTED`. Its caps are every item kind and every operator,
 `CAN_BLOCK`, `CALLER_MEMORY`, `CLIP_AA`, `BLEND_SPACES`, `READBACK`,
-`GLYPHS_FROM_FONT` (story 14a), and cancel between units with a bound of
+`GLYPHS_FROM_FONT` (story 14a), every gradient kind with `GRADIENT_SPACES`
+(color-paint story P2), and cancel between units with a bound of
 `max_points + max_cells + max_bytes` in cells, points and pixels. The planning
 pass is the contract layer's; the sink decides each unit with the same predicate
 (and a run from a font with shape-scene's route), skips what it refused, and adds
@@ -127,6 +128,37 @@ Measured (story 13b's gate, `tests/unit/test_render_vectors.cpp`): the worst
 error before the write is 1.22e-15 over shape-scene's 82 composite vectors and
 this library's 77 render vectors on four formats; every exact case is equal bit
 for bit, and every stored value is the oracle's rounding.
+
+### Gradients (color-paint story P2)
+
+shape-scene's G1 to G14 are drawn per pixel, normatively as render.h's S11 says:
+
+- **The sample** is the pixel's center, `(x + 1/2, y + 1/2)` in device space, weighted by the pixel's coverage and
+  clips as a solid fill's. One sample a pixel is what Canvas, Skia and Blend2D do, and what keeps a damaged render
+  equal to the whole render inside the damage.
+- **The map.** The chain (instances, item, the gradient's map as the leaf, the target's last) is composed by
+  `gshgeom_map_compose_chain` (AD-24: only shape-geometry composes) and the one composed map inverted once a fill:
+  the 2x2 part scaled by the power of two of its largest entry (exact), its determinant the exact sum of its two
+  products rounded once. A map whose inverse is not finite, and a fill whose rectangle in the whole render maps
+  outside half of G14's sampling domain, are this sink's resource limit (S6, S4).
+- **The stops** come from `gshscene_gradient_resolve`, once a gradient a render (an open-addressed table keyed by the
+  resource id, in the render's block, so caller memory allocates nothing), made interpolants once. The interpolated
+  straight color is converted per pixel into the layer's space: N3 is not linear, so it cannot be done once.
+  This sink's own N2 and N3 (compose.c) are bit for bit shape-scene's, which is internal to it.
+- **The arithmetic.** G7's denominator and G8's `a` are formed exactly (Dekker's product and Shewchuk's expansion,
+  no fused multiply-add) and rounded once, so the zero tests the rules make are exact and a nonzero value is never
+  divided as zero. G8's roots are `q / a` and `c / q` with `q = b + sign(b) sqrt(b^2 - a c)` (no cancellation).
+  G9's angle is `gmath_atan2`, exact on the axes. A `t` past `2^431` (only where G8's `a = 0` sends the root to
+  infinity, at the cone's edge) is taken at that end, so no NaN reaches a store and the bits do not depend on a
+  target's NaN.
+- **What draws nothing** (G10, G11) is skipped by the plan's own predicate, `gshscene_gradient_notice`; where G8
+  gives nothing the pixel is not touched.
+
+Measured against shape-scene's `tests/gradient_vectors.h` (the gradient oracle's 1860 points): the worst error of
+a color component is 6.11e-16 (linear), 7.77e-16 (radial) and 2.22e-16 (sweep), of `t` 2.05e-16, against a stated
+tolerance of `1e-12` (`GSHCPU_RENDER_GRADIENT_TOLERANCE`); all 343 exact cases are equal bit for bit, and every
+point the oracle says draws nothing is drawn as nothing. No dithering: the goldens are bit-identical on every
+target.
 
 ### Why the layers cover the region, not bands of it
 
@@ -262,4 +294,9 @@ and D8 in exact rationals (`make check-vectors` checks it); the fixture set of
 extents, readback, cancel against the render of the prefix, every limit at its
 bound and one past it, the exact workspace, frames that allocate nothing,
 allocation failure at every call, and the same drawing as a recorded and a
-retained list.
+retained list. Gradients (`test_render_gradient.cpp`): the evaluation against
+shape-scene's installed `gradient_vectors.h`, every pixel of a covering fill
+against the primitives at its center under the composed chain, parameter stops
+against the drawing list, what draws nothing, the domain limit with and without
+a damage, and the inverse's and the parameter's ends; the four gradient
+fixtures are goldens like the rest.

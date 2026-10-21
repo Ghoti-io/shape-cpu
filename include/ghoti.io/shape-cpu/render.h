@@ -37,7 +37,9 @@
  * `CAN_BLOCK` (it completes inside `begin`), `CALLER_MEMORY`, `CLIP_AA`,
  * `BLEND_SPACES`, `READBACK` and `GLYPHS_FROM_FONT` (story 14a: a run from a font
  * is drawn through its face's provider by shape-scene's route, glyph.h, the fast
- * tier wherever the route returns it); no `THREAD_AFFINE` (it holds no mutable
+ * tier wherever the route returns it); every gradient kind and `GRADIENT_SPACES`
+ * (color-paint story P2: linear, radial and sweep, each in its stated
+ * interpolation space); no `THREAD_AFFINE` (it holds no mutable
  * state of its own, so renders on distinct surfaces may run at once) and no
  * `PREPARE`.  Cancel is `BETWEEN_UNITS` (each unit
  * of the list's expansion); the work between two checks is counted in
@@ -85,6 +87,36 @@
  * - **Paint.**  A fill's paint (the foreground for a `FOREGROUND` paint, N10) is
  *   converted once per fill from its space to the layer's (N3; untouched when the
  *   spaces are equal) and premultiplied.
+ * - **Gradients (color-paint story P2; shape-scene's G1 to G14, S17).**  A
+ *   gradient fill's source at pixel `(x, y)` is G12's at the device point
+ *   `q = (x + 1/2, y + 1/2)`, the pixel's center, weighted by its coverage and
+ *   clips as a solid fill's.  The fill's chain (the enclosing instances' maps,
+ *   the item's, the gradient's as the leaf, the target's last) is composed by
+ *   `gshgeom_map_compose_chain` (AD-24) and inverted once a fill: the 2x2 part is
+ *   scaled by the power of two of its largest entry (exact), its determinant is
+ *   the exact sum of its two exact products rounded once, and `p = L^-1 (q - t)`.
+ *   The stops are `gshscene_gradient_resolve`'s, once a gradient a render (by
+ *   resource id), made interpolants (G4) once.  At each pixel: G7's `t` is
+ *   `((p - p0) . n_d) / den` with `den` the exact `(p1 - p0) . n_d` rounded once;
+ *   G8's `a` is the exact `|c1 - c0|^2 - (r1 - r0)^2` rounded once (so it is zero
+ *   exactly when it is), `b` and `c` are evaluated in doubles, the roots are
+ *   `q / a` and `c / q` with `q = b + sign(b) sqrt(b^2 - a c)` (`gmath_sqrt`), or
+ *   `c / 2b` where `a` is zero, and the larger root whose radius is positive is
+ *   taken; G9's angle is `gmath_atan2`, exact on the axes, `+ 2 pi` below zero and
+ *   scaled to the unit; G5's `mod` is `x - floor(x / P) P` (`gmath_floor`); a `t`
+ *   beyond `2^431` in magnitude (or not finite) is taken as `+-2^431`, so no NaN
+ *   reaches a store.  The straight color at `t` (un-premultiplied when the line
+ *   is) has its alpha multiplied by the paint's, is converted per pixel from the
+ *   interpolation space into the layer's (N3; untouched when they are equal),
+ *   premultiplied and applied with `SRC_OVER`; where G8 gives nothing the pixel
+ *   is not touched.  A fill that `gshscene_gradient_notice` names (G10, G11) is
+ *   skipped.  A composed map whose inverse is not finite, or whose determinant
+ *   rounds to zero, and a fill whose rectangle in the whole render (S4) maps
+ *   outside half of G14's sampling domain, are the sink's resource limit: the item
+ *   is refused while drawing (S6).  Before the write, each component of the color
+ *   and `t` are within ::GSHCPU_RENDER_GRADIENT_TOLERANCE times `max(1, |v|)` of
+ *   the gradient oracle's (shape-scene's `tests/gradient_vectors.h`).  No
+ *   dithering.
  * - **Coverage (D8).**  Coverage is 8-bit.  A clip multiplies each fill's
  *   coverage (N9): for a fill of coverage `k8` under the clips in force in its
  *   group, of coverages `c8` in the order they were pushed, `m8` starts at `k8`
@@ -125,7 +157,9 @@
  * A render takes one block: the layers (32 bytes a pixel of the region for the
  * root and for each level of group nesting), the touched map and the coverage
  * scratch (a byte a pixel each), a byte a pixel for each level of clip nesting,
- * the cell accumulator of ::GSHCPU_RENDER_BAND_ROWS rows, and the walk.  The
+ * the cell accumulator of ::GSHCPU_RENDER_BAND_ROWS rows, the walk, and for
+ * gradients a table of twice the gradient fills of the expansion (a picture's
+ * counted where it is drawn) and room for their stops.  The
  * geometry of each item (its device path and flattened path) is allocated from
  * the sink's allocator, or with `CALLER_MEMORY` from the rest of the workspace,
  * which is sized by converting every item once: the exact need is the block plus
@@ -176,6 +210,12 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * The bound of a gradient's evaluation against the gradient oracle (S11): each component of the straight color in the
+ * interpolation space, and `t`, within this times `max(1, |v|)` of the oracle's value.
+ */
+#define GSHCPU_RENDER_GRADIENT_TOLERANCE 1e-12
 
 /** Rows of the cell accumulator: coverage is accumulated this many rows at a time. */
 #define GSHCPU_RENDER_BAND_ROWS 16u

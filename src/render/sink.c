@@ -75,6 +75,14 @@ typedef struct Clip {
   uint8_t * coverage;        /* rect's width by height */
 } Clip;
 
+/** A gradient resolved in this render (S17: once per gradient per render), by resource id. */
+typedef struct Resolved {
+  uint64_t id;               /* the resource's id */
+  int used;
+  size_t first;              /* its stops in the render's pool */
+  GSHSCENE_Color_Space space; /* its interpolation space, resolved */
+} Resolved;
+
 /** What a refusal skips (S6): a refused push its block, a refused instance its picture. */
 typedef struct Skip {
   size_t level;              /* the chain length of the refused item; 0 when nothing is skipped */
@@ -93,8 +101,11 @@ typedef struct Layout {
   size_t groups;             /* the most groups open at once */
   size_t clips;              /* the most clips open at once */
   size_t walk;               /* bytes of the expansion walk */
+  size_t gradients;          /* the gradient fills of the expansion, a picture's counted where it is drawn */
+  size_t stops;              /* their stops */
+  size_t table;              /* the resolved table's slots: a power of two at least twice the gradient fills */
   size_t at_walk, at_maps, at_stop, at_frames, at_clips, at_root, at_layers, at_touched, at_coverage, at_clip_memory,
-      at_acc, at_items;      /* offsets from the aligned base */
+      at_acc, at_table, at_pool, at_items; /* offsets from the aligned base */
   size_t fixed;              /* the bytes before the items' arena, the alignment slack included */
 } Layout;
 
@@ -121,6 +132,9 @@ typedef struct Run {
   uint8_t * coverage;
   uint8_t * clip_memory;
   int64_t * acc;
+  Resolved * resolved;       /* the gradients resolved so far (S17), open addressing on the id */
+  GSHCPU_Stop * pool;        /* their stops */
+  size_t pooled;
   GSHCPU_Arena arena;        /* CALLER_MEMORY: the items' geometry */
   const GSHGEOM_Allocator * item_alloc;
   GSHSCENE_Color foreground;
@@ -159,17 +173,26 @@ static size_t mul3(size_t a, size_t b, size_t c) {
   return r;
 }
 
-/** The most groups and clips open at once in @p list's expansion, a picture's counting where it is drawn. */
-static void nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips) {
+/**
+ * The most groups and clips open at once in @p list's expansion, a picture's counting where it is drawn; and its
+ * gradient fills and their stops added to @p gradients and @p stops (0 when a sum would overflow).
+ */
+static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops) {
   size_t g = 0;
   size_t c = 0;
   size_t most_g = 0;
   size_t most_c = 0;
+  int ok = 1;
   size_t count = gshscene_list_count(list);
   for (size_t i = 0; i < count; i++) {
     const GSHSCENE_Item * item = NULL;
     if (gshscene_list_item(list, i, &item) != GSHSCENE_OK) {
       break;
+    }
+    GSHSCENE_Gradient gradient;
+    if (item->kind == GSHSCENE_ITEM_FILL && item->paint.kind == GSHSCENE_PAINT_GRADIENT &&
+        gshscene_resource_gradient(item->paint.gradient, &gradient) == GSHSCENE_OK) {
+      ok = ok && gcu_safe_add_size(*gradients, 1u, gradients) && gcu_safe_add_size(*stops, gradient.stop_count, stops);
     }
     switch (item->kind) {
       case GSHSCENE_ITEM_GROUP_PUSH:
@@ -187,7 +210,7 @@ static void nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips)
       case GSHSCENE_ITEM_INSTANCE: {
         size_t ig = 0;
         size_t ic = 0;
-        nesting(gshscene_resource_picture(item->resource), &ig, &ic);
+        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops) && ok;
         most_g = g + ig > most_g ? g + ig : most_g;
         most_c = c + ic > most_c ? c + ic : most_c;
         break;
@@ -200,6 +223,7 @@ static void nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips)
   }
   *groups = most_g;
   *clips = most_c;
+  return ok;
 }
 
 /** The region a render draws: the extent, meet the damage. */
@@ -239,7 +263,19 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
   }
   L->walk = gshscene_expansion_bytes(list);
   L->levels = L->walk / (sizeof(const GSHSCENE_List *) + sizeof(size_t));
-  nesting(list, &L->groups, &L->clips);
+  if (!nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops)) {
+    return GSHCPU_ERR_LIMIT;
+  }
+  L->table = 0;
+  if (L->gradients) {
+    L->table = 1;
+    while (L->table < L->gradients || L->table - L->gradients < L->gradients) {
+      if (L->table > SIZE_MAX / 4u) {
+        return GSHCPU_ERR_LIMIT;
+      }
+      L->table *= 2u; /* at least twice the gradient fills: a probe ends at an empty slot soon */
+    }
+  }
   size_t at = 0;
   size_t ignored;
   int ok = place(&at, sizeof(Run), &ignored) && place(&at, L->walk, &L->at_walk) &&
@@ -251,7 +287,9 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
       place(&at, mul3(L->groups, L->pixels, 4u * sizeof(double)), &L->at_layers) &&
       place(&at, L->pixels, &L->at_touched) && place(&at, L->pixels, &L->at_coverage) &&
       place(&at, mul3(L->clips, L->pixels, 1), &L->at_clip_memory) &&
-      place(&at, mul3(2u * (L->width + 1u), GSHCPU_RENDER_BAND_ROWS, sizeof(int64_t)), &L->at_acc);
+      place(&at, mul3(2u * (L->width + 1u), GSHCPU_RENDER_BAND_ROWS, sizeof(int64_t)), &L->at_acc) &&
+      place(&at, mul3(L->table, sizeof(Resolved), 1), &L->at_table) &&
+      place(&at, mul3(L->stops, sizeof(GSHCPU_Stop), 1), &L->at_pool);
   L->at_items = at;
   if (!ok || !gcu_safe_add_size(at, CARVE_ALIGN - 1u, &L->fixed)) {
     return GSHCPU_ERR_LIMIT;
@@ -423,7 +461,11 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
     out->composites |= UINT32_C(1) << c;
   }
   out->flags = GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA | GSHSCENE_CAP_BLEND_SPACES |
-      GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT;
+      GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT | GSHSCENE_CAP_GRADIENT_SPACES;
+  /* S17: every kind, in its stated interpolation space (story P2). */
+  for (uint32_t k = GSHSCENE_GRADIENT_LINEAR; k < GSHSCENE_GRADIENT_KIND_COUNT; k++) {
+    out->gradient_kinds |= UINT32_C(1) << k;
+  }
   out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;
   out->cancel_work_bound = work_bound(cs);
   out->work_measure = "cells+points+pixels";
@@ -631,6 +673,96 @@ static void source_of(const Run * run, const GSHSCENE_Item * item, const Frame *
   s[3] = alpha;
 }
 
+/**
+ * The gradient's stops, resolved and made interpolants once per render (S17, G3, G4): found by id, or resolved into
+ * the pool now.  @return ::GSHSCENE_OK; ::GSHSCENE_ERR_INTERNAL where the resolve fails (the plan refused that).
+ */
+static GSHSCENE_Result resolved_of(Run * run, const GSHSCENE_Resource * resource, const GSHSCENE_Gradient * g,
+    const Resolved ** out) {
+  uint64_t id = gshscene_resource_id(resource);
+  size_t mask = run->layout.table - 1u;
+  uint64_t h = id * UINT64_C(0x9E3779B97F4A7C15);
+  size_t slot = (size_t)(h ^ (h >> 32)) & mask;
+  while (run->resolved[slot].used && run->resolved[slot].id != id) {
+    slot = (slot + 1u) & mask;
+  }
+  Resolved * e = &run->resolved[slot];
+  if (!e->used) {
+    GSHSCENE_Color_Space space;
+    if (g->stop_count > run->layout.stops - run->pooled ||
+        gshscene_gradient_resolve(resource, &run->foreground, run->palette, gshscene_job_target_space(run->job), &space,
+            run->pool + run->pooled, run->layout.stops - run->pooled) != GSHSCENE_OK) {
+      return GSHSCENE_ERR_INTERNAL;
+    }
+    gshcpu_render_gradient_stops(run->pool + run->pooled, g->stop_count, g->premultiplied);
+    e->used = 1;
+    e->id = id;
+    e->first = run->pooled;
+    e->space = space;
+    run->pooled += g->stop_count;
+  }
+  *out = e;
+  return GSHSCENE_OK;
+}
+
+/**
+ * A gradient fill (G6 to G12, S11): at each pixel the paint is G12's source at the pixel's center, under the chain
+ * composed by shape-geometry and inverted once; the color is converted per pixel from the interpolation space to the
+ * layer's (N3, nothing when they are equal).  Where G8 gives nothing the pixel is not drawn.  A composed map past the
+ * double range, or a rectangle (the whole render's: S4) mapped outside G14's domain, is the sink's own limit (S6).
+ */
+static GSHSCENE_Result fill_gradient(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count,
+    Frame * frame, GSHCPU_Rect rect, GSHCPU_Rect whole) {
+  if (gshcpu_render_rect_empty(whole)) {
+    return GSHSCENE_OK; /* nothing of it is in the whole render */
+  }
+  GSHSCENE_Gradient g;
+  const Resolved * e = NULL;
+  if (gshscene_resource_gradient(item->paint.gradient, &g) != GSHSCENE_OK) {
+    return GSHSCENE_ERR_INTERNAL;
+  }
+  GSHSCENE_Result r = resolved_of(run, item->paint.gradient, &g, &e);
+  if (r != GSHSCENE_OK) {
+    return r;
+  }
+  /* AD-24: T I_1 ... I_k M G, the gradient's map the leaf, composed by the one composer. */
+  GSHGEOM_Map composed;
+  run->maps[count - 1] = item->map;
+  run->maps[count] = g.map;
+  GSHCPU_Gradient gr;
+  if (gshgeom_map_compose_chain(run->maps, count + 1, &run->job->target.map, &composed) != GSHGEOM_OK ||
+      gshcpu_render_gradient_prepare(&gr, &g, run->pool + e->first, &composed, item->paint.rgba[3]) != GSHCPU_OK ||
+      !gshcpu_render_gradient_in_domain(&gr, whole)) {
+    return refuse(run, item, chain, count);
+  }
+  GSHCPU_Convert c;
+  gshcpu_render_convert_prepare(&c, &e->space, &frame->space);
+  widen(run, frame, rect);
+  size_t w = (size_t)(rect.x1 - rect.x0);
+  for (int64_t y = rect.y0; y < rect.y1; y++) {
+    for (int64_t x = rect.x0; x < rect.x1; x++) {
+      uint32_t m8 = run->coverage[(size_t)(y - rect.y0) * w + (size_t)(x - rect.x0)];
+      m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);
+      if (m8 == 0) {
+        continue;
+      }
+      double color[4];
+      if (!gshcpu_render_gradient_at(&gr, (double)x + 0.5, (double)y + 0.5, color)) {
+        continue; /* G8: outside the cone, the source is zero and src-over changes nothing */
+      }
+      gshcpu_render_convert_straight(&c, color, color);
+      double s[4] = {color[0] * color[3], color[1] * color[3], color[2] * color[3], color[3]};
+      size_t p = at(run, x, y);
+      gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);
+      if (run->top == 0) {
+        run->touched[p] = 1;
+      }
+    }
+  }
+  run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);
+  return GSHSCENE_OK;
+}
+
 static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
   Frame * frame = &run->frames[run->top];
   GSHCPU_Rect rect;
@@ -642,6 +774,9 @@ static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t 
   }
   if (r != GSHSCENE_OK) {
     return r;
+  }
+  if (item->paint.kind == GSHSCENE_PAINT_GRADIENT) {
+    return fill_gradient(run, item, chain, count, frame, rect, whole);
   }
   double s[4];
   source_of(run, item, frame, s);
@@ -750,6 +885,9 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
     /* The planning pass reported it. */
     skip_begin(&run->skip, item, count);
     return GSHSCENE_OK;
+  }
+  if (gshscene_gradient_notice(item, run->maps, count - 1, &run->job->target.map)) {
+    return GSHSCENE_OK; /* S17: a gradient fill that draws nothing (G10, G11); the plan wrote its notice */
   }
   switch (item->kind) {
     case GSHSCENE_ITEM_FILL:
@@ -874,6 +1012,9 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   run->coverage = base + L.at_coverage;
   run->clip_memory = base + L.at_clip_memory;
   run->acc = (int64_t *)(void *)(base + L.at_acc);
+  run->resolved = (Resolved *)(void *)(base + L.at_table);
+  run->pool = (GSHCPU_Stop *)(void *)(base + L.at_pool);
+  memset(run->resolved, 0, L.table * sizeof *run->resolved); /* the gradient fills' slots, never the region */
   if (caller) {
     /* The items' geometry from the rest of the workspace. */
     gshcpu_render_arena_init(&run->arena, base + L.at_items, raw_bytes - (size_t)(base - raw) - L.at_items);
