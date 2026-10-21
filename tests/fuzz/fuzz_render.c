@@ -359,8 +359,6 @@ static const GSHSCENE_Resource * gradient_of(Input * in, GSHSCENE_Store * store)
     }
   } else if (g.kind == GSHSCENE_GRADIENT_RADIAL) {
     g.c0[0] = v[0], g.c0[1] = v[1], g.r0 = v[2] / 4.0, g.c1[0] = v[3], g.c1[1] = v[4], g.r1 = v[5];
-    double r0 = g.r0 < 0 ? -g.r0 : g.r0;
-    beyond |= r0 != 0.0 && (r0 > 0x1p64 || r0 < 0x1p-64);
   } else {
     g.center[0] = v[0], g.center[1] = v[1];
     g.angle_unit = next(in) % GSHGEOM_ANGLE_UNIT_COUNT;
@@ -417,6 +415,16 @@ static const GSHSCENE_Resource * gradient_of(Input * in, GSHSCENE_Store * store)
   }
   g.stops = n ? stops : NULL;
   g.stop_count = n;
+  /* G14's bound, from the values the gradient holds (a draw above may go unused, or be scaled). */
+  beyond = 0;
+  const double held[22] = {g.p0[0], g.p0[1], g.p1[0], g.p1[1], g.d[0], g.d[1], g.c0[0], g.c0[1], g.r0, g.c1[0], g.c1[1],
+      g.r1, g.center[0], g.center[1], g.a0, g.a1, g.map.m[0][0], g.map.m[0][1], g.map.m[1][0], g.map.m[1][1], g.map.t[0],
+      g.map.t[1]};
+  for (size_t i = 0; i < 22 + n; i++) {
+    double x = i < 22 ? held[i] : stops[i - 22].offset;
+    double m = x < 0 ? -x : x;
+    beyond |= m != 0.0 && (m > 0x1p64 || m < 0x1p-64);
+  }
   const GSHSCENE_Resource * r = NULL;
   GSHSCENE_Result res = gshscene_store_intern_gradient(store, &g, &r);
   CHECK(res == GSHSCENE_OK || res == GSHSCENE_ERR_LIMIT || res == GSHSCENE_ERR_OOM);
