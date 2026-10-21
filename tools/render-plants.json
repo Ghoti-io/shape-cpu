@@ -10710,41 +10710,7 @@
 ]
 ],
 [
-"rs-457-lt",
-"srcl",
-"src/render/sink.c",
-"457:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender_gradient",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
 "rs-463-le",
-"srcl",
-"src/render/sink.c",
-"463:<=",
-"<",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender_gradient",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-466-le",
 "srcl",
 "src/render/sink.c",
 "466:<=",
@@ -10761,10 +10727,27 @@
 ]
 ],
 [
+"rs-466-le",
+"srcl",
+"src/render/sink.c",
+"469:<=",
+"<",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender_gradient",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
 "rs-472-lt",
 "srcl",
 "src/render/sink.c",
-"472:<",
+"475:<",
 "<=",
 [
 "testRender_vectors",
@@ -10781,7 +10764,7 @@
 "rs-475-del",
 "srcl",
 "src/render/sink.c",
-"475:out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;",
+"478:out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;",
 ";",
 [
 "testRender_vectors",
@@ -10798,7 +10781,7 @@
 "rs-477-del",
 "srcl",
 "src/render/sink.c",
-"477:out->work_measure = \"cells+points+pixels\";",
+"480:out->work_measure = \"cells+points+pixels\";",
 ";",
 [
 "testRender_vectors",
@@ -10815,7 +10798,7 @@
 "rs-477-str",
 "srcl",
 "src/render/sink.c",
-"477:c",
+"480:c",
 "Z",
 [
 "testRender_vectors",
@@ -10832,7 +10815,7 @@
 "rs-490-ne",
 "srcl",
 "src/render/sink.c",
-"490:!=",
+"493:!=",
 "==",
 [
 "testRender_vectors",
@@ -10849,7 +10832,7 @@
 "rs-490-neg",
 "srcl",
 "src/render/sink.c",
-"490:(r != GSHSCENE_OK)",
+"493:(r != GSHSCENE_OK)",
 "(!(r != GSHSCENE_OK))",
 [
 "testRender_vectors",
@@ -10866,7 +10849,7 @@
 "rs-493-neg",
 "srcl",
 "src/render/sink.c",
-"493:(run->request->flags & GSHSCENE_RENDER_STRICT)",
+"496:(run->request->flags & GSHSCENE_RENDER_STRICT)",
 "(!(run->request->flags & GSHSCENE_RENDER_STRICT))",
 [
 "testRender_vectors",
@@ -10883,7 +10866,7 @@
 "rs-494-del",
 "srcl",
 "src/render/sink.c",
-"494:memcpy(run->stop, chain, count * sizeof *chain);",
+"497:memcpy(run->stop, chain, count * sizeof *chain);",
 ";",
 [
 "testRender_vectors",
@@ -10900,7 +10883,7 @@
 "rs-495-del",
 "srcl",
 "src/render/sink.c",
-"495:run->stop_count = count;",
+"498:run->stop_count = count;",
 ";",
 [
 "testRender_vectors",
@@ -10917,7 +10900,7 @@
 "rs-496-ret",
 "srcl",
 "src/render/sink.c",
-"496:GSHSCENE_ERR_REFUSED",
+"499:GSHSCENE_ERR_REFUSED",
 "GSHSCENE_ERR_LIMIT",
 [
 "testRender_vectors",
@@ -10934,7 +10917,7 @@
 "rs-517-ne",
 "srcl",
 "src/render/sink.c",
-"517:!=",
+"520:!=",
 "==",
 [
 "testRender_vectors",
@@ -10951,7 +10934,7 @@
 "rs-517-neg",
 "srcl",
 "src/render/sink.c",
-"517:(f != &run->frames[0])",
+"520:(f != &run->frames[0])",
 "(!(f != &run->frames[0]))",
 [
 "testRender_vectors",
@@ -10968,7 +10951,7 @@
 "rs-518-del",
 "srcl",
 "src/render/sink.c",
-"518:memset(f->layer + 4u * p, 0, 4u * n * sizeof *f->layer);",
+"521:memset(f->layer + 4u * p, 0, 4u * n * sizeof *f->layer);",
 ";",
 [
 "testRender_vectors",
@@ -10985,7 +10968,7 @@
 "rs-521-del",
 "srcl",
 "src/render/sink.c",
-"521:memset(run->touched + p, 0, n);",
+"524:memset(run->touched + p, 0, n);",
 ";",
 [
 "testRender_vectors",
@@ -11002,7 +10985,7 @@
 "rs-523-lt",
 "srcl",
 "src/render/sink.c",
-"523:<",
+"526:<",
 "<=",
 [
 "testRender_vectors",
@@ -11019,7 +11002,7 @@
 "rs-539-eq",
 "srcl",
 "src/render/sink.c",
-"539:x0 == ol",
+"542:x0 == ol",
 "x0 != ol",
 [
 "testRender_vectors",
@@ -11036,7 +11019,7 @@
 "rs-539-eq2",
 "srcl",
 "src/render/sink.c",
-"539:y0 == ol",
+"542:y0 == ol",
 "y0 != ol",
 [
 "testRender_vectors",
@@ -11053,7 +11036,7 @@
 "rs-539-eq3",
 "srcl",
 "src/render/sink.c",
-"539:x1 == ol",
+"542:x1 == ol",
 "x1 != ol",
 [
 "testRender_vectors",
@@ -11070,7 +11053,7 @@
 "rs-539-eq4",
 "srcl",
 "src/render/sink.c",
-"539:y1 == ol",
+"542:y1 == ol",
 "y1 != ol",
 [
 "testRender_vectors",
@@ -11087,7 +11070,7 @@
 "rs-542-neg",
 "srcl",
 "src/render/sink.c",
-"542:(gshcpu_render_rect_empty(old))",
+"545:(gshcpu_render_rect_empty(old))",
 "(!(gshcpu_render_rect_empty(old)))",
 [
 "testRender_vectors",
@@ -11104,7 +11087,7 @@
 "rs-544-del",
 "srcl",
 "src/render/sink.c",
-"544:old.y0 = old.y1 = grown.y0;",
+"547:old.y0 = old.y1 = grown.y0;",
 ";",
 [
 "testRender_vectors",
@@ -11121,7 +11104,7 @@
 "rs-546-lt",
 "srcl",
 "src/render/sink.c",
-"546:<",
+"549:<",
 "<=",
 [
 "testRender_vectors",
@@ -11138,7 +11121,7 @@
 "rs-547-del",
 "srcl",
 "src/render/sink.c",
-"547:ready_span(run, f, grown.x0, grown.x1, y);",
+"550:ready_span(run, f, grown.x0, grown.x1, y);",
 ";",
 [
 "testRender_vectors",
@@ -11155,7 +11138,7 @@
 "rs-549-or",
 "srcl",
 "src/render/sink.c",
-"549:||",
+"552:||",
 "&&",
 [
 "testRender_vectors",
@@ -11172,7 +11155,7 @@
 "rs-549-neg",
 "srcl",
 "src/render/sink.c",
-"549:(grown.x0 < old.x0 || old.x1 < grown.x1)",
+"552:(grown.x0 < old.x0 || old.x1 < grown.x1)",
 "(!(grown.x0 < old.x0 || old.x1 < grown.x1))",
 [
 "testRender_vectors",
@@ -11189,7 +11172,7 @@
 "rs-550-lt",
 "srcl",
 "src/render/sink.c",
-"550:<",
+"553:<",
 "<=",
 [
 "testRender_vectors",
@@ -11206,7 +11189,7 @@
 "rs-551-del",
 "srcl",
 "src/render/sink.c",
-"551:ready_span(run, f, grown.x0, old.x0, y);",
+"554:ready_span(run, f, grown.x0, old.x0, y);",
 ";",
 [
 "testRender_vectors",
@@ -11223,7 +11206,7 @@
 "rs-552-del",
 "srcl",
 "src/render/sink.c",
-"552:ready_span(run, f, old.x1, grown.x1, y);",
+"555:ready_span(run, f, old.x1, grown.x1, y);",
 ";",
 [
 "testRender_vectors",
@@ -11240,7 +11223,7 @@
 "rs-555-lt",
 "srcl",
 "src/render/sink.c",
-"555:<",
+"558:<",
 "<=",
 [
 "testRender_vectors",
@@ -11257,7 +11240,7 @@
 "rs-556-del",
 "srcl",
 "src/render/sink.c",
-"556:ready_span(run, f, grown.x0, grown.x1, y);",
+"559:ready_span(run, f, grown.x0, grown.x1, y);",
 ";",
 [
 "testRender_vectors",
@@ -11274,7 +11257,7 @@
 "rs-558-del",
 "srcl",
 "src/render/sink.c",
-"558:f->dirty = grown;",
+"561:f->dirty = grown;",
 ";",
 [
 "testRender_vectors",
@@ -11291,7 +11274,7 @@
 "rs-563-ge",
 "srcl",
 "src/render/sink.c",
-"563: x >= r.",
+"566: x >= r.",
 " x > r.",
 [
 "testRender_vectors",
@@ -11308,7 +11291,7 @@
 "rs-563-lt",
 "srcl",
 "src/render/sink.c",
-"563: x < r.",
+"566: x < r.",
 " x <= r.",
 [
 "testRender_vectors",
@@ -11325,7 +11308,7 @@
 "rs-563-ge2",
 "srcl",
 "src/render/sink.c",
-"563: y >= r.",
+"566: y >= r.",
 " y > r.",
 [
 "testRender_vectors",
@@ -11342,7 +11325,7 @@
 "rs-563-lt2",
 "srcl",
 "src/render/sink.c",
-"563: y < r.",
+"566: y < r.",
 " y <= r.",
 [
 "testRender_vectors",
@@ -11359,7 +11342,7 @@
 "rs-582-eq",
 "srcl",
 "src/render/sink.c",
-"582:==",
+"585:==",
 "!=",
 [
 "testRender_vectors",
@@ -11376,7 +11359,7 @@
 "rs-582-neg",
 "srcl",
 "src/render/sink.c",
-"582:(run->item_alloc == &run->arena.self)",
+"585:(run->item_alloc == &run->arena.self)",
 "(!(run->item_alloc == &run->arena.self))",
 [
 "testRender_vectors",
@@ -11393,7 +11376,7 @@
 "rs-583-del",
 "srcl",
 "src/render/sink.c",
-"583:gshcpu_render_arena_reset(&run->arena);",
+"586:gshcpu_render_arena_reset(&run->arena);",
 ";",
 [
 "testRender_vectors",
@@ -11410,7 +11393,7 @@
 "rs-587-del",
 "srcl",
 "src/render/sink.c",
-"587:run->work += g.points;",
+"590:run->work += g.points;",
 ";",
 [
 "testRender_vectors",
@@ -11427,7 +11410,7 @@
 "rs-589-eq",
 "srcl",
 "src/render/sink.c",
-"589:==",
+"592:==",
 "!=",
 [
 "testRender_vectors",
@@ -11444,7 +11427,7 @@
 "rs-589-lt",
 "srcl",
 "src/render/sink.c",
-"589:<",
+"592:<",
 "<=",
 [
 "testRender_vectors",
@@ -11461,7 +11444,7 @@
 "rs-590-neg",
 "srcl",
 "src/render/sink.c",
-"590:(!g.notes[i].entry_class)",
+"593:(!g.notes[i].entry_class)",
 "(!(!g.notes[i].entry_class))",
 [
 "testRender_vectors",
@@ -11478,7 +11461,7 @@
 "rs-595-eq",
 "srcl",
 "src/render/sink.c",
-"595:(e == GS",
+"598:(e == GS",
 "(e != GS",
 [
 "testRender_vectors",
@@ -11495,7 +11478,7 @@
 "rs-595-eq2",
 "srcl",
 "src/render/sink.c",
-"595:ss == GS",
+"598:ss == GS",
 "ss != GS",
 [
 "testRender_vectors",
@@ -11512,7 +11495,7 @@
 "rs-597-del",
 "srcl",
 "src/render/sink.c",
-"597:memcpy(run->stop, chain, count * sizeof *chain);",
+"600:memcpy(run->stop, chain, count * sizeof *chain);",
 ";",
 [
 "testRender_vectors",
@@ -11529,7 +11512,7 @@
 "rs-598-del",
 "srcl",
 "src/render/sink.c",
-"598:run->stop_count = count;",
+"601:run->stop_count = count;",
 ";",
 [
 "testRender_vectors",
@@ -11546,7 +11529,7 @@
 "rs-599-del",
 "srcl",
 "src/render/sink.c",
-"599:e = GSHSCENE_ERR_REFUSED;",
+"602:e = GSHSCENE_ERR_REFUSED;",
 ";",
 [
 "testRender_vectors",
@@ -11563,7 +11546,7 @@
 "rs-601-ne",
 "srcl",
 "src/render/sink.c",
-"601:!=",
+"604:!=",
 "==",
 [
 "testRender_vectors",
@@ -11580,7 +11563,7 @@
 "rs-601-neg",
 "srcl",
 "src/render/sink.c",
-"601:(e != GSHSCENE_OK)",
+"604:(e != GSHSCENE_OK)",
 "(!(e != GSHSCENE_OK))",
 [
 "testRender_vectors",
@@ -11597,7 +11580,7 @@
 "rs-602-del",
 "srcl",
 "src/render/sink.c",
-"602:gshcpu_render_geometry_release(&g, run->item_alloc);",
+"605:gshcpu_render_geometry_release(&g, run->item_alloc);",
 ";",
 [
 "testRender_vectors",
@@ -11614,7 +11597,7 @@
 "rs-606-eq",
 "srcl",
 "src/render/sink.c",
-"606:==",
+"609:==",
 "!=",
 [
 "testRender_vectors",
@@ -11631,7 +11614,7 @@
 "rs-606-neg",
 "srcl",
 "src/render/sink.c",
-"606:(r == GSHCPU_OK)",
+"609:(r == GSHCPU_OK)",
 "(!(r == GSHCPU_OK))",
 [
 "testRender_vectors",
@@ -11648,7 +11631,7 @@
 "rs-609-neg",
 "srcl",
 "src/render/sink.c",
-"609:(gshcpu_render_rect_empty(*rect))",
+"612:(gshcpu_render_rect_empty(*rect))",
 "(!(gshcpu_render_rect_empty(*rect)))",
 [
 "testRender_vectors",
@@ -11665,7 +11648,7 @@
 "rs-615-neg",
 "srcl",
 "src/render/sink.c",
-"615:(!gshcpu_render_rect_empty(walk))",
+"618:(!gshcpu_render_rect_empty(walk))",
 "(!(!gshcpu_render_rect_empty(walk)))",
 [
 "testRender_vectors",
@@ -11682,7 +11665,7 @@
 "rs-619-ne",
 "srcl",
 "src/render/sink.c",
-"619:x0 != wa",
+"622:x0 != wa",
 "x0 == wa",
 [
 "testRender_vectors",
@@ -11699,7 +11682,7 @@
 "rs-619-ne2",
 "srcl",
 "src/render/sink.c",
-"619:y0 != wa",
+"622:y0 != wa",
 "y0 == wa",
 [
 "testRender_vectors",
@@ -11716,7 +11699,7 @@
 "rs-619-ne3",
 "srcl",
 "src/render/sink.c",
-"619:x1 != wa",
+"622:x1 != wa",
 "x1 == wa",
 [
 "testRender_vectors",
@@ -11733,7 +11716,7 @@
 "rs-619-ne4",
 "srcl",
 "src/render/sink.c",
-"619:y1 != wa",
+"622:y1 != wa",
 "y1 == wa",
 [
 "testRender_vectors",
@@ -11750,7 +11733,7 @@
 "rs-619-and",
 "srcl",
 "src/render/sink.c",
-"619:&&",
+"622:&&",
 "||",
 [
 "testRender_vectors",
@@ -11767,7 +11750,7 @@
 "rs-620-le",
 "srcl",
 "src/render/sink.c",
-"620:<=",
+"623:<=",
 "<",
 [
 "testRender_vectors",
@@ -11784,7 +11767,7 @@
 "rs-621-del",
 "srcl",
 "src/render/sink.c",
-"621:walk = *rect;",
+"624:walk = *rect;",
 ";",
 [
 "testRender_vectors",
@@ -11801,7 +11784,7 @@
 "rs-625-del",
 "srcl",
 "src/render/sink.c",
-"625:run->work += cells;",
+"628:run->work += cells;",
 ";",
 [
 "testRender_vectors",
@@ -11818,7 +11801,7 @@
 "rs-628-del",
 "srcl",
 "src/render/sink.c",
-"628:gshcpu_render_geometry_release(&g, run->item_alloc);",
+"631:gshcpu_render_geometry_release(&g, run->item_alloc);",
 ";",
 [
 "testRender_vectors",
@@ -11835,7 +11818,7 @@
 "rs-635-lt",
 "srcl",
 "src/render/sink.c",
-"635:<",
+"638:<",
 "<=",
 [
 "testRender_vectors",
@@ -11852,7 +11835,7 @@
 "rs-636-del",
 "srcl",
 "src/render/sink.c",
-"636:r = gshcpu_render_rect_meet(r, run->clips[i].rect);",
+"639:r = gshcpu_render_rect_meet(r, run->clips[i].rect);",
 ";",
 [
 "testRender_vectors",
@@ -11869,7 +11852,7 @@
 "rs-644-lt",
 "srcl",
 "src/render/sink.c",
-"644:<",
+"647:<",
 "<=",
 [
 "testRender_vectors",
@@ -11886,7 +11869,7 @@
 "rs-645-del",
 "srcl",
 "src/render/sink.c",
-"645:r = gshcpu_render_rect_meet(r, run->clips[i].whole);",
+"648:r = gshcpu_render_rect_meet(r, run->clips[i].whole);",
 ";",
 [
 "testRender_vectors",
@@ -11903,7 +11886,7 @@
 "rs-652-lt",
 "srcl",
 "src/render/sink.c",
-"652:<",
+"655:<",
 "<=",
 [
 "testRender_vectors",
@@ -11920,7 +11903,7 @@
 "rs-652-and",
 "srcl",
 "src/render/sink.c",
-"652:&&",
+"655:&&",
 "||",
 [
 "testRender_vectors",
@@ -11937,7 +11920,7 @@
 "rs-652-ne",
 "srcl",
 "src/render/sink.c",
-"652:!=",
+"655:!=",
 "==",
 [
 "testRender_vectors",
@@ -11954,7 +11937,7 @@
 "rs-664-ne",
 "srcl",
 "src/render/sink.c",
-"664:!=",
+"667:!=",
 "==",
 [
 "testRender_vectors",
@@ -11971,7 +11954,7 @@
 "rs-664-neg",
 "srcl",
 "src/render/sink.c",
-"664:(gshscene_paint_resolve(&item->paint, &run->foreground, run->palette, &color) != GSHSCENE_OK)",
+"667:(gshscene_paint_resolve(&item->paint, &run->foreground, run->palette, &color) != GSHSCENE_OK)",
 "(!(gshscene_paint_resolve(&item->paint, &run->foreground, run->palette, &color) != GSHSCENE_OK))",
 [
 "testRender_vectors",
@@ -11988,7 +11971,7 @@
 "rs-670-neg",
 "srcl",
 "src/render/sink.c",
-"670:(gshscene_color_space_is_target(&space))",
+"673:(gshscene_color_space_is_target(&space))",
 "(!(gshscene_color_space_is_target(&space)))",
 [
 "testRender_vectors",
@@ -12005,7 +11988,7 @@
 "rs-671-del",
 "srcl",
 "src/render/sink.c",
-"671:space = *gshscene_job_target_space(run->job);",
+"674:space = *gshscene_job_target_space(run->job);",
 ";",
 [
 "testRender_vectors",
@@ -12022,7 +12005,7 @@
 "rs-675-del",
 "srcl",
 "src/render/sink.c",
-"675:gshcpu_render_convert_straight(&c, rgb, rgb);",
+"678:gshcpu_render_convert_straight(&c, rgb, rgb);",
 ";",
 [
 "testRender_vectors",
@@ -12039,7 +12022,7 @@
 "rs-676-del",
 "srcl",
 "src/render/sink.c",
-"676:s[0] = rgb[0] * alpha;",
+"679:s[0] = rgb[0] * alpha;",
 ";",
 [
 "testRender_vectors",
@@ -12056,7 +12039,7 @@
 "rs-677-del",
 "srcl",
 "src/render/sink.c",
-"677:s[1] = rgb[1] * alpha;",
+"680:s[1] = rgb[1] * alpha;",
 ";",
 [
 "testRender_vectors",
@@ -12073,7 +12056,7 @@
 "rs-678-del",
 "srcl",
 "src/render/sink.c",
-"678:s[2] = rgb[2] * alpha;",
+"681:s[2] = rgb[2] * alpha;",
 ";",
 [
 "testRender_vectors",
@@ -12090,7 +12073,7 @@
 "rs-679-del",
 "srcl",
 "src/render/sink.c",
-"679:s[3] = alpha;",
+"682:s[3] = alpha;",
 ";",
 [
 "testRender_vectors",
@@ -12107,7 +12090,7 @@
 "rs-692-and",
 "srcl",
 "src/render/sink.c",
-"692:&&",
+"695:&&",
 "||",
 [
 "testRender_vectors",
@@ -12124,7 +12107,7 @@
 "rs-692-neg",
 "srcl",
 "src/render/sink.c",
-"692:(run->resolved[slot].used && run->resolved[slot].id != id)",
+"695:(run->resolved[slot].used && run->resolved[slot].id != id)",
 "(!(run->resolved[slot].used && run->resolved[slot].id != id))",
 [
 "testRender_vectors",
@@ -12141,7 +12124,7 @@
 "rs-696-neg",
 "srcl",
 "src/render/sink.c",
-"696:(!e->used)",
+"699:(!e->used)",
 "(!(!e->used))",
 [
 "testRender_vectors",
@@ -12158,7 +12141,7 @@
 "rs-698-gt",
 "srcl",
 "src/render/sink.c",
-"698:nt > ru",
+"701:nt > ru",
 "nt >= ru",
 [
 "testRender_vectors",
@@ -12175,7 +12158,7 @@
 "rs-698-or",
 "srcl",
 "src/render/sink.c",
-"698:||",
+"701:||",
 "&&",
 [
 "testRender_vectors",
@@ -12192,7 +12175,7 @@
 "rs-700-ne",
 "srcl",
 "src/render/sink.c",
-"700:!=",
+"703:!=",
 "==",
 [
 "testRender_vectors",
@@ -12209,7 +12192,7 @@
 "rs-703-del",
 "srcl",
 "src/render/sink.c",
-"703:gshcpu_render_gradient_stops(run->pool + run->pooled, g->stop_count, g->premultiplied);",
+"706:gshcpu_render_gradient_stops(run->pool + run->pooled, g->stop_count, g->premultiplied);",
 ";",
 [
 "testRender_vectors",
@@ -12226,7 +12209,7 @@
 "rs-706-del",
 "srcl",
 "src/render/sink.c",
-"706:e->first = run->pooled;",
+"709:e->first = run->pooled;",
 ";",
 [
 "testRender_vectors",
@@ -12243,7 +12226,7 @@
 "rs-707-del",
 "srcl",
 "src/render/sink.c",
-"707:e->space = space;",
+"710:e->space = space;",
 ";",
 [
 "testRender_vectors",
@@ -12260,7 +12243,7 @@
 "rs-722-neg",
 "srcl",
 "src/render/sink.c",
-"722:(gshcpu_render_rect_empty(whole))",
+"725:(gshcpu_render_rect_empty(whole))",
 "(!(gshcpu_render_rect_empty(whole)))",
 [
 "testRender_vectors",
@@ -12277,7 +12260,7 @@
 "rs-727-ne",
 "srcl",
 "src/render/sink.c",
-"727:!=",
+"730:!=",
 "==",
 [
 "testRender_vectors",
@@ -12294,7 +12277,7 @@
 "rs-727-neg",
 "srcl",
 "src/render/sink.c",
-"727:(gshscene_resource_gradient(item->paint.gradient, &g) != GSHSCENE_OK)",
+"730:(gshscene_resource_gradient(item->paint.gradient, &g) != GSHSCENE_OK)",
 "(!(gshscene_resource_gradient(item->paint.gradient, &g) != GSHSCENE_OK))",
 [
 "testRender_vectors",
@@ -12311,7 +12294,7 @@
 "rs-731-ne",
 "srcl",
 "src/render/sink.c",
-"731:!=",
+"734:!=",
 "==",
 [
 "testRender_vectors",
@@ -12328,7 +12311,7 @@
 "rs-731-neg",
 "srcl",
 "src/render/sink.c",
-"731:(r != GSHSCENE_OK)",
+"734:(r != GSHSCENE_OK)",
 "(!(r != GSHSCENE_OK))",
 [
 "testRender_vectors",
@@ -12345,7 +12328,7 @@
 "rs-737-del",
 "srcl",
 "src/render/sink.c",
-"737:run->maps[count] = g.map;",
+"740:run->maps[count] = g.map;",
 ";",
 [
 "testRender_vectors",
@@ -12362,7 +12345,7 @@
 "rs-739-ne",
 "srcl",
 "src/render/sink.c",
-"739:!=",
+"742:!=",
 "==",
 [
 "testRender_vectors",
@@ -12379,7 +12362,7 @@
 "rs-740-ne",
 "srcl",
 "src/render/sink.c",
-"740:!=",
+"743:!=",
 "==",
 [
 "testRender_vectors",
@@ -12396,7 +12379,7 @@
 "rs-745-del",
 "srcl",
 "src/render/sink.c",
-"745:gshcpu_render_convert_prepare(&c, &e->space, &frame->space);",
+"748:gshcpu_render_convert_prepare(&c, &e->space, &frame->space);",
 ";",
 [
 "testRender_vectors",
@@ -12413,7 +12396,7 @@
 "rs-746-del",
 "srcl",
 "src/render/sink.c",
-"746:widen(run, frame, rect);",
+"749:widen(run, frame, rect);",
 ";",
 [
 "testRender_vectors",
@@ -12430,7 +12413,7 @@
 "rs-748-lt",
 "srcl",
 "src/render/sink.c",
-"748:<",
+"751:<",
 "<=",
 [
 "testRender_vectors",
@@ -12447,7 +12430,7 @@
 "rs-749-lt",
 "srcl",
 "src/render/sink.c",
-"749:<",
+"752:<",
 "<=",
 [
 "testRender_vectors",
@@ -12464,7 +12447,7 @@
 "rs-752-eq",
 "srcl",
 "src/render/sink.c",
-"752:==",
+"755:==",
 "!=",
 [
 "testRender_vectors",
@@ -12481,7 +12464,7 @@
 "rs-752-neg",
 "srcl",
 "src/render/sink.c",
-"752:(m8 == 0)",
+"755:(m8 == 0)",
 "(!(m8 == 0))",
 [
 "testRender_vectors",
@@ -12498,7 +12481,7 @@
 "rs-756-neg",
 "srcl",
 "src/render/sink.c",
-"756:(!gshcpu_render_gradient_at(&gr, (double)(int32_t)x + 0.5, (double)(int32_t)y + 0.5, color))",
+"759:(!gshcpu_render_gradient_at(&gr, (double)(int32_t)x + 0.5, (double)(int32_t)y + 0.5, color))",
 "(!(!gshcpu_render_gradient_at(&gr, (double)(int32_t)x + 0.5, (double)(int32_t)y + 0.5, color)))",
 [
 "testRender_vectors",
@@ -12515,7 +12498,7 @@
 "rs-759-del",
 "srcl",
 "src/render/sink.c",
-"759:gshcpu_render_convert_straight(&c, color, color);",
+"762:gshcpu_render_convert_straight(&c, color, color);",
 ";",
 [
 "testRender_vectors",
@@ -12532,7 +12515,7 @@
 "rs-763-eq",
 "srcl",
 "src/render/sink.c",
-"763:==",
+"766:==",
 "!=",
 [
 "testRender_vectors",
@@ -12549,7 +12532,7 @@
 "rs-763-neg",
 "srcl",
 "src/render/sink.c",
-"763:(run->top == 0)",
+"766:(run->top == 0)",
 "(!(run->top == 0))",
 [
 "testRender_vectors",
@@ -12566,7 +12549,7 @@
 "rs-764-del",
 "srcl",
 "src/render/sink.c",
-"764:run->touched[p] = 1;",
+"767:run->touched[p] = 1;",
 ";",
 [
 "testRender_vectors",
@@ -12583,7 +12566,7 @@
 "rs-778-eq",
 "srcl",
 "src/render/sink.c",
-"778:==",
+"781:==",
 "!=",
 [
 "testRender_vectors",
@@ -12600,7 +12583,7 @@
 "rs-778-neg",
 "srcl",
 "src/render/sink.c",
-"778:(r == GSHSCENE_ERR_LIMIT)",
+"781:(r == GSHSCENE_ERR_LIMIT)",
 "(!(r == GSHSCENE_ERR_LIMIT))",
 [
 "testRender_vectors",
@@ -12617,7 +12600,7 @@
 "rs-781-ne",
 "srcl",
 "src/render/sink.c",
-"781:!=",
+"784:!=",
 "==",
 [
 "testRender_vectors",
@@ -12634,7 +12617,7 @@
 "rs-781-neg",
 "srcl",
 "src/render/sink.c",
-"781:(r != GSHSCENE_OK)",
+"784:(r != GSHSCENE_OK)",
 "(!(r != GSHSCENE_OK))",
 [
 "testRender_vectors",
@@ -12651,7 +12634,7 @@
 "rs-784-eq",
 "srcl",
 "src/render/sink.c",
-"784:==",
+"787:==",
 "!=",
 [
 "testRender_vectors",
@@ -12668,7 +12651,7 @@
 "rs-784-neg",
 "srcl",
 "src/render/sink.c",
-"784:(item->paint.kind == GSHSCENE_PAINT_GRADIENT)",
+"787:(item->paint.kind == GSHSCENE_PAINT_GRADIENT)",
 "(!(item->paint.kind == GSHSCENE_PAINT_GRADIENT))",
 [
 "testRender_vectors",
@@ -12685,7 +12668,7 @@
 "rs-788-del",
 "srcl",
 "src/render/sink.c",
-"788:source_of(run, item, frame, s);",
+"791:source_of(run, item, frame, s);",
 ";",
 [
 "testRender_vectors",
@@ -12702,7 +12685,7 @@
 "rs-789-del",
 "srcl",
 "src/render/sink.c",
-"789:widen(run, frame, rect);",
+"792:widen(run, frame, rect);",
 ";",
 [
 "testRender_vectors",
@@ -12719,7 +12702,7 @@
 "rs-791-lt",
 "srcl",
 "src/render/sink.c",
-"791:<",
+"794:<",
 "<=",
 [
 "testRender_vectors",
@@ -12736,7 +12719,7 @@
 "rs-792-lt",
 "srcl",
 "src/render/sink.c",
-"792:<",
+"795:<",
 "<=",
 [
 "testRender_vectors",
@@ -12753,7 +12736,7 @@
 "rs-794-del",
 "srcl",
 "src/render/sink.c",
-"794:m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);",
+"797:m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);",
 ";",
 [
 "testRender_vectors",
@@ -12770,7 +12753,7 @@
 "rs-795-eq",
 "srcl",
 "src/render/sink.c",
-"795:==",
+"798:==",
 "!=",
 [
 "testRender_vectors",
@@ -12787,7 +12770,7 @@
 "rs-795-neg",
 "srcl",
 "src/render/sink.c",
-"795:(m8 == 0)",
+"798:(m8 == 0)",
 "(!(m8 == 0))",
 [
 "testRender_vectors",
@@ -12804,7 +12787,7 @@
 "rs-799-del",
 "srcl",
 "src/render/sink.c",
-"799:gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);",
+"802:gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);",
 ";",
 [
 "testRender_vectors",
@@ -12821,7 +12804,7 @@
 "rs-800-eq",
 "srcl",
 "src/render/sink.c",
-"800:==",
+"803:==",
 "!=",
 [
 "testRender_vectors",
@@ -12838,7 +12821,7 @@
 "rs-800-neg",
 "srcl",
 "src/render/sink.c",
-"800:(run->top == 0)",
+"803:(run->top == 0)",
 "(!(run->top == 0))",
 [
 "testRender_vectors",
@@ -12855,7 +12838,7 @@
 "rs-801-del",
 "srcl",
 "src/render/sink.c",
-"801:run->touched[p] = 1;",
+"804:run->touched[p] = 1;",
 ";",
 [
 "testRender_vectors",
@@ -12872,7 +12855,7 @@
 "rs-805-del",
 "srcl",
 "src/render/sink.c",
-"805:run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);",
+"808:run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);",
 ";",
 [
 "testRender_vectors",
@@ -12889,7 +12872,7 @@
 "rs-812-del",
 "srcl",
 "src/render/sink.c",
-"812:clip->coverage = run->clip_memory + run->clip_count * run->layout.pixels;",
+"815:clip->coverage = run->clip_memory + run->clip_count * run->layout.pixels;",
 ";",
 [
 "testRender_vectors",
@@ -12906,7 +12889,7 @@
 "rs-815-eq",
 "srcl",
 "src/render/sink.c",
-"815:==",
+"818:==",
 "!=",
 [
 "testRender_vectors",
@@ -12923,7 +12906,7 @@
 "rs-815-neg",
 "srcl",
 "src/render/sink.c",
-"815:(r == GSHSCENE_ERR_LIMIT)",
+"818:(r == GSHSCENE_ERR_LIMIT)",
 "(!(r == GSHSCENE_ERR_LIMIT))",
 [
 "testRender_vectors",
@@ -12940,7 +12923,7 @@
 "rs-818-ne",
 "srcl",
 "src/render/sink.c",
-"818:!=",
+"821:!=",
 "==",
 [
 "testRender_vectors",
@@ -12957,7 +12940,7 @@
 "rs-818-neg",
 "srcl",
 "src/render/sink.c",
-"818:(r != GSHSCENE_OK)",
+"821:(r != GSHSCENE_OK)",
 "(!(r != GSHSCENE_OK))",
 [
 "testRender_vectors",
@@ -12974,7 +12957,7 @@
 "rs-821-del",
 "srcl",
 "src/render/sink.c",
-"821:run->clip_count++;",
+"824:run->clip_count++;",
 ";",
 [
 "testRender_vectors",
@@ -12991,7 +12974,7 @@
 "rs-829-del",
 "srcl",
 "src/render/sink.c",
-"829:f->group = item->group;",
+"832:f->group = item->group;",
 ";",
 [
 "testRender_vectors",
@@ -13008,7 +12991,7 @@
 "rs-831-del",
 "srcl",
 "src/render/sink.c",
-"831:f->clip_base = run->clip_count;",
+"834:f->clip_base = run->clip_count;",
 ";",
 [
 "testRender_vectors",
@@ -13025,7 +13008,7 @@
 "rs-832-del",
 "srcl",
 "src/render/sink.c",
-"832:f->dirty.x0 = f->dirty.y0 = f->dirty.x1 = f->dirty.y1 = 0;",
+"835:f->dirty.x0 = f->dirty.y0 = f->dirty.x1 = f->dirty.y1 = 0;",
 ";",
 [
 "testRender_vectors",
@@ -13042,7 +13025,7 @@
 "rs-833-del",
 "srcl",
 "src/render/sink.c",
-"833:run->groups_open++;",
+"836:run->groups_open++;",
 ";",
 [
 "testRender_vectors",
@@ -13059,7 +13042,7 @@
 "rs-834-del",
 "srcl",
 "src/render/sink.c",
-"834:run->work += run->layout.pixels;",
+"837:run->work += run->layout.pixels;",
 ";",
 [
 "testRender_vectors",
@@ -13076,7 +13059,7 @@
 "rs-845-del",
 "srcl",
 "src/render/sink.c",
-"845:region = gshcpu_render_rect_meet(region, reach_of(run, parent->clip_base, f->clip_base));",
+"848:region = gshcpu_render_rect_meet(region, reach_of(run, parent->clip_base, f->clip_base));",
 ";",
 [
 "testRender_vectors",
@@ -13093,7 +13076,7 @@
 "rs-847-del",
 "srcl",
 "src/render/sink.c",
-"847:gshcpu_render_convert_prepare(&c, &f->space, &parent->space);",
+"850:gshcpu_render_convert_prepare(&c, &f->space, &parent->space);",
 ";",
 [
 "testRender_vectors",
@@ -13110,7 +13093,7 @@
 "rs-851-del",
 "srcl",
 "src/render/sink.c",
-"851:widen(run, parent, region);",
+"854:widen(run, parent, region);",
 ";",
 [
 "testRender_vectors",
@@ -13127,7 +13110,7 @@
 "rs-852-lt",
 "srcl",
 "src/render/sink.c",
-"852:<",
+"855:<",
 "<=",
 [
 "testRender_vectors",
@@ -13144,7 +13127,7 @@
 "rs-853-lt",
 "srcl",
 "src/render/sink.c",
-"853:<",
+"856:<",
 "<=",
 [
 "testRender_vectors",
@@ -13161,7 +13144,7 @@
 "rs-855-eq",
 "srcl",
 "src/render/sink.c",
-"855:==",
+"858:==",
 "!=",
 [
 "testRender_vectors",
@@ -13178,7 +13161,7 @@
 "rs-855-neg",
 "srcl",
 "src/render/sink.c",
-"855:(m8 == 0)",
+"858:(m8 == 0)",
 "(!(m8 == 0))",
 [
 "testRender_vectors",
@@ -13195,7 +13178,7 @@
 "rs-864-eq",
 "srcl",
 "src/render/sink.c",
-"864:0] == 0.",
+"867:0] == 0.",
 "0] != 0.",
 [
 "testRender_vectors",
@@ -13212,7 +13195,7 @@
 "rs-864-eq2",
 "srcl",
 "src/render/sink.c",
-"864:1] == 0.",
+"867:1] == 0.",
 "1] != 0.",
 [
 "testRender_vectors",
@@ -13229,7 +13212,7 @@
 "rs-864-eq3",
 "srcl",
 "src/render/sink.c",
-"864:2] == 0.",
+"867:2] == 0.",
 "2] != 0.",
 [
 "testRender_vectors",
@@ -13246,7 +13229,7 @@
 "rs-864-eq4",
 "srcl",
 "src/render/sink.c",
-"864:3] == 0.",
+"867:3] == 0.",
 "3] != 0.",
 [
 "testRender_vectors",
@@ -13263,7 +13246,7 @@
 "rs-864-neg",
 "srcl",
 "src/render/sink.c",
-"864:(bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0)",
+"867:(bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0)",
 "(!(bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0))",
 [
 "testRender_vectors",
@@ -13280,7 +13263,7 @@
 "rs-867-neg",
 "srcl",
 "src/render/sink.c",
-"867:(!gshcpu_render_apply(&parent->layer[4u * p], s, (double)m8 / 255.0, op))",
+"870:(!gshcpu_render_apply(&parent->layer[4u * p], s, (double)m8 / 255.0, op))",
 "(!(!gshcpu_render_apply(&parent->layer[4u * p], s, (double)m8 / 255.0, op)))",
 [
 "testRender_vectors",
@@ -13297,7 +13280,7 @@
 "rs-870-eq",
 "srcl",
 "src/render/sink.c",
-"870:==",
+"873:==",
 "!=",
 [
 "testRender_vectors",
@@ -13314,7 +13297,7 @@
 "rs-870-neg",
 "srcl",
 "src/render/sink.c",
-"870:(run->top == 1u)",
+"873:(run->top == 1u)",
 "(!(run->top == 1u))",
 [
 "testRender_vectors",
@@ -13331,7 +13314,7 @@
 "rs-871-del",
 "srcl",
 "src/render/sink.c",
-"871:run->touched[p] = 1;",
+"874:run->touched[p] = 1;",
 ";",
 [
 "testRender_vectors",
@@ -13348,7 +13331,7 @@
 "rs-878-del",
 "srcl",
 "src/render/sink.c",
-"878:run->top--;",
+"881:run->top--;",
 ";",
 [
 "testRender_vectors",
@@ -13365,7 +13348,7 @@
 "rs-879-del",
 "srcl",
 "src/render/sink.c",
-"879:run->groups_open--;",
+"882:run->groups_open--;",
 ";",
 [
 "testRender_vectors",
@@ -13382,7 +13365,7 @@
 "rs-885-neg",
 "srcl",
 "src/render/sink.c",
-"885:(skip_step(&run->skip, item, count))",
+"888:(skip_step(&run->skip, item, count))",
 "(!(skip_step(&run->skip, item, count)))",
 [
 "testRender_vectors",
@@ -13399,7 +13382,7 @@
 "rs-891-eq",
 "srcl",
 "src/render/sink.c",
-"891:==",
+"894:==",
 "!=",
 [
 "testRender_vectors",
@@ -13416,7 +13399,7 @@
 "rs-891-or",
 "srcl",
 "src/render/sink.c",
-"891:||",
+"894:||",
 "&&",
 [
 "testRender_vectors",
@@ -13433,7 +13416,7 @@
 "rs-892-and",
 "srcl",
 "src/render/sink.c",
-"892:&&",
+"895:&&",
 "||",
 [
 "testRender_vectors",
@@ -13450,7 +13433,7 @@
 "rs-893-eq",
 "srcl",
 "src/render/sink.c",
-"893:==",
+"896:==",
 "!=",
 [
 "testRender_vectors",
@@ -13467,7 +13450,7 @@
 "rs-895-del",
 "srcl",
 "src/render/sink.c",
-"895:skip_begin(&run->skip, item, count);",
+"898:skip_begin(&run->skip, item, count);",
 ";",
 [
 "testRender_vectors",
@@ -13484,7 +13467,7 @@
 "rs-898-neg",
 "srcl",
 "src/render/sink.c",
-"898:(gshscene_gradient_notice(item, run->maps, count - 1, &run->job->target.map))",
+"901:(gshscene_gradient_notice(item, run->maps, count - 1, &run->job->target.map))",
 "(!(gshscene_gradient_notice(item, run->maps, count - 1, &run->job->target.map)))",
 [
 "testRender_vectors",
@@ -13501,7 +13484,7 @@
 "rs-907-del",
 "srcl",
 "src/render/sink.c",
-"907:run->clip_count--;",
+"910:run->clip_count--;",
 ";",
 [
 "testRender_vectors",
@@ -13518,7 +13501,7 @@
 "rs-910-del",
 "srcl",
 "src/render/sink.c",
-"910:group_push(run, item);",
+"913:group_push(run, item);",
 ";",
 [
 "testRender_vectors",
@@ -13535,7 +13518,7 @@
 "rs-915-del",
 "srcl",
 "src/render/sink.c",
-"915:run->maps[count - 1] = item->map;",
+"918:run->maps[count - 1] = item->map;",
 ";",
 [
 "testRender_vectors",
@@ -13552,7 +13535,7 @@
 "rs-927-lt",
 "srcl",
 "src/render/sink.c",
-"927:<",
+"930:<",
 "<=",
 [
 "testRender_vectors",
@@ -13569,7 +13552,7 @@
 "rs-929-lt",
 "srcl",
 "src/render/sink.c",
-"929:<",
+"932:<",
 "<=",
 [
 "testRender_vectors",
@@ -13586,7 +13569,7 @@
 "rs-931-neg",
 "srcl",
 "src/render/sink.c",
-"931:(run->touched[p])",
+"934:(run->touched[p])",
 "(!(run->touched[p]))",
 [
 "testRender_vectors",
@@ -13603,7 +13586,7 @@
 "rs-941-str",
 "srcl",
 "src/render/sink.c",
-"941:n \"canc",
+"944:n \"canc",
 "n \"Zanc",
 [
 "testRender_vectors",
@@ -13620,7 +13603,7 @@
 "rs-943-str",
 "srcl",
 "src/render/sink.c",
-"943:n \"stri",
+"946:n \"stri",
 "n \"Ztri",
 [
 "testRender_vectors",
@@ -13637,7 +13620,7 @@
 "rs-945-str",
 "srcl",
 "src/render/sink.c",
-"945:n \"out ",
+"948:n \"out ",
 "n \"Zut ",
 [
 "testRender_vectors",
@@ -13654,7 +13637,7 @@
 "rs-954-neg",
 "srcl",
 "src/render/sink.c",
-"954:(cs->observer)",
+"957:(cs->observer)",
 "(!(cs->observer))",
 [
 "testRender_vectors",
@@ -13671,7 +13654,7 @@
 "rs-958-lt",
 "srcl",
 "src/render/sink.c",
-"958:<",
+"961:<",
 "<=",
 [
 "testRender_vectors",
@@ -13688,7 +13671,7 @@
 "rs-959-lt",
 "srcl",
 "src/render/sink.c",
-"959:<",
+"962:<",
 "<=",
 [
 "testRender_vectors",
@@ -13705,7 +13688,7 @@
 "rs-960-neg",
 "srcl",
 "src/render/sink.c",
-"960:(!inside(run->frames[0].dirty, x, y))",
+"963:(!inside(run->frames[0].dirty, x, y))",
 "(!(!inside(run->frames[0].dirty, x, y)))",
 [
 "testRender_vectors",
@@ -13722,7 +13705,7 @@
 "rs-962-del",
 "srcl",
 "src/render/sink.c",
-"962:run->touched[p] = 0;",
+"965:run->touched[p] = 0;",
 ";",
 [
 "testRender_vectors",
@@ -13739,7 +13722,7 @@
 "rs-963-del",
 "srcl",
 "src/render/sink.c",
-"963:gshcpu_render_load(run->format, run->pixels + (size_t)y * run->stride, (size_t)x, &run->root[4u * p]);",
+"966:gshcpu_render_load(run->format, run->pixels + (size_t)y * run->stride, (size_t)x, &run->root[4u * p]);",
 ";",
 [
 "testRender_vectors",
@@ -13756,7 +13739,7 @@
 "rs-967-del",
 "srcl",
 "src/render/sink.c",
-"967:cs->observer(cs->observer_ctx, run->layout.region, run->root, run->touched);",
+"970:cs->observer(cs->observer_ctx, run->layout.region, run->root, run->touched);",
 ";",
 [
 "testRender_vectors",
@@ -13773,7 +13756,7 @@
 "rs-969-del",
 "srcl",
 "src/render/sink.c",
-"969:write_target(run);",
+"972:write_target(run);",
 ";",
 [
 "testRender_vectors",
@@ -13790,7 +13773,7 @@
 "rs-971-del",
 "srcl",
 "src/render/sink.c",
-"971:gshscene_job_set_frame_bytes(job, run->layout.fixed);",
+"974:gshscene_job_set_frame_bytes(job, run->layout.fixed);",
 ";",
 [
 "testRender_vectors",
@@ -13807,7 +13790,7 @@
 "rs-972-eq",
 "srcl",
 "src/render/sink.c",
-"972:==",
+"975:==",
 "!=",
 [
 "testRender_vectors",
@@ -13824,7 +13807,7 @@
 "rs-973-neg",
 "srcl",
 "src/render/sink.c",
-"973:(memory)",
+"976:(memory)",
 "(!(memory))",
 [
 "testRender_vectors",
@@ -13841,7 +13824,7 @@
 "rs-974-del",
 "srcl",
 "src/render/sink.c",
-"974:cs->alloc.free_fn(cs->alloc.ctx, memory);",
+"977:cs->alloc.free_fn(cs->alloc.ctx, memory);",
 ";",
 [
 "testRender_vectors",
@@ -13858,7 +13841,7 @@
 "rs-984-ne",
 "srcl",
 "src/render/sink.c",
-"984:!=",
+"987:!=",
 "==",
 [
 "testRender_vectors",
@@ -13875,7 +13858,7 @@
 "rs-984-neg",
 "srcl",
 "src/render/sink.c",
-"984:(lr != GSHCPU_OK)",
+"987:(lr != GSHCPU_OK)",
 "(!(lr != GSHCPU_OK))",
 [
 "testRender_vectors",
@@ -13892,7 +13875,7 @@
 "rs-990-ne",
 "srcl",
 "src/render/sink.c",
-"990:!=",
+"993:!=",
 "==",
 [
 "testRender_vectors",
@@ -13909,7 +13892,7 @@
 "rs-991-neg",
 "srcl",
 "src/render/sink.c",
-"991:(caller)",
+"994:(caller)",
 "(!(caller))",
 [
 "testRender_vectors",
@@ -13926,7 +13909,7 @@
 "rs-995-del",
 "srcl",
 "src/render/sink.c",
-"995:memory = cs->alloc.malloc_fn(cs->alloc.ctx, L.fixed);",
+"998:memory = cs->alloc.malloc_fn(cs->alloc.ctx, L.fixed);",
 ";",
 [
 "testRender_vectors",
@@ -13943,7 +13926,7 @@
 "rs-996-neg",
 "srcl",
 "src/render/sink.c",
-"996:(!memory)",
+"999:(!memory)",
 "(!(!memory))",
 [
 "testRender_vectors",
@@ -13960,7 +13943,7 @@
 "rs-997-ret",
 "srcl",
 "src/render/sink.c",
-"997:GSHSCENE_ERR_OOM",
+"1000:GSHSCENE_ERR_OOM",
 "GSHSCENE_ERR_LIMIT",
 [
 "testRender_vectors",
@@ -13977,7 +13960,7 @@
 "rs-1004-del",
 "srcl",
 "src/render/sink.c",
-"1004:memset(run, 0, sizeof *run);",
+"1007:memset(run, 0, sizeof *run);",
 ";",
 [
 "testRender_vectors",
@@ -13994,7 +13977,7 @@
 "rs-1005-del",
 "srcl",
 "src/render/sink.c",
-"1005:run->cs = cs;",
+"1008:run->cs = cs;",
 ";",
 [
 "testRender_vectors",
@@ -14011,7 +13994,7 @@
 "rs-1006-del",
 "srcl",
 "src/render/sink.c",
-"1006:run->job = job;",
+"1009:run->job = job;",
 ";",
 [
 "testRender_vectors",
@@ -14028,7 +14011,7 @@
 "rs-1007-del",
 "srcl",
 "src/render/sink.c",
-"1007:run->request = request;",
+"1010:run->request = request;",
 ";",
 [
 "testRender_vectors",
@@ -14045,7 +14028,7 @@
 "rs-1008-del",
 "srcl",
 "src/render/sink.c",
-"1008:run->layout = L;",
+"1011:run->layout = L;",
 ";",
 [
 "testRender_vectors",
@@ -14062,7 +14045,7 @@
 "rs-1009-del",
 "srcl",
 "src/render/sink.c",
-"1009:run->raster = target->surface;",
+"1012:run->raster = target->surface;",
 ";",
 [
 "testRender_vectors",
@@ -14079,7 +14062,7 @@
 "rs-1010-del",
 "srcl",
 "src/render/sink.c",
-"1010:run->format = gshcpu_format_of(run->raster);",
+"1013:run->format = gshcpu_format_of(run->raster);",
 ";",
 [
 "testRender_vectors",
@@ -14096,7 +14079,7 @@
 "rs-1011-del",
 "srcl",
 "src/render/sink.c",
-"1011:run->pixels = gimg_raster_pixels(run->raster);",
+"1014:run->pixels = gimg_raster_pixels(run->raster);",
 ";",
 [
 "testRender_vectors",
@@ -14113,7 +14096,7 @@
 "rs-1012-del",
 "srcl",
 "src/render/sink.c",
-"1012:run->stride = gimg_raster_stride_bytes(run->raster);",
+"1015:run->stride = gimg_raster_stride_bytes(run->raster);",
 ";",
 [
 "testRender_vectors",
@@ -14130,7 +14113,7 @@
 "rs-1013-del",
 "srcl",
 "src/render/sink.c",
-"1013:run->maps = (GSHGEOM_Map *)(void *)(base + L.at_maps);",
+"1016:run->maps = (GSHGEOM_Map *)(void *)(base + L.at_maps);",
 ";",
 [
 "testRender_vectors",
@@ -14147,7 +14130,7 @@
 "rs-1014-del",
 "srcl",
 "src/render/sink.c",
-"1014:run->stop = (size_t *)(void *)(base + L.at_stop);",
+"1017:run->stop = (size_t *)(void *)(base + L.at_stop);",
 ";",
 [
 "testRender_vectors",
@@ -14164,7 +14147,7 @@
 "rs-1015-del",
 "srcl",
 "src/render/sink.c",
-"1015:run->frames = (Frame *)(void *)(base + L.at_frames);",
+"1018:run->frames = (Frame *)(void *)(base + L.at_frames);",
 ";",
 [
 "testRender_vectors",
@@ -14181,7 +14164,7 @@
 "rs-1016-del",
 "srcl",
 "src/render/sink.c",
-"1016:run->clips = (Clip *)(void *)(base + L.at_clips);",
+"1019:run->clips = (Clip *)(void *)(base + L.at_clips);",
 ";",
 [
 "testRender_vectors",
@@ -14198,7 +14181,7 @@
 "rs-1017-del",
 "srcl",
 "src/render/sink.c",
-"1017:run->root = (double *)(void *)(base + L.at_root);",
+"1020:run->root = (double *)(void *)(base + L.at_root);",
 ";",
 [
 "testRender_vectors",
@@ -14215,7 +14198,7 @@
 "rs-1018-del",
 "srcl",
 "src/render/sink.c",
-"1018:run->layers = (double *)(void *)(base + L.at_layers);",
+"1021:run->layers = (double *)(void *)(base + L.at_layers);",
 ";",
 [
 "testRender_vectors",
@@ -14232,7 +14215,7 @@
 "rs-1019-del",
 "srcl",
 "src/render/sink.c",
-"1019:run->touched = base + L.at_touched;",
+"1022:run->touched = base + L.at_touched;",
 ";",
 [
 "testRender_vectors",
@@ -14249,7 +14232,7 @@
 "rs-1020-del",
 "srcl",
 "src/render/sink.c",
-"1020:run->coverage = base + L.at_coverage;",
+"1023:run->coverage = base + L.at_coverage;",
 ";",
 [
 "testRender_vectors",
@@ -14266,7 +14249,7 @@
 "rs-1021-del",
 "srcl",
 "src/render/sink.c",
-"1021:run->clip_memory = base + L.at_clip_memory;",
+"1024:run->clip_memory = base + L.at_clip_memory;",
 ";",
 [
 "testRender_vectors",
@@ -14283,7 +14266,7 @@
 "rs-1022-del",
 "srcl",
 "src/render/sink.c",
-"1022:run->acc = (int64_t *)(void *)(base + L.at_acc);",
+"1025:run->acc = (int64_t *)(void *)(base + L.at_acc);",
 ";",
 [
 "testRender_vectors",
@@ -14300,7 +14283,7 @@
 "rs-1023-del",
 "srcl",
 "src/render/sink.c",
-"1023:run->resolved = (Resolved *)(void *)(base + L.at_table);",
+"1026:run->resolved = (Resolved *)(void *)(base + L.at_table);",
 ";",
 [
 "testRender_vectors",
@@ -14317,7 +14300,7 @@
 "rs-1024-del",
 "srcl",
 "src/render/sink.c",
-"1024:run->pool = (GSHCPU_Stop *)(void *)(base + L.at_pool);",
+"1027:run->pool = (GSHCPU_Stop *)(void *)(base + L.at_pool);",
 ";",
 [
 "testRender_vectors",
@@ -14334,7 +14317,7 @@
 "rs-1026-neg",
 "srcl",
 "src/render/sink.c",
-"1026:(caller)",
+"1029:(caller)",
 "(!(caller))",
 [
 "testRender_vectors",
@@ -14351,7 +14334,7 @@
 "rs-1029-del",
 "srcl",
 "src/render/sink.c",
-"1029:run->item_alloc = &run->arena.self;",
+"1032:run->item_alloc = &run->arena.self;",
 ";",
 [
 "testRender_vectors",
@@ -14368,7 +14351,7 @@
 "rs-1031-del",
 "srcl",
 "src/render/sink.c",
-"1031:run->item_alloc = &cs->alloc;",
+"1034:run->item_alloc = &cs->alloc;",
 ";",
 [
 "testRender_vectors",
@@ -14385,7 +14368,7 @@
 "rs-1033-ne",
 "srcl",
 "src/render/sink.c",
-"1033:!=",
+"1036:!=",
 "==",
 [
 "testRender_vectors",
@@ -14402,7 +14385,7 @@
 "rs-1033-or",
 "srcl",
 "src/render/sink.c",
-"1033:||",
+"1036:||",
 "&&",
 [
 "testRender_vectors",
@@ -14419,7 +14402,7 @@
 "rs-1034-ne",
 "srcl",
 "src/render/sink.c",
-"1034:!=",
+"1037:!=",
 "==",
 [
 "testRender_vectors",
@@ -14436,7 +14419,7 @@
 "rs-1040-del",
 "srcl",
 "src/render/sink.c",
-"1040:run->palette = gshscene_list_palette(request->list);",
+"1043:run->palette = gshscene_list_palette(request->list);",
 ";",
 [
 "testRender_vectors",
@@ -14453,7 +14436,7 @@
 "rs-1043-del",
 "srcl",
 "src/render/sink.c",
-"1043:memset(root, 0, sizeof *root);",
+"1046:memset(root, 0, sizeof *root);",
 ";",
 [
 "testRender_vectors",
@@ -14470,7 +14453,7 @@
 "rs-1044-del",
 "srcl",
 "src/render/sink.c",
-"1044:root->layer = run->root;",
+"1047:root->layer = run->root;",
 ";",
 [
 "testRender_vectors",
@@ -14487,7 +14470,7 @@
 "rs-1045-del",
 "srcl",
 "src/render/sink.c",
-"1045:root->space = *gshscene_job_target_space(job);",
+"1048:root->space = *gshscene_job_target_space(job);",
 ";",
 [
 "testRender_vectors",
@@ -14504,7 +14487,7 @@
 "rs-1050-neg",
 "srcl",
 "src/render/sink.c",
-"1050:(gshscene_expansion_next(&run->walk, &item, &chain, &count))",
+"1053:(gshscene_expansion_next(&run->walk, &item, &chain, &count))",
 "(!(gshscene_expansion_next(&run->walk, &item, &chain, &count)))",
 [
 "testRender_vectors",
@@ -14521,7 +14504,7 @@
 "rs-1051-del",
 "srcl",
 "src/render/sink.c",
-"1051:run->work = 0;",
+"1054:run->work = 0;",
 ";",
 [
 "testRender_vectors",
@@ -14538,7 +14521,7 @@
 "rs-1053-del",
 "srcl",
 "src/render/sink.c",
-"1053:gshscene_job_work(job, run->work);",
+"1056:gshscene_job_work(job, run->work);",
 ";",
 [
 "testRender_vectors",
@@ -14555,7 +14538,7 @@
 "rs-1054-ne",
 "srcl",
 "src/render/sink.c",
-"1054:!=",
+"1057:!=",
 "==",
 [
 "testRender_vectors",
@@ -14572,7 +14555,7 @@
 "rs-1054-neg",
 "srcl",
 "src/render/sink.c",
-"1054:(r != GSHSCENE_OK)",
+"1057:(r != GSHSCENE_OK)",
 "(!(r != GSHSCENE_OK))",
 [
 "testRender_vectors",
@@ -14589,7 +14572,7 @@
 "rs-1055-eq",
 "srcl",
 "src/render/sink.c",
-"1055:==",
+"1058:==",
 "!=",
 [
 "testRender_vectors",
@@ -14606,7 +14589,7 @@
 "rs-1055-ne",
 "srcl",
 "src/render/sink.c",
-"1055:!=",
+"1058:!=",
 "==",
 [
 "testRender_vectors",
@@ -14623,7 +14606,7 @@
 "rs-1055-neg",
 "srcl",
 "src/render/sink.c",
-"1055:(run->stop_count == 0 && r != GSHSCENE_ERR_REFUSED)",
+"1058:(run->stop_count == 0 && r != GSHSCENE_ERR_REFUSED)",
 "(!(run->stop_count == 0 && r != GSHSCENE_ERR_REFUSED))",
 [
 "testRender_vectors",
@@ -14640,7 +14623,7 @@
 "rs-1056-del",
 "srcl",
 "src/render/sink.c",
-"1056:memcpy(run->stop, chain, count * sizeof *chain);",
+"1059:memcpy(run->stop, chain, count * sizeof *chain);",
 ";",
 [
 "testRender_vectors",
@@ -14657,7 +14640,7 @@
 "rs-1057-del",
 "srcl",
 "src/render/sink.c",
-"1057:run->stop_count = count;",
+"1060:run->stop_count = count;",
 ";",
 [
 "testRender_vectors",
@@ -14674,7 +14657,7 @@
 "rs-1059-del",
 "srcl",
 "src/render/sink.c",
-"1059:finish(run, r, memory);",
+"1062:finish(run, r, memory);",
 ";",
 [
 "testRender_vectors",
@@ -14691,7 +14674,7 @@
 "rs-1062-del",
 "srcl",
 "src/render/sink.c",
-"1062:run->processed++;",
+"1065:run->processed++;",
 ";",
 [
 "testRender_vectors",
@@ -14708,7 +14691,7 @@
 "rs-1063-eq",
 "srcl",
 "src/render/sink.c",
-"1063:==",
+"1066:==",
 "!=",
 [
 "testRender_vectors",
@@ -14725,7 +14708,7 @@
 "rs-1063-neg",
 "srcl",
 "src/render/sink.c",
-"1063:(run->groups_open == 0)",
+"1066:(run->groups_open == 0)",
 "(!(run->groups_open == 0))",
 [
 "testRender_vectors",
@@ -14742,7 +14725,7 @@
 "rs-1064-del",
 "srcl",
 "src/render/sink.c",
-"1064:run->done = run->processed;",
+"1067:run->done = run->processed;",
 ";",
 [
 "testRender_vectors",
@@ -14759,7 +14742,7 @@
 "rs-1066-neg",
 "srcl",
 "src/render/sink.c",
-"1066:(gshscene_job_unit(job, run->processed, run->done))",
+"1069:(gshscene_job_unit(job, run->processed, run->done))",
 "(!(gshscene_job_unit(job, run->processed, run->done)))",
 [
 "testRender_vectors",
@@ -14776,7 +14759,7 @@
 "rs-1067-del",
 "srcl",
 "src/render/sink.c",
-"1067:finish(run, GSHSCENE_ERR_CANCELLED, memory);",
+"1070:finish(run, GSHSCENE_ERR_CANCELLED, memory);",
 ";",
 [
 "testRender_vectors",
@@ -14793,7 +14776,7 @@
 "rs-1071-del",
 "srcl",
 "src/render/sink.c",
-"1071:finish(run, GSHSCENE_OK, memory);",
+"1074:finish(run, GSHSCENE_OK, memory);",
 ";",
 [
 "testRender_vectors",
@@ -14810,7 +14793,7 @@
 "rs-1085-lt",
 "srcl",
 "src/render/sink.c",
-"1085:<",
+"1088:<",
 "<=",
 [
 "testRender_vectors",
@@ -14827,7 +14810,7 @@
 "rs-1103-eq",
 "srcl",
 "src/render/sink.c",
-"1103:==",
+"1106:==",
 "!=",
 [
 "testRender_vectors",
@@ -14844,7 +14827,7 @@
 "rs-1103-str",
 "srcl",
 "src/render/sink.c",
-"1103:, \"shap",
+"1106:, \"shap",
 ", \"Zhap",
 [
 "testRender_vectors",
@@ -14861,7 +14844,7 @@
 "rs-1108-neg",
 "srcl",
 "src/render/sink.c",
-"1108:(!out)",
+"1111:(!out)",
 "(!(!out))",
 [
 "testRender_vectors",
@@ -14878,7 +14861,7 @@
 "rs-1109-ret",
 "srcl",
 "src/render/sink.c",
-"1109:GSHCPU_ERR_INVALID",
+"1112:GSHCPU_ERR_INVALID",
 "GSHCPU_ERR_LIMIT",
 [
 "testRender_vectors",
@@ -14895,7 +14878,7 @@
 "rs-1111-neg",
 "srcl",
 "src/render/sink.c",
-"1111:(limits)",
+"1114:(limits)",
 "(!(limits))",
 [
 "testRender_vectors",
@@ -14912,7 +14895,7 @@
 "rs-1112-lt",
 "srcl",
 "src/render/sink.c",
-"1112:<",
+"1115:<",
 "<=",
 [
 "testRender_vectors",
@@ -14929,7 +14912,7 @@
 "rs-1113-neg",
 "srcl",
 "src/render/sink.c",
-"1113:(limits->_reserved[i])",
+"1116:(limits->_reserved[i])",
 "(!(limits->_reserved[i]))",
 [
 "testRender_vectors",
@@ -14946,7 +14929,7 @@
 "rs-1114-ret",
 "srcl",
 "src/render/sink.c",
-"1114:GSHCPU_ERR_INVALID",
+"1117:GSHCPU_ERR_INVALID",
 "GSHCPU_ERR_LIMIT",
 [
 "testRender_vectors",
@@ -14963,7 +14946,7 @@
 "rs-1118-neg",
 "srcl",
 "src/render/sink.c",
-"1118:(!alloc)",
+"1121:(!alloc)",
 "(!(!alloc))",
 [
 "testRender_vectors",
@@ -14980,7 +14963,7 @@
 "rs-1119-del",
 "srcl",
 "src/render/sink.c",
-"1119:alloc = gshgeom_allocator_default();",
+"1122:alloc = gshgeom_allocator_default();",
 ";",
 [
 "testRender_vectors",
@@ -14997,7 +14980,7 @@
 "rs-1122-neg",
 "srcl",
 "src/render/sink.c",
-"1122:(!cs)",
+"1125:(!cs)",
 "(!(!cs))",
 [
 "testRender_vectors",
@@ -15014,7 +14997,7 @@
 "rs-1123-ret",
 "srcl",
 "src/render/sink.c",
-"1123:GSHCPU_ERR_OOM",
+"1126:GSHCPU_ERR_OOM",
 "GSHCPU_ERR_LIMIT",
 [
 "testRender_vectors",
@@ -15031,7 +15014,7 @@
 "rs-1125-del",
 "srcl",
 "src/render/sink.c",
-"1125:cs->alloc = *alloc;",
+"1128:cs->alloc = *alloc;",
 ";",
 [
 "testRender_vectors",
@@ -15048,7 +15031,7 @@
 "rs-1128-and",
 "srcl",
 "src/render/sink.c",
-"1128:&&",
+"1131:&&",
 "||",
 [
 "testRender_vectors",
@@ -15065,7 +15048,7 @@
 "rs-1128-del",
 "srcl",
 "src/render/sink.c",
-"1128:cs->max_dimension = limits && limits->max_dimension ? limits->max_dimension : GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION;",
+"1131:cs->max_dimension = limits && limits->max_dimension ? limits->max_dimension : GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION;",
 ";",
 [
 "testRender_vectors",
@@ -15082,7 +15065,7 @@
 "rs-1129-neg",
 "srcl",
 "src/render/sink.c",
-"1129:(cs->max_dimension > GSHCPU_MAX_DIMENSION_CEILING)",
+"1132:(cs->max_dimension > GSHCPU_MAX_DIMENSION_CEILING)",
 "(!(cs->max_dimension > GSHCPU_MAX_DIMENSION_CEILING))",
 [
 "testRender_vectors",
@@ -15099,7 +15082,7 @@
 "rs-1132-and",
 "srcl",
 "src/render/sink.c",
-"1132:&&",
+"1135:&&",
 "||",
 [
 "testRender_vectors",
@@ -15116,7 +15099,7 @@
 "rs-1132-del",
 "srcl",
 "src/render/sink.c",
-"1132:cs->max_bytes = limits && limits->max_bytes ? limits->max_bytes : GSHCPU_LIMITS_DEFAULT_MAX_BYTES;",
+"1135:cs->max_bytes = limits && limits->max_bytes ? limits->max_bytes : GSHCPU_LIMITS_DEFAULT_MAX_BYTES;",
 ";",
 [
 "testRender_vectors",
@@ -15133,7 +15116,7 @@
 "rs-1133-and",
 "srcl",
 "src/render/sink.c",
-"1133:&&",
+"1136:&&",
 "||",
 [
 "testRender_vectors",
@@ -15150,7 +15133,7 @@
 "rs-1133-del",
 "srcl",
 "src/render/sink.c",
-"1133:cs->max_cells = limits && limits->max_cells ? limits->max_cells : GSHCPU_LIMITS_DEFAULT_MAX_CELLS;",
+"1136:cs->max_cells = limits && limits->max_cells ? limits->max_cells : GSHCPU_LIMITS_DEFAULT_MAX_CELLS;",
 ";",
 [
 "testRender_vectors",
@@ -15167,7 +15150,7 @@
 "rs-1134-del",
 "srcl",
 "src/render/sink.c",
-"1134:gshgeom_limits_default(&cs->geometry);",
+"1137:gshgeom_limits_default(&cs->geometry);",
 ";",
 [
 "testRender_vectors",
@@ -15184,7 +15167,7 @@
 "rs-1135-and",
 "srcl",
 "src/render/sink.c",
-"1135:&&",
+"1138:&&",
 "||",
 [
 "testRender_vectors",
@@ -15201,7 +15184,7 @@
 "rs-1135-neg",
 "srcl",
 "src/render/sink.c",
-"1135:(limits && limits->max_points)",
+"1138:(limits && limits->max_points)",
 "(!(limits && limits->max_points))",
 [
 "testRender_vectors",
@@ -15218,7 +15201,7 @@
 "rs-1136-del",
 "srcl",
 "src/render/sink.c",
-"1136:cs->geometry.max_points = limits->max_points;",
+"1139:cs->geometry.max_points = limits->max_points;",
 ";",
 [
 "testRender_vectors",
@@ -15235,7 +15218,7 @@
 "rs-1139-del",
 "srcl",
 "src/render/sink.c",
-"1139:memset(&ops, 0, sizeof ops);",
+"1142:memset(&ops, 0, sizeof ops);",
 ";",
 [
 "testRender_vectors",
@@ -15252,7 +15235,7 @@
 "rs-1140-del",
 "srcl",
 "src/render/sink.c",
-"1140:ops.name = \"shape-cpu\";",
+"1143:ops.name = \"shape-cpu\";",
 ";",
 [
 "testRender_vectors",
@@ -15269,7 +15252,7 @@
 "rs-1140-str",
 "srcl",
 "src/render/sink.c",
-"1140:= \"shap",
+"1143:= \"shap",
 "= \"Zhap",
 [
 "testRender_vectors",
@@ -15286,7 +15269,7 @@
 "rs-1142-del",
 "srcl",
 "src/render/sink.c",
-"1142:ops.caps = op_caps;",
+"1145:ops.caps = op_caps;",
 ";",
 [
 "testRender_vectors",
@@ -15303,7 +15286,7 @@
 "rs-1143-del",
 "srcl",
 "src/render/sink.c",
-"1143:ops.workspace_bytes = op_workspace_bytes;",
+"1146:ops.workspace_bytes = op_workspace_bytes;",
 ";",
 [
 "testRender_vectors",
@@ -15320,7 +15303,7 @@
 "rs-1144-del",
 "srcl",
 "src/render/sink.c",
-"1144:ops.begin = op_begin;",
+"1147:ops.begin = op_begin;",
 ";",
 [
 "testRender_vectors",
@@ -15337,7 +15320,7 @@
 "rs-1145-del",
 "srcl",
 "src/render/sink.c",
-"1145:ops.readback = op_readback;",
+"1148:ops.readback = op_readback;",
 ";",
 [
 "testRender_vectors",
@@ -15354,7 +15337,7 @@
 "rs-1146-del",
 "srcl",
 "src/render/sink.c",
-"1146:ops.destroy = op_destroy;",
+"1149:ops.destroy = op_destroy;",
 ";",
 [
 "testRender_vectors",
@@ -15371,7 +15354,7 @@
 "rs-1149-ne",
 "srcl",
 "src/render/sink.c",
-"1149:!=",
+"1152:!=",
 "==",
 [
 "testRender_vectors",
@@ -15388,7 +15371,7 @@
 "rs-1149-neg",
 "srcl",
 "src/render/sink.c",
-"1149:(r != GSHSCENE_OK)",
+"1152:(r != GSHSCENE_OK)",
 "(!(r != GSHSCENE_OK))",
 [
 "testRender_vectors",
@@ -15405,7 +15388,7 @@
 "rs-1150-del",
 "srcl",
 "src/render/sink.c",
-"1150:alloc->free_fn(alloc->ctx, cs);",
+"1153:alloc->free_fn(alloc->ctx, cs);",
 ";",
 [
 "testRender_vectors",
@@ -15422,7 +15405,7 @@
 "rs-1151-eq",
 "srcl",
 "src/render/sink.c",
-"1151:==",
+"1154:==",
 "!=",
 [
 "testRender_vectors",

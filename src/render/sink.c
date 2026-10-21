@@ -454,9 +454,12 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   if (target->kind != GSHSCENE_TARGET_RASTER || !gshcpu_format_of(target->surface)) {
     return GSHSCENE_ERR_UNSUPPORTED;
   }
-  for (uint32_t k = GSHSCENE_ITEM_FILL; k < GSHSCENE_ITEM_KIND_COUNT; k++) {
-    out->item_kinds |= UINT32_C(1) << k;
-  }
+  /* Exactly the item kinds unit() draws, named rather than counted up to the enum's end: a shape-scene whose enum has
+   * grown past them (a stroke, kind 7, strokes story S1) must find that kind unclaimed, so that the planning pass refuses
+   * it (ITEM_KIND) instead of the sink meeting an item it has no drawing for. */
+  out->item_kinds = (UINT32_C(1) << GSHSCENE_ITEM_FILL) | (UINT32_C(1) << GSHSCENE_ITEM_CLIP_PUSH) |
+      (UINT32_C(1) << GSHSCENE_ITEM_CLIP_POP) | (UINT32_C(1) << GSHSCENE_ITEM_GROUP_PUSH) |
+      (UINT32_C(1) << GSHSCENE_ITEM_GROUP_POP) | (UINT32_C(1) << GSHSCENE_ITEM_INSTANCE);
   /* Exactly the operators gshcpu_render_apply composites, named rather than counted up to the enum's end: a
    * shape-scene whose enum has grown past them must not find them claimed here (they would be refused by nothing and
    * composited as no operator at all).  The Porter-Duff operators and PLUS, then the blend modes (B1, story P3). */

@@ -810,8 +810,14 @@ PLANTS += [
     # --- the contract's rules (shape-scene's sink.h): each violated, the conformance suite must fail -----------------
     ("rule-S1-never-completes", "src", RS, "  finish(run, GSHSCENE_OK, memory);\n  return GSHSCENE_OK;\n}",
      "  (void)memory;\n  return GSHSCENE_OK;\n}", CONF),
-    ("rule-S2-caps-instances", "src", RS, "for (uint32_t k = GSHSCENE_ITEM_FILL; k < GSHSCENE_ITEM_KIND_COUNT; k++) {",
-     "for (uint32_t k = GSHSCENE_ITEM_FILL; k < GSHSCENE_ITEM_INSTANCE; k++) {", CONF),
+    ("rule-S2-caps-instances", "src", RS, "      (UINT32_C(1) << GSHSCENE_ITEM_GROUP_POP) | (UINT32_C(1) << GSHSCENE_ITEM_INSTANCE);",
+     "      (UINT32_C(1) << GSHSCENE_ITEM_GROUP_POP);", CONF),
+    # Strokes story S1: the item kinds named, so a kind shape-scene adds (the stroke, 7) is refused, never claimed: a
+    # claim of the kind after instance must fail.
+    ("r-caps-kinds-grown", "src", RS,
+     "  out->item_kinds = (UINT32_C(1) << GSHSCENE_ITEM_FILL) | (UINT32_C(1) << GSHSCENE_ITEM_CLIP_PUSH) |",
+     "  out->item_kinds = (UINT32_C(1) << (GSHSCENE_ITEM_INSTANCE + 1)) | (UINT32_C(1) << GSHSCENE_ITEM_FILL) |\n"
+     "      (UINT32_C(1) << GSHSCENE_ITEM_CLIP_PUSH) |", RT),
     ("rule-S3-failure-leaks", "src", RS, "      finish(run, r, memory);\n      return GSHSCENE_OK;", "      return r;", CONF),
     ("rule-S4-damage-ignored", "src", RS, "    r = gshcpu_render_rect_meet(r, *target->damage);", "    (void)0;", CONF),
     ("rule-S5-entry-chain", "src", RS, "GSHSCENE_REASON_RESOURCE_LIMIT, chain, count);", "GSHSCENE_REASON_RESOURCE_LIMIT, chain, count - 1);", RT),

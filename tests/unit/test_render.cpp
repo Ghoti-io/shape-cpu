@@ -44,10 +44,12 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
     ASSERT_NE(r.raster, nullptr);
     EXPECT_EQ(gshcpu_format_of(r.raster), format);
     GSHSCENE_Sink_Caps caps = caps_for(sink.sink, r.raster);
-    for (uint32_t k = GSHSCENE_ITEM_FILL; k < GSHSCENE_ITEM_KIND_COUNT; k++) {
-      EXPECT_TRUE(caps.item_kinds & (1u << k)) << k;
-    }
-    EXPECT_EQ(caps.item_kinds, ((1u << GSHSCENE_ITEM_KIND_COUNT) - 1u) & ~1u) << "every kind, and no bit past them";
+    // The six kinds the sink draws, named: not "every kind below the enum's end", which would claim a kind shape-scene
+    // adds later (a stroke, strokes story S1) and hand the sink an item it has no drawing for.
+    EXPECT_EQ(caps.item_kinds, (1u << GSHSCENE_ITEM_FILL) | (1u << GSHSCENE_ITEM_CLIP_PUSH) |
+        (1u << GSHSCENE_ITEM_CLIP_POP) | (1u << GSHSCENE_ITEM_GROUP_PUSH) | (1u << GSHSCENE_ITEM_GROUP_POP) |
+        (1u << GSHSCENE_ITEM_INSTANCE)) << "the six kinds it draws, and no bit past them";
+    EXPECT_EQ(caps.item_kinds & ~0x7eu, 0u) << "no kind from 7 on";
     EXPECT_EQ(caps.composites, (1u << GSHSCENE_COMPOSITE_COUNT) - 1u)
         << "the twelve Porter-Duff operators, plus and the fifteen blend modes (color-paint story P3)";
     EXPECT_EQ(caps.flags & (GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT | GSHSCENE_CAP_GROUP_SOFT_MASK), 0u)
@@ -67,6 +69,23 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
     EXPECT_STREQ(caps.work_measure, "cells+points+pixels");
     EXPECT_EQ(caps.cancel_work_bound, (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS + GSHCPU_LIMITS_DEFAULT_MAX_CELLS +
         GSHCPU_LIMITS_DEFAULT_MAX_BYTES);
+  }
+}
+
+TEST(RenderCaps, AKindPastTheSixItDrawsIsRefused) {
+  // The seventh kind (shape-scene's stroke, strokes story S1) and every kind after it: the one predicate of the
+  // planning pass refuses each, ITEM_KIND, so the sink never meets one (it has no drawing for it until strokes story S4).
+  SinkRef sink;
+  RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 4, 4));
+  ASSERT_NE(r.raster, nullptr);
+  GSHSCENE_Sink_Caps caps = caps_for(sink.sink, r.raster);
+  const GSHSCENE_Color_Space srgb = {GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_SRGB, 0.0};
+  for (uint32_t k = 7; k < 40; k++) {
+    GSHSCENE_Item item{};
+    item.kind = (GSHSCENE_Item_Kind)k;
+    GSHSCENE_Disposition d = gshscene_caps_disposition(&caps, &item, &srgb, nullptr);
+    EXPECT_EQ(d.entry_class, GSHSCENE_ENTRY_REFUSED) << k;
+    EXPECT_EQ(d.reason, GSHSCENE_REASON_ITEM_KIND) << k;
   }
 }
 

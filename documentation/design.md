@@ -87,7 +87,8 @@ keeps its own spelling, which is committed in its goldens.
 `gshcpu_sink_create` makes a `GSHSCENE_Sink` (shape-scene's sink.h, S1 to S16).
 It draws `RASTER` targets of RGBA, interleaved, 8-bit unsigned normalized or
 32-bit float, straight or premultiplied as the raster's format says; every other
-target is `ERR_UNSUPPORTED`. Its caps are every item kind and every operator it composites, named one by one (the
+target is `ERR_UNSUPPORTED`. Its caps are the six item kinds it draws (a stroke, shape-scene's kind 7, is refused `ITEM_KIND` by the planning pass
+until strokes story S4) and every operator it composites, each named one by one (the
 Porter-Duff operators, `PLUS` and the fifteen blend modes; none of PDF's group fields, which the plan refuses),
 `CAN_BLOCK`, `CALLER_MEMORY`, `CLIP_AA`, `BLEND_SPACES`, `READBACK`,
 `GLYPHS_FROM_FONT` (story 14a), every gradient kind with `GRADIENT_SPACES`

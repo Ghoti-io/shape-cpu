@@ -33,7 +33,10 @@
  * premultiplied alpha form the raster's format records (it is read, never
  * assumed).  Every other format (gray, CMYK, planar, 12 or 16 bits), a `STREAM`
  * target and the reserved GPU kinds are ::GSHSCENE_ERR_UNSUPPORTED.  For a target
- * it draws, the caps are: every item kind and the composite operators it
+ * it draws, the caps are: the six item kinds it draws (fill, clip push and
+ * pop, group push and pop, instance), named one by one, so that a kind
+ * shape-scene adds later (the stroke, kind 7) is refused by the planning pass
+ * (`ITEM_KIND`) and never reaches the sink; the composite operators it
  * composites, named one by one (the twelve Porter-Duff operators, `PLUS` and the
  * fifteen blend modes of color-paint story P3; an operator past them is refused
  * by the planning pass, never drawn as another); none of PDF's group fields
