@@ -1424,10 +1424,10 @@
 ]
 ],
 [
-"rv-65-ge",
+"rv-74-ge",
 "srcl",
 "src/render/cover.c",
-"65:x0 >= r.",
+"74:x0 >= r.",
 "x0 > r.",
 [
 "testRender_vectors",
@@ -1440,10 +1440,10 @@
 ]
 ],
 [
-"rv-65-or",
+"rv-74-or",
 "srcl",
 "src/render/cover.c",
-"65:||",
+"74:||",
 "&&",
 [
 "testRender_vectors",
@@ -1456,10 +1456,10 @@
 ]
 ],
 [
-"rv-65-ge2",
+"rv-74-ge2",
 "srcl",
 "src/render/cover.c",
-"65:y0 >= r.",
+"74:y0 >= r.",
 "y0 > r.",
 [
 "testRender_vectors",
@@ -1472,10 +1472,10 @@
 ]
 ],
 [
-"rv-70-del",
+"rv-79-del",
 "srcl",
 "src/render/cover.c",
-"70:r.x0 = a.x0 > b.x0 ? a.x0 : b.x0;",
+"79:r.x0 = a.x0 > b.x0 ? a.x0 : b.x0;",
 ";",
 [
 "testRender_vectors",
@@ -1488,10 +1488,10 @@
 ]
 ],
 [
-"rv-71-del",
+"rv-80-del",
 "srcl",
 "src/render/cover.c",
-"71:r.y0 = a.y0 > b.y0 ? a.y0 : b.y0;",
+"80:r.y0 = a.y0 > b.y0 ? a.y0 : b.y0;",
 ";",
 [
 "testRender_vectors",
@@ -1504,10 +1504,10 @@
 ]
 ],
 [
-"rv-72-del",
+"rv-81-del",
 "srcl",
 "src/render/cover.c",
-"72:r.x1 = a.x1 < b.x1 ? a.x1 : b.x1;",
+"81:r.x1 = a.x1 < b.x1 ? a.x1 : b.x1;",
 ";",
 [
 "testRender_vectors",
@@ -1520,10 +1520,10 @@
 ]
 ],
 [
-"rv-73-del",
+"rv-82-del",
 "srcl",
 "src/render/cover.c",
-"73:r.y1 = a.y1 < b.y1 ? a.y1 : b.y1;",
+"82:r.y1 = a.y1 < b.y1 ? a.y1 : b.y1;",
 ";",
 [
 "testRender_vectors",
@@ -1536,10 +1536,10 @@
 ]
 ],
 [
-"rv-78-neg",
+"rv-87-neg",
 "srcl",
 "src/render/cover.c",
-"78:(gshcpu_render_rect_empty(a))",
+"87:(gshcpu_render_rect_empty(a))",
 "(!(gshcpu_render_rect_empty(a)))",
 [
 "testRender_vectors",
@@ -1552,10 +1552,10 @@
 ]
 ],
 [
-"rv-81-neg",
+"rv-90-neg",
 "srcl",
 "src/render/cover.c",
-"81:(gshcpu_render_rect_empty(b))",
+"90:(gshcpu_render_rect_empty(b))",
 "(!(gshcpu_render_rect_empty(b)))",
 [
 "testRender_vectors",
@@ -1568,10 +1568,10 @@
 ]
 ],
 [
-"rv-85-del",
+"rv-94-del",
 "srcl",
 "src/render/cover.c",
-"85:r.x0 = a.x0 < b.x0 ? a.x0 : b.x0;",
+"94:r.x0 = a.x0 < b.x0 ? a.x0 : b.x0;",
 ";",
 [
 "testRender_vectors",
@@ -1584,10 +1584,10 @@
 ]
 ],
 [
-"rv-86-del",
+"rv-95-del",
 "srcl",
 "src/render/cover.c",
-"86:r.y0 = a.y0 < b.y0 ? a.y0 : b.y0;",
+"95:r.y0 = a.y0 < b.y0 ? a.y0 : b.y0;",
 ";",
 [
 "testRender_vectors",
@@ -1600,10 +1600,10 @@
 ]
 ],
 [
-"rv-87-del",
+"rv-96-del",
 "srcl",
 "src/render/cover.c",
-"87:r.x1 = a.x1 > b.x1 ? a.x1 : b.x1;",
+"96:r.x1 = a.x1 > b.x1 ? a.x1 : b.x1;",
 ";",
 [
 "testRender_vectors",
@@ -1616,10 +1616,10 @@
 ]
 ],
 [
-"rv-88-del",
+"rv-97-del",
 "srcl",
 "src/render/cover.c",
-"88:r.y1 = a.y1 > b.y1 ? a.y1 : b.y1;",
+"97:r.y1 = a.y1 > b.y1 ? a.y1 : b.y1;",
 ";",
 [
 "testRender_vectors",
@@ -1632,10 +1632,10 @@
 ]
 ],
 [
-"rv-99-ne",
+"rv-108-ne",
 "srcl",
 "src/render/cover.c",
-"99:!=",
+"108:!=",
 "==",
 [
 "testRender_vectors",
@@ -1648,10 +1648,10 @@
 ]
 ],
 [
-"rv-105-ne",
+"rv-114-ne",
 "srcl",
 "src/render/cover.c",
-"105:or != 0)",
+"114:or != 0)",
 "or == 0)",
 [
 "testRender_vectors",
@@ -1664,10 +1664,10 @@
 ]
 ],
 [
-"rv-105-and",
+"rv-114-and",
 "srcl",
 "src/render/cover.c",
-"105:&&",
+"114:&&",
 "||",
 [
 "testRender_vectors",
@@ -1680,10 +1680,10 @@
 ]
 ],
 [
-"rv-105-ne2",
+"rv-114-ne2",
 "srcl",
 "src/render/cover.c",
-"105:0) != (d",
+"114:0) != (d",
 "0) == (d",
 [
 "testRender_vectors",
@@ -1696,10 +1696,10 @@
 ]
 ],
 [
-"rv-105-neg",
+"rv-114-neg",
 "srcl",
 "src/render/cover.c",
-"105:((numerator % denominator != 0) && ((numerator < 0) != (denominator < 0)))",
+"114:((numerator % denominator != 0) && ((numerator < 0) != (denominator < 0)))",
 "(!((numerator % denominator != 0) && ((numerator < 0) != (denominator < 0))))",
 [
 "testRender_vectors",
@@ -1712,10 +1712,10 @@
 ]
 ],
 [
-"rv-106-del",
+"rv-115-del",
 "srcl",
 "src/render/cover.c",
-"106:q -= 1;",
+"115:q -= 1;",
 ";",
 [
 "testRender_vectors",
@@ -1728,10 +1728,10 @@
 ]
 ],
 [
-"rv-132-eq",
+"rv-142-eq",
 "srcl",
 "src/render/cover.c",
-"132:==",
+"142:==",
 "!=",
 [
 "testRender_vectors",
@@ -1744,10 +1744,10 @@
 ]
 ],
 [
-"rv-132-or",
+"rv-142-or",
 "srcl",
 "src/render/cover.c",
-"132:||",
+"142:||",
 "&&",
 [
 "testRender_vectors",
@@ -1760,10 +1760,10 @@
 ]
 ],
 [
-"rv-132-neg",
+"rv-142-neg",
 "srcl",
 "src/render/cover.c",
-"132:(dy == 0 || c->over)",
+"142:(dy == 0 || c->over)",
 "(!(dy == 0 || c->over))",
 [
 "testRender_vectors",
@@ -1776,10 +1776,10 @@
 ]
 ],
 [
-"rv-135-ge",
+"rv-145-ge",
 "srcl",
 "src/render/cover.c",
-"135:>=",
+"145:>=",
 ">",
 [
 "testRender_vectors",
@@ -1792,10 +1792,10 @@
 ]
 ],
 [
-"rv-135-neg",
+"rv-145-neg",
 "srcl",
 "src/render/cover.c",
-"135:(c->cells >= c->max_cells)",
+"145:(c->cells >= c->max_cells)",
 "(!(c->cells >= c->max_cells))",
 [
 "testRender_vectors",
@@ -1808,58 +1808,10 @@
 ]
 ],
 [
-"rv-136-del",
+"rv-146-del",
 "srcl",
 "src/render/cover.c",
-"136:c->over = 1;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-139-del",
-"srcl",
-"src/render/cover.c",
-"139:c->cells++;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-140-lt",
-"srcl",
-"src/render/cover.c",
-"140:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-142-del",
-"srcl",
-"src/render/cover.c",
-"142:c->cover[at] += dy;",
+"146:c->over = 1;",
 ";",
 [
 "testRender_vectors",
@@ -1875,7 +1827,7 @@
 "rv-149-del",
 "srcl",
 "src/render/cover.c",
-"149:p.x = b;",
+"149:c->cells++;",
 ";",
 [
 "testRender_vectors",
@@ -1888,10 +1840,106 @@
 ]
 ],
 [
-"rv-156-eq",
+"rv-150-or",
 "srcl",
 "src/render/cover.c",
-"156:==",
+"150:||",
+"&&",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-150-ge",
+"srcl",
+"src/render/cover.c",
+"150:>=",
+">",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-150-neg",
+"srcl",
+"src/render/cover.c",
+"150:(!c->cover || ex >= c->rect.x1)",
+"(!(!c->cover || ex >= c->rect.x1))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-153-lt",
+"srcl",
+"src/render/cover.c",
+"153:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-155-del",
+"srcl",
+"src/render/cover.c",
+"155:c->cover[at] += dy;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-162-del",
+"srcl",
+"src/render/cover.c",
+"162:p.x = b;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-169-eq",
+"srcl",
+"src/render/cover.c",
+"169:==",
 "!=",
 [
 "testRender_vectors",
@@ -1904,10 +1952,10 @@
 ]
 ],
 [
-"rv-156-neg",
+"rv-169-neg",
 "srcl",
 "src/render/cover.c",
-"156:(from.y == to.y)",
+"169:(from.y == to.y)",
 "(!(from.y == to.y))",
 [
 "testRender_vectors",
@@ -1920,123 +1968,11 @@
 ]
 ],
 [
-"rv-161-eq",
+"rv-174-eq",
 "srcl",
 "src/render/cover.c",
-"161:==",
+"174:==",
 "!=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-161-neg",
-"srcl",
-"src/render/cover.c",
-"161:(ex1 == ex2)",
-"(!(ex1 == ex2))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-162-lt",
-"srcl",
-"src/render/cover.c",
-"162:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-162-neg",
-"srcl",
-"src/render/cover.c",
-"162:(ex1 < c->rect.x1)",
-"(!(ex1 < c->rect.x1))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-163-del",
-"srcl",
-"src/render/cover.c",
-"163:deposit(c, ex1, ey, to.y - from.y, from.x - ex1 * ONE_PIXEL, to.x - ex1 * ONE_PIXEL);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-171-lt",
-"srcl",
-"src/render/cover.c",
-"171:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-171-neg",
-"srcl",
-"src/render/cover.c",
-"171:(lo < c->rect.x0)",
-"(!(lo < c->rect.x0))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-174-ge",
-"srcl",
-"src/render/cover.c",
-"174:>=",
-">",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -2051,8 +1987,8 @@
 "rv-174-neg",
 "srcl",
 "src/render/cover.c",
-"174:(hi >= c->rect.x0)",
-"(!(hi >= c->rect.x0))",
+"174:(ex1 == ex2)",
+"(!(ex1 == ex2))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -2064,10 +2000,122 @@
 ]
 ],
 [
-"rv-176-neg",
+"rv-175-lt",
 "srcl",
 "src/render/cover.c",
-"176:(right)",
+"175:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-175-neg",
+"srcl",
+"src/render/cover.c",
+"175:(ex1 < c->walk.x1)",
+"(!(ex1 < c->walk.x1))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-176-del",
+"srcl",
+"src/render/cover.c",
+"176:deposit(c, ex1, ey, to.y - from.y, from.x - ex1 * ONE_PIXEL, to.x - ex1 * ONE_PIXEL);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-184-lt",
+"srcl",
+"src/render/cover.c",
+"184:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-184-neg",
+"srcl",
+"src/render/cover.c",
+"184:(lo < c->walk.x0)",
+"(!(lo < c->walk.x0))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-187-ge",
+"srcl",
+"src/render/cover.c",
+"187:>=",
+">",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-187-neg",
+"srcl",
+"src/render/cover.c",
+"187:(hi >= c->walk.x0)",
+"(!(hi >= c->walk.x0))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-189-neg",
+"srcl",
+"src/render/cover.c",
+"189:(right)",
 "(!(right))",
 [
 "testRender_vectors",
@@ -2080,10 +2128,10 @@
 ]
 ],
 [
-"rv-177-del",
+"rv-190-del",
 "srcl",
 "src/render/cover.c",
-"177:b = cut;",
+"190:b = cut;",
 ";",
 [
 "testRender_vectors",
@@ -2096,10 +2144,10 @@
 ]
 ],
 [
-"rv-179-del",
+"rv-192-del",
 "srcl",
 "src/render/cover.c",
-"179:a = cut;",
+"192:a = cut;",
 ";",
 [
 "testRender_vectors",
@@ -2112,10 +2160,10 @@
 ]
 ],
 [
-"rv-186-le",
+"rv-199-le",
 "srcl",
 "src/render/cover.c",
-"186:<=",
+"199:<=",
 "<",
 [
 "testRender_vectors",
@@ -2128,10 +2176,10 @@
 ]
 ],
 [
-"rv-188-eq",
+"rv-201-eq",
 "srcl",
 "src/render/cover.c",
-"188:==",
+"201:==",
 "!=",
 [
 "testRender_vectors",
@@ -2144,10 +2192,10 @@
 ]
 ],
 [
-"rv-189-eq",
+"rv-202-eq",
 "srcl",
 "src/render/cover.c",
-"189:==",
+"202:==",
 "!=",
 [
 "testRender_vectors",
@@ -2160,10 +2208,10 @@
 ]
 ],
 [
-"rv-198-del",
+"rv-211-del",
 "srcl",
 "src/render/cover.c",
-"198:p.y = b;",
+"211:p.y = b;",
 ";",
 [
 "testRender_vectors",
@@ -2176,10 +2224,10 @@
 ]
 ],
 [
-"rv-204-eq",
+"rv-217-eq",
 "srcl",
 "src/render/cover.c",
-"204:==",
+"217:==",
 "!=",
 [
 "testRender_vectors",
@@ -2192,10 +2240,10 @@
 ]
 ],
 [
-"rv-204-neg",
+"rv-217-neg",
 "srcl",
 "src/render/cover.c",
-"204:(from.y == to.y)",
+"217:(from.y == to.y)",
 "(!(from.y == to.y))",
 [
 "testRender_vectors",
@@ -2208,10 +2256,10 @@
 ]
 ],
 [
-"rv-211-neg",
+"rv-224-neg",
 "srcl",
 "src/render/cover.c",
-"211:(ymax <= top || ymin >= bottom)",
+"224:(ymax <= top || ymin >= bottom)",
 "(!(ymax <= top || ymin >= bottom))",
 [
 "testRender_vectors",
@@ -2224,10 +2272,10 @@
 ]
 ],
 [
-"rv-219-neg",
+"rv-232-neg",
 "srcl",
 "src/render/cover.c",
-"219:(lo < c->band)",
+"232:(lo < c->band)",
 "(!(lo < c->band))",
 [
 "testRender_vectors",
@@ -2240,91 +2288,11 @@
 ]
 ],
 [
-"rv-220-del",
+"rv-233-del",
 "srcl",
 "src/render/cover.c",
-"220:lo = c->band;",
+"233:lo = c->band;",
 ";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-222-neg",
-"srcl",
-"src/render/cover.c",
-"222:(hi > c->band + c->rows - 1)",
-"(!(hi > c->band + c->rows - 1))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-223-del",
-"srcl",
-"src/render/cover.c",
-"223:hi = c->band + c->rows - 1;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-225-le",
-"srcl",
-"src/render/cover.c",
-"225:<=",
-"<",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-226-eq",
-"srcl",
-"src/render/cover.c",
-"226:==",
-"!=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-227-eq",
-"srcl",
-"src/render/cover.c",
-"227:==",
-"!=",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -2339,8 +2307,8 @@
 "rv-235-neg",
 "srcl",
 "src/render/cover.c",
-"235:(value < 0)",
-"(!(value < 0))",
+"235:(hi > c->band + c->rows - 1)",
+"(!(hi > c->band + c->rows - 1))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -2355,7 +2323,7 @@
 "rv-236-del",
 "srcl",
 "src/render/cover.c",
-"236:value = -value;",
+"236:hi = c->band + c->rows - 1;",
 ";",
 [
 "testRender_vectors",
@@ -2368,10 +2336,26 @@
 ]
 ],
 [
-"rv-238-eq",
+"rv-238-le",
 "srcl",
 "src/render/cover.c",
-"238:==",
+"238:<=",
+"<",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-239-eq",
+"srcl",
+"src/render/cover.c",
+"239:==",
 "!=",
 [
 "testRender_vectors",
@@ -2384,10 +2368,74 @@
 ]
 ],
 [
-"rv-238-neg",
+"rv-240-eq",
 "srcl",
 "src/render/cover.c",
-"238:(rule == GSHGEOM_FILL_EVEN_ODD)",
+"240:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-248-neg",
+"srcl",
+"src/render/cover.c",
+"248:(value < 0)",
+"(!(value < 0))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-249-del",
+"srcl",
+"src/render/cover.c",
+"249:value = -value;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-251-eq",
+"srcl",
+"src/render/cover.c",
+"251:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-251-neg",
+"srcl",
+"src/render/cover.c",
+"251:(rule == GSHGEOM_FILL_EVEN_ODD)",
 "(!(rule == GSHGEOM_FILL_EVEN_ODD))",
 [
 "testRender_vectors",
@@ -2400,10 +2448,10 @@
 ]
 ],
 [
-"rv-240-gt",
+"rv-253-gt",
 "srcl",
 "src/render/cover.c",
-"240:>",
+"253:>",
 ">=",
 [
 "testRender_vectors",
@@ -2416,139 +2464,11 @@
 ]
 ],
 [
-"rv-240-neg",
+"rv-253-neg",
 "srcl",
 "src/render/cover.c",
-"240:(value > 256)",
+"253:(value > 256)",
 "(!(value > 256))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-241-del",
-"srcl",
-"src/render/cover.c",
-"241:value = 512 - value;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-242-eq",
-"srcl",
-"src/render/cover.c",
-"242:==",
-"!=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-242-neg",
-"srcl",
-"src/render/cover.c",
-"242:(value == 256)",
-"(!(value == 256))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-243-del",
-"srcl",
-"src/render/cover.c",
-"243:value = 255;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-245-ge",
-"srcl",
-"src/render/cover.c",
-"245:>=",
-">",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-245-neg",
-"srcl",
-"src/render/cover.c",
-"245:(value >= 256)",
-"(!(value >= 256))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-246-del",
-"srcl",
-"src/render/cover.c",
-"246:value = 255;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-253-del",
-"srcl",
-"src/render/cover.c",
-"253:q.x = p.x;",
-";",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -2563,7 +2483,7 @@
 "rv-254-del",
 "srcl",
 "src/render/cover.c",
-"254:q.y = p.y;",
+"254:value = 512 - value;",
 ";",
 [
 "testRender_vectors",
@@ -2576,42 +2496,10 @@
 ]
 ],
 [
-"rv-262-and",
+"rv-255-eq",
 "srcl",
 "src/render/cover.c",
-"262:&&",
-"||",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-264-ne",
-"srcl",
-"src/render/cover.c",
-"264:!=",
-"==",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-264-eq",
-"srcl",
-"src/render/cover.c",
-"264:==",
+"255:==",
 "!=",
 [
 "testRender_vectors",
@@ -2624,10 +2512,170 @@
 ]
 ],
 [
-"rv-264-neg",
+"rv-255-neg",
 "srcl",
 "src/render/cover.c",
-"264:(gshgeom_flat_path_subpath(path, s, &sub) != GSHGEOM_OK || sub.count == 0)",
+"255:(value == 256)",
+"(!(value == 256))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-256-del",
+"srcl",
+"src/render/cover.c",
+"256:value = 255;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-258-ge",
+"srcl",
+"src/render/cover.c",
+"258:>=",
+">",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-258-neg",
+"srcl",
+"src/render/cover.c",
+"258:(value >= 256)",
+"(!(value >= 256))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-259-del",
+"srcl",
+"src/render/cover.c",
+"259:value = 255;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-266-del",
+"srcl",
+"src/render/cover.c",
+"266:q.x = p.x;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-267-del",
+"srcl",
+"src/render/cover.c",
+"267:q.y = p.y;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-275-and",
+"srcl",
+"src/render/cover.c",
+"275:&&",
+"||",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-277-ne",
+"srcl",
+"src/render/cover.c",
+"277:!=",
+"==",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-277-eq",
+"srcl",
+"src/render/cover.c",
+"277:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-277-neg",
+"srcl",
+"src/render/cover.c",
+"277:(gshgeom_flat_path_subpath(path, s, &sub) != GSHGEOM_OK || sub.count == 0)",
 "(!(gshgeom_flat_path_subpath(path, s, &sub) != GSHGEOM_OK || sub.count == 0))",
 [
 "testRender_vectors",
@@ -2640,10 +2688,10 @@
 ]
 ],
 [
-"rv-267-lt",
+"rv-280-lt",
 "srcl",
 "src/render/cover.c",
-"267:<",
+"280:<",
 "<=",
 [
 "testRender_vectors",
@@ -2656,74 +2704,10 @@
 ]
 ],
 [
-"rv-268-del",
+"rv-281-del",
 "srcl",
 "src/render/cover.c",
-"268:edge(c, point_of(points[sub.first + k - 1]), point_of(points[sub.first + k]));",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-271-del",
-"srcl",
-"src/render/cover.c",
-"271:edge(c, point_of(points[sub.first + sub.count - 1]), point_of(points[sub.first]));",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-278-del",
-"srcl",
-"src/render/cover.c",
-"278:memset(&c, 0, sizeof c);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-279-del",
-"srcl",
-"src/render/cover.c",
-"279:c.rect = rect;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-280-del",
-"srcl",
-"src/render/cover.c",
-"280:c.stride = rect.x1 - rect.x0 + 1;",
+"281:edge(c, point_of(points[sub.first + k - 1]), point_of(points[sub.first + k]));",
 ";",
 [
 "testRender_vectors",
@@ -2739,135 +2723,7 @@
 "rv-284-del",
 "srcl",
 "src/render/cover.c",
-"284:c.band = band;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-285-del",
-"srcl",
-"src/render/cover.c",
-"285:c.rows = rect.y1 - band < (int64_t)GSHCPU_RENDER_BAND_ROWS ? rect.y1 - band : (int64_t)GSHCPU_RENDER_BAND_ROWS;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-287-del",
-"srcl",
-"src/render/cover.c",
-"287:c.cover = acc;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-288-del",
-"srcl",
-"src/render/cover.c",
-"288:c.area = acc + n;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-289-del",
-"srcl",
-"src/render/cover.c",
-"289:memset(acc, 0, 2 * n * sizeof *acc);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-290-lt",
-"srcl",
-"src/render/cover.c",
-"290:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-290-and",
-"srcl",
-"src/render/cover.c",
-"290:&&",
-"||",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-291-neg",
-"srcl",
-"src/render/cover.c",
-"291:(paths[i])",
-"(!(paths[i]))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rv-292-del",
-"srcl",
-"src/render/cover.c",
-"292:path_edges(&c, paths[i]);",
+"284:edge(c, point_of(points[sub.first + sub.count - 1]), point_of(points[sub.first]));",
 ";",
 [
 "testRender_vectors",
@@ -2883,8 +2739,8 @@
 "rv-295-neg",
 "srcl",
 "src/render/cover.c",
-"295:(c.over)",
-"(!(c.over))",
+"295:(y0 >= y1)",
+"(!(y0 >= y1))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -2896,11 +2752,11 @@
 ]
 ],
 [
-"rv-297-ret",
+"rv-298-del",
 "srcl",
 "src/render/cover.c",
-"297:GSHCPU_ERR_LIMIT",
-"GSHCPU_ERR_INVALID",
+"298:c->band = y0;",
+";",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -2912,10 +2768,26 @@
 ]
 ],
 [
-"rv-299-lt",
+"rv-299-del",
 "srcl",
 "src/render/cover.c",
-"299:<",
+"299:c->rows = y1 - y0;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-302-lt",
+"srcl",
+"src/render/cover.c",
+"302:<",
 "<=",
 [
 "testRender_vectors",
@@ -2928,10 +2800,410 @@
 ]
 ],
 [
-"rv-304-le",
+"rv-302-and",
 "srcl",
 "src/render/cover.c",
-"304:<=",
+"302:&&",
+"||",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-303-neg",
+"srcl",
+"src/render/cover.c",
+"303:(paths[i])",
+"(!(paths[i]))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-304-del",
+"srcl",
+"src/render/cover.c",
+"304:path_edges(c, paths[i]);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-312-del",
+"srcl",
+"src/render/cover.c",
+"312:memset(&c, 0, sizeof c);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-313-del",
+"srcl",
+"src/render/cover.c",
+"313:c.rect = rect;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-314-del",
+"srcl",
+"src/render/cover.c",
+"314:c.walk = walk;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-315-del",
+"srcl",
+"src/render/cover.c",
+"315:c.stride = rect.x1 - rect.x0 + 1;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-319-neg",
+"srcl",
+"src/render/cover.c",
+"319:(gshcpu_render_rect_empty(rect))",
+"(!(gshcpu_render_rect_empty(rect)))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-320-del",
+"srcl",
+"src/render/cover.c",
+"320:count_rows(&c, paths, count, walk.y0, walk.y1);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-322-del",
+"srcl",
+"src/render/cover.c",
+"322:count_rows(&c, paths, count, walk.y0, rect.y0);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-323-del",
+"srcl",
+"src/render/cover.c",
+"323:count_rows(&c, paths, count, rect.y1, walk.y1);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-325-neg",
+"srcl",
+"src/render/cover.c",
+"325:(c.over)",
+"(!(c.over))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-327-ret",
+"srcl",
+"src/render/cover.c",
+"327:GSHCPU_ERR_LIMIT",
+"GSHCPU_ERR_INVALID",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-330-del",
+"srcl",
+"src/render/cover.c",
+"330:c.band = band;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-331-del",
+"srcl",
+"src/render/cover.c",
+"331:c.rows = rect.y1 - band < (int64_t)GSHCPU_RENDER_BAND_ROWS ? rect.y1 - band : (int64_t)GSHCPU_RENDER_BAND_ROWS;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-333-del",
+"srcl",
+"src/render/cover.c",
+"333:c.cover = acc;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-334-del",
+"srcl",
+"src/render/cover.c",
+"334:c.area = acc + n;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-335-del",
+"srcl",
+"src/render/cover.c",
+"335:memset(acc, 0, 2 * n * sizeof *acc);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-336-lt",
+"srcl",
+"src/render/cover.c",
+"336:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-336-and",
+"srcl",
+"src/render/cover.c",
+"336:&&",
+"||",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-337-neg",
+"srcl",
+"src/render/cover.c",
+"337:(paths[i])",
+"(!(paths[i]))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-338-del",
+"srcl",
+"src/render/cover.c",
+"338:path_edges(&c, paths[i]);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-341-neg",
+"srcl",
+"src/render/cover.c",
+"341:(c.over)",
+"(!(c.over))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-343-ret",
+"srcl",
+"src/render/cover.c",
+"343:GSHCPU_ERR_LIMIT",
+"GSHCPU_ERR_INVALID",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-345-lt",
+"srcl",
+"src/render/cover.c",
+"345:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-350-le",
+"srcl",
+"src/render/cover.c",
+"350:<=",
 "<",
 [
 "testRender_vectors",
@@ -2944,10 +3216,330 @@
 ]
 ],
 [
-"rv-305-del",
+"rv-351-del",
 "srcl",
 "src/render/cover.c",
-"305:accumulated += cv[j] * (ONE_PIXEL * 2);",
+"351:accumulated += cv[j] * (ONE_PIXEL * 2);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-374-eq",
+"srcl",
+"src/render/cover.c",
+"374:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-374-neg",
+"srcl",
+"src/render/cover.c",
+"374:(from.y == to.y)",
+"(!(from.y == to.y))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-381-del",
+"srcl",
+"src/render/cover.c",
+"381:lo = lo > walk.y0 ? lo : walk.y0;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-382-del",
+"srcl",
+"src/render/cover.c",
+"382:hi = hi < walk.y1 - 1 ? hi : walk.y1 - 1;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-383-gt",
+"srcl",
+"src/render/cover.c",
+"383:>",
+">=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-383-neg",
+"srcl",
+"src/render/cover.c",
+"383:(lo > hi)",
+"(!(lo > hi))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-392-neg",
+"srcl",
+"src/render/cover.c",
+"392:(rows * width < columns)",
+"(!(rows * width < columns))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-401-neg",
+"srcl",
+"src/render/cover.c",
+"401:(gshcpu_render_rect_empty(walk))",
+"(!(gshcpu_render_rect_empty(walk)))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-404-lt",
+"srcl",
+"src/render/cover.c",
+"404: i < co",
+" i <= co",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-404-and",
+"srcl",
+"src/render/cover.c",
+"404:&&",
+"||",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-404-le",
+"srcl",
+"src/render/cover.c",
+"404:<=",
+"<",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-405-neg",
+"srcl",
+"src/render/cover.c",
+"405:(!paths[i])",
+"(!(!paths[i]))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-410-and",
+"srcl",
+"src/render/cover.c",
+"410:&&",
+"||",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-410-le",
+"srcl",
+"src/render/cover.c",
+"410:<=",
+"<",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-412-ne",
+"srcl",
+"src/render/cover.c",
+"412:!=",
+"==",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-412-eq",
+"srcl",
+"src/render/cover.c",
+"412:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-412-neg",
+"srcl",
+"src/render/cover.c",
+"412:(gshgeom_flat_path_subpath(paths[i], s, &sub) != GSHGEOM_OK || sub.count == 0)",
+"(!(gshgeom_flat_path_subpath(paths[i], s, &sub) != GSHGEOM_OK || sub.count == 0))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-415-lt",
+"srcl",
+"src/render/cover.c",
+"415:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-416-del",
+"srcl",
+"src/render/cover.c",
+"416:bound = add_held(bound, edge_bound(point_of(points[sub.first + k - 1]), point_of(points[sub.first + k]), walk));",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rv-418-del",
+"srcl",
+"src/render/cover.c",
+"418:bound = add_held(bound, edge_bound(point_of(points[sub.first + sub.count - 1]), point_of(points[sub.first]), walk));",
 ";",
 [
 "testRender_vectors",
@@ -7088,10 +7680,10 @@
 ]
 ],
 [
-"rs-138-eq",
+"rs-140-eq",
 "srcl",
 "src/render/sink.c",
-"138:==",
+"140:==",
 "!=",
 [
 "testRender_vectors",
@@ -7104,10 +7696,10 @@
 ]
 ],
 [
-"rs-138-neg",
+"rs-140-neg",
 "srcl",
 "src/render/sink.c",
-"138:(n == SIZE_MAX || !gcu_safe_add_size(n, CARVE_ALIGN - 1u, &r))",
+"140:(n == SIZE_MAX || !gcu_safe_add_size(n, CARVE_ALIGN - 1u, &r))",
 "(!(n == SIZE_MAX || !gcu_safe_add_size(n, CARVE_ALIGN - 1u, &r)))",
 [
 "testRender_vectors",
@@ -7120,10 +7712,10 @@
 ]
 ],
 [
-"rs-148-ne",
+"rs-150-ne",
 "srcl",
 "src/render/sink.c",
-"148:!=",
+"150:!=",
 "==",
 [
 "testRender_vectors",
@@ -7136,10 +7728,10 @@
 ]
 ],
 [
-"rs-148-and",
+"rs-150-and",
 "srcl",
 "src/render/sink.c",
-"148:&&",
+"150:&&",
 "||",
 [
 "testRender_vectors",
@@ -7152,10 +7744,10 @@
 ]
 ],
 [
-"rs-154-neg",
+"rs-156-neg",
 "srcl",
 "src/render/sink.c",
-"154:(!gcu_safe_mul_size(a, b, &r) || !gcu_safe_mul_size(r, c, &r))",
+"156:(!gcu_safe_mul_size(a, b, &r) || !gcu_safe_mul_size(r, c, &r))",
 "(!(!gcu_safe_mul_size(a, b, &r) || !gcu_safe_mul_size(r, c, &r)))",
 [
 "testRender_vectors",
@@ -7168,10 +7760,10 @@
 ]
 ],
 [
-"rs-169-ne",
+"rs-171-ne",
 "srcl",
 "src/render/sink.c",
-"169:!=",
+"171:!=",
 "==",
 [
 "testRender_vectors",
@@ -7184,10 +7776,10 @@
 ]
 ],
 [
-"rs-169-neg",
+"rs-171-neg",
 "srcl",
 "src/render/sink.c",
-"169:(gshscene_list_item(list, i, &item) != GSHSCENE_OK)",
+"171:(gshscene_list_item(list, i, &item) != GSHSCENE_OK)",
 "(!(gshscene_list_item(list, i, &item) != GSHSCENE_OK))",
 [
 "testRender_vectors",
@@ -7200,10 +7792,10 @@
 ]
 ],
 [
-"rs-174-del",
+"rs-176-del",
 "srcl",
 "src/render/sink.c",
-"174:g++;",
+"176:g++;",
 ";",
 [
 "testRender_vectors",
@@ -7216,10 +7808,10 @@
 ]
 ],
 [
-"rs-177-del",
+"rs-179-del",
 "srcl",
 "src/render/sink.c",
-"177:g--;",
+"179:g--;",
 ";",
 [
 "testRender_vectors",
@@ -7232,10 +7824,10 @@
 ]
 ],
 [
-"rs-180-del",
+"rs-182-del",
 "srcl",
 "src/render/sink.c",
-"180:c++;",
+"182:c++;",
 ";",
 [
 "testRender_vectors",
@@ -7248,42 +7840,10 @@
 ]
 ],
 [
-"rs-183-del",
+"rs-185-del",
 "srcl",
 "src/render/sink.c",
-"183:c--;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-188-del",
-"srcl",
-"src/render/sink.c",
-"188:nesting(gshscene_resource_picture(item->resource), &ig, &ic);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-189-del",
-"srcl",
-"src/render/sink.c",
-"189:most_g = g + ig > most_g ? g + ig : most_g;",
+"185:c--;",
 ";",
 [
 "testRender_vectors",
@@ -7299,7 +7859,7 @@
 "rs-190-del",
 "srcl",
 "src/render/sink.c",
-"190:most_c = c + ic > most_c ? c + ic : most_c;",
+"190:nesting(gshscene_resource_picture(item->resource), &ig, &ic);",
 ";",
 [
 "testRender_vectors",
@@ -7312,10 +7872,10 @@
 ]
 ],
 [
-"rs-196-del",
+"rs-191-del",
 "srcl",
 "src/render/sink.c",
-"196:most_g = g > most_g ? g : most_g;",
+"191:most_g = g + ig > most_g ? g + ig : most_g;",
 ";",
 [
 "testRender_vectors",
@@ -7328,10 +7888,10 @@
 ]
 ],
 [
-"rs-197-del",
+"rs-192-del",
 "srcl",
 "src/render/sink.c",
-"197:most_c = c > most_c ? c : most_c;",
+"192:most_c = c + ic > most_c ? c + ic : most_c;",
 ";",
 [
 "testRender_vectors",
@@ -7344,10 +7904,42 @@
 ]
 ],
 [
-"rs-206-neg",
+"rs-198-del",
 "srcl",
 "src/render/sink.c",
-"206:(target->damage)",
+"198:most_g = g > most_g ? g : most_g;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-199-del",
+"srcl",
+"src/render/sink.c",
+"199:most_c = c > most_c ? c : most_c;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-208-neg",
+"srcl",
+"src/render/sink.c",
+"208:(target->damage)",
 "(!(target->damage))",
 [
 "testRender_vectors",
@@ -7360,10 +7952,10 @@
 ]
 ],
 [
-"rs-207-del",
+"rs-209-del",
 "srcl",
 "src/render/sink.c",
-"207:r = gshcpu_render_rect_meet(r, *target->damage);",
+"209:r = gshcpu_render_rect_meet(r, *target->damage);",
 ";",
 [
 "testRender_vectors",
@@ -7376,10 +7968,10 @@
 ]
 ],
 [
-"rs-209-neg",
+"rs-211-neg",
 "srcl",
 "src/render/sink.c",
-"209:(gshcpu_render_rect_empty(r))",
+"211:(gshcpu_render_rect_empty(r))",
 "(!(gshcpu_render_rect_empty(r)))",
 [
 "testRender_vectors",
@@ -7392,10 +7984,10 @@
 ]
 ],
 [
-"rs-210-del",
+"rs-212-del",
 "srcl",
 "src/render/sink.c",
-"210:r.x1 = r.x0;",
+"212:r.x1 = r.x0;",
 ";",
 [
 "testRender_vectors",
@@ -7408,26 +8000,10 @@
 ]
 ],
 [
-"rs-211-del",
+"rs-213-del",
 "srcl",
 "src/render/sink.c",
-"211:r.y1 = r.y0;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-220-del",
-"srcl",
-"src/render/sink.c",
-"220:L->width = (size_t)(L->region.x1 - L->region.x0);",
+"213:r.y1 = r.y0;",
 ";",
 [
 "testRender_vectors",
@@ -7443,7 +8019,7 @@
 "rs-221-del",
 "srcl",
 "src/render/sink.c",
-"221:L->height = (size_t)(L->region.y1 - L->region.y0);",
+"221:whole.damage = NULL;",
 ";",
 [
 "testRender_vectors",
@@ -7456,11 +8032,11 @@
 ]
 ],
 [
-"rs-222-gt",
+"rs-228-del",
 "srcl",
 "src/render/sink.c",
-"222:x1 > (i",
-"x1 >= (i",
+"228:L->region = region_of(target);",
+";",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -7472,107 +8048,11 @@
 ]
 ],
 [
-"rs-222-gt2",
+"rs-229-del",
 "srcl",
 "src/render/sink.c",
-"222:y1 > (i",
-"y1 >= (i",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-223-gt",
-"srcl",
-"src/render/sink.c",
-"223:th > cs",
-"th >= cs",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-223-gt2",
-"srcl",
-"src/render/sink.c",
-"223:ht > cs",
-"ht >= cs",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-224-ret",
-"srcl",
-"src/render/sink.c",
-"224:GSHCPU_ERR_LIMIT",
-"GSHCPU_ERR_INVALID",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-227-gt",
-"srcl",
-"src/render/sink.c",
-"227:ls > cs",
-"ls >= cs",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-227-neg",
-"srcl",
-"src/render/sink.c",
-"227:(L->pixels > cs->max_bytes)",
-"(!(L->pixels > cs->max_bytes))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-228-ret",
-"srcl",
-"src/render/sink.c",
-"228:GSHCPU_ERR_LIMIT",
-"GSHCPU_ERR_INVALID",
+"229:L->whole = whole_of(target);",
+";",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -7587,7 +8067,7 @@
 "rs-230-del",
 "srcl",
 "src/render/sink.c",
-"230:L->walk = gshscene_expansion_bytes(list);",
+"230:L->width = (size_t)(L->region.x1 - L->region.x0);",
 ";",
 [
 "testRender_vectors",
@@ -7603,7 +8083,7 @@
 "rs-231-del",
 "srcl",
 "src/render/sink.c",
-"231:L->levels = L->walk / (sizeof(const GSHSCENE_List *) + sizeof(size_t));",
+"231:L->height = (size_t)(L->region.y1 - L->region.y0);",
 ";",
 [
 "testRender_vectors",
@@ -7616,10 +8096,138 @@
 ]
 ],
 [
-"rs-232-del",
+"rs-232-gt",
 "srcl",
 "src/render/sink.c",
-"232:nesting(list, &L->groups, &L->clips);",
+"232:x1 > (i",
+"x1 >= (i",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-232-gt2",
+"srcl",
+"src/render/sink.c",
+"232:y1 > (i",
+"y1 >= (i",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-233-gt",
+"srcl",
+"src/render/sink.c",
+"233:th > cs",
+"th >= cs",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-233-gt2",
+"srcl",
+"src/render/sink.c",
+"233:ht > cs",
+"ht >= cs",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-234-ret",
+"srcl",
+"src/render/sink.c",
+"234:GSHCPU_ERR_LIMIT",
+"GSHCPU_ERR_INVALID",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-237-gt",
+"srcl",
+"src/render/sink.c",
+"237:ls > cs",
+"ls >= cs",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-237-neg",
+"srcl",
+"src/render/sink.c",
+"237:(L->pixels > cs->max_bytes)",
+"(!(L->pixels > cs->max_bytes))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-238-ret",
+"srcl",
+"src/render/sink.c",
+"238:GSHCPU_ERR_LIMIT",
+"GSHCPU_ERR_INVALID",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-240-del",
+"srcl",
+"src/render/sink.c",
+"240:L->walk = gshscene_expansion_bytes(list);",
 ";",
 [
 "testRender_vectors",
@@ -7632,10 +8240,10 @@
 ]
 ],
 [
-"rs-245-del",
+"rs-241-del",
 "srcl",
 "src/render/sink.c",
-"245:L->at_items = at;",
+"241:L->levels = L->walk / (sizeof(const GSHSCENE_List *) + sizeof(size_t));",
 ";",
 [
 "testRender_vectors",
@@ -7648,10 +8256,42 @@
 ]
 ],
 [
-"rs-246-or",
+"rs-242-del",
 "srcl",
 "src/render/sink.c",
-"246:||",
+"242:nesting(list, &L->groups, &L->clips);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-255-del",
+"srcl",
+"src/render/sink.c",
+"255:L->at_items = at;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-256-or",
+"srcl",
+"src/render/sink.c",
+"256:||",
 "&&",
 [
 "testRender_vectors",
@@ -7664,10 +8304,10 @@
 ]
 ],
 [
-"rs-246-neg",
+"rs-256-neg",
 "srcl",
 "src/render/sink.c",
-"246:(!ok || !gcu_safe_add_size(at, CARVE_ALIGN - 1u, &L->fixed))",
+"256:(!ok || !gcu_safe_add_size(at, CARVE_ALIGN - 1u, &L->fixed))",
 "(!(!ok || !gcu_safe_add_size(at, CARVE_ALIGN - 1u, &L->fixed)))",
 [
 "testRender_vectors",
@@ -7680,10 +8320,10 @@
 ]
 ],
 [
-"rs-255-eq",
+"rs-265-eq",
 "srcl",
 "src/render/sink.c",
-"255:(item->kind == GSHSCENE_IT",
+"265:(item->kind == GSHSCENE_IT",
 "(item->kind != GSHSCENE_IT",
 [
 "testRender_vectors",
@@ -7696,10 +8336,10 @@
 ]
 ],
 [
-"rs-255-eq2",
+"rs-265-eq2",
 "srcl",
 "src/render/sink.c",
-"255: item->kind == GSHSCENE_IT",
+"265: item->kind == GSHSCENE_IT",
 " item->kind != GSHSCENE_IT",
 [
 "testRender_vectors",
@@ -7712,10 +8352,10 @@
 ]
 ],
 [
-"rs-256-eq",
+"rs-266-eq",
 "srcl",
 "src/render/sink.c",
-"256:==",
+"266:==",
 "!=",
 [
 "testRender_vectors",
@@ -7728,139 +8368,11 @@
 ]
 ],
 [
-"rs-259-eq",
+"rs-269-eq",
 "srcl",
 "src/render/sink.c",
-"259:==",
+"269:==",
 "!=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-265-neg",
-"srcl",
-"src/render/sink.c",
-"265:(!s->level)",
-"(!(!s->level))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-268-gt",
-"srcl",
-"src/render/sink.c",
-"268:nt > s-",
-"nt >= s-",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-268-neg",
-"srcl",
-"src/render/sink.c",
-"268:(count > s->level)",
-"(!(count > s->level))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-271-lt",
-"srcl",
-"src/render/sink.c",
-"271:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-271-neg",
-"srcl",
-"src/render/sink.c",
-"271:(s->instance || count < s->level)",
-"(!(s->instance || count < s->level))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-275-eq",
-"srcl",
-"src/render/sink.c",
-"275:(item->kind == GSHSCENE_IT",
-"(item->kind != GSHSCENE_IT",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-275-or",
-"srcl",
-"src/render/sink.c",
-"275:||",
-"&&",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-275-eq2",
-"srcl",
-"src/render/sink.c",
-"275: item->kind == GSHSCENE_IT",
-" item->kind != GSHSCENE_IT",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -7875,8 +8387,8 @@
 "rs-275-neg",
 "srcl",
 "src/render/sink.c",
-"275:(item->kind == GSHSCENE_ITEM_CLIP_PUSH || item->kind == GSHSCENE_ITEM_GROUP_PUSH)",
-"(!(item->kind == GSHSCENE_ITEM_CLIP_PUSH || item->kind == GSHSCENE_ITEM_GROUP_PUSH))",
+"275:(!s->level)",
+"(!(!s->level))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -7888,91 +8400,11 @@
 ]
 ],
 [
-"rs-276-del",
+"rs-278-gt",
 "srcl",
 "src/render/sink.c",
-"276:s->depth++;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-277-eq",
-"srcl",
-"src/render/sink.c",
-"277:(item->kind == GSHSCENE_IT",
-"(item->kind != GSHSCENE_IT",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-277-or",
-"srcl",
-"src/render/sink.c",
-"277:||",
-"&&",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-277-eq2",
-"srcl",
-"src/render/sink.c",
-"277: item->kind == GSHSCENE_IT",
-" item->kind != GSHSCENE_IT",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-277-neg",
-"srcl",
-"src/render/sink.c",
-"277:(item->kind == GSHSCENE_ITEM_CLIP_POP || item->kind == GSHSCENE_ITEM_GROUP_POP)",
-"(!(item->kind == GSHSCENE_ITEM_CLIP_POP || item->kind == GSHSCENE_ITEM_GROUP_POP))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-278-eq",
-"srcl",
-"src/render/sink.c",
-"278:==",
-"!=",
+"278:nt > s-",
+"nt >= s-",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -7987,8 +8419,8 @@
 "rs-278-neg",
 "srcl",
 "src/render/sink.c",
-"278:(s->depth == 0)",
-"(!(s->depth == 0))",
+"278:(count > s->level)",
+"(!(count > s->level))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -8000,10 +8432,106 @@
 ]
 ],
 [
-"rs-281-del",
+"rs-281-lt",
 "srcl",
 "src/render/sink.c",
-"281:s->depth--;",
+"281:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-281-neg",
+"srcl",
+"src/render/sink.c",
+"281:(s->instance || count < s->level)",
+"(!(s->instance || count < s->level))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-285-eq",
+"srcl",
+"src/render/sink.c",
+"285:(item->kind == GSHSCENE_IT",
+"(item->kind != GSHSCENE_IT",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-285-or",
+"srcl",
+"src/render/sink.c",
+"285:||",
+"&&",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-285-eq2",
+"srcl",
+"src/render/sink.c",
+"285: item->kind == GSHSCENE_IT",
+" item->kind != GSHSCENE_IT",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-285-neg",
+"srcl",
+"src/render/sink.c",
+"285:(item->kind == GSHSCENE_ITEM_CLIP_PUSH || item->kind == GSHSCENE_ITEM_GROUP_PUSH)",
+"(!(item->kind == GSHSCENE_ITEM_CLIP_PUSH || item->kind == GSHSCENE_ITEM_GROUP_PUSH))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-286-del",
+"srcl",
+"src/render/sink.c",
+"286:s->depth++;",
 ";",
 [
 "testRender_vectors",
@@ -8016,11 +8544,11 @@
 ]
 ],
 [
-"rs-297-ne",
+"rs-287-eq",
 "srcl",
 "src/render/sink.c",
-"297:!=",
-"==",
+"287:(item->kind == GSHSCENE_IT",
+"(item->kind != GSHSCENE_IT",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -8032,11 +8560,11 @@
 ]
 ],
 [
-"rs-297-neg",
+"rs-287-or",
 "srcl",
 "src/render/sink.c",
-"297:(gshscene_expansion_init(&walk, list, memory + L->at_walk, L->walk) != GSHSCENE_OK)",
-"(!(gshscene_expansion_init(&walk, list, memory + L->at_walk, L->walk) != GSHSCENE_OK))",
+"287:||",
+"&&",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -8048,11 +8576,11 @@
 ]
 ],
 [
-"rs-304-neg",
+"rs-287-eq2",
 "srcl",
 "src/render/sink.c",
-"304:(gshscene_expansion_next(&walk, &item, &chain, &count))",
-"(!(gshscene_expansion_next(&walk, &item, &chain, &count)))",
+"287: item->kind == GSHSCENE_IT",
+" item->kind != GSHSCENE_IT",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -8064,10 +8592,26 @@
 ]
 ],
 [
-"rs-306-eq",
+"rs-287-neg",
 "srcl",
 "src/render/sink.c",
-"306:==",
+"287:(item->kind == GSHSCENE_ITEM_CLIP_POP || item->kind == GSHSCENE_ITEM_GROUP_POP)",
+"(!(item->kind == GSHSCENE_ITEM_CLIP_POP || item->kind == GSHSCENE_ITEM_GROUP_POP))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-288-eq",
+"srcl",
+"src/render/sink.c",
+"288:==",
 "!=",
 [
 "testRender_vectors",
@@ -8080,107 +8624,107 @@
 ]
 ],
 [
-"rs-306-neg",
+"rs-288-neg",
 "srcl",
 "src/render/sink.c",
-"306:(item->kind == GSHSCENE_ITEM_INSTANCE)",
+"288:(s->depth == 0)",
+"(!(s->depth == 0))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-291-del",
+"srcl",
+"src/render/sink.c",
+"291:s->depth--;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-307-ne",
+"srcl",
+"src/render/sink.c",
+"307:!=",
+"==",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-307-neg",
+"srcl",
+"src/render/sink.c",
+"307:(gshscene_expansion_init(&walk, list, memory + L->at_walk, L->walk) != GSHSCENE_OK)",
+"(!(gshscene_expansion_init(&walk, list, memory + L->at_walk, L->walk) != GSHSCENE_OK))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-314-neg",
+"srcl",
+"src/render/sink.c",
+"314:(gshscene_expansion_next(&walk, &item, &chain, &count))",
+"(!(gshscene_expansion_next(&walk, &item, &chain, &count)))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-316-eq",
+"srcl",
+"src/render/sink.c",
+"316:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-316-neg",
+"srcl",
+"src/render/sink.c",
+"316:(item->kind == GSHSCENE_ITEM_INSTANCE)",
 "(!(item->kind == GSHSCENE_ITEM_INSTANCE))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-307-del",
-"srcl",
-"src/render/sink.c",
-"307:maps[count - 1] = item->map;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-310-ne",
-"srcl",
-"src/render/sink.c",
-"310:(item->kind != GSHSCENE_IT",
-"(item->kind == GSHSCENE_IT",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-310-and",
-"srcl",
-"src/render/sink.c",
-"310:&&",
-"||",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-310-ne2",
-"srcl",
-"src/render/sink.c",
-"310: item->kind != GSHSCENE_IT",
-" item->kind == GSHSCENE_IT",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-310-neg",
-"srcl",
-"src/render/sink.c",
-"310:(item->kind != GSHSCENE_ITEM_FILL && item->kind != GSHSCENE_ITEM_CLIP_PUSH)",
-"(!(item->kind != GSHSCENE_ITEM_FILL && item->kind != GSHSCENE_ITEM_CLIP_PUSH))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-314-del",
-"srcl",
-"src/render/sink.c",
-"314:gshcpu_render_arena_reset(arena);",
-";",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -8195,7 +8739,7 @@
 "rs-317-del",
 "srcl",
 "src/render/sink.c",
-"317:gshcpu_render_geometry_release(&g, &arena->self);",
+"317:maps[count - 1] = item->map;",
 ";",
 [
 "testRender_vectors",
@@ -8208,10 +8752,106 @@
 ]
 ],
 [
-"rs-318-eq",
+"rs-320-ne",
 "srcl",
 "src/render/sink.c",
-"318:==",
+"320:(item->kind != GSHSCENE_IT",
+"(item->kind == GSHSCENE_IT",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-320-and",
+"srcl",
+"src/render/sink.c",
+"320:&&",
+"||",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-320-ne2",
+"srcl",
+"src/render/sink.c",
+"320: item->kind != GSHSCENE_IT",
+" item->kind == GSHSCENE_IT",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-320-neg",
+"srcl",
+"src/render/sink.c",
+"320:(item->kind != GSHSCENE_ITEM_FILL && item->kind != GSHSCENE_ITEM_CLIP_PUSH)",
+"(!(item->kind != GSHSCENE_ITEM_FILL && item->kind != GSHSCENE_ITEM_CLIP_PUSH))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-324-del",
+"srcl",
+"src/render/sink.c",
+"324:gshcpu_render_arena_reset(arena);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-327-del",
+"srcl",
+"src/render/sink.c",
+"327:gshcpu_render_geometry_release(&g, &arena->self);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-328-eq",
+"srcl",
+"src/render/sink.c",
+"328:==",
 "!=",
 [
 "testRender_vectors",
@@ -8224,10 +8864,10 @@
 ]
 ],
 [
-"rs-318-neg",
+"rs-328-neg",
 "srcl",
 "src/render/sink.c",
-"318:(r == GSHCPU_ERR_OOM)",
+"328:(r == GSHCPU_ERR_OOM)",
 "(!(r == GSHCPU_ERR_OOM))",
 [
 "testRender_vectors",
@@ -8240,10 +8880,10 @@
 ]
 ],
 [
-"rs-330-ne",
+"rs-346-ne",
 "srcl",
 "src/render/sink.c",
-"330:!=",
+"346:!=",
 "==",
 [
 "testRender_vectors",
@@ -8256,10 +8896,10 @@
 ]
 ],
 [
-"rs-330-neg",
+"rs-346-neg",
 "srcl",
 "src/render/sink.c",
-"330:(r != GSHCPU_OK)",
+"346:(r != GSHCPU_OK)",
 "(!(r != GSHCPU_OK))",
 [
 "testRender_vectors",
@@ -8272,11 +8912,11 @@
 ]
 ],
 [
-"rs-337-neg",
+"rs-351-neg",
 "srcl",
 "src/render/sink.c",
-"337:((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) && request->workspace && request->workspace_bytes >= L.fixed)",
-"(!((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) && request->workspace && request->workspace_bytes >= L.fixed))",
+"351:(request->flags & GSHSCENE_RENDER_CALLER_MEMORY)",
+"(!(request->flags & GSHSCENE_RENDER_CALLER_MEMORY))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -8288,11 +8928,11 @@
 ]
 ],
 [
-"rs-340-del",
+"rs-352-or",
 "srcl",
 "src/render/sink.c",
-"340:gshcpu_render_arena_init(&arena, base + L.at_items, request->workspace_bytes - L.fixed);",
-";",
+"352:||",
+"&&",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -8304,75 +8944,11 @@
 ]
 ],
 [
-"rs-341-del",
+"rs-352-lt",
 "srcl",
 "src/render/sink.c",
-"341:r = measure_items(cs, request->list, request->target, &L, base, &arena, &peak);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-342-eq",
-"srcl",
-"src/render/sink.c",
-"342:==",
-"!=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-342-neg",
-"srcl",
-"src/render/sink.c",
-"342:(r == GSHCPU_OK)",
-"(!(r == GSHCPU_OK))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-345-ne",
-"srcl",
-"src/render/sink.c",
-"345:!=",
-"==",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-345-neg",
-"srcl",
-"src/render/sink.c",
-"345:(r != GSHCPU_ERR_OOM)",
-"(!(r != GSHCPU_ERR_OOM))",
+"352:<",
+"<=",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -8387,40 +8963,8 @@
 "rs-352-neg",
 "srcl",
 "src/render/sink.c",
-"352:(!scratch)",
-"(!(!scratch))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-353-ret",
-"srcl",
-"src/render/sink.c",
-"353:GSHCPU_ERR_OOM",
-"GSHCPU_ERR_LIMIT",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-356-del",
-"srcl",
-"src/render/sink.c",
-"356:gshcpu_render_arena_measure(&arena, &cs->alloc);",
-";",
+"352:(!request->workspace || request->workspace_bytes < L.fixed)",
+"(!(!request->workspace || request->workspace_bytes < L.fixed))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -8435,7 +8979,7 @@
 "rs-358-del",
 "srcl",
 "src/render/sink.c",
-"358:cs->alloc.free_fn(cs->alloc.ctx, scratch);",
+"358:gshcpu_render_arena_init(&arena, base + L.at_items, request->workspace_bytes - L.fixed);",
 ";",
 [
 "testRender_vectors",
@@ -8448,10 +8992,58 @@
 ]
 ],
 [
-"rs-359-ne",
+"rs-359-del",
 "srcl",
 "src/render/sink.c",
-"359:!=",
+"359:r = measure_items(cs, request->list, request->target, &L, base, &arena, &peak);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-360-eq",
+"srcl",
+"src/render/sink.c",
+"360:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-360-neg",
+"srcl",
+"src/render/sink.c",
+"360:(r == GSHCPU_OK)",
+"(!(r == GSHCPU_OK))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-363-ne",
+"srcl",
+"src/render/sink.c",
+"363:!=",
 "==",
 [
 "testRender_vectors",
@@ -8464,11 +9056,27 @@
 ]
 ],
 [
-"rs-359-neg",
+"rs-363-neg",
 "srcl",
 "src/render/sink.c",
-"359:(r != GSHCPU_OK)",
-"(!(r != GSHCPU_OK))",
+"363:(r != GSHCPU_ERR_OOM)",
+"(!(r != GSHCPU_ERR_OOM))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-371-neg",
+"srcl",
+"src/render/sink.c",
+"371:(!scratch)",
+"(!(!scratch))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -8483,7 +9091,87 @@
 "rs-372-ret",
 "srcl",
 "src/render/sink.c",
-"372:GSHSCENE_ERR_LIMIT",
+"372:GSHCPU_ERR_OOM",
+"GSHCPU_ERR_LIMIT",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-375-del",
+"srcl",
+"src/render/sink.c",
+"375:gshcpu_render_arena_measure(&arena, &cs->alloc);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-377-del",
+"srcl",
+"src/render/sink.c",
+"377:cs->alloc.free_fn(cs->alloc.ctx, scratch);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-378-ne",
+"srcl",
+"src/render/sink.c",
+"378:!=",
+"==",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-378-neg",
+"srcl",
+"src/render/sink.c",
+"378:(r != GSHCPU_OK)",
+"(!(r != GSHCPU_OK))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-391-ret",
+"srcl",
+"src/render/sink.c",
+"391:GSHSCENE_ERR_LIMIT",
 "GSHSCENE_ERR_INVALID",
 [
 "testRender_vectors",
@@ -8496,10 +9184,10 @@
 ]
 ],
 [
-"rs-374-ret",
+"rs-393-ret",
 "srcl",
 "src/render/sink.c",
-"374:GSHSCENE_ERR_OOM",
+"393:GSHSCENE_ERR_OOM",
 "GSHSCENE_ERR_LIMIT",
 [
 "testRender_vectors",
@@ -8512,10 +9200,10 @@
 ]
 ],
 [
-"rs-389-or",
+"rs-408-or",
 "srcl",
 "src/render/sink.c",
-"389:||",
+"408:||",
 "&&",
 [
 "testRender_vectors",
@@ -8528,10 +9216,10 @@
 ]
 ],
 [
-"rs-389-neg",
+"rs-408-neg",
 "srcl",
 "src/render/sink.c",
-"389:(!gcu_safe_add_u64(b, cs->max_cells, &b) || !gcu_safe_add_u64(b, (uint64_t)cs->max_bytes, &b))",
+"408:(!gcu_safe_add_u64(b, cs->max_cells, &b) || !gcu_safe_add_u64(b, (uint64_t)cs->max_bytes, &b))",
 "(!(!gcu_safe_add_u64(b, cs->max_cells, &b) || !gcu_safe_add_u64(b, (uint64_t)cs->max_bytes, &b)))",
 [
 "testRender_vectors",
@@ -8544,10 +9232,10 @@
 ]
 ],
 [
-"rs-397-ne",
+"rs-416-ne",
 "srcl",
 "src/render/sink.c",
-"397:!=",
+"416:!=",
 "==",
 [
 "testRender_vectors",
@@ -8560,10 +9248,10 @@
 ]
 ],
 [
-"rs-397-or",
+"rs-416-or",
 "srcl",
 "src/render/sink.c",
-"397:||",
+"416:||",
 "&&",
 [
 "testRender_vectors",
@@ -8576,10 +9264,10 @@
 ]
 ],
 [
-"rs-397-neg",
+"rs-416-neg",
 "srcl",
 "src/render/sink.c",
-"397:(target->kind != GSHSCENE_TARGET_RASTER || !gshcpu_format_of(target->surface))",
+"416:(target->kind != GSHSCENE_TARGET_RASTER || !gshcpu_format_of(target->surface))",
 "(!(target->kind != GSHSCENE_TARGET_RASTER || !gshcpu_format_of(target->surface)))",
 [
 "testRender_vectors",
@@ -8592,10 +9280,10 @@
 ]
 ],
 [
-"rs-398-ret",
+"rs-417-ret",
 "srcl",
 "src/render/sink.c",
-"398:GSHSCENE_ERR_UNSUPPORTED",
+"417:GSHSCENE_ERR_UNSUPPORTED",
 "GSHSCENE_ERR_INVALID",
 [
 "testRender_vectors",
@@ -8608,10 +9296,10 @@
 ]
 ],
 [
-"rs-400-lt",
+"rs-419-lt",
 "srcl",
 "src/render/sink.c",
-"400:<",
+"419:<",
 "<=",
 [
 "testRender_vectors",
@@ -8624,107 +9312,11 @@
 ]
 ],
 [
-"rs-403-lt",
+"rs-422-lt",
 "srcl",
 "src/render/sink.c",
-"403:<",
+"422:<",
 "<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-408-del",
-"srcl",
-"src/render/sink.c",
-"408:out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-410-del",
-"srcl",
-"src/render/sink.c",
-"410:out->work_measure = \"cells+points+pixels\";",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-410-str",
-"srcl",
-"src/render/sink.c",
-"410:c",
-"Z",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-423-ne",
-"srcl",
-"src/render/sink.c",
-"423:!=",
-"==",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-423-neg",
-"srcl",
-"src/render/sink.c",
-"423:(r != GSHSCENE_OK)",
-"(!(r != GSHSCENE_OK))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-426-neg",
-"srcl",
-"src/render/sink.c",
-"426:(run->request->flags & GSHSCENE_RENDER_STRICT)",
-"(!(run->request->flags & GSHSCENE_RENDER_STRICT))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -8739,7 +9331,7 @@
 "rs-427-del",
 "srcl",
 "src/render/sink.c",
-"427:memcpy(run->stop, chain, count * sizeof *chain);",
+"427:out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;",
 ";",
 [
 "testRender_vectors",
@@ -8752,10 +9344,10 @@
 ]
 ],
 [
-"rs-428-del",
+"rs-429-del",
 "srcl",
 "src/render/sink.c",
-"428:run->stop_count = count;",
+"429:out->work_measure = \"cells+points+pixels\";",
 ";",
 [
 "testRender_vectors",
@@ -8768,10 +9360,106 @@
 ]
 ],
 [
-"rs-429-ret",
+"rs-429-str",
 "srcl",
 "src/render/sink.c",
-"429:GSHSCENE_ERR_REFUSED",
+"429:c",
+"Z",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-442-ne",
+"srcl",
+"src/render/sink.c",
+"442:!=",
+"==",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-442-neg",
+"srcl",
+"src/render/sink.c",
+"442:(r != GSHSCENE_OK)",
+"(!(r != GSHSCENE_OK))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-445-neg",
+"srcl",
+"src/render/sink.c",
+"445:(run->request->flags & GSHSCENE_RENDER_STRICT)",
+"(!(run->request->flags & GSHSCENE_RENDER_STRICT))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-446-del",
+"srcl",
+"src/render/sink.c",
+"446:memcpy(run->stop, chain, count * sizeof *chain);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-447-del",
+"srcl",
+"src/render/sink.c",
+"447:run->stop_count = count;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-448-ret",
+"srcl",
+"src/render/sink.c",
+"448:GSHSCENE_ERR_REFUSED",
 "GSHSCENE_ERR_LIMIT",
 [
 "testRender_vectors",
@@ -8784,10 +9472,10 @@
 ]
 ],
 [
-"rs-450-ne",
+"rs-469-ne",
 "srcl",
 "src/render/sink.c",
-"450:!=",
+"469:!=",
 "==",
 [
 "testRender_vectors",
@@ -8800,10 +9488,10 @@
 ]
 ],
 [
-"rs-450-neg",
+"rs-469-neg",
 "srcl",
 "src/render/sink.c",
-"450:(f != &run->frames[0])",
+"469:(f != &run->frames[0])",
 "(!(f != &run->frames[0]))",
 [
 "testRender_vectors",
@@ -8816,10 +9504,10 @@
 ]
 ],
 [
-"rs-451-del",
+"rs-470-del",
 "srcl",
 "src/render/sink.c",
-"451:memset(f->layer + 4u * p, 0, 4u * n * sizeof *f->layer);",
+"470:memset(f->layer + 4u * p, 0, 4u * n * sizeof *f->layer);",
 ";",
 [
 "testRender_vectors",
@@ -8832,10 +9520,10 @@
 ]
 ],
 [
-"rs-454-del",
+"rs-473-del",
 "srcl",
 "src/render/sink.c",
-"454:memset(run->touched + p, 0, n);",
+"473:memset(run->touched + p, 0, n);",
 ";",
 [
 "testRender_vectors",
@@ -8848,10 +9536,10 @@
 ]
 ],
 [
-"rs-456-lt",
+"rs-475-lt",
 "srcl",
 "src/render/sink.c",
-"456:<",
+"475:<",
 "<=",
 [
 "testRender_vectors",
@@ -8864,10 +9552,10 @@
 ]
 ],
 [
-"rs-472-eq",
+"rs-491-eq",
 "srcl",
 "src/render/sink.c",
-"472:x0 == ol",
+"491:x0 == ol",
 "x0 != ol",
 [
 "testRender_vectors",
@@ -8880,10 +9568,10 @@
 ]
 ],
 [
-"rs-472-eq2",
+"rs-491-eq2",
 "srcl",
 "src/render/sink.c",
-"472:y0 == ol",
+"491:y0 == ol",
 "y0 != ol",
 [
 "testRender_vectors",
@@ -8896,10 +9584,10 @@
 ]
 ],
 [
-"rs-472-eq3",
+"rs-491-eq3",
 "srcl",
 "src/render/sink.c",
-"472:x1 == ol",
+"491:x1 == ol",
 "x1 != ol",
 [
 "testRender_vectors",
@@ -8912,10 +9600,10 @@
 ]
 ],
 [
-"rs-472-eq4",
+"rs-491-eq4",
 "srcl",
 "src/render/sink.c",
-"472:y1 == ol",
+"491:y1 == ol",
 "y1 != ol",
 [
 "testRender_vectors",
@@ -8928,10 +9616,10 @@
 ]
 ],
 [
-"rs-475-neg",
+"rs-494-neg",
 "srcl",
 "src/render/sink.c",
-"475:(gshcpu_render_rect_empty(old))",
+"494:(gshcpu_render_rect_empty(old))",
 "(!(gshcpu_render_rect_empty(old)))",
 [
 "testRender_vectors",
@@ -8944,10 +9632,10 @@
 ]
 ],
 [
-"rs-477-del",
+"rs-496-del",
 "srcl",
 "src/render/sink.c",
-"477:old.y0 = old.y1 = grown.y0;",
+"496:old.y0 = old.y1 = grown.y0;",
 ";",
 [
 "testRender_vectors",
@@ -8960,10 +9648,10 @@
 ]
 ],
 [
-"rs-479-lt",
+"rs-498-lt",
 "srcl",
 "src/render/sink.c",
-"479:<",
+"498:<",
 "<=",
 [
 "testRender_vectors",
@@ -8976,10 +9664,10 @@
 ]
 ],
 [
-"rs-480-del",
+"rs-499-del",
 "srcl",
 "src/render/sink.c",
-"480:ready_span(run, f, grown.x0, grown.x1, y);",
+"499:ready_span(run, f, grown.x0, grown.x1, y);",
 ";",
 [
 "testRender_vectors",
@@ -8992,10 +9680,10 @@
 ]
 ],
 [
-"rs-482-or",
+"rs-501-or",
 "srcl",
 "src/render/sink.c",
-"482:||",
+"501:||",
 "&&",
 [
 "testRender_vectors",
@@ -9008,10 +9696,10 @@
 ]
 ],
 [
-"rs-482-neg",
+"rs-501-neg",
 "srcl",
 "src/render/sink.c",
-"482:(grown.x0 < old.x0 || old.x1 < grown.x1)",
+"501:(grown.x0 < old.x0 || old.x1 < grown.x1)",
 "(!(grown.x0 < old.x0 || old.x1 < grown.x1))",
 [
 "testRender_vectors",
@@ -9024,10 +9712,10 @@
 ]
 ],
 [
-"rs-483-lt",
+"rs-502-lt",
 "srcl",
 "src/render/sink.c",
-"483:<",
+"502:<",
 "<=",
 [
 "testRender_vectors",
@@ -9040,10 +9728,10 @@
 ]
 ],
 [
-"rs-484-del",
+"rs-503-del",
 "srcl",
 "src/render/sink.c",
-"484:ready_span(run, f, grown.x0, old.x0, y);",
+"503:ready_span(run, f, grown.x0, old.x0, y);",
 ";",
 [
 "testRender_vectors",
@@ -9056,10 +9744,10 @@
 ]
 ],
 [
-"rs-485-del",
+"rs-504-del",
 "srcl",
 "src/render/sink.c",
-"485:ready_span(run, f, old.x1, grown.x1, y);",
+"504:ready_span(run, f, old.x1, grown.x1, y);",
 ";",
 [
 "testRender_vectors",
@@ -9072,10 +9760,10 @@
 ]
 ],
 [
-"rs-488-lt",
+"rs-507-lt",
 "srcl",
 "src/render/sink.c",
-"488:<",
+"507:<",
 "<=",
 [
 "testRender_vectors",
@@ -9088,10 +9776,10 @@
 ]
 ],
 [
-"rs-489-del",
+"rs-508-del",
 "srcl",
 "src/render/sink.c",
-"489:ready_span(run, f, grown.x0, grown.x1, y);",
+"508:ready_span(run, f, grown.x0, grown.x1, y);",
 ";",
 [
 "testRender_vectors",
@@ -9104,10 +9792,10 @@
 ]
 ],
 [
-"rs-491-del",
+"rs-510-del",
 "srcl",
 "src/render/sink.c",
-"491:f->dirty = grown;",
+"510:f->dirty = grown;",
 ";",
 [
 "testRender_vectors",
@@ -9120,10 +9808,10 @@
 ]
 ],
 [
-"rs-496-ge",
+"rs-515-ge",
 "srcl",
 "src/render/sink.c",
-"496: x >= r.",
+"515: x >= r.",
 " x > r.",
 [
 "testRender_vectors",
@@ -9136,10 +9824,10 @@
 ]
 ],
 [
-"rs-496-lt",
+"rs-515-lt",
 "srcl",
 "src/render/sink.c",
-"496: x < r.",
+"515: x < r.",
 " x <= r.",
 [
 "testRender_vectors",
@@ -9152,10 +9840,10 @@
 ]
 ],
 [
-"rs-496-ge2",
+"rs-515-ge2",
 "srcl",
 "src/render/sink.c",
-"496: y >= r.",
+"515: y >= r.",
 " y > r.",
 [
 "testRender_vectors",
@@ -9168,10 +9856,10 @@
 ]
 ],
 [
-"rs-496-lt2",
+"rs-515-lt2",
 "srcl",
 "src/render/sink.c",
-"496: y < r.",
+"515: y < r.",
 " y <= r.",
 [
 "testRender_vectors",
@@ -9184,10 +9872,10 @@
 ]
 ],
 [
-"rs-512-eq",
+"rs-534-eq",
 "srcl",
 "src/render/sink.c",
-"512:==",
+"534:==",
 "!=",
 [
 "testRender_vectors",
@@ -9200,10 +9888,10 @@
 ]
 ],
 [
-"rs-512-neg",
+"rs-534-neg",
 "srcl",
 "src/render/sink.c",
-"512:(run->item_alloc == &run->arena.self)",
+"534:(run->item_alloc == &run->arena.self)",
 "(!(run->item_alloc == &run->arena.self))",
 [
 "testRender_vectors",
@@ -9216,10 +9904,10 @@
 ]
 ],
 [
-"rs-513-del",
+"rs-535-del",
 "srcl",
 "src/render/sink.c",
-"513:gshcpu_render_arena_reset(&run->arena);",
+"535:gshcpu_render_arena_reset(&run->arena);",
 ";",
 [
 "testRender_vectors",
@@ -9232,10 +9920,10 @@
 ]
 ],
 [
-"rs-517-del",
+"rs-539-del",
 "srcl",
 "src/render/sink.c",
-"517:run->work += g.points;",
+"539:run->work += g.points;",
 ";",
 [
 "testRender_vectors",
@@ -9248,10 +9936,10 @@
 ]
 ],
 [
-"rs-519-eq",
+"rs-541-eq",
 "srcl",
 "src/render/sink.c",
-"519:==",
+"541:==",
 "!=",
 [
 "testRender_vectors",
@@ -9264,10 +9952,10 @@
 ]
 ],
 [
-"rs-519-lt",
+"rs-541-lt",
 "srcl",
 "src/render/sink.c",
-"519:<",
+"541:<",
 "<=",
 [
 "testRender_vectors",
@@ -9280,10 +9968,10 @@
 ]
 ],
 [
-"rs-520-neg",
+"rs-542-neg",
 "srcl",
 "src/render/sink.c",
-"520:(!g.notes[i].entry_class)",
+"542:(!g.notes[i].entry_class)",
 "(!(!g.notes[i].entry_class))",
 [
 "testRender_vectors",
@@ -9296,10 +9984,10 @@
 ]
 ],
 [
-"rs-525-eq",
+"rs-547-eq",
 "srcl",
 "src/render/sink.c",
-"525:(e == GS",
+"547:(e == GS",
 "(e != GS",
 [
 "testRender_vectors",
@@ -9312,10 +10000,10 @@
 ]
 ],
 [
-"rs-525-eq2",
+"rs-547-eq2",
 "srcl",
 "src/render/sink.c",
-"525:ss == GS",
+"547:ss == GS",
 "ss != GS",
 [
 "testRender_vectors",
@@ -9328,10 +10016,10 @@
 ]
 ],
 [
-"rs-527-del",
+"rs-549-del",
 "srcl",
 "src/render/sink.c",
-"527:memcpy(run->stop, chain, count * sizeof *chain);",
+"549:memcpy(run->stop, chain, count * sizeof *chain);",
 ";",
 [
 "testRender_vectors",
@@ -9344,10 +10032,10 @@
 ]
 ],
 [
-"rs-528-del",
+"rs-550-del",
 "srcl",
 "src/render/sink.c",
-"528:run->stop_count = count;",
+"550:run->stop_count = count;",
 ";",
 [
 "testRender_vectors",
@@ -9360,10 +10048,10 @@
 ]
 ],
 [
-"rs-529-del",
+"rs-551-del",
 "srcl",
 "src/render/sink.c",
-"529:e = GSHSCENE_ERR_REFUSED;",
+"551:e = GSHSCENE_ERR_REFUSED;",
 ";",
 [
 "testRender_vectors",
@@ -9376,10 +10064,10 @@
 ]
 ],
 [
-"rs-531-ne",
+"rs-553-ne",
 "srcl",
 "src/render/sink.c",
-"531:!=",
+"553:!=",
 "==",
 [
 "testRender_vectors",
@@ -9392,10 +10080,10 @@
 ]
 ],
 [
-"rs-531-neg",
+"rs-553-neg",
 "srcl",
 "src/render/sink.c",
-"531:(e != GSHSCENE_OK)",
+"553:(e != GSHSCENE_OK)",
 "(!(e != GSHSCENE_OK))",
 [
 "testRender_vectors",
@@ -9408,10 +10096,10 @@
 ]
 ],
 [
-"rs-532-del",
+"rs-554-del",
 "srcl",
 "src/render/sink.c",
-"532:gshcpu_render_geometry_release(&g, run->item_alloc);",
+"554:gshcpu_render_geometry_release(&g, run->item_alloc);",
 ";",
 [
 "testRender_vectors",
@@ -9424,10 +10112,10 @@
 ]
 ],
 [
-"rs-536-eq",
+"rs-558-eq",
 "srcl",
 "src/render/sink.c",
-"536:==",
+"558:==",
 "!=",
 [
 "testRender_vectors",
@@ -9440,10 +10128,10 @@
 ]
 ],
 [
-"rs-536-neg",
+"rs-558-neg",
 "srcl",
 "src/render/sink.c",
-"536:(r == GSHCPU_OK)",
+"558:(r == GSHCPU_OK)",
 "(!(r == GSHCPU_OK))",
 [
 "testRender_vectors",
@@ -9456,10 +10144,10 @@
 ]
 ],
 [
-"rs-538-neg",
+"rs-561-neg",
 "srcl",
 "src/render/sink.c",
-"538:(gshcpu_render_rect_empty(*rect))",
+"561:(gshcpu_render_rect_empty(*rect))",
 "(!(gshcpu_render_rect_empty(*rect)))",
 [
 "testRender_vectors",
@@ -9472,11 +10160,11 @@
 ]
 ],
 [
-"rs-545-del",
+"rs-567-neg",
 "srcl",
 "src/render/sink.c",
-"545:run->work += cells;",
-";",
+"567:(!gshcpu_render_rect_empty(walk))",
+"(!(!gshcpu_render_rect_empty(walk)))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9488,11 +10176,11 @@
 ]
 ],
 [
-"rs-548-del",
+"rs-571-ne",
 "srcl",
 "src/render/sink.c",
-"548:gshcpu_render_geometry_release(&g, run->item_alloc);",
-";",
+"571:x0 != wa",
+"x0 == wa",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9504,11 +10192,11 @@
 ]
 ],
 [
-"rs-555-lt",
+"rs-571-ne2",
 "srcl",
 "src/render/sink.c",
-"555:<",
-"<=",
+"571:y0 != wa",
+"y0 == wa",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9520,11 +10208,11 @@
 ]
 ],
 [
-"rs-556-del",
+"rs-571-ne3",
 "srcl",
 "src/render/sink.c",
-"556:r = gshcpu_render_rect_meet(r, run->clips[i].rect);",
-";",
+"571:x1 != wa",
+"x1 == wa",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9536,11 +10224,11 @@
 ]
 ],
 [
-"rs-563-lt",
+"rs-571-ne4",
 "srcl",
 "src/render/sink.c",
-"563:<",
-"<=",
+"571:y1 != wa",
+"y1 == wa",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9552,10 +10240,10 @@
 ]
 ],
 [
-"rs-563-and",
+"rs-571-and",
 "srcl",
 "src/render/sink.c",
-"563:&&",
+"571:&&",
 "||",
 [
 "testRender_vectors",
@@ -9568,11 +10256,11 @@
 ]
 ],
 [
-"rs-563-ne",
+"rs-572-le",
 "srcl",
 "src/render/sink.c",
-"563:!=",
-"==",
+"572:<=",
+"<",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9584,58 +10272,10 @@
 ]
 ],
 [
-"rs-575-ne",
+"rs-573-del",
 "srcl",
 "src/render/sink.c",
-"575:!=",
-"==",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-575-neg",
-"srcl",
-"src/render/sink.c",
-"575:(gshscene_paint_resolve(&item->paint, &run->foreground, run->palette, &color) != GSHSCENE_OK)",
-"(!(gshscene_paint_resolve(&item->paint, &run->foreground, run->palette, &color) != GSHSCENE_OK))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-581-neg",
-"srcl",
-"src/render/sink.c",
-"581:(gshscene_color_space_is_target(&space))",
-"(!(gshscene_color_space_is_target(&space)))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-582-del",
-"srcl",
-"src/render/sink.c",
-"582:space = *gshscene_job_target_space(run->job);",
+"573:walk = *rect;",
 ";",
 [
 "testRender_vectors",
@@ -9648,10 +10288,10 @@
 ]
 ],
 [
-"rs-586-del",
+"rs-577-del",
 "srcl",
 "src/render/sink.c",
-"586:gshcpu_render_convert_straight(&c, rgb, rgb);",
+"577:run->work += cells;",
 ";",
 [
 "testRender_vectors",
@@ -9664,11 +10304,27 @@
 ]
 ],
 [
-"rs-587-del",
+"rs-580-del",
 "srcl",
 "src/render/sink.c",
-"587:s[0] = rgb[0] * alpha;",
+"580:gshcpu_render_geometry_release(&g, run->item_alloc);",
 ";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-587-lt",
+"srcl",
+"src/render/sink.c",
+"587:<",
+"<=",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9683,7 +10339,7 @@
 "rs-588-del",
 "srcl",
 "src/render/sink.c",
-"588:s[1] = rgb[1] * alpha;",
+"588:r = gshcpu_render_rect_meet(r, run->clips[i].rect);",
 ";",
 [
 "testRender_vectors",
@@ -9696,10 +10352,26 @@
 ]
 ],
 [
-"rs-589-del",
+"rs-596-lt",
 "srcl",
 "src/render/sink.c",
-"589:s[2] = rgb[2] * alpha;",
+"596:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-597-del",
+"srcl",
+"src/render/sink.c",
+"597:r = gshcpu_render_rect_meet(r, run->clips[i].whole);",
 ";",
 [
 "testRender_vectors",
@@ -9712,11 +10384,11 @@
 ]
 ],
 [
-"rs-590-del",
+"rs-604-lt",
 "srcl",
 "src/render/sink.c",
-"590:s[3] = alpha;",
-";",
+"604:<",
+"<=",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9728,11 +10400,11 @@
 ]
 ],
 [
-"rs-597-eq",
+"rs-604-and",
 "srcl",
 "src/render/sink.c",
-"597:==",
-"!=",
+"604:&&",
+"||",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9744,26 +10416,10 @@
 ]
 ],
 [
-"rs-597-neg",
+"rs-604-ne",
 "srcl",
 "src/render/sink.c",
-"597:(r == GSHSCENE_ERR_LIMIT)",
-"(!(r == GSHSCENE_ERR_LIMIT))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-600-ne",
-"srcl",
-"src/render/sink.c",
-"600:!=",
+"604:!=",
 "==",
 [
 "testRender_vectors",
@@ -9776,155 +10432,11 @@
 ]
 ],
 [
-"rs-600-neg",
+"rs-616-ne",
 "srcl",
 "src/render/sink.c",
-"600:(r != GSHSCENE_OK)",
-"(!(r != GSHSCENE_OK))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-604-del",
-"srcl",
-"src/render/sink.c",
-"604:source_of(run, item, frame, s);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-605-del",
-"srcl",
-"src/render/sink.c",
-"605:widen(run, frame, rect);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-607-lt",
-"srcl",
-"src/render/sink.c",
-"607:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-608-lt",
-"srcl",
-"src/render/sink.c",
-"608:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-610-del",
-"srcl",
-"src/render/sink.c",
-"610:m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-611-eq",
-"srcl",
-"src/render/sink.c",
-"611:==",
-"!=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-611-neg",
-"srcl",
-"src/render/sink.c",
-"611:(m8 == 0)",
-"(!(m8 == 0))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-615-del",
-"srcl",
-"src/render/sink.c",
-"615:gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-616-eq",
-"srcl",
-"src/render/sink.c",
-"616:==",
-"!=",
+"616:!=",
+"==",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9939,8 +10451,8 @@
 "rs-616-neg",
 "srcl",
 "src/render/sink.c",
-"616:(run->top == 0)",
-"(!(run->top == 0))",
+"616:(gshscene_paint_resolve(&item->paint, &run->foreground, run->palette, &color) != GSHSCENE_OK)",
+"(!(gshscene_paint_resolve(&item->paint, &run->foreground, run->palette, &color) != GSHSCENE_OK))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9952,10 +10464,26 @@
 ]
 ],
 [
-"rs-617-del",
+"rs-622-neg",
 "srcl",
 "src/render/sink.c",
-"617:run->touched[p] = 1;",
+"622:(gshscene_color_space_is_target(&space))",
+"(!(gshscene_color_space_is_target(&space)))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-623-del",
+"srcl",
+"src/render/sink.c",
+"623:space = *gshscene_job_target_space(run->job);",
 ";",
 [
 "testRender_vectors",
@@ -9968,10 +10496,10 @@
 ]
 ],
 [
-"rs-621-del",
+"rs-627-del",
 "srcl",
 "src/render/sink.c",
-"621:run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);",
+"627:gshcpu_render_convert_straight(&c, rgb, rgb);",
 ";",
 [
 "testRender_vectors",
@@ -9987,7 +10515,7 @@
 "rs-628-del",
 "srcl",
 "src/render/sink.c",
-"628:clip->coverage = run->clip_memory + run->clip_count * run->layout.pixels;",
+"628:s[0] = rgb[0] * alpha;",
 ";",
 [
 "testRender_vectors",
@@ -10000,10 +10528,58 @@
 ]
 ],
 [
-"rs-631-eq",
+"rs-629-del",
 "srcl",
 "src/render/sink.c",
-"631:==",
+"629:s[1] = rgb[1] * alpha;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-630-del",
+"srcl",
+"src/render/sink.c",
+"630:s[2] = rgb[2] * alpha;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-631-del",
+"srcl",
+"src/render/sink.c",
+"631:s[3] = alpha;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-640-eq",
+"srcl",
+"src/render/sink.c",
+"640:==",
 "!=",
 [
 "testRender_vectors",
@@ -10016,10 +10592,10 @@
 ]
 ],
 [
-"rs-631-neg",
+"rs-640-neg",
 "srcl",
 "src/render/sink.c",
-"631:(r == GSHSCENE_ERR_LIMIT)",
+"640:(r == GSHSCENE_ERR_LIMIT)",
 "(!(r == GSHSCENE_ERR_LIMIT))",
 [
 "testRender_vectors",
@@ -10032,10 +10608,10 @@
 ]
 ],
 [
-"rs-634-ne",
+"rs-643-ne",
 "srcl",
 "src/render/sink.c",
-"634:!=",
+"643:!=",
 "==",
 [
 "testRender_vectors",
@@ -10048,43 +10624,11 @@
 ]
 ],
 [
-"rs-634-neg",
+"rs-643-neg",
 "srcl",
 "src/render/sink.c",
-"634:(r != GSHSCENE_OK)",
+"643:(r != GSHSCENE_OK)",
 "(!(r != GSHSCENE_OK))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-637-del",
-"srcl",
-"src/render/sink.c",
-"637:run->clip_count++;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-645-del",
-"srcl",
-"src/render/sink.c",
-"645:f->group = item->group;",
-";",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -10099,7 +10643,7 @@
 "rs-647-del",
 "srcl",
 "src/render/sink.c",
-"647:f->clip_base = run->clip_count;",
+"647:source_of(run, item, frame, s);",
 ";",
 [
 "testRender_vectors",
@@ -10115,7 +10659,7 @@
 "rs-648-del",
 "srcl",
 "src/render/sink.c",
-"648:f->dirty.x0 = f->dirty.y0 = f->dirty.x1 = f->dirty.y1 = 0;",
+"648:widen(run, frame, rect);",
 ";",
 [
 "testRender_vectors",
@@ -10128,90 +10672,10 @@
 ]
 ],
 [
-"rs-649-del",
+"rs-650-lt",
 "srcl",
 "src/render/sink.c",
-"649:run->groups_open++;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-650-del",
-"srcl",
-"src/render/sink.c",
-"650:run->work += run->layout.pixels;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-661-del",
-"srcl",
-"src/render/sink.c",
-"661:region = gshcpu_render_rect_meet(region, reach_of(run, parent->clip_base, f->clip_base));",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-663-del",
-"srcl",
-"src/render/sink.c",
-"663:gshcpu_render_convert_prepare(&c, &f->space, &parent->space);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-667-del",
-"srcl",
-"src/render/sink.c",
-"667:widen(run, parent, region);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-668-lt",
-"srcl",
-"src/render/sink.c",
-"668:<",
+"650:<",
 "<=",
 [
 "testRender_vectors",
@@ -10224,10 +10688,10 @@
 ]
 ],
 [
-"rs-669-lt",
+"rs-651-lt",
 "srcl",
 "src/render/sink.c",
-"669:<",
+"651:<",
 "<=",
 [
 "testRender_vectors",
@@ -10240,10 +10704,26 @@
 ]
 ],
 [
-"rs-671-eq",
+"rs-653-del",
 "srcl",
 "src/render/sink.c",
-"671:==",
+"653:m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-654-eq",
+"srcl",
+"src/render/sink.c",
+"654:==",
 "!=",
 [
 "testRender_vectors",
@@ -10256,10 +10736,10 @@
 ]
 ],
 [
-"rs-671-neg",
+"rs-654-neg",
 "srcl",
 "src/render/sink.c",
-"671:(m8 == 0)",
+"654:(m8 == 0)",
 "(!(m8 == 0))",
 [
 "testRender_vectors",
@@ -10272,90 +10752,10 @@
 ]
 ],
 [
-"rs-680-eq",
+"rs-658-del",
 "srcl",
 "src/render/sink.c",
-"680:0] == 0.",
-"0] != 0.",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-680-eq2",
-"srcl",
-"src/render/sink.c",
-"680:1] == 0.",
-"1] != 0.",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-680-eq3",
-"srcl",
-"src/render/sink.c",
-"680:2] == 0.",
-"2] != 0.",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-680-eq4",
-"srcl",
-"src/render/sink.c",
-"680:3] == 0.",
-"3] != 0.",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-680-neg",
-"srcl",
-"src/render/sink.c",
-"680:(bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0)",
-"(!(bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-683-del",
-"srcl",
-"src/render/sink.c",
-"683:gshcpu_render_apply(&parent->layer[4u * p], s, (double)m8 / 255.0, op);",
+"658:gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);",
 ";",
 [
 "testRender_vectors",
@@ -10368,10 +10768,10 @@
 ]
 ],
 [
-"rs-684-eq",
+"rs-659-eq",
 "srcl",
 "src/render/sink.c",
-"684:==",
+"659:==",
 "!=",
 [
 "testRender_vectors",
@@ -10384,11 +10784,11 @@
 ]
 ],
 [
-"rs-684-neg",
+"rs-659-neg",
 "srcl",
 "src/render/sink.c",
-"684:(run->top == 1u)",
-"(!(run->top == 1u))",
+"659:(run->top == 0)",
+"(!(run->top == 0))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -10400,10 +10800,170 @@
 ]
 ],
 [
-"rs-685-del",
+"rs-660-del",
 "srcl",
 "src/render/sink.c",
-"685:run->touched[p] = 1;",
+"660:run->touched[p] = 1;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-664-del",
+"srcl",
+"src/render/sink.c",
+"664:run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-671-del",
+"srcl",
+"src/render/sink.c",
+"671:clip->coverage = run->clip_memory + run->clip_count * run->layout.pixels;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-674-eq",
+"srcl",
+"src/render/sink.c",
+"674:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-674-neg",
+"srcl",
+"src/render/sink.c",
+"674:(r == GSHSCENE_ERR_LIMIT)",
+"(!(r == GSHSCENE_ERR_LIMIT))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-677-ne",
+"srcl",
+"src/render/sink.c",
+"677:!=",
+"==",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-677-neg",
+"srcl",
+"src/render/sink.c",
+"677:(r != GSHSCENE_OK)",
+"(!(r != GSHSCENE_OK))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-680-del",
+"srcl",
+"src/render/sink.c",
+"680:run->clip_count++;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-688-del",
+"srcl",
+"src/render/sink.c",
+"688:f->group = item->group;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-690-del",
+"srcl",
+"src/render/sink.c",
+"690:f->clip_base = run->clip_count;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-691-del",
+"srcl",
+"src/render/sink.c",
+"691:f->dirty.x0 = f->dirty.y0 = f->dirty.x1 = f->dirty.y1 = 0;",
 ";",
 [
 "testRender_vectors",
@@ -10419,7 +10979,7 @@
 "rs-692-del",
 "srcl",
 "src/render/sink.c",
-"692:run->top--;",
+"692:run->groups_open++;",
 ";",
 [
 "testRender_vectors",
@@ -10435,7 +10995,7 @@
 "rs-693-del",
 "srcl",
 "src/render/sink.c",
-"693:run->groups_open--;",
+"693:run->work += run->layout.pixels;",
 ";",
 [
 "testRender_vectors",
@@ -10448,11 +11008,11 @@
 ]
 ],
 [
-"rs-698-neg",
+"rs-704-del",
 "srcl",
 "src/render/sink.c",
-"698:(skip_step(&run->skip, item, count))",
-"(!(skip_step(&run->skip, item, count)))",
+"704:region = gshcpu_render_rect_meet(region, reach_of(run, parent->clip_base, f->clip_base));",
+";",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -10464,10 +11024,74 @@
 ]
 ],
 [
-"rs-704-eq",
+"rs-706-del",
 "srcl",
 "src/render/sink.c",
-"704:==",
+"706:gshcpu_render_convert_prepare(&c, &f->space, &parent->space);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-710-del",
+"srcl",
+"src/render/sink.c",
+"710:widen(run, parent, region);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-711-lt",
+"srcl",
+"src/render/sink.c",
+"711:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-712-lt",
+"srcl",
+"src/render/sink.c",
+"712:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-714-eq",
+"srcl",
+"src/render/sink.c",
+"714:==",
 "!=",
 [
 "testRender_vectors",
@@ -10480,11 +11104,11 @@
 ]
 ],
 [
-"rs-704-or",
+"rs-714-neg",
 "srcl",
 "src/render/sink.c",
-"704:||",
-"&&",
+"714:(m8 == 0)",
+"(!(m8 == 0))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -10496,11 +11120,11 @@
 ]
 ],
 [
-"rs-705-and",
+"rs-723-eq",
 "srcl",
 "src/render/sink.c",
-"705:&&",
-"||",
+"723:0] == 0.",
+"0] != 0.",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -10512,11 +11136,11 @@
 ]
 ],
 [
-"rs-706-eq",
+"rs-723-eq2",
 "srcl",
 "src/render/sink.c",
-"706:==",
-"!=",
+"723:1] == 0.",
+"1] != 0.",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -10528,11 +11152,11 @@
 ]
 ],
 [
-"rs-708-del",
+"rs-723-eq3",
 "srcl",
 "src/render/sink.c",
-"708:skip_begin(&run->skip, item, count);",
-";",
+"723:2] == 0.",
+"2] != 0.",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -10544,11 +11168,11 @@
 ]
 ],
 [
-"rs-717-del",
+"rs-723-eq4",
 "srcl",
 "src/render/sink.c",
-"717:run->clip_count--;",
-";",
+"723:3] == 0.",
+"3] != 0.",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -10560,27 +11184,11 @@
 ]
 ],
 [
-"rs-720-del",
+"rs-723-neg",
 "srcl",
 "src/render/sink.c",
-"720:group_push(run, item);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-723-del",
-"srcl",
-"src/render/sink.c",
-"723:group_pop(run);",
-";",
+"723:(bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0)",
+"(!(bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -10595,7 +11203,7 @@
 "rs-726-del",
 "srcl",
 "src/render/sink.c",
-"726:run->maps[count - 1] = item->map;",
+"726:gshcpu_render_apply(&parent->layer[4u * p], s, (double)m8 / 255.0, op);",
 ";",
 [
 "testRender_vectors",
@@ -10608,250 +11216,10 @@
 ]
 ],
 [
-"rs-738-lt",
+"rs-727-eq",
 "srcl",
 "src/render/sink.c",
-"738:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-740-lt",
-"srcl",
-"src/render/sink.c",
-"740:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-742-neg",
-"srcl",
-"src/render/sink.c",
-"742:(run->touched[p])",
-"(!(run->touched[p]))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-752-str",
-"srcl",
-"src/render/sink.c",
-"752:n \"canc",
-"n \"Zanc",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-754-str",
-"srcl",
-"src/render/sink.c",
-"754:n \"stri",
-"n \"Ztri",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-756-str",
-"srcl",
-"src/render/sink.c",
-"756:n \"out ",
-"n \"Zut ",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-765-neg",
-"srcl",
-"src/render/sink.c",
-"765:(cs->observer)",
-"(!(cs->observer))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-769-lt",
-"srcl",
-"src/render/sink.c",
-"769:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-770-lt",
-"srcl",
-"src/render/sink.c",
-"770:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-771-neg",
-"srcl",
-"src/render/sink.c",
-"771:(!inside(run->frames[0].dirty, x, y))",
-"(!(!inside(run->frames[0].dirty, x, y)))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-773-del",
-"srcl",
-"src/render/sink.c",
-"773:run->touched[p] = 0;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-774-del",
-"srcl",
-"src/render/sink.c",
-"774:gshcpu_render_load(run->format, run->pixels + (size_t)y * run->stride, (size_t)x, &run->root[4u * p]);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-778-del",
-"srcl",
-"src/render/sink.c",
-"778:cs->observer(cs->observer_ctx, run->layout.region, run->root, run->touched);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-780-del",
-"srcl",
-"src/render/sink.c",
-"780:write_target(run);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-782-del",
-"srcl",
-"src/render/sink.c",
-"782:gshscene_job_set_frame_bytes(job, run->layout.fixed);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-783-eq",
-"srcl",
-"src/render/sink.c",
-"783:==",
+"727:==",
 "!=",
 [
 "testRender_vectors",
@@ -10864,11 +11232,11 @@
 ]
 ],
 [
-"rs-784-neg",
+"rs-727-neg",
 "srcl",
 "src/render/sink.c",
-"784:(memory)",
-"(!(memory))",
+"727:(run->top == 1u)",
+"(!(run->top == 1u))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -10880,10 +11248,10 @@
 ]
 ],
 [
-"rs-785-del",
+"rs-728-del",
 "srcl",
 "src/render/sink.c",
-"785:cs->alloc.free_fn(cs->alloc.ctx, memory);",
+"728:run->touched[p] = 1;",
 ";",
 [
 "testRender_vectors",
@@ -10896,74 +11264,10 @@
 ]
 ],
 [
-"rs-795-ne",
+"rs-735-del",
 "srcl",
 "src/render/sink.c",
-"795:!=",
-"==",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-795-neg",
-"srcl",
-"src/render/sink.c",
-"795:(lr != GSHCPU_OK)",
-"(!(lr != GSHCPU_OK))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-801-ne",
-"srcl",
-"src/render/sink.c",
-"801:!=",
-"==",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-802-neg",
-"srcl",
-"src/render/sink.c",
-"802:(caller)",
-"(!(caller))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-806-del",
-"srcl",
-"src/render/sink.c",
-"806:memory = cs->alloc.malloc_fn(cs->alloc.ctx, L.fixed);",
+"735:run->top--;",
 ";",
 [
 "testRender_vectors",
@@ -10976,43 +11280,331 @@
 ]
 ],
 [
-"rs-807-neg",
+"rs-736-del",
 "srcl",
 "src/render/sink.c",
-"807:(!memory)",
-"(!(!memory))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-808-ret",
-"srcl",
-"src/render/sink.c",
-"808:GSHSCENE_ERR_OOM",
-"GSHSCENE_ERR_LIMIT",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-815-del",
-"srcl",
-"src/render/sink.c",
-"815:memset(run, 0, sizeof *run);",
+"736:run->groups_open--;",
 ";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-741-neg",
+"srcl",
+"src/render/sink.c",
+"741:(skip_step(&run->skip, item, count))",
+"(!(skip_step(&run->skip, item, count)))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-747-eq",
+"srcl",
+"src/render/sink.c",
+"747:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-747-or",
+"srcl",
+"src/render/sink.c",
+"747:||",
+"&&",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-748-and",
+"srcl",
+"src/render/sink.c",
+"748:&&",
+"||",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-749-eq",
+"srcl",
+"src/render/sink.c",
+"749:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-751-del",
+"srcl",
+"src/render/sink.c",
+"751:skip_begin(&run->skip, item, count);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-760-del",
+"srcl",
+"src/render/sink.c",
+"760:run->clip_count--;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-763-del",
+"srcl",
+"src/render/sink.c",
+"763:group_push(run, item);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-766-del",
+"srcl",
+"src/render/sink.c",
+"766:group_pop(run);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-769-del",
+"srcl",
+"src/render/sink.c",
+"769:run->maps[count - 1] = item->map;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-781-lt",
+"srcl",
+"src/render/sink.c",
+"781:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-783-lt",
+"srcl",
+"src/render/sink.c",
+"783:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-785-neg",
+"srcl",
+"src/render/sink.c",
+"785:(run->touched[p])",
+"(!(run->touched[p]))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-795-str",
+"srcl",
+"src/render/sink.c",
+"795:n \"canc",
+"n \"Zanc",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-797-str",
+"srcl",
+"src/render/sink.c",
+"797:n \"stri",
+"n \"Ztri",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-799-str",
+"srcl",
+"src/render/sink.c",
+"799:n \"out ",
+"n \"Zut ",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-808-neg",
+"srcl",
+"src/render/sink.c",
+"808:(cs->observer)",
+"(!(cs->observer))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-812-lt",
+"srcl",
+"src/render/sink.c",
+"812:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-813-lt",
+"srcl",
+"src/render/sink.c",
+"813:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-814-neg",
+"srcl",
+"src/render/sink.c",
+"814:(!inside(run->frames[0].dirty, x, y))",
+"(!(!inside(run->frames[0].dirty, x, y)))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -11027,7 +11619,7 @@
 "rs-816-del",
 "srcl",
 "src/render/sink.c",
-"816:run->cs = cs;",
+"816:run->touched[p] = 0;",
 ";",
 [
 "testRender_vectors",
@@ -11043,55 +11635,7 @@
 "rs-817-del",
 "srcl",
 "src/render/sink.c",
-"817:run->job = job;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-818-del",
-"srcl",
-"src/render/sink.c",
-"818:run->request = request;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-819-del",
-"srcl",
-"src/render/sink.c",
-"819:run->layout = L;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-820-del",
-"srcl",
-"src/render/sink.c",
-"820:run->raster = target->surface;",
+"817:gshcpu_render_load(run->format, run->pixels + (size_t)y * run->stride, (size_t)x, &run->root[4u * p]);",
 ";",
 [
 "testRender_vectors",
@@ -11107,23 +11651,7 @@
 "rs-821-del",
 "srcl",
 "src/render/sink.c",
-"821:run->format = gshcpu_format_of(run->raster);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-822-del",
-"srcl",
-"src/render/sink.c",
-"822:run->pixels = gimg_raster_pixels(run->raster);",
+"821:cs->observer(cs->observer_ctx, run->layout.region, run->root, run->touched);",
 ";",
 [
 "testRender_vectors",
@@ -11139,23 +11667,7 @@
 "rs-823-del",
 "srcl",
 "src/render/sink.c",
-"823:run->stride = gimg_raster_stride_bytes(run->raster);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-824-del",
-"srcl",
-"src/render/sink.c",
-"824:run->maps = (GSHGEOM_Map *)(void *)(base + L.at_maps);",
+"823:write_target(run);",
 ";",
 [
 "testRender_vectors",
@@ -11171,7 +11683,7 @@
 "rs-825-del",
 "srcl",
 "src/render/sink.c",
-"825:run->stop = (size_t *)(void *)(base + L.at_stop);",
+"825:gshscene_job_set_frame_bytes(job, run->layout.fixed);",
 ";",
 [
 "testRender_vectors",
@@ -11184,11 +11696,11 @@
 ]
 ],
 [
-"rs-826-del",
+"rs-826-eq",
 "srcl",
 "src/render/sink.c",
-"826:run->frames = (Frame *)(void *)(base + L.at_frames);",
-";",
+"826:==",
+"!=",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -11200,11 +11712,11 @@
 ]
 ],
 [
-"rs-827-del",
+"rs-827-neg",
 "srcl",
 "src/render/sink.c",
-"827:run->clips = (Clip *)(void *)(base + L.at_clips);",
-";",
+"827:(memory)",
+"(!(memory))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -11219,7 +11731,7 @@
 "rs-828-del",
 "srcl",
 "src/render/sink.c",
-"828:run->root = (double *)(void *)(base + L.at_root);",
+"828:cs->alloc.free_fn(cs->alloc.ctx, memory);",
 ";",
 [
 "testRender_vectors",
@@ -11232,11 +11744,11 @@
 ]
 ],
 [
-"rs-829-del",
+"rs-838-ne",
 "srcl",
 "src/render/sink.c",
-"829:run->layers = (double *)(void *)(base + L.at_layers);",
-";",
+"838:!=",
+"==",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -11248,11 +11760,11 @@
 ]
 ],
 [
-"rs-830-del",
+"rs-838-neg",
 "srcl",
 "src/render/sink.c",
-"830:run->touched = base + L.at_touched;",
-";",
+"838:(lr != GSHCPU_OK)",
+"(!(lr != GSHCPU_OK))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -11264,11 +11776,11 @@
 ]
 ],
 [
-"rs-831-del",
+"rs-844-ne",
 "srcl",
 "src/render/sink.c",
-"831:run->coverage = base + L.at_coverage;",
-";",
+"844:!=",
+"==",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -11280,42 +11792,10 @@
 ]
 ],
 [
-"rs-832-del",
+"rs-845-neg",
 "srcl",
 "src/render/sink.c",
-"832:run->clip_memory = base + L.at_clip_memory;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-833-del",
-"srcl",
-"src/render/sink.c",
-"833:run->acc = (int64_t *)(void *)(base + L.at_acc);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-834-neg",
-"srcl",
-"src/render/sink.c",
-"834:(caller)",
+"845:(caller)",
 "(!(caller))",
 [
 "testRender_vectors",
@@ -11328,10 +11808,10 @@
 ]
 ],
 [
-"rs-837-del",
+"rs-849-del",
 "srcl",
 "src/render/sink.c",
-"837:run->item_alloc = &run->arena.self;",
+"849:memory = cs->alloc.malloc_fn(cs->alloc.ctx, L.fixed);",
 ";",
 [
 "testRender_vectors",
@@ -11344,139 +11824,43 @@
 ]
 ],
 [
-"rs-839-del",
+"rs-850-neg",
 "srcl",
 "src/render/sink.c",
-"839:run->item_alloc = &cs->alloc;",
+"850:(!memory)",
+"(!(!memory))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-851-ret",
+"srcl",
+"src/render/sink.c",
+"851:GSHSCENE_ERR_OOM",
+"GSHSCENE_ERR_LIMIT",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-858-del",
+"srcl",
+"src/render/sink.c",
+"858:memset(run, 0, sizeof *run);",
 ";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-841-ne",
-"srcl",
-"src/render/sink.c",
-"841:!=",
-"==",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-841-or",
-"srcl",
-"src/render/sink.c",
-"841:||",
-"&&",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-842-ne",
-"srcl",
-"src/render/sink.c",
-"842:!=",
-"==",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-848-del",
-"srcl",
-"src/render/sink.c",
-"848:run->palette = gshscene_list_palette(request->list);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-851-del",
-"srcl",
-"src/render/sink.c",
-"851:memset(root, 0, sizeof *root);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-852-del",
-"srcl",
-"src/render/sink.c",
-"852:root->layer = run->root;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-853-del",
-"srcl",
-"src/render/sink.c",
-"853:root->space = *gshscene_job_target_space(job);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-858-neg",
-"srcl",
-"src/render/sink.c",
-"858:(gshscene_expansion_next(&run->walk, &item, &chain, &count))",
-"(!(gshscene_expansion_next(&run->walk, &item, &chain, &count)))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -11491,7 +11875,23 @@
 "rs-859-del",
 "srcl",
 "src/render/sink.c",
-"859:run->work = 0;",
+"859:run->cs = cs;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-860-del",
+"srcl",
+"src/render/sink.c",
+"860:run->job = job;",
 ";",
 [
 "testRender_vectors",
@@ -11507,7 +11907,7 @@
 "rs-861-del",
 "srcl",
 "src/render/sink.c",
-"861:gshscene_job_work(job, run->work);",
+"861:run->request = request;",
 ";",
 [
 "testRender_vectors",
@@ -11520,11 +11920,11 @@
 ]
 ],
 [
-"rs-862-ne",
+"rs-862-del",
 "srcl",
 "src/render/sink.c",
-"862:!=",
-"==",
+"862:run->layout = L;",
+";",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -11536,59 +11936,11 @@
 ]
 ],
 [
-"rs-862-neg",
+"rs-863-del",
 "srcl",
 "src/render/sink.c",
-"862:(r != GSHSCENE_OK)",
-"(!(r != GSHSCENE_OK))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-863-eq",
-"srcl",
-"src/render/sink.c",
-"863:==",
-"!=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-863-ne",
-"srcl",
-"src/render/sink.c",
-"863:!=",
-"==",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-863-neg",
-"srcl",
-"src/render/sink.c",
-"863:(run->stop_count == 0 && r != GSHSCENE_ERR_REFUSED)",
-"(!(run->stop_count == 0 && r != GSHSCENE_ERR_REFUSED))",
+"863:run->raster = target->surface;",
+";",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -11603,7 +11955,7 @@
 "rs-864-del",
 "srcl",
 "src/render/sink.c",
-"864:memcpy(run->stop, chain, count * sizeof *chain);",
+"864:run->format = gshcpu_format_of(run->raster);",
 ";",
 [
 "testRender_vectors",
@@ -11619,7 +11971,23 @@
 "rs-865-del",
 "srcl",
 "src/render/sink.c",
-"865:run->stop_count = count;",
+"865:run->pixels = gimg_raster_pixels(run->raster);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-866-del",
+"srcl",
+"src/render/sink.c",
+"866:run->stride = gimg_raster_stride_bytes(run->raster);",
 ";",
 [
 "testRender_vectors",
@@ -11635,7 +12003,39 @@
 "rs-867-del",
 "srcl",
 "src/render/sink.c",
-"867:finish(run, r, memory);",
+"867:run->maps = (GSHGEOM_Map *)(void *)(base + L.at_maps);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-868-del",
+"srcl",
+"src/render/sink.c",
+"868:run->stop = (size_t *)(void *)(base + L.at_stop);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-869-del",
+"srcl",
+"src/render/sink.c",
+"869:run->frames = (Frame *)(void *)(base + L.at_frames);",
 ";",
 [
 "testRender_vectors",
@@ -11651,7 +12051,7 @@
 "rs-870-del",
 "srcl",
 "src/render/sink.c",
-"870:run->processed++;",
+"870:run->clips = (Clip *)(void *)(base + L.at_clips);",
 ";",
 [
 "testRender_vectors",
@@ -11664,27 +12064,11 @@
 ]
 ],
 [
-"rs-871-eq",
+"rs-871-del",
 "srcl",
 "src/render/sink.c",
-"871:==",
-"!=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-871-neg",
-"srcl",
-"src/render/sink.c",
-"871:(run->groups_open == 0)",
-"(!(run->groups_open == 0))",
+"871:run->root = (double *)(void *)(base + L.at_root);",
+";",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -11699,7 +12083,7 @@
 "rs-872-del",
 "srcl",
 "src/render/sink.c",
-"872:run->done = run->processed;",
+"872:run->layers = (double *)(void *)(base + L.at_layers);",
 ";",
 [
 "testRender_vectors",
@@ -11712,11 +12096,27 @@
 ]
 ],
 [
-"rs-874-neg",
+"rs-873-del",
 "srcl",
 "src/render/sink.c",
-"874:(gshscene_job_unit(job, run->processed, run->done))",
-"(!(gshscene_job_unit(job, run->processed, run->done)))",
+"873:run->touched = base + L.at_touched;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-874-del",
+"srcl",
+"src/render/sink.c",
+"874:run->coverage = base + L.at_coverage;",
+";",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -11731,7 +12131,7 @@
 "rs-875-del",
 "srcl",
 "src/render/sink.c",
-"875:finish(run, GSHSCENE_ERR_CANCELLED, memory);",
+"875:run->clip_memory = base + L.at_clip_memory;",
 ";",
 [
 "testRender_vectors",
@@ -11744,10 +12144,10 @@
 ]
 ],
 [
-"rs-879-del",
+"rs-876-del",
 "srcl",
 "src/render/sink.c",
-"879:finish(run, GSHSCENE_OK, memory);",
+"876:run->acc = (int64_t *)(void *)(base + L.at_acc);",
 ";",
 [
 "testRender_vectors",
@@ -11760,11 +12160,11 @@
 ]
 ],
 [
-"rs-893-lt",
+"rs-877-neg",
 "srcl",
 "src/render/sink.c",
-"893:<",
-"<=",
+"877:(caller)",
+"(!(caller))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -11776,154 +12176,10 @@
 ]
 ],
 [
-"rs-911-eq",
+"rs-880-del",
 "srcl",
 "src/render/sink.c",
-"911:==",
-"!=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-911-str",
-"srcl",
-"src/render/sink.c",
-"911:, \"shap",
-", \"Zhap",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-916-neg",
-"srcl",
-"src/render/sink.c",
-"916:(!out)",
-"(!(!out))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-917-ret",
-"srcl",
-"src/render/sink.c",
-"917:GSHCPU_ERR_INVALID",
-"GSHCPU_ERR_LIMIT",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-919-neg",
-"srcl",
-"src/render/sink.c",
-"919:(limits)",
-"(!(limits))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-920-lt",
-"srcl",
-"src/render/sink.c",
-"920:<",
-"<=",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-921-neg",
-"srcl",
-"src/render/sink.c",
-"921:(limits->_reserved[i])",
-"(!(limits->_reserved[i]))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-922-ret",
-"srcl",
-"src/render/sink.c",
-"922:GSHCPU_ERR_INVALID",
-"GSHCPU_ERR_LIMIT",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-926-neg",
-"srcl",
-"src/render/sink.c",
-"926:(!alloc)",
-"(!(!alloc))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-927-del",
-"srcl",
-"src/render/sink.c",
-"927:alloc = gshgeom_allocator_default();",
+"880:run->item_alloc = &run->arena.self;",
 ";",
 [
 "testRender_vectors",
@@ -11936,42 +12192,10 @@
 ]
 ],
 [
-"rs-930-neg",
+"rs-882-del",
 "srcl",
 "src/render/sink.c",
-"930:(!cs)",
-"(!(!cs))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-931-ret",
-"srcl",
-"src/render/sink.c",
-"931:GSHCPU_ERR_OOM",
-"GSHCPU_ERR_LIMIT",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-933-del",
-"srcl",
-"src/render/sink.c",
-"933:cs->alloc = *alloc;",
+"882:run->item_alloc = &cs->alloc;",
 ";",
 [
 "testRender_vectors",
@@ -11984,314 +12208,10 @@
 ]
 ],
 [
-"rs-936-and",
+"rs-884-ne",
 "srcl",
 "src/render/sink.c",
-"936:&&",
-"||",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-936-del",
-"srcl",
-"src/render/sink.c",
-"936:cs->max_dimension = limits && limits->max_dimension ? limits->max_dimension : GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-937-neg",
-"srcl",
-"src/render/sink.c",
-"937:(cs->max_dimension > GSHCPU_MAX_DIMENSION_CEILING)",
-"(!(cs->max_dimension > GSHCPU_MAX_DIMENSION_CEILING))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-940-and",
-"srcl",
-"src/render/sink.c",
-"940:&&",
-"||",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-940-del",
-"srcl",
-"src/render/sink.c",
-"940:cs->max_bytes = limits && limits->max_bytes ? limits->max_bytes : GSHCPU_LIMITS_DEFAULT_MAX_BYTES;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-941-and",
-"srcl",
-"src/render/sink.c",
-"941:&&",
-"||",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-941-del",
-"srcl",
-"src/render/sink.c",
-"941:cs->max_cells = limits && limits->max_cells ? limits->max_cells : GSHCPU_LIMITS_DEFAULT_MAX_CELLS;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-942-del",
-"srcl",
-"src/render/sink.c",
-"942:gshgeom_limits_default(&cs->geometry);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-943-and",
-"srcl",
-"src/render/sink.c",
-"943:&&",
-"||",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-943-neg",
-"srcl",
-"src/render/sink.c",
-"943:(limits && limits->max_points)",
-"(!(limits && limits->max_points))",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-944-del",
-"srcl",
-"src/render/sink.c",
-"944:cs->geometry.max_points = limits->max_points;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-947-del",
-"srcl",
-"src/render/sink.c",
-"947:memset(&ops, 0, sizeof ops);",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-948-del",
-"srcl",
-"src/render/sink.c",
-"948:ops.name = \"shape-cpu\";",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-948-str",
-"srcl",
-"src/render/sink.c",
-"948:= \"shap",
-"= \"Zhap",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-950-del",
-"srcl",
-"src/render/sink.c",
-"950:ops.caps = op_caps;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-951-del",
-"srcl",
-"src/render/sink.c",
-"951:ops.workspace_bytes = op_workspace_bytes;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-952-del",
-"srcl",
-"src/render/sink.c",
-"952:ops.begin = op_begin;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-953-del",
-"srcl",
-"src/render/sink.c",
-"953:ops.readback = op_readback;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-954-del",
-"srcl",
-"src/render/sink.c",
-"954:ops.destroy = op_destroy;",
-";",
-[
-"testRender_vectors",
-"testRender_parts",
-"testRender",
-"testRender_limits",
-"testRender_conformance",
-"testGlyph_render",
-"probe"
-]
-],
-[
-"rs-957-ne",
-"srcl",
-"src/render/sink.c",
-"957:!=",
+"884:!=",
 "==",
 [
 "testRender_vectors",
@@ -12304,11 +12224,11 @@
 ]
 ],
 [
-"rs-957-neg",
+"rs-884-or",
 "srcl",
 "src/render/sink.c",
-"957:(r != GSHSCENE_OK)",
-"(!(r != GSHSCENE_OK))",
+"884:||",
+"&&",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -12320,10 +12240,26 @@
 ]
 ],
 [
-"rs-958-del",
+"rs-885-ne",
 "srcl",
 "src/render/sink.c",
-"958:alloc->free_fn(alloc->ctx, cs);",
+"885:!=",
+"==",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-891-del",
+"srcl",
+"src/render/sink.c",
+"891:run->palette = gshscene_list_palette(request->list);",
 ";",
 [
 "testRender_vectors",
@@ -12336,10 +12272,922 @@
 ]
 ],
 [
-"rs-959-eq",
+"rs-894-del",
 "srcl",
 "src/render/sink.c",
-"959:==",
+"894:memset(root, 0, sizeof *root);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-895-del",
+"srcl",
+"src/render/sink.c",
+"895:root->layer = run->root;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-896-del",
+"srcl",
+"src/render/sink.c",
+"896:root->space = *gshscene_job_target_space(job);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-901-neg",
+"srcl",
+"src/render/sink.c",
+"901:(gshscene_expansion_next(&run->walk, &item, &chain, &count))",
+"(!(gshscene_expansion_next(&run->walk, &item, &chain, &count)))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-902-del",
+"srcl",
+"src/render/sink.c",
+"902:run->work = 0;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-904-del",
+"srcl",
+"src/render/sink.c",
+"904:gshscene_job_work(job, run->work);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-905-ne",
+"srcl",
+"src/render/sink.c",
+"905:!=",
+"==",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-905-neg",
+"srcl",
+"src/render/sink.c",
+"905:(r != GSHSCENE_OK)",
+"(!(r != GSHSCENE_OK))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-906-eq",
+"srcl",
+"src/render/sink.c",
+"906:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-906-ne",
+"srcl",
+"src/render/sink.c",
+"906:!=",
+"==",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-906-neg",
+"srcl",
+"src/render/sink.c",
+"906:(run->stop_count == 0 && r != GSHSCENE_ERR_REFUSED)",
+"(!(run->stop_count == 0 && r != GSHSCENE_ERR_REFUSED))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-907-del",
+"srcl",
+"src/render/sink.c",
+"907:memcpy(run->stop, chain, count * sizeof *chain);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-908-del",
+"srcl",
+"src/render/sink.c",
+"908:run->stop_count = count;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-910-del",
+"srcl",
+"src/render/sink.c",
+"910:finish(run, r, memory);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-913-del",
+"srcl",
+"src/render/sink.c",
+"913:run->processed++;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-914-eq",
+"srcl",
+"src/render/sink.c",
+"914:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-914-neg",
+"srcl",
+"src/render/sink.c",
+"914:(run->groups_open == 0)",
+"(!(run->groups_open == 0))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-915-del",
+"srcl",
+"src/render/sink.c",
+"915:run->done = run->processed;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-917-neg",
+"srcl",
+"src/render/sink.c",
+"917:(gshscene_job_unit(job, run->processed, run->done))",
+"(!(gshscene_job_unit(job, run->processed, run->done)))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-918-del",
+"srcl",
+"src/render/sink.c",
+"918:finish(run, GSHSCENE_ERR_CANCELLED, memory);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-922-del",
+"srcl",
+"src/render/sink.c",
+"922:finish(run, GSHSCENE_OK, memory);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-936-lt",
+"srcl",
+"src/render/sink.c",
+"936:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-954-eq",
+"srcl",
+"src/render/sink.c",
+"954:==",
+"!=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-954-str",
+"srcl",
+"src/render/sink.c",
+"954:, \"shap",
+", \"Zhap",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-959-neg",
+"srcl",
+"src/render/sink.c",
+"959:(!out)",
+"(!(!out))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-960-ret",
+"srcl",
+"src/render/sink.c",
+"960:GSHCPU_ERR_INVALID",
+"GSHCPU_ERR_LIMIT",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-962-neg",
+"srcl",
+"src/render/sink.c",
+"962:(limits)",
+"(!(limits))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-963-lt",
+"srcl",
+"src/render/sink.c",
+"963:<",
+"<=",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-964-neg",
+"srcl",
+"src/render/sink.c",
+"964:(limits->_reserved[i])",
+"(!(limits->_reserved[i]))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-965-ret",
+"srcl",
+"src/render/sink.c",
+"965:GSHCPU_ERR_INVALID",
+"GSHCPU_ERR_LIMIT",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-969-neg",
+"srcl",
+"src/render/sink.c",
+"969:(!alloc)",
+"(!(!alloc))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-970-del",
+"srcl",
+"src/render/sink.c",
+"970:alloc = gshgeom_allocator_default();",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-973-neg",
+"srcl",
+"src/render/sink.c",
+"973:(!cs)",
+"(!(!cs))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-974-ret",
+"srcl",
+"src/render/sink.c",
+"974:GSHCPU_ERR_OOM",
+"GSHCPU_ERR_LIMIT",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-976-del",
+"srcl",
+"src/render/sink.c",
+"976:cs->alloc = *alloc;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-979-and",
+"srcl",
+"src/render/sink.c",
+"979:&&",
+"||",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-979-del",
+"srcl",
+"src/render/sink.c",
+"979:cs->max_dimension = limits && limits->max_dimension ? limits->max_dimension : GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-980-neg",
+"srcl",
+"src/render/sink.c",
+"980:(cs->max_dimension > GSHCPU_MAX_DIMENSION_CEILING)",
+"(!(cs->max_dimension > GSHCPU_MAX_DIMENSION_CEILING))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-983-and",
+"srcl",
+"src/render/sink.c",
+"983:&&",
+"||",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-983-del",
+"srcl",
+"src/render/sink.c",
+"983:cs->max_bytes = limits && limits->max_bytes ? limits->max_bytes : GSHCPU_LIMITS_DEFAULT_MAX_BYTES;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-984-and",
+"srcl",
+"src/render/sink.c",
+"984:&&",
+"||",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-984-del",
+"srcl",
+"src/render/sink.c",
+"984:cs->max_cells = limits && limits->max_cells ? limits->max_cells : GSHCPU_LIMITS_DEFAULT_MAX_CELLS;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-985-del",
+"srcl",
+"src/render/sink.c",
+"985:gshgeom_limits_default(&cs->geometry);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-986-and",
+"srcl",
+"src/render/sink.c",
+"986:&&",
+"||",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-986-neg",
+"srcl",
+"src/render/sink.c",
+"986:(limits && limits->max_points)",
+"(!(limits && limits->max_points))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-987-del",
+"srcl",
+"src/render/sink.c",
+"987:cs->geometry.max_points = limits->max_points;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-990-del",
+"srcl",
+"src/render/sink.c",
+"990:memset(&ops, 0, sizeof ops);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-991-del",
+"srcl",
+"src/render/sink.c",
+"991:ops.name = \"shape-cpu\";",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-991-str",
+"srcl",
+"src/render/sink.c",
+"991:= \"shap",
+"= \"Zhap",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-993-del",
+"srcl",
+"src/render/sink.c",
+"993:ops.caps = op_caps;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-994-del",
+"srcl",
+"src/render/sink.c",
+"994:ops.workspace_bytes = op_workspace_bytes;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-995-del",
+"srcl",
+"src/render/sink.c",
+"995:ops.begin = op_begin;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-996-del",
+"srcl",
+"src/render/sink.c",
+"996:ops.readback = op_readback;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-997-del",
+"srcl",
+"src/render/sink.c",
+"997:ops.destroy = op_destroy;",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-1000-ne",
+"srcl",
+"src/render/sink.c",
+"1000:!=",
+"==",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-1000-neg",
+"srcl",
+"src/render/sink.c",
+"1000:(r != GSHSCENE_OK)",
+"(!(r != GSHSCENE_OK))",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-1001-del",
+"srcl",
+"src/render/sink.c",
+"1001:alloc->free_fn(alloc->ctx, cs);",
+";",
+[
+"testRender_vectors",
+"testRender_parts",
+"testRender",
+"testRender_limits",
+"testRender_conformance",
+"testGlyph_render",
+"probe"
+]
+],
+[
+"rs-1002-eq",
+"srcl",
+"src/render/sink.c",
+"1002:==",
 "!=",
 [
 "testRender_vectors",

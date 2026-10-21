@@ -333,7 +333,13 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
   return GSHCPU_OK;
 }
 
-/** The exact workspace (S9): the fixed block and the most any item's geometry takes. */
+/**
+ * The workspace (S9): the fixed block and the most any item's geometry takes.  A render's own sizing
+ * (`CALLER_MEMORY` in the flags) allocates nothing, not even to size itself: it measures inside the caller's
+ * workspace, and one too small for the block or for an item gives only a need past it (the contract layer then
+ * refuses the render with ::GSHSCENE_ERR_LIMIT; the query asks again without the flag).  Without the flag the need is
+ * measured over the sink's allocator, exactly.
+ */
 static GSHCPU_Result need_of(const Cpu_Sink * cs, const GSHSCENE_Render_Request * request, size_t * out) {
   Layout L;
   GSHCPU_Result r = layout(cs, request->list, request->target, &L);
@@ -342,9 +348,11 @@ static GSHCPU_Result need_of(const Cpu_Sink * cs, const GSHSCENE_Render_Request 
   }
   size_t peak = 0;
   GSHCPU_Arena arena;
-  /* The caller's workspace, when there is room in it for the walk (the arena may be empty), is the measure's
-   * scratch: a render that brings its workspace allocates nothing, not even to size itself. */
-  if ((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) && request->workspace && request->workspace_bytes >= L.fixed) {
+  if (request->flags & GSHSCENE_RENDER_CALLER_MEMORY) {
+    if (!request->workspace || request->workspace_bytes < L.fixed) {
+      *out = L.fixed; /* no room for the walk: the block alone is past the workspace */
+      return GSHCPU_OK;
+    }
     unsigned char * base = (unsigned char *)(((uintptr_t)request->workspace + (CARVE_ALIGN - 1u)) &
         ~(uintptr_t)(CARVE_ALIGN - 1u));
     gshcpu_render_arena_init(&arena, base + L.at_items, request->workspace_bytes - L.fixed);
@@ -355,7 +363,8 @@ static GSHCPU_Result need_of(const Cpu_Sink * cs, const GSHSCENE_Render_Request 
     if (r != GSHCPU_ERR_OOM) {
       return r;
     }
-    /* The workspace is too small for some item: measure over the sink's allocator, for the need to report. */
+    /* An item does not fit in what is left: the need is past the workspace, and the query gives it exactly. */
+    return gcu_safe_add_size(request->workspace_bytes, 1u, out) ? GSHCPU_OK : GSHCPU_ERR_LIMIT;
   }
   size_t scratch_bytes = L.at_stop; /* the walk and the maps, from the aligned base (the Run's room unused) */
   unsigned char * scratch = cs->alloc.malloc_fn(cs->alloc.ctx, scratch_bytes + CARVE_ALIGN);

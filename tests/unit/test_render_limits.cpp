@@ -129,6 +129,45 @@ uint64_t cells_in(const GSHSCENE_List * list, size_t index, GSHCPU_Rect rect) {
   return cells;
 }
 
+/** An item's box, its points, and the cell bound over its box meet @p walk (no instances). */
+struct ItemFacts {
+  GSHCPU_Rect box{0, 0, 0, 0};
+  size_t points = 0;
+  uint64_t bound = 0;
+};
+
+ItemFacts facts_of(const GSHSCENE_List * list, size_t index, GSHCPU_Rect walk) {
+  const GSHSCENE_Item * item = nullptr;
+  EXPECT_EQ(gshscene_list_item(list, index, &item), GSHSCENE_OK);
+  GSHGEOM_Map maps[4];
+  GSHGEOM_Map identity;
+  gshgeom_map_identity(2, &identity);
+  GSHGEOM_Limits limits;
+  gshgeom_limits_default(&limits);
+  GSHCPU_Item_Geometry g;
+  const GSHGEOM_Allocator * alloc = gshgeom_allocator_default();
+  EXPECT_EQ(gshcpu_render_geometry(item, maps, 0, &identity, alloc, &limits, &g), GSHCPU_OK);
+  ItemFacts f;
+  f.box = g.box;
+  f.points = g.points;
+  f.bound = gshcpu_render_cells_bound((const GSHGEOM_Flat_Path * const *)g.paths, g.count,
+      gshcpu_render_rect_meet(g.box, walk), UINT64_MAX);
+  gshcpu_render_geometry_release(&g, alloc);
+  return f;
+}
+
+/** A diamond of radius @p r about (@p cx, @p cy): every edge crosses columns and rows alike. */
+const GSHSCENE_Resource * diamond(Store & s, double cx, double cy, double r) {
+  GSHGEOM_Path * p = nullptr;
+  gshgeom_path_create(nullptr, nullptr, 2, &p);
+  gshgeom_path_move_to(p, GSHGEOM_Point{cx, cy - r, 0});
+  gshgeom_path_line_to(p, GSHGEOM_Point{cx + r, cy + 0.25, 0});
+  gshgeom_path_line_to(p, GSHGEOM_Point{cx + 0.5, cy + r, 0});
+  gshgeom_path_line_to(p, GSHGEOM_Point{cx - r, cy - 0.25, 0});
+  gshgeom_path_close(p);
+  return s.path(p);
+}
+
 /** A zigzag of @p n points across the raster (lines only, so the flattened path holds exactly n points). */
 const GSHSCENE_Resource * zigzag(Store & s, int n, double w, double h) {
   GSHGEOM_Path * p = nullptr;
@@ -644,6 +683,85 @@ TEST(RenderLimits, ACellCapRefusesTheSameItemsWithAndWithoutTheDamage) {
   }
 }
 
+TEST(RenderLimits, ADamageCountsOnlyTheCellsItDrawsWhereTheCapCannotBeMet) {
+  // Where the bound from an item's edges says the cap cannot be met over the whole render's rectangle, a damage-limited
+  // render counts the cells where it draws and no more: the work of an item cut by the damage on one side (each side
+  // in turn) is its points, the cells inside the damage and the pixels drawn.  Where the bound reaches the cap, the
+  // whole rectangle is counted (and the item is still drawn, its cells being within the bound).
+  Store s;
+  GSHSCENE_Paint red = solid(1, 0, 0, 0.5);
+  const GSHSCENE_Rect damage{10, 8, 30, 24};
+  const GSHCPU_Rect region{0, 0, RF_WIDTH, RF_HEIGHT};
+  struct Cut {
+    const char * side;
+    double cx, cy;
+  } cuts[] = {{"left", 11, 16}, {"top", 20, 9.5}, {"right", 28.5, 16}, {"bottom", 20, 22.5}};
+  for (const Cut & c : cuts) {
+    GSHSCENE_List * l = s.open();
+    ASSERT_EQ(gshscene_list_fill(l, diamond(s, c.cx, c.cy, 5.0), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+    ItemFacts f = facts_of(l, 0, region);
+    GSHCPU_Rect drawn = gshcpu_render_rect_meet(f.box, damage);
+    int cut = (f.box.x0 < damage.x0) + (f.box.y0 < damage.y0) + (f.box.x1 > damage.x1) + (f.box.y1 > damage.y1);
+    ASSERT_EQ(cut, 1) << c.side << ": cut on one side only";
+    const uint64_t inside = cells_in(l, 0, damage);
+    const uint64_t whole = cells_in(l, 0, region);
+    ASSERT_NE(inside, whole) << c.side;
+    const uint64_t pixels = (uint64_t)(drawn.x1 - drawn.x0) * (uint64_t)(drawn.y1 - drawn.y0);
+    {
+      SinkRef sink;
+      RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+      Refusals o = render_damaged(sink.sink, l, r.raster, &damage);
+      EXPECT_EQ(o.result, GSHSCENE_OK);
+      EXPECT_EQ(o.work_max, f.points + inside + pixels) << c.side << ": the default cap";
+    }
+    for (uint64_t cap : {f.bound, f.bound - 1}) {
+      GSHCPU_Limits limits;
+      gshcpu_limits_default(&limits);
+      limits.max_cells = (size_t)cap;
+      SinkRef sink(&limits);
+      RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+      Refusals o = render_damaged(sink.sink, l, r.raster, &damage);
+      EXPECT_EQ(o.result, GSHSCENE_OK);
+      EXPECT_TRUE(o.rows.empty()) << c.side << " cap " << cap;
+      EXPECT_EQ(o.work_max, f.points + (cap == f.bound ? inside : whole) + pixels)
+          << c.side << ": a cap the bound " << (cap == f.bound ? "reaches" : "passes");
+    }
+  }
+}
+
+TEST(RenderLimits, AnItemUnderAClipMeetsTheCapOverTheClipsReach) {
+  // The cells of an item are met over what the whole render draws of it, which a clip narrows (S4's rectangle is the
+  // extent meet the clips' reach, not the extent): under a cap of exactly the cells inside the clip the item is drawn,
+  // in the whole render and in a damage-limited one alike; one less and both refuse it.
+  Store s;
+  GSHSCENE_Paint red = solid(1, 0, 0, 1);
+  GSHSCENE_List * l = s.open();
+  ASSERT_EQ(gshscene_list_clip_push(l, s.rect(10.5, 10.5, 19.5, 19.5), nullptr, GSHGEOM_FILL_NONZERO, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, zigzag(s, 64, 40.0, 30.0), nullptr, GSHGEOM_FILL_EVEN_ODD, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_pop(l), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  const GSHCPU_Rect region{0, 0, RF_WIDTH, RF_HEIGHT};
+  const GSHCPU_Rect clip = facts_of(l, 0, region).box;
+  const uint64_t under = cells_in(l, 1, clip);
+  ASSERT_LT(under + 20, cells_in(l, 1, region));
+  ASSERT_GT(cells_in(l, 0, region), 0u);
+  ASSERT_LT(cells_in(l, 0, region), under) << "the clip itself is within every cap here";
+  const GSHSCENE_Rect damage{12, 12, 16, 30};
+  for (uint64_t cap : {under, under - 1}) {
+    GSHCPU_Limits limits;
+    gshcpu_limits_default(&limits);
+    limits.max_cells = (size_t)cap;
+    SinkRef sink(&limits);
+    RasterRef whole(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+    RasterRef part(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+    Refusals w = render_damaged(sink.sink, l, whole.raster, nullptr);
+    Refusals p = render_damaged(sink.sink, l, part.raster, &damage);
+    EXPECT_EQ(w.rows.size(), cap == under ? 0u : 1u) << cap;
+    EXPECT_TRUE(w == p) << cap;
+  }
+}
+
 TEST(RenderMemory, TheNeedIsTheBlockAndTheLargestItemNotTheirSum) {
   Store s;
   GSHSCENE_Paint red = solid(1, 0, 0, 1);
@@ -732,6 +850,75 @@ TEST(RenderMemory, AListThatNeedsNoItemMemoryRendersInItsExactWorkspaceWithoutAl
     EXPECT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK);
     EXPECT_EQ(t.calls, before) << (list == empty ? "the empty list" : "the list with an item");
   }
+}
+
+TEST(RenderMemory, AShortWorkspaceIsALimitWithoutAnyAllocation) {
+  // S9 is absolute: a CALLER_MEMORY render whose workspace is too small (for the block, or for an item's geometry), or
+  // that brings none, is ERR_LIMIT without one allocator call, by the sink or the report, and with the target
+  // untouched; it states no need, and the query (not a render) gives it exactly.  Before 2026-10-21 the sink
+  // measured over its own allocator to put the need in the summary (story 16, Implementation Notes 7).
+  Store s;
+  GSHSCENE_Paint red = solid(1, 0, 0, 0.5);
+  GSHSCENE_List * l = s.open();
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(1, 1, 5, 5), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, zigzag(s, 300, 40, 30), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  tracker::Tracker t;
+  GSHSCENE_Allocator alloc = tracker::allocator_for(&t);
+  {
+    SinkRef sink(nullptr, &alloc);
+    ReportRef report(&alloc);
+    RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+    RasterRef fresh(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+    GSHSCENE_Target target = target_of(r.raster);
+    GSHSCENE_Render_Request req = request_of(l, &target, report.report);
+    req.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+    size_t need = 0;
+    ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &req, &need), GSHSCENE_OK);
+    ASSERT_GT(need, (size_t)RF_WIDTH * RF_HEIGHT * 32u);
+    // The block: the need of the same render with no item (the walk and the layers do not depend on the items here).
+    GSHSCENE_List * none = s.open();
+    ASSERT_EQ(gshscene_list_close(none), GSHSCENE_OK);
+    GSHSCENE_Render_Request empty = request_of(none, &target, report.report);
+    empty.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+    size_t block = 0;
+    ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &empty, &block), GSHSCENE_OK);
+    ASSERT_LT(block + 64, need);
+    std::vector<unsigned char> workspace(need + 1);
+    // None; a byte; far short of the block; a byte short of the block; the block alone (short for any item); a byte
+    // short of the need.  Nothing past the bytes given is written.
+    for (size_t bytes : {(size_t)0, (size_t)1, need / 4, block - 1, block, need - 1}) {
+      for (int failing = 0; failing < 2; failing++) {
+        std::fill(workspace.begin(), workspace.end(), (unsigned char)0xc5);
+        req.workspace = bytes ? workspace.data() + 1 : nullptr;
+        req.workspace_bytes = bytes;
+        const long calls = t.calls;
+        t.fail_from = failing ? t.calls : -1;
+        t.persistent = failing != 0;
+        EXPECT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_ERR_LIMIT) << bytes << (failing ? " failing" : "");
+        t.fail_from = -1;
+        t.persistent = false;
+        EXPECT_EQ(t.calls, calls) << bytes << " of " << need << " bytes: the render allocated";
+        EXPECT_EQ(r.bytes(), fresh.bytes()) << bytes;
+        GSHSCENE_Report_Summary sum = report.summary();
+        EXPECT_EQ(sum.workspace_needed, 0u) << bytes;
+        EXPECT_NE(std::string(sum.failure.reason).find("gshscene_sink_workspace_bytes"), std::string::npos)
+            << sum.failure.reason;
+        EXPECT_EQ(workspace[0], 0xc5);
+        for (size_t i = 1 + bytes; i < workspace.size(); i++) {
+          ASSERT_EQ(workspace[i], 0xc5) << bytes << " bytes given: written at " << i - 1;
+        }
+      }
+      size_t again = 0;
+      ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &req, &again), GSHSCENE_OK);
+      EXPECT_EQ(again, need) << bytes << ": the query with the short workspace gives the exact need";
+    }
+    req.workspace = workspace.data() + 1;
+    req.workspace_bytes = need;
+    EXPECT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK);
+    EXPECT_EQ(report.summary().workspace_needed, need);
+  }
+  EXPECT_TRUE(t.live.empty());
 }
 
 /* --- what a render touches ---------------------------------------------------------------------------------- */
@@ -964,12 +1151,12 @@ TEST(RenderMemory, TheExactWorkspaceDrawsTheGoldenAndFramesAllocateNothing) {
       ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &req, &need), GSHSCENE_OK);
       ASSERT_GT(need, (size_t)RF_WIDTH * RF_HEIGHT * 32u);
       std::vector<unsigned char> workspace(need + 1 + 4096, 0xc5);
-      // One byte less: a limit, naming the need, the target untouched.
+      // One byte less: a limit, the target untouched.
       req.workspace = workspace.data() + 1;
       req.workspace_bytes = need - 1;
       RasterRef fresh(rf_raster(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, RF_WIDTH, RF_HEIGHT));
       EXPECT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_ERR_LIMIT) << RF_FIXTURES[i].name;
-      EXPECT_EQ(report.summary().workspace_needed, need);
+      EXPECT_EQ(report.summary().workspace_needed, 0u) << "a short workspace states no need (S9)";
       EXPECT_EQ(r.bytes(), fresh.bytes());
       // Sized with the workspace given: the same need, and nothing allocated to find it.
       req.workspace_bytes = need;

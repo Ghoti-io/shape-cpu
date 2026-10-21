@@ -129,10 +129,11 @@
  * geometry of each item (its device path and flattened path) is allocated from
  * the sink's allocator, or with `CALLER_MEMORY` from the rest of the workspace,
  * which is sized by converting every item once: the exact need is the block plus
- * the most any item takes.  A workspace one byte smaller is ::GSHSCENE_ERR_LIMIT.
- * Sizing a list for a workspace the caller gives uses that workspace as its
- * scratch, so a `CALLER_MEMORY` render whose workspace is large enough allocates
- * nothing at all.  The block is sized for the region, but a render reads,
+ * the most any item takes.  A `CALLER_MEMORY` render sizes itself inside its
+ * workspace, so one whose workspace is large enough allocates nothing at all; a
+ * workspace one byte smaller (or any smaller, or none) is ::GSHSCENE_ERR_LIMIT
+ * with nothing allocated and no need stated, and
+ * ::gshscene_sink_workspace_bytes gives the need (S9).  The block is sized for the region, but a render reads,
  * clears and writes only the part of it its units reach: each layer is made
  * ready (a group's cleared, the root's read from the target) over the rectangle
  * its units have drawn on so far.  An empty list touches none of it.

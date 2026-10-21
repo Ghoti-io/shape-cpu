@@ -99,7 +99,22 @@ by a test of its own.  Story 14c changed sink.c (a fill's color is shape-scene's
 one resolution of its paint, and the disposition reads the list's palette) and
 swept its 440 candidates again: 80 do not compile, 329 are caught (they replace
 sink.c's in tools/render-plants.json) and 31 survive, the same 31 as before by
-kind and none on the story's lines.  The 31 survivors, by kind:
+kind and none on the story's lines.  Story 16's two decisions (2026-10-21: the
+cell cap met over the whole render's region whatever the damage, and a short
+caller-memory workspace refused without measuring it) changed cover.c and
+sink.c and swept their 677 candidates again: 123 do not compile, 478 are caught
+(they replace cover.c's and sink.c's in tools/render-plants.json), and 76
+survive: sink.c's 31, the same as before by kind, and cover.c's 45, the old
+converter's by the kinds below and twelve on the new lines (ties in the cell
+bound's row clamp, its absolute span, its minimum and the held sum at exactly
+UINT64_MAX; the bound's subpath loop and read, as the converter's; zero rows
+let through to a count of nothing; and count_rows' two NULL stores, which the
+zeroed Cover already holds, since it runs before any band).  The first sweep
+of those lines left fourteen mutants no test caught (a crossing just right of
+the walk counted, the bound's clamps, minimum, last edge and early stop, the
+shortcut's guard and its cap test, the clips' reach in the whole render, a
+workspace of exactly the block); each is caught by a test since.  The
+survivors, by kind:
 
   - a tie between equal values: `<` for `<=` where both sides choosing the same
     value is the same answer (the rectangles' meet and join, the lowest and
@@ -144,8 +159,7 @@ kind and none on the story's lines.  The 31 survivors, by kind:
     `GSHSCENE_ERR_INVALID` from the geometry's mapping, a failure other than
     cancel, refusal and memory (whose reason is "the CPU sink failed"), the
     clamp of `max_dimension` to the ceiling (the region's own ceiling check
-    refuses first), the caller's workspace being exactly the block (the measure
-    then falls back to the allocator and finds the same need)
+    refuses first)
   - `fprintf(...) < 0` for `<= 0`: no line of the dump prints nothing; and the
     final `fflush` and `ferror` of the dump, either of which reports a failed
     stream
@@ -698,10 +712,14 @@ PLANTS += [
     ("rule-S9-need-short", "src", RS, "      return gcu_safe_add_size(L.fixed, peak, out) ? GSHCPU_OK : GSHCPU_ERR_LIMIT;\n    }",
      "      return gcu_safe_add_size(L.fixed, 0, out) ? GSHCPU_OK : GSHCPU_ERR_LIMIT;\n    }", CONF),
     ("rule-S9-arena-short", "src", RS, "raw_bytes - (size_t)(base - raw) - L.at_items);", "raw_bytes - (size_t)(base - raw) - L.at_items - 16);", CONF),
-    # 2026-10-21 (story 16's decision): the behaviour before the fix, planted back.  S4: the cell cap met only where a
-    # damage-limited render draws (the walk is the rectangle drawn), and the bound that lets it skip the count too low.
+    # 2026-10-21 (story 16's two decisions): the behaviour before each fix, planted back.  S4: the cell cap met only
+    # where a damage-limited render draws (the walk is the rectangle drawn), and the bound that lets it skip the count
+    # too low.  S9: a short workspace sized over the sink's allocator, short for an item or for the block.
     ("rule-S4-cells-in-damage", "src", RS, "*rect, walk, out, run->acc", "*rect, *rect, out, run->acc", RT),
     ("rule-S4-cells-bound-low", "src", RV, "  return rows + columns;", "  return rows;", RT),
+    ("rule-S9-short-item-measures", "src", RS, "    return gcu_safe_add_size(request->workspace_bytes, 1u, out) ? GSHCPU_OK : GSHCPU_ERR_LIMIT;\n  }", "  }", RT),
+    ("rule-S9-short-block-measures", "src", RS, "  if (request->flags & GSHSCENE_RENDER_CALLER_MEMORY) {\n    if (!request->workspace",
+     "  if ((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) && request->workspace && request->workspace_bytes >= L.fixed) {\n    if (!request->workspace", RT),
     ("rule-S10-keeps-a-reference", "src", RS, "  double s[4];\n  source_of(run, item, frame, s);",
      "  double s[4];\n  gshscene_resource_retain(item->resource);\n  source_of(run, item, frame, s);", CONF),
     ("rule-S11-src-over", "src", RC, "      fa = 1.0;\n      fb = 1.0 - sa;", "      fa = 1.0;\n      fb = 1.0 - sa * 0.5;", RT),

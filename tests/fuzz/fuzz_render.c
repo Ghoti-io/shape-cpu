@@ -44,7 +44,7 @@
  * - a successful render is deterministic: the same request again into a fresh
  *   copy of the backdrop gives the same bytes; with caller memory, the exact
  *   workspace gives the bytes of the default render, and a byte less is
- *   `ERR_LIMIT`;
+ *   `ERR_LIMIT` with nothing allocated and no need stated (S9);
  * - pixels outside the extent and the damage are never touched, and inside the
  *   damage the render equals the whole render, which refuses the same items for
  *   the sink's limits (S4);
@@ -576,10 +576,15 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
       request.workspace = workspace;
       request.workspace_bytes = need - 1;
       CHECK(workspace != NULL);
+      const long sink_calls = sink_counter.calls;
+      const long calls = counter.calls;
       GSHSCENE_Result shortr = gshscene_sink_render(sink, &request);
-      /* The sink sizes the need of a short workspace over its own allocator (render/sink.c, need_of), so a failure
-       * planted there is ERR_OOM rather than ERR_LIMIT. */
-      CHECK(shortr == GSHSCENE_ERR_LIMIT || (shortr == GSHSCENE_ERR_OOM && sink_counter.failed));
+      /* S9: a short workspace is a limit with nothing allocated, by the sink or the report, and no need stated. */
+      CHECK(shortr == GSHSCENE_ERR_LIMIT);
+      CHECK(sink_counter.calls == sink_calls && counter.calls == calls);
+      GSHSCENE_Report_Summary short_summary;
+      CHECK(gshscene_report_summary(report, &short_summary) == GSHSCENE_OK);
+      CHECK(short_summary.workspace_needed == 0);
       CHECK(same_bytes(raster, backdrop));
       outcomes[OUT_WORKSPACE_SHORT]++;
       free(workspace);

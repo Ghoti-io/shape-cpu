@@ -211,6 +211,61 @@ TEST(RenderCover, ACellIsACrossingOfNonzeroHeight) {
   EXPECT_EQ(cells, 4u);
   cover(r.flat, GSHGEOM_FILL_NONZERO, GSHCPU_Rect{3, 0, 4, 10}, &cells);
   EXPECT_EQ(cells, 2u) << "left of the window: one folded cell a row; right of it: none";
+  cover(r.flat, GSHGEOM_FILL_NONZERO, GSHCPU_Rect{0, 0, 5, 10}, &cells);
+  EXPECT_EQ(cells, 2u) << "a crossing in the column just right of the window is not one of its cells";
+  // Counted over a larger rectangle than the one drawn: the same rule at the larger one's right edge.
+  const GSHGEOM_Flat_Path * paths[1] = {r.flat};
+  std::vector<uint8_t> out(3 * 10);
+  std::vector<int64_t> acc(2 * 4 * GSHCPU_RENDER_BAND_ROWS);
+  ASSERT_EQ(gshcpu_render_cover_counted(paths, 1, GSHGEOM_FILL_NONZERO, GSHCPU_Rect{0, 0, 3, 10}, GSHCPU_Rect{0, 0, 5, 10},
+                out.data(), acc.data(), UINT64_MAX, &cells),
+      GSHCPU_OK);
+  EXPECT_EQ(cells, 2u);
+  ASSERT_EQ(gshcpu_render_cover_counted(paths, 1, GSHGEOM_FILL_NONZERO, GSHCPU_Rect{0, 0, 3, 10}, GSHCPU_Rect{0, 0, 6, 10},
+                out.data(), acc.data(), UINT64_MAX, &cells),
+      GSHCPU_OK);
+  EXPECT_EQ(cells, 4u);
+}
+
+TEST(RenderCover, TheCellBoundIsItsFormula) {
+  // gshcpu_render_cells_bound is a bound by a stated formula (render_internal.h): per edge with height, its rows R in
+  // the walk plus min(its column span + R, R times the walk's width).  Pinned on known edges, so that a looser bound
+  // (which would only make a damage-limited render count more often) is seen too.  Two pixel-aligned rectangles, A
+  // from (2, 2) to (5, 4) and B from (10, 1) to (12, 7), as two subpaths: a vertical edge from y0 to y1 spans the
+  // rows floor(y0) to floor(y1), the last of height zero, and has no span; a horizontal edge has no height.
+  Device two;
+  for (int k = 0; k < 2; k++) {
+    int32_t x0 = k ? 10 : 2, y0 = k ? 1 : 2, x1 = k ? 12 : 5, y1 = k ? 7 : 4;
+    gshgeom_device_path_move_to(two.path, dp(x0 * 64, y0 * 64));
+    gshgeom_device_path_line_to(two.path, dp(x1 * 64, y0 * 64));
+    gshgeom_device_path_line_to(two.path, dp(x1 * 64, y1 * 64));
+    gshgeom_device_path_line_to(two.path, dp(x0 * 64, y1 * 64));
+    gshgeom_device_path_close(two.path);
+  }
+  two.flatten();
+  const GSHGEOM_Flat_Path * paths[1] = {two.flat};
+  // Whole: A's edges 3 rows each (3 + 3), B's 7 (7 + 7): 2 * 6 + 2 * 14.
+  EXPECT_EQ(gshcpu_render_cells_bound(paths, 1, GSHCPU_Rect{0, 0, 20, 20}, UINT64_MAX), 40u);
+  // Rows from 3: A 2 rows, B 5.
+  EXPECT_EQ(gshcpu_render_cells_bound(paths, 1, GSHCPU_Rect{0, 3, 20, 20}, UINT64_MAX), 2u * 4u + 2u * 10u);
+  // Rows to 4 (below 5): A 3 rows, B 4.
+  EXPECT_EQ(gshcpu_render_cells_bound(paths, 1, GSHCPU_Rect{0, 0, 20, 5}, UINT64_MAX), 2u * 6u + 2u * 8u);
+  // A shallow edge 40 columns long in a walk 4 wide: 2 rows, min(40 + 2, 2 * 4) columns; its closing edge 2 + 2.
+  Device shallow;
+  gshgeom_device_path_move_to(shallow.path, dp(0, 0));
+  gshgeom_device_path_line_to(shallow.path, dp(40 * 64, 64));
+  gshgeom_device_path_line_to(shallow.path, dp(0, 64));
+  gshgeom_device_path_close(shallow.path);
+  shallow.flatten();
+  const GSHGEOM_Flat_Path * one[1] = {shallow.flat};
+  EXPECT_EQ(gshcpu_render_cells_bound(one, 1, GSHCPU_Rect{0, 0, 4, 2}, UINT64_MAX), (2u + 8u) + (2u + 2u));
+  EXPECT_EQ(gshcpu_render_cells_bound(one, 1, GSHCPU_Rect{0, 0, 100, 2}, UINT64_MAX), (2u + 42u) + (2u + 2u));
+  // A limit stops the sum only once it is passed: a sum that reaches it exactly goes on to the next path.
+  const GSHGEOM_Flat_Path * both[2] = {shallow.flat, two.flat};
+  EXPECT_EQ(gshcpu_render_cells_bound(both, 2, GSHCPU_Rect{0, 0, 4, 2}, 14u), 14u + 2u * 2u)
+      << "A's rows 2 and 3 meet the walk's rows 0 and 1 not at all, B's row 1 does: 2 + min(0 + 1, 4) each";
+  EXPECT_EQ(gshcpu_render_cells_bound(one, 1, GSHCPU_Rect{0, 0, 20, 20}, UINT64_MAX), 46u);
+  EXPECT_GT(gshcpu_render_cells_bound(both, 2, GSHCPU_Rect{0, 0, 20, 20}, 46u), 46u);
 }
 
 TEST(RenderCover, CountedOverALargerRectangleItDrawsTheSmallerAndCountsTheLarger) {

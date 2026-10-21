@@ -219,9 +219,14 @@ the block first, then an arena (src/render/arena.c) for the geometry, reset at
 every item. The exact need is the block plus the most any item's geometry takes
 from the arena, which `workspace_bytes` finds by converting every item once
 through a measure of the arena (the same rule of blocks and headers, so the
-measure is the size that repeats the calls). When the request carries a
-workspace, the measure runs in it, so a frame that brings its workspace
-allocates nothing, even to size itself. The need depends on the list and the
+measure is the size that repeats the calls). A `CALLER_MEMORY` render sizes
+itself inside its workspace, so a frame that brings its workspace allocates
+nothing, even to size itself; a workspace too small for the block or for an item
+(or none) gives only a need past it, and the render is `ERR_LIMIT` with nothing
+allocated and no need in the summary (S9, decided 2026-10-21: before, the sink
+measured the need over its own allocator to report it). The query,
+`gshscene_sink_workspace_bytes`, gives the exact need, over the sink's allocator
+when the caller's workspace is too small. The need depends on the list and the
 region only, never on the workspace's address.
 
 ### The hash of a render
