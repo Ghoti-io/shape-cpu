@@ -888,8 +888,8 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
   if (skip_step(&run->skip, item, count)) {
     return GSHSCENE_OK;
   }
-  GSHSCENE_Disposition d =
-      gshscene_caps_disposition(&run->job->caps, item, gshscene_job_target_space(run->job), run->palette);
+  GSHSCENE_Disposition d = gshscene_caps_disposition(&run->job->caps, item, run->maps, count - 1,
+      &run->job->target.map, gshscene_job_target_space(run->job), run->palette);
   GSHSCENE_Glyph_Route route;
   if (d.entry_class == GSHSCENE_ENTRY_REFUSED ||
       (gshcpu_render_glyph_route(item, run->maps, count - 1, &run->job->target.map, &route) &&

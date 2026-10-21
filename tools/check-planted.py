@@ -813,7 +813,11 @@ PLANTS += [
     ("rule-S2-caps-instances", "src", RS, "      (UINT32_C(1) << GSHSCENE_ITEM_GROUP_POP) | (UINT32_C(1) << GSHSCENE_ITEM_INSTANCE);",
      "      (UINT32_C(1) << GSHSCENE_ITEM_GROUP_POP);", CONF),
     # Strokes story S1: the item kinds named, so a kind shape-scene adds (the stroke, 7) is refused, never claimed: a
-    # claim of the kind after instance must fail.
+    # claim of the kind after instance must fail, and so must the loop up to the enum's end that the names replaced.
+    ("r-caps-kinds-loop", "src", RS,
+     "  out->item_kinds = (UINT32_C(1) << GSHSCENE_ITEM_FILL) | (UINT32_C(1) << GSHSCENE_ITEM_CLIP_PUSH) |",
+     "  for (uint32_t k = GSHSCENE_ITEM_FILL; k < GSHSCENE_ITEM_KIND_COUNT; k++) {\n    out->item_kinds |= UINT32_C(1) << k;\n  }\n"
+     "  out->item_kinds |= (UINT32_C(1) << GSHSCENE_ITEM_FILL) | (UINT32_C(1) << GSHSCENE_ITEM_CLIP_PUSH) |", RT),
     ("r-caps-kinds-grown", "src", RS,
      "  out->item_kinds = (UINT32_C(1) << GSHSCENE_ITEM_FILL) | (UINT32_C(1) << GSHSCENE_ITEM_CLIP_PUSH) |",
      "  out->item_kinds = (UINT32_C(1) << (GSHSCENE_ITEM_INSTANCE + 1)) | (UINT32_C(1) << GSHSCENE_ITEM_FILL) |\n"

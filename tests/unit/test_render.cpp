@@ -83,7 +83,7 @@ TEST(RenderCaps, AKindPastTheSixItDrawsIsRefused) {
   for (uint32_t k = 7; k < 40; k++) {
     GSHSCENE_Item item{};
     item.kind = (GSHSCENE_Item_Kind)k;
-    GSHSCENE_Disposition d = gshscene_caps_disposition(&caps, &item, &srgb, nullptr);
+    GSHSCENE_Disposition d = gshscene_caps_disposition(&caps, &item, nullptr, 0, nullptr, &srgb, nullptr);
     EXPECT_EQ(d.entry_class, GSHSCENE_ENTRY_REFUSED) << k;
     EXPECT_EQ(d.reason, GSHSCENE_REASON_ITEM_KIND) << k;
   }
