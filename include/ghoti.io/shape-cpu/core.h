@@ -81,6 +81,12 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
 /** Default ::GSHCPU_Limits.max_cells: 4 Mi cells (24 bytes each). */
 #define GSHCPU_LIMITS_DEFAULT_MAX_CELLS ((size_t)1 << 22)
 
+/** Default ::GSHCPU_Limits.max_cache_bytes: 16 MiB of stroke expansions held across renders. */
+#define GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES ((uint64_t)16 * 1024 * 1024)
+
+/** ::GSHCPU_Limits.max_cache_bytes of 1: no stroke expansion is kept (every entry is larger). */
+#define GSHCPU_LIMITS_CACHE_OFF ((uint64_t)1)
+
 /**
  * The ceiling on a bitmap's width or height, in pixels, whatever a caller
  * sets: coordinates relative to a bitmap are 26.6 and stay far inside
@@ -94,14 +100,20 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
  * A field of 0 means the default above; NULL where a `const GSHCPU_Limits *`
  * is taken means every default.  Exceeding a cap is ::GSHCPU_ERR_LIMIT exactly
  * at the bound (a quantity equal to the cap passes, one more does not), never
- * a truncation, and the output is left as it was.  Pass `SIZE_MAX` for no cap.
+ * a truncation, and the output is left as it was.  Pass `SIZE_MAX` for no cap (`UINT64_MAX` for the cache).
  */
 typedef struct GSHCPU_Limits {
   size_t max_dimension; ///< Widest and tallest working bitmap, in pixels (including the one-pixel margin ::gshcpu_coverage_from_path adds). At most ::GSHCPU_MAX_DIMENSION_CEILING whatever is asked.
   size_t max_bytes;     ///< Bytes of the working bitmap (width times height).
   size_t max_cells;     ///< Cells the accumulator may hold.
   size_t max_points;    ///< Points of the flattened path (handed to `shape-geometry`).
-  uint8_t _reserved[8]; ///< Reserved; zero.
+  /**
+   * The sink's cache of stroke expansions (render.h, SC7), in the bytes it accounts for them: 0 is
+   * ::GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES, ::GSHCPU_LIMITS_CACHE_OFF (1) keeps nothing, `UINT64_MAX` has no cap.
+   * A `uint64_t` whatever the target, so that the structure has the same layout on every one.  Read by the sink; the
+   * coverage functions ignore it.
+   */
+  uint64_t max_cache_bytes;
 } GSHCPU_Limits;
 
 /**

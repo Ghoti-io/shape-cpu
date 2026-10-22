@@ -44,12 +44,13 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
     ASSERT_NE(r.raster, nullptr);
     EXPECT_EQ(gshcpu_format_of(r.raster), format);
     GSHSCENE_Sink_Caps caps = caps_for(sink.sink, r.raster);
-    // The six kinds the sink draws, named: not "every kind below the enum's end", which would claim a kind shape-scene
-    // adds later (a stroke, strokes story S1) and hand the sink an item it has no drawing for.
+    // The seven kinds the sink draws, named: not "every kind below the enum's end", which would claim a kind shape-scene
+    // adds later and hand the sink an item it has no drawing for.
     EXPECT_EQ(caps.item_kinds, (1u << GSHSCENE_ITEM_FILL) | (1u << GSHSCENE_ITEM_CLIP_PUSH) |
         (1u << GSHSCENE_ITEM_CLIP_POP) | (1u << GSHSCENE_ITEM_GROUP_PUSH) | (1u << GSHSCENE_ITEM_GROUP_POP) |
-        (1u << GSHSCENE_ITEM_INSTANCE)) << "the six kinds it draws, and no bit past them";
-    EXPECT_EQ(caps.item_kinds & ~0x7eu, 0u) << "no kind from 7 on";
+        (1u << GSHSCENE_ITEM_INSTANCE) | (1u << GSHSCENE_ITEM_STROKE)) << "the seven kinds it draws, and no bit past them";
+    EXPECT_EQ(caps.item_kinds & ~0xfeu, 0u) << "no kind from 8 on";
+    EXPECT_EQ(caps.stroke_native, 0u) << "a stroke is never drawn as a stroke: every feature is met by expansion (SC1)";
     EXPECT_EQ(caps.composites, (1u << GSHSCENE_COMPOSITE_COUNT) - 1u)
         << "the twelve Porter-Duff operators, plus and the fifteen blend modes (color-paint story P3)";
     EXPECT_EQ(caps.flags & (GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT | GSHSCENE_CAP_GROUP_SOFT_MASK), 0u)
@@ -62,25 +63,29 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
       EXPECT_EQ((caps.composites >> op) & 1u, (uint32_t)gshcpu_render_apply(d, s, 0.5, op)) << "operator " << op;
     }
     EXPECT_EQ(caps.flags, GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA |
-        GSHSCENE_CAP_BLEND_SPACES | GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT | GSHSCENE_CAP_GRADIENT_SPACES);
+        GSHSCENE_CAP_BLEND_SPACES | GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT | GSHSCENE_CAP_GRADIENT_SPACES |
+        GSHSCENE_CAP_STROKE_EXPAND);
+    EXPECT_EQ(caps.flags & GSHSCENE_CAP_STROKE_RUNS, 0u) << "a stroked run waits for strokes story S5";
     EXPECT_EQ(caps.gradient_kinds, (1u << GSHSCENE_GRADIENT_LINEAR) | (1u << GSHSCENE_GRADIENT_RADIAL) |
         (1u << GSHSCENE_GRADIENT_SWEEP)) << "every gradient kind (color-paint story P2)";
     EXPECT_EQ(caps.cancel_unit, (uint32_t)GSHSCENE_CANCEL_BETWEEN_UNITS);
     EXPECT_STREQ(caps.work_measure, "cells+points+pixels");
-    EXPECT_EQ(caps.cancel_work_bound, (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS + GSHCPU_LIMITS_DEFAULT_MAX_CELLS +
-        GSHCPU_LIMITS_DEFAULT_MAX_BYTES);
+    EXPECT_EQ(caps.cancel_work_bound, 3 * (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS + GSHCPU_LIMITS_DEFAULT_MAX_CELLS +
+        2 * (uint64_t)GSHCPU_LIMITS_DEFAULT_MAX_BYTES +
+        (uint64_t)GSHSCENE_LIMITS_DEFAULT_MAX_RESOURCE_ELEMENTS * GSHGEOM_STROKE_MAX_DEPTH)
+        << "SC11: an aligned stroke's three parts, its cells, two passes over the pixels and the expansion's steps";
   }
 }
 
-TEST(RenderCaps, AKindPastTheSixItDrawsIsRefused) {
-  // The seventh kind (shape-scene's stroke, strokes story S1) and every kind after it: the one predicate of the
-  // planning pass refuses each, ITEM_KIND, so the sink never meets one (it has no drawing for it until strokes story S4).
+TEST(RenderCaps, AKindPastTheSevenItDrawsIsRefused) {
+  // Every kind after the stroke: the one predicate of the planning pass refuses each, ITEM_KIND, so the sink never
+  // meets one it has no drawing for.
   SinkRef sink;
   RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 4, 4));
   ASSERT_NE(r.raster, nullptr);
   GSHSCENE_Sink_Caps caps = caps_for(sink.sink, r.raster);
   const GSHSCENE_Color_Space srgb = {GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_SRGB, 0.0};
-  for (uint32_t k = 7; k < 40; k++) {
+  for (uint32_t k = 8; k < 40; k++) {
     GSHSCENE_Item item{};
     item.kind = (GSHSCENE_Item_Kind)k;
     GSHSCENE_Disposition d = gshscene_caps_disposition(&caps, &item, nullptr, 0, nullptr, &srgb, nullptr);
@@ -89,7 +94,7 @@ TEST(RenderCaps, AKindPastTheSixItDrawsIsRefused) {
   }
 }
 
-TEST(RenderCaps, TheWorkBoundIsTheSumOfTheLimits) {
+TEST(RenderCaps, TheWorkBoundIsTheWorstUnitsSumOfTheLimits) {
   GSHCPU_Limits limits;
   gshcpu_limits_default(&limits);
   limits.max_points = 100;
@@ -97,7 +102,13 @@ TEST(RenderCaps, TheWorkBoundIsTheSumOfTheLimits) {
   limits.max_bytes = 300;
   SinkRef sink(&limits);
   RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 4, 4));
-  EXPECT_EQ(caps_for(sink.sink, r.raster).cancel_work_bound, 600u);
+  GSHSCENE_Limits scene_limits{};
+  scene_limits.max_resource_elements = 10;
+  GSHSCENE_Sink * small = nullptr;
+  ASSERT_EQ(gshcpu_sink_create(nullptr, &scene_limits, &limits, &small), GSHCPU_OK);
+  // An aligned stroke: 3 parts of 100 points, 200 cells, two passes over 300 pixels, 10 elements to the depth cap.
+  EXPECT_EQ(caps_for(small, r.raster).cancel_work_bound, 300u + 200u + 600u + 10u * GSHGEOM_STROKE_MAX_DEPTH);
+  EXPECT_EQ(gshscene_sink_destroy(small), GSHSCENE_OK);
   limits.max_cells = SIZE_MAX;
   limits.max_points = SIZE_MAX;
   SinkRef wide(&limits);
@@ -197,9 +208,10 @@ TEST(RenderSink, CreateChecksItsArgumentsAndNamesItself) {
   EXPECT_EQ(gshcpu_sink_create(nullptr, nullptr, nullptr, nullptr), GSHCPU_ERR_INVALID);
   GSHCPU_Limits limits;
   gshcpu_limits_default(&limits);
-  limits._reserved[2] = 1;
-  EXPECT_EQ(gshcpu_sink_create(nullptr, nullptr, &limits, &sink), GSHCPU_ERR_INVALID);
-  EXPECT_EQ(sink, nullptr);
+  limits.max_cache_bytes = GSHCPU_LIMITS_CACHE_OFF;
+  ASSERT_EQ(gshcpu_sink_create(nullptr, nullptr, &limits, &sink), GSHCPU_OK) << "every value of the cache field is one";
+  EXPECT_EQ(gshscene_sink_destroy(sink), GSHSCENE_OK);
+  sink = nullptr;
   ASSERT_EQ(gshcpu_sink_create(nullptr, nullptr, nullptr, &sink), GSHCPU_OK);
   EXPECT_STREQ(gshscene_sink_name(sink), "shape-cpu");
   EXPECT_TRUE(gshcpu_sink_is(sink));

@@ -35,6 +35,7 @@
 
 #include <ghoti.io/cutil/safemath.h>
 #include <ghoti.io/shape-scene/resource.h>
+#include <ghoti.io/shape-scene/stroke.h>
 
 #include <string.h>
 
@@ -51,6 +52,11 @@ typedef struct Cpu_Sink {
   GSHGEOM_Limits geometry;   /* max_points for the flattener */
   GSHCPU_Render_Observer observer;
   void * observer_ctx;
+  GSHCPU_Stroke_Cache * cache;      /* SC7: the expansions kept across renders */
+  GSHCPU_Render_Counters own;       /* the counters, unless a test gave a place for them */
+  GSHCPU_Render_Counters * counters;
+  unsigned tiers;                   /* GSHCPU_RENDER_TIER_*: the tiers that are on */
+  size_t elements;                  /* the most path elements a stored resource may hold: SC11's term */
 } Cpu_Sink;
 
 /* --- what a render remembers ----------------------------------------------------------------- */
@@ -104,8 +110,10 @@ typedef struct Layout {
   size_t gradients;          /* the gradient fills of the expansion, a picture's counted where it is drawn */
   size_t stops;              /* their stops */
   size_t table;              /* the resolved table's slots: a power of two at least twice the gradient fills */
+  int aligned;               /* the expansion holds a stroke that aligns: three more coverage arrays (SC5) */
   size_t at_walk, at_maps, at_stop, at_frames, at_clips, at_root, at_layers, at_touched, at_coverage, at_clip_memory,
       at_acc, at_table, at_pool, at_items; /* offsets from the aligned base */
+  size_t at_cov_aligned, at_cov_clip, at_cov_result; /* the aligned stroke's arrays */
   size_t fixed;              /* the bytes before the items' arena, the alignment slack included */
 } Layout;
 
@@ -131,7 +139,12 @@ typedef struct Run {
   uint8_t * touched;
   uint8_t * coverage;
   uint8_t * clip_memory;
+  uint8_t * cov_aligned;     /* an aligned stroke's parts and their composition (SC5), only when the layout has them */
+  uint8_t * cov_clip;
+  uint8_t * cov_result;
   int64_t * acc;
+  int acc_dirty;             /* the dense sweep leaves the accumulator written; the sparse one needs it zero */
+  int caller;                /* CALLER_MEMORY: nothing allocated, so no cache */
   Resolved * resolved;       /* the gradients resolved so far (S17), open addressing on the id */
   GSHCPU_Stop * pool;        /* their stops */
   size_t pooled;
@@ -177,7 +190,8 @@ static size_t mul3(size_t a, size_t b, size_t c) {
  * The most groups and clips open at once in @p list's expansion, a picture's counting where it is drawn; and its
  * gradient fills and their stops added to @p gradients and @p stops (0 when a sum would overflow).
  */
-static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops) {
+static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops,
+    int * aligned) {
   size_t g = 0;
   size_t c = 0;
   size_t most_g = 0;
@@ -190,9 +204,15 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
       break;
     }
     GSHSCENE_Gradient gradient;
-    if (item->kind == GSHSCENE_ITEM_FILL && item->paint.kind == GSHSCENE_PAINT_GRADIENT &&
+    if ((item->kind == GSHSCENE_ITEM_FILL || item->kind == GSHSCENE_ITEM_STROKE) &&
+        item->paint.kind == GSHSCENE_PAINT_GRADIENT &&
         gshscene_resource_gradient(item->paint.gradient, &gradient) == GSHSCENE_OK) {
       ok = ok && gcu_safe_add_size(*gradients, 1u, gradients) && gcu_safe_add_size(*stops, gradient.stop_count, stops);
+    }
+    GSHSCENE_Stroke_Style style;
+    if (item->kind == GSHSCENE_ITEM_STROKE && gshscene_resource_stroke_style(item->style, &style) == GSHSCENE_OK &&
+        style.alignment != (uint32_t)GSHSCENE_STROKE_ALIGN_CENTER) {
+      *aligned = 1; /* SC5: the parts and their composition need arrays of their own */
     }
     switch (item->kind) {
       case GSHSCENE_ITEM_GROUP_PUSH:
@@ -210,7 +230,7 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
       case GSHSCENE_ITEM_INSTANCE: {
         size_t ig = 0;
         size_t ic = 0;
-        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops) && ok;
+        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops, aligned) && ok;
         most_g = g + ig > most_g ? g + ig : most_g;
         most_c = c + ic > most_c ? c + ic : most_c;
         break;
@@ -263,7 +283,7 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
   }
   L->walk = gshscene_expansion_bytes(list);
   L->levels = L->walk / (sizeof(const GSHSCENE_List *) + sizeof(size_t));
-  if (!nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops)) {
+  if (!nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned)) {
     return GSHCPU_ERR_LIMIT;
   }
   L->table = 0;
@@ -286,6 +306,8 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
       place(&at, mul3(L->pixels, 4u, sizeof(double)), &L->at_root) &&
       place(&at, mul3(L->groups, L->pixels, 4u * sizeof(double)), &L->at_layers) &&
       place(&at, L->pixels, &L->at_touched) && place(&at, L->pixels, &L->at_coverage) &&
+      place(&at, L->aligned ? L->pixels : 0, &L->at_cov_aligned) && place(&at, L->aligned ? L->pixels : 0, &L->at_cov_clip) &&
+      place(&at, L->aligned ? L->pixels : 0, &L->at_cov_result) &&
       place(&at, mul3(L->clips, L->pixels, 1), &L->at_clip_memory) &&
       place(&at, mul3(2u * (L->width + 1u), GSHCPU_RENDER_BAND_ROWS, sizeof(int64_t)), &L->at_acc) &&
       place(&at, mul3(L->table, sizeof(Resolved), 1), &L->at_table) &&
@@ -353,6 +375,31 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
     (void)chain;
     if (item->kind == GSHSCENE_ITEM_INSTANCE) {
       maps[count - 1] = item->map;
+      continue;
+    }
+    if (item->kind == GSHSCENE_ITEM_STROKE) {
+      /* A stroke that is drawn is expanded once through the arena (no cache under CALLER_MEMORY: SC7); its expansion
+       * is what an item's geometry is for a fill, so the caller's memory holds the most any item takes. */
+      if (!gshscene_resource_path(item->resource) ||
+          gshscene_stroke_notice(item, maps, count - 1, &target->map)) {
+        continue; /* a run (the plan refuses it) or a stroke that draws nothing */
+      }
+      GSHGEOM_Map composed;
+      maps[count - 1] = item->map;
+      if (gshgeom_map_compose_chain(maps, count, &target->map, &composed) != GSHGEOM_OK) {
+        continue;
+      }
+      GSHCPU_Stroke st;
+      gshcpu_render_arena_reset(arena);
+      arena->peak = 0;
+      GSHCPU_Result sr = gshcpu_render_stroke_open(NULL, &arena->self, &cs->geometry, item, &composed, &st);
+      if (sr == GSHCPU_OK) {
+        gshcpu_render_stroke_close(NULL, &st);
+      }
+      if (sr == GSHCPU_ERR_OOM) {
+        return sr;
+      }
+      *peak = arena->peak > *peak ? arena->peak : *peak;
       continue;
     }
     if (item->kind != GSHSCENE_ITEM_FILL && item->kind != GSHSCENE_ITEM_CLIP_PUSH) {
@@ -442,8 +489,15 @@ static GSHSCENE_Result scene_result(GSHCPU_Result r) {
 
 /** The bound of the work between two checks (S7): render.h. */
 static uint64_t work_bound(const Cpu_Sink * cs) {
-  uint64_t b = (uint64_t)cs->geometry.max_points;
-  if (!gcu_safe_add_u64(b, cs->max_cells, &b) || !gcu_safe_add_u64(b, (uint64_t)cs->max_bytes, &b)) {
+  /* The worst unit is an aligned stroke (SC11): the points of its three parts, the deposits of all of them (the one
+   * cap), two passes over the pixels (the composition and the paint), and the expansion's own steps, bounded by the
+   * depth cap for every element of the centerline (stroke_work). */
+  uint64_t b;
+  uint64_t pixels;
+  uint64_t expansion;
+  if (!gcu_safe_mul_u64((uint64_t)cs->geometry.max_points, 3u, &b) || !gcu_safe_mul_u64((uint64_t)cs->max_bytes, 2u, &pixels) ||
+      !gcu_safe_mul_u64((uint64_t)cs->elements, (uint64_t)GSHGEOM_STROKE_MAX_DEPTH, &expansion) ||
+      !gcu_safe_add_u64(b, cs->max_cells, &b) || !gcu_safe_add_u64(b, pixels, &b) || !gcu_safe_add_u64(b, expansion, &b)) {
     return UINT64_MAX;
   }
   return b;
@@ -455,11 +509,12 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
     return GSHSCENE_ERR_UNSUPPORTED;
   }
   /* Exactly the item kinds unit() draws, named rather than counted up to the enum's end: a shape-scene whose enum has
-   * grown past them (a stroke, kind 7, strokes story S1) must find that kind unclaimed, so that the planning pass refuses
-   * it (ITEM_KIND) instead of the sink meeting an item it has no drawing for. */
+   * grown past them must find that kind unclaimed, so that the planning pass refuses it (ITEM_KIND) instead of the
+   * sink meeting an item it has no drawing for. */
   out->item_kinds = (UINT32_C(1) << GSHSCENE_ITEM_FILL) | (UINT32_C(1) << GSHSCENE_ITEM_CLIP_PUSH) |
       (UINT32_C(1) << GSHSCENE_ITEM_CLIP_POP) | (UINT32_C(1) << GSHSCENE_ITEM_GROUP_PUSH) |
-      (UINT32_C(1) << GSHSCENE_ITEM_GROUP_POP) | (UINT32_C(1) << GSHSCENE_ITEM_INSTANCE);
+      (UINT32_C(1) << GSHSCENE_ITEM_GROUP_POP) | (UINT32_C(1) << GSHSCENE_ITEM_INSTANCE) |
+      (UINT32_C(1) << GSHSCENE_ITEM_STROKE);
   /* Exactly the operators gshcpu_render_apply composites, named rather than counted up to the enum's end: a
    * shape-scene whose enum has grown past them must not find them claimed here (they would be refused by nothing and
    * composited as no operator at all).  The Porter-Duff operators and PLUS, then the blend modes (B1, story P3). */
@@ -471,6 +526,9 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   }
   out->flags = GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA | GSHSCENE_CAP_BLEND_SPACES |
       GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT | GSHSCENE_CAP_GRADIENT_SPACES;
+  /* SC1: a stroke is never drawn as a stroke (stroke_native is 0) but by expansion, for every style, so no stroke is
+   * refused for its style.  A stroke of a glyph run waits for strokes story S5: no STROKE_RUNS yet. */
+  out->flags |= GSHSCENE_CAP_STROKE_EXPAND;
   /* S17: every kind, in its stated interpolation space (story P2). */
   for (uint32_t k = GSHSCENE_GRADIENT_LINEAR; k < GSHSCENE_GRADIENT_KIND_COUNT; k++) {
     out->gradient_kinds |= UINT32_C(1) << k;
@@ -625,6 +683,7 @@ static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t
       }
       r = gshcpu_render_cover_counted(paths, g.count, item->fill_rule, *rect, walk, out, run->acc, run->cs->max_cells,
           &cells);
+      run->acc_dirty = 1; /* the dense sweep writes the accumulator band by band and leaves it so */
       run->work += cells;
     }
   }
@@ -721,7 +780,7 @@ static GSHSCENE_Result resolved_of(Run * run, const GSHSCENE_Resource * resource
  * double range, or a rectangle (the whole render's: S4) mapped outside G14's domain, is the sink's own limit (S6).
  */
 static GSHSCENE_Result fill_gradient(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count,
-    Frame * frame, GSHCPU_Rect rect, GSHCPU_Rect whole) {
+    Frame * frame, GSHCPU_Rect rect, GSHCPU_Rect whole, const uint8_t * cov) {
   if (gshcpu_render_rect_empty(whole)) {
     return GSHSCENE_OK; /* nothing of it is in the whole render */
   }
@@ -750,7 +809,7 @@ static GSHSCENE_Result fill_gradient(Run * run, const GSHSCENE_Item * item, cons
   size_t w = (size_t)(rect.x1 - rect.x0);
   for (int64_t y = rect.y0; y < rect.y1; y++) {
     for (int64_t x = rect.x0; x < rect.x1; x++) {
-      uint32_t m8 = run->coverage[(size_t)(y - rect.y0) * w + (size_t)(x - rect.x0)];
+      uint32_t m8 = cov[(size_t)(y - rect.y0) * w + (size_t)(x - rect.x0)];
       m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);
       if (m8 == 0) {
         continue;
@@ -772,6 +831,42 @@ static GSHSCENE_Result fill_gradient(Run * run, const GSHSCENE_Item * item, cons
   return GSHSCENE_OK;
 }
 
+/**
+ * The pixels of @p rect, weighed by the clips in force and the coverage @p cov (row by row over @p rect), composited
+ * with the solid source @p src, SRC_OVER (N5, N7, D8).  A pixel of weight 0 is not touched.
+ */
+static void composite_solid(Run * run, Frame * frame, const double src[4], GSHCPU_Rect rect, const uint8_t * cov) {
+  size_t w = (size_t)(rect.x1 - rect.x0);
+  for (int64_t y = rect.y0; y < rect.y1; y++) {
+    for (int64_t x = rect.x0; x < rect.x1; x++) {
+      uint32_t m8 = cov[(size_t)(y - rect.y0) * w + (size_t)(x - rect.x0)];
+      m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);
+      if (m8 == 0) {
+        continue;
+      }
+      size_t p = at(run, x, y);
+      gshcpu_render_apply(&frame->layer[4u * p], src, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);
+      if (run->top == 0) {
+        run->touched[p] = 1;
+      }
+    }
+  }
+}
+
+/** The coverage of @p cov over @p rect painted as the item's paint says: the fill's tail, which a stroke shares (SC5). */
+static GSHSCENE_Result paint_coverage(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count,
+    Frame * frame, GSHCPU_Rect rect, GSHCPU_Rect whole, const uint8_t * cov) {
+  if (item->paint.kind == GSHSCENE_PAINT_GRADIENT) {
+    return fill_gradient(run, item, chain, count, frame, rect, whole, cov);
+  }
+  double s[4];
+  source_of(run, item, frame, s);
+  widen(run, frame, rect);
+  composite_solid(run, frame, s, rect, cov);
+  run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
+  return GSHSCENE_OK;
+}
+
 static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
   Frame * frame = &run->frames[run->top];
   GSHCPU_Rect rect;
@@ -784,29 +879,134 @@ static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t 
   if (r != GSHSCENE_OK) {
     return r;
   }
-  if (item->paint.kind == GSHSCENE_PAINT_GRADIENT) {
-    return fill_gradient(run, item, chain, count, frame, rect, whole);
-  }
-  double s[4];
-  source_of(run, item, frame, s);
-  widen(run, frame, rect);
-  size_t w = (size_t)(rect.x1 - rect.x0);
-  for (int64_t y = rect.y0; y < rect.y1; y++) {
-    for (int64_t x = rect.x0; x < rect.x1; x++) {
-      uint32_t m8 = run->coverage[(size_t)(y - rect.y0) * w + (size_t)(x - rect.x0)];
-      m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);
-      if (m8 == 0) {
-        continue;
-      }
-      size_t p = at(run, x, y);
-      gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);
-      if (run->top == 0) {
-        run->touched[p] = 1;
-      }
+  return paint_coverage(run, item, chain, count, frame, rect, whole, run->coverage);
+}
+
+/* --- a stroke (SC1 to SC8) ------------------------------------------------------------------------------- */
+
+/** FT-2's receiver: one row of coverages, each weighed by the clips and composited if nonzero. */
+typedef struct Sparse {
+  Run * run;
+  Frame * frame;
+  const double * src;
+  int64_t dx, dy;            /* the whole-pixel shift: the paths' frame to the destination's */
+} Sparse;
+
+static void sparse_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8) {
+  Sparse * sp = ctx;
+  Run * run = sp->run;
+  Frame * frame = sp->frame;
+  for (size_t i = 0; i < n; i++) {
+    if (m8[i] == 0) {
+      continue;
+    }
+    int64_t px = x + (int64_t)i + sp->dx;
+    int64_t py = y + sp->dy;
+    uint32_t m = weigh_clips(run, frame->clip_base, run->clip_count, m8[i], px, py);
+    if (m == 0) {
+      continue;
+    }
+    size_t p = at(run, px, py);
+    gshcpu_render_apply(&frame->layer[4u * p], sp->src, (double)m / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);
+    if (run->top == 0) {
+      run->touched[p] = 1;
     }
   }
-  run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);
-  return GSHSCENE_OK;
+}
+
+/** SC11: the expansion's own steps, counted whether the expansion was made or found, so a report does not depend on the cache. */
+static uint64_t expansion_work(const Run * run, const GSHSCENE_Item * item, const GSHCPU_Stroke * s) {
+  uint64_t points = 0;
+  for (int p = 0; p < GSHCPU_STROKE_PARTS; p++) {
+    points += s->meta.points[p];
+  }
+  size_t elements = gshgeom_path_element_count(gshscene_resource_path(item->resource));
+  if (elements > run->cs->elements) {
+    elements = run->cs->elements;
+  }
+  return points + (uint64_t)elements * (uint64_t)GSHGEOM_STROKE_MAX_DEPTH;
+}
+
+/**
+ * A stroke (SC1 to SC8): the centerline expanded at the canonical map by shape-geometry, the parts covered and
+ * composed into one coverage `k`, and from there a fill's tail (the clips, the layers, the operator, the paint).
+ */
+static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  Frame * frame = &run->frames[run->top];
+  Cpu_Sink * cs = run->cs;
+  GSHGEOM_Map composed;
+  run->maps[count - 1] = item->map;
+  if (gshgeom_map_compose_chain(run->maps, count, &run->job->target.map, &composed) != GSHGEOM_OK) {
+    return refuse(run, item, chain, count); /* SC4: a composed map that cannot be formed is the sink's own limit */
+  }
+  if (run->item_alloc == &run->arena.self) {
+    gshcpu_render_arena_reset(&run->arena);
+  }
+  /* SC7: the cache serves a render that allocates, never one that takes its memory from the caller (S9). */
+  GSHCPU_Stroke_Cache * cache = !run->caller && (cs->tiers & GSHCPU_RENDER_TIER_CACHE) ? cs->cache : NULL;
+  GSHCPU_Stroke s;
+  GSHCPU_Result opened = gshcpu_render_stroke_open(cache, run->item_alloc, &cs->geometry, item, &composed, &s);
+  if (opened == GSHCPU_ERR_LIMIT) {
+    return refuse(run, item, chain, count);
+  }
+  if (opened != GSHCPU_OK) {
+    return scene_result(opened);
+  }
+  if (!s.drawn) {
+    return GSHSCENE_OK; /* an EMPTY or NOT_INVERTIBLE outline, which the plan's notice should have caught first: nothing */
+  }
+  run->work += expansion_work(run, item, &s);
+  GSHCPU_Rect reach = reach_of(run, frame->clip_base, run->clip_count);
+  GSHCPU_Rect wreach = whole_reach_of(run, frame->clip_base, run->clip_count);
+  GSHCPU_Rect rect;
+  GSHCPU_Rect whole;
+  uint64_t cells = 0;
+  GSHCPU_Result r;
+  uint8_t * cov = run->coverage;
+  int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT;
+  if (solid && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_cells)) {
+    /* FT-2 (SC8): the sweep gives only the pixels that can be nonzero; the rest the general loop would skip. */
+    if (run->acc_dirty) {
+      memset(run->acc, 0, 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc);
+      run->acc_dirty = 0;
+    }
+    gshcpu_render_stroke_rects(&s, reach, wreach, &rect, &whole);
+    double src[4];
+    source_of(run, item, frame, src);
+    widen(run, frame, rect);
+    Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
+    GSHCPU_Rect drawn;
+    GSHCPU_Rect counted;
+    r = gshcpu_render_stroke_cover_sparse(&s, reach, wreach, cs->max_cells, run->acc, run->coverage, sparse_span, &sp, &drawn,
+        &counted, &cells);
+    /* Never refused for its cells (the cap was bounded by the detection), but the arithmetic is shown to hold. */
+    if (r == GSHCPU_OK) {
+      run->work += cells + (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
+      gshcpu_stroke_cache_count(cs->cache, s.hairline ? offsetof(GSHCPU_Render_Counters, sparse_hairline)
+                                                      : offsetof(GSHCPU_Render_Counters, sparse_plain));
+      gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, strokes));
+    }
+    gshcpu_render_stroke_close(cache, &s);
+    return r == GSHCPU_OK ? GSHSCENE_OK : r == GSHCPU_ERR_LIMIT ? refuse(run, item, chain, count) : scene_result(r);
+  }
+  GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result};
+  r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_cells, run->acc, &buffers, &cov, &rect, &whole, &cells);
+  run->acc_dirty = 1;
+  run->work += cells;
+  GSHSCENE_Result result;
+  if (r == GSHCPU_ERR_LIMIT) {
+    result = refuse(run, item, chain, count);
+  } else if (r != GSHCPU_OK) {
+    result = scene_result(r);
+  } else {
+    gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, strokes));
+    if (s.meta.present[GSHCPU_STROKE_ALIGNED] && run->cov_result) {
+      run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0); /* the composition's pass */
+    }
+    result = paint_coverage(run, item, chain, count, frame, rect, whole, cov);
+  }
+  gshcpu_render_stroke_close(cache, &s);
+  return result;
 }
 
 static GSHSCENE_Result clip_push(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
@@ -898,12 +1098,16 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
     skip_begin(&run->skip, item, count);
     return GSHSCENE_OK;
   }
-  if (gshscene_gradient_notice(item, run->maps, count - 1, &run->job->target.map)) {
-    return GSHSCENE_OK; /* S17: a gradient fill that draws nothing (G10, G11); the plan wrote its notice */
+  if (item->kind == GSHSCENE_ITEM_STROKE
+          ? gshscene_stroke_notice(item, run->maps, count - 1, &run->job->target.map)
+          : gshscene_gradient_notice(item, run->maps, count - 1, &run->job->target.map)) {
+    return GSHSCENE_OK; /* S17, SC4: a gradient fill or a stroke that draws nothing; the plan wrote its notice */
   }
   switch (item->kind) {
     case GSHSCENE_ITEM_FILL:
       return fill(run, item, chain, count);
+    case GSHSCENE_ITEM_STROKE:
+      return stroke(run, item, chain, count);
     case GSHSCENE_ITEM_CLIP_PUSH:
       return clip_push(run, item, chain, count);
     case GSHSCENE_ITEM_CLIP_POP:
@@ -1022,7 +1226,14 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   run->touched = base + L.at_touched;
   run->coverage = base + L.at_coverage;
   run->clip_memory = base + L.at_clip_memory;
+  if (L.aligned) {
+    run->cov_aligned = base + L.at_cov_aligned;
+    run->cov_clip = base + L.at_cov_clip;
+    run->cov_result = base + L.at_cov_result;
+  }
   run->acc = (int64_t *)(void *)(base + L.at_acc);
+  run->acc_dirty = 1; /* the caller's memory is not zeroed: the sparse sweep clears the accumulator before its first use */
+  run->caller = caller;
   run->resolved = (Resolved *)(void *)(base + L.at_table);
   run->pool = (GSHCPU_Stop *)(void *)(base + L.at_pool);
   memset(run->resolved, 0, L.table * sizeof *run->resolved); /* the gradient fills' slots, never the region */
@@ -1092,9 +1303,21 @@ static GSHSCENE_Result op_readback(void * impl, const GSHSCENE_Job * job, GIMG_R
   return GSHSCENE_OK;
 }
 
+static GSHSCENE_Result op_evict(void * impl, uint64_t id) {
+  Cpu_Sink * cs = impl;
+  gshcpu_stroke_cache_evict(cs->cache, id);
+  return GSHSCENE_OK;
+}
+
+static uint64_t op_static_bytes(void * impl) {
+  Cpu_Sink * cs = impl;
+  return gshcpu_stroke_cache_bytes(cs->cache);
+}
+
 static void op_destroy(void * impl) {
   Cpu_Sink * cs = impl;
   GSHGEOM_Allocator alloc = cs->alloc;
+  gshcpu_stroke_cache_destroy(cs->cache);
   alloc.free_fn(alloc.ctx, cs);
 }
 
@@ -1106,17 +1329,11 @@ int gshcpu_sink_is(const GSHSCENE_Sink * sink) {
   return sink && name && strcmp(name, "shape-cpu") == 0;
 }
 
-GSHCPU_Result gshcpu_render_sink_create_observed(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
-    const GSHCPU_Limits * limits, GSHCPU_Render_Observer observer, void * observer_ctx, GSHSCENE_Sink ** out) {
+GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
+    const GSHCPU_Limits * limits, unsigned tiers, GSHCPU_Render_Counters * counters, GSHCPU_Render_Observer observer,
+    void * observer_ctx, GSHSCENE_Sink ** out) {
   if (!out) {
     return GSHCPU_ERR_INVALID;
-  }
-  if (limits) {
-    for (size_t i = 0; i < sizeof limits->_reserved; i++) {
-      if (limits->_reserved[i]) {
-        return GSHCPU_ERR_INVALID;
-      }
-    }
   }
   if (!alloc) {
     alloc = gshgeom_allocator_default();
@@ -1128,6 +1345,11 @@ GSHCPU_Result gshcpu_render_sink_create_observed(const GSHCPU_Allocator * alloc,
   cs->alloc = *alloc;
   cs->observer = observer;
   cs->observer_ctx = observer_ctx;
+  cs->tiers = tiers;
+  cs->counters = counters ? counters : &cs->own;
+  memset(cs->counters, 0, sizeof *cs->counters);
+  cs->elements = scene_limits && scene_limits->max_resource_elements ? scene_limits->max_resource_elements
+                                                                       : GSHSCENE_LIMITS_DEFAULT_MAX_RESOURCE_ELEMENTS;
   cs->max_dimension = limits && limits->max_dimension ? limits->max_dimension : GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION;
   if (cs->max_dimension > GSHCPU_MAX_DIMENSION_CEILING) {
     cs->max_dimension = GSHCPU_MAX_DIMENSION_CEILING;
@@ -1138,6 +1360,11 @@ GSHCPU_Result gshcpu_render_sink_create_observed(const GSHCPU_Allocator * alloc,
   if (limits && limits->max_points) {
     cs->geometry.max_points = limits->max_points;
   }
+  GSHCPU_Result cr = gshcpu_stroke_cache_create(&cs->alloc, limits ? limits->max_cache_bytes : 0, cs->counters, &cs->cache);
+  if (cr != GSHCPU_OK) {
+    alloc->free_fn(alloc->ctx, cs);
+    return cr;
+  }
   GSHSCENE_Sink_Ops ops;
   memset(&ops, 0, sizeof ops);
   ops.name = "shape-cpu";
@@ -1146,15 +1373,24 @@ GSHCPU_Result gshcpu_render_sink_create_observed(const GSHCPU_Allocator * alloc,
   ops.workspace_bytes = op_workspace_bytes;
   ops.begin = op_begin;
   ops.readback = op_readback;
+  ops.evict = op_evict;
+  ops.static_bytes = op_static_bytes;
   ops.destroy = op_destroy;
   GSHSCENE_Sink * sink = NULL;
   GSHSCENE_Result r = gshscene_sink_create(alloc, scene_limits, &ops, cs, &sink);
   if (r != GSHSCENE_OK) {
+    gshcpu_stroke_cache_destroy(cs->cache);
     alloc->free_fn(alloc->ctx, cs);
     return r == GSHSCENE_ERR_OOM ? GSHCPU_ERR_OOM : GSHCPU_ERR_INVALID;
   }
   *out = sink;
   return GSHCPU_OK;
+}
+
+GSHCPU_Result gshcpu_render_sink_create_observed(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
+    const GSHCPU_Limits * limits, GSHCPU_Render_Observer observer, void * observer_ctx, GSHSCENE_Sink ** out) {
+  return gshcpu_render_sink_create_tiered(alloc, scene_limits, limits, GSHCPU_RENDER_TIERS_ALL, NULL, observer,
+      observer_ctx, out);
 }
 
 GSHCPU_Result gshcpu_sink_create(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,

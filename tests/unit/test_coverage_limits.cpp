@@ -48,9 +48,11 @@ TEST(CoverageLimits, TheDefaultsAreWhatTheHeaderSays) {
   EXPECT_EQ(l.max_bytes, (size_t)256 * 1024 * 1024);
   EXPECT_EQ(l.max_cells, (size_t)1 << 22);
   EXPECT_EQ(l.max_points, 0u);
-  for (unsigned char b : l._reserved) {
-    EXPECT_EQ(b, 0);
-  }
+  EXPECT_EQ(l.max_cache_bytes, 0u) << "zero is the default, 16 MiB, for the sink's stroke cache";
+  EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES, (uint64_t)16 << 20);
+  EXPECT_EQ(GSHCPU_LIMITS_CACHE_OFF, 1u);
+  // The same layout on every target: four sizes and a 64-bit field, none of it padding the sizes would not.
+  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + sizeof(uint64_t));
   gshcpu_limits_default(nullptr);   // ignored
   EXPECT_LT((size_t)GSHCPU_MAX_DIMENSION_CEILING * 64, (size_t)INT32_MAX);
 }

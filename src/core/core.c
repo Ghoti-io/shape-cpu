@@ -68,9 +68,7 @@ void gshcpu_limits_default(GSHCPU_Limits * limits) {
   limits->max_cells = GSHCPU_LIMITS_DEFAULT_MAX_CELLS;
   /* Zero: shape-geometry's own default for a flattened path. */
   limits->max_points = 0;
-  for (size_t i = 0; i < sizeof limits->_reserved; i++) {
-    limits->_reserved[i] = 0;
-  }
+  limits->max_cache_bytes = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES */
 }
 
 const char * gshcpu_version_string(void) {

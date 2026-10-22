@@ -79,12 +79,44 @@ def runs():
     return one + one
 
 
-def fill(pick, map_bytes=b"\x00", rule=0, gradient=None):
+def fill(pick, map_bytes=b"\x00", rule=0, gradient=None, style=b""):
     # op 0, the resource pick (0..: a path; 3 the fast run, 7 the general run), the map, a paint (rgba, then a byte:
-    # 0 mod 4 Display P3, 1 mod 4 a gradient whose bytes follow, else the target's space), rule
+    # 0 mod 4 Display P3, 1 mod 4 a gradient whose bytes follow, else the target's space), rule; a rule with bits 1
+    # and 2 set is a stroke, and the first one is followed by the style's three bytes (STYLE below)
     if gradient is None:
-        return bytes([0, pick]) + map_bytes + bytes([200, 100, 50, 255, 2, rule])
-    return bytes([0, pick]) + map_bytes + bytes([200, 100, 50, 255, 1]) + gradient + bytes([rule])
+        return bytes([0, pick]) + map_bytes + bytes([200, 100, 50, 255, 2, rule]) + style
+    return bytes([0, pick]) + map_bytes + bytes([200, 100, 50, 255, 1]) + gradient + bytes([rule]) + style
+
+
+def style(width=0, space=0, join=0, cap=0, degenerate=0, alignment=0, rule=0, dashes=0, scope=0, miter1=0, offset=0):
+    """The three bytes fuzz_render.c's stroke style is made from: width index (0 one, 1 zero, 2 2.5, 3 six, 4 1/16,
+    5 seventeen, 6 1.5, 7 three) and the width space; join, cap and degenerate; alignment, the alignment rule, the
+    dash pattern (0 none, 1 [3, 2], 2 [1, 1], 3 [0, 2]), its scope, a miter limit of 1 and a dash offset of 1/2."""
+    return bytes([width | space << 3, join | cap << 3 | degenerate << 5,
+                  alignment | rule << 2 | dashes << 3 | scope << 5 | miter1 << 6 | offset << 7])
+
+
+def stroke(pick, map_bytes=b"\x00", gradient=None, first=None):
+    return fill(pick, map_bytes, rule=6, gradient=gradient, style=first if first is not None else b"")
+
+
+def line_path():
+    """A horizontal line along the top of the target, from x = -32 to 95.875 (the two-byte coordinates 12 0 and 15 255
+    of fuzz_render.c's table), one row high at width 1: far wider than the target, so its rectangle is large against its
+    few cell deposits and a stroke of it takes the sparse composite."""
+    return bytes([2, 12, 0, HALF, 0, 0, 0, 0, 0, 15, 255, HALF, 0, 0, 0, 0, 1])
+
+
+def paths_with_line():
+    """Three paths: the square, the cubic bulge and the line (picks 0, 1 and 2)."""
+    square = bytes([5]) + (element(0, HALF, HALF) + element(1, FULL, HALF) + element(1, FULL, FULL)
+                           + element(1, HALF, FULL) + element(5))
+    curve = bytes([3]) + element(0, HALF, FULL) + element(4, Z, Z, FULL, Z, FULL, FULL) + element(5)
+    return bytes([2]) + square + curve + line_path()
+
+
+def body_with_line(items):
+    return paths_with_line() + runs() + bytes([len(items)]) + b"".join(items)
 
 
 def gval(x):
@@ -195,11 +227,53 @@ def scripted():
     out["scripted-blend-modes-float.bin"] = header(target=T64 | 3) + body(blends)
     pdf = [fill(0), bytes([5, 0, 4, 23, 0xA1]), fill(1), POP, bytes([5, 0, 4, 0, 0x81]), fill(0), POP]
     out["scripted-pdf-refused.bin"] = header() + body(pdf)
-    # Strokes story S1: a fill whose rule byte has bits 1 and 2 set is a stroke of the shape instead, which this sink
-    # refuses for its kind until it draws strokes (S4); under strict the render is refused before it starts.
-    strokes = [fill(0), fill(1, rule=6), fill(0, ROTATED, rule=7)]
-    out["scripted-stroke-refused.bin"] = header() + body(strokes)
-    out["scripted-stroke-strict.bin"] = header(request=STRICT) + body(strokes)
+    # Strokes stories S1 and S4: a fill whose rule byte has bits 1 and 2 set is a stroke of the shape instead, drawn by
+    # expansion; one of a glyph run is refused for its centerline (S20), and under strict the render is refused before
+    # it starts.
+    run_stroke = [fill(0), stroke(3, first=style())]
+    out["scripted-stroke-run-refused.bin"] = header() + body_with_line(run_stroke)
+    out["scripted-stroke-run-strict.bin"] = header(request=STRICT) + body_with_line(run_stroke)
+    # A plain stroke of each path under a rotation and a group, a hairline and a plain sparse stroke of the line, each
+    # join and cap, dashes of both scopes, every alignment (inside, outside, even-odd) over the closed square and the
+    # open line, a gradient stroke, a zero width (a notice), and the same on a float target, damaged, in caller memory.
+    plain = [fill(0), stroke(0, first=style(width=3)), group(), stroke(1, ROTATED), stroke(2), POP]
+    out["scripted-stroke-plain.bin"] = header() + body_with_line(plain)
+    out["scripted-stroke-float.bin"] = header(target=T64 | 3) + body_with_line(plain)
+    out["scripted-stroke-damage.bin"] = header(request=DAMAGE | EXTENT) + body_with_line(plain)
+    out["scripted-stroke-caller-memory.bin"] = header(request=CALLER_MEMORY) + body_with_line(plain)
+    out["scripted-stroke-damage-float-memory.bin"] = header(target=T64 | 2, request=DAMAGE | CALLER_MEMORY) \
+        + body_with_line(plain)
+    out["scripted-stroke-hairline.bin"] = header() + body_with_line(
+        [fill(0), stroke(2, first=style(space=1)), stroke(1), stroke(2, ROTATED)])
+    out["scripted-stroke-sparse.bin"] = header() + body_with_line([stroke(2, first=style()), stroke(2)])
+    out["scripted-stroke-joins.bin"] = header() + body_with_line(
+        [stroke(0, first=style(width=3, join=1, cap=2)), stroke(1, ROTATED), stroke(2)])
+    out["scripted-stroke-bevel-arcs.bin"] = header() + body_with_line(
+        [stroke(0, first=style(width=5, join=4, cap=1, miter1=1)), stroke(1)])
+    out["scripted-stroke-dashes.bin"] = header() + body_with_line(
+        [stroke(0, first=style(width=2, dashes=1, cap=1, offset=1)), stroke(1), stroke(2)])
+    out["scripted-stroke-dash-path.bin"] = header() + body_with_line(
+        [stroke(0, first=style(width=2, dashes=3, scope=1, cap=1)), stroke(1), stroke(2, ROTATED)])
+    out["scripted-stroke-inside.bin"] = header() + body_with_line(
+        [fill(0), stroke(0, first=style(width=3, alignment=1)), stroke(1, ROTATED), stroke(2)])
+    out["scripted-stroke-outside-even-odd.bin"] = header() + body_with_line(
+        [stroke(0, first=style(width=3, alignment=2, rule=1)), stroke(1), group(3, 9), stroke(0), POP])
+    out["scripted-stroke-aligned-caller-memory.bin"] = header(request=CALLER_MEMORY | DAMAGE) + body_with_line(
+        [stroke(0, first=style(width=3, alignment=1)), stroke(1, ROTATED)])
+    out["scripted-stroke-aligned-float.bin"] = header(target=T64 | 3) + body_with_line(
+        [stroke(0, first=style(width=3, alignment=2)), stroke(1, ROTATED)])
+    out["scripted-stroke-gradient.bin"] = header() + body_with_line(
+        [stroke(0, gradient=LINEAR, first=style(width=3)), stroke(1, ROTATED, gradient=RADIAL),
+         stroke(2, gradient=SWEEP)])
+    out["scripted-stroke-zero-width.bin"] = header(request=STRICT) + body_with_line(
+        [fill(0), stroke(0, first=style(width=1)), stroke(1)])
+    out["scripted-stroke-point-cap.bin"] = header(limit=1) + body_with_line([stroke(1, first=style(width=3))])
+    out["scripted-stroke-cell-cap.bin"] = header(limit=2 | 16) + body_with_line(
+        [stroke(0, first=style(width=3)), stroke(1)])
+    out["scripted-stroke-cell-cap-damage.bin"] = header(request=DAMAGE, limit=2 | 24) + body_with_line(
+        [stroke(0, first=style(width=3, alignment=1)), stroke(1)])
+    out["scripted-stroke-strict-cap.bin"] = header(request=STRICT, limit=1) + body_with_line(
+        [stroke(1, first=style(width=3)), fill(0)])
     # Found by the first libFuzzer soak (story 16): strict, a damage and a small cell cap. The damage-limited render
     # passed and the whole render met the cap outside the damage, so it was refused. Since 2026-10-21 the cap is met
     # over the whole render's region whatever the damage (S4), and the harness requires both to agree.

@@ -169,6 +169,10 @@ inline GSHSCENE_List * prefix(const GSHSCENE_List * list, GSHSCENE_Store * store
         EXPECT_EQ(gshscene_list_fill(out, it->resource, &it->map, it->fill_rule, &it->paint, it->layer, it->depth),
             GSHSCENE_OK);
         break;
+      case GSHSCENE_ITEM_STROKE:
+        EXPECT_EQ(gshscene_list_stroke(out, it->resource, it->style, &it->map, &it->paint, it->layer, it->depth),
+            GSHSCENE_OK);
+        break;
       case GSHSCENE_ITEM_CLIP_PUSH:
         EXPECT_EQ(gshscene_list_clip_push(out, it->resource, &it->map, it->fill_rule, it->layer, it->depth), GSHSCENE_OK);
         clips++;

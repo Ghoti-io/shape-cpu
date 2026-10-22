@@ -87,13 +87,13 @@ keeps its own spelling, which is committed in its goldens.
 `gshcpu_sink_create` makes a `GSHSCENE_Sink` (shape-scene's sink.h, S1 to S16).
 It draws `RASTER` targets of RGBA, interleaved, 8-bit unsigned normalized or
 32-bit float, straight or premultiplied as the raster's format says; every other
-target is `ERR_UNSUPPORTED`. Its caps are the six item kinds it draws (a stroke, shape-scene's kind 7, is refused `ITEM_KIND` by the planning pass
-until strokes story S4) and every operator it composites, each named one by one (the
+target is `ERR_UNSUPPORTED`. Its caps are the seven item kinds it draws (the stroke, shape-scene's kind 7, among them: SC1 below) and every operator it composites, each named one by one (the
 Porter-Duff operators, `PLUS` and the fifteen blend modes; none of PDF's group fields, which the plan refuses),
 `CAN_BLOCK`, `CALLER_MEMORY`, `CLIP_AA`, `BLEND_SPACES`, `READBACK`,
 `GLYPHS_FROM_FONT` (story 14a), every gradient kind with `GRADIENT_SPACES`
-(color-paint story P2), and cancel between units with a bound of
-`max_points + max_cells + max_bytes` in cells, points and pixels. The planning
+(color-paint story P2), `STROKE_EXPAND` with no stroke feature native, and cancel between units with a bound in cells,
+points and pixels that is `max_points + max_cells + max_bytes` for a fill and, for an aligned stroke,
+`3 max_points + max_cells + 2 max_bytes + elements * GSHGEOM_STROKE_MAX_DEPTH`. The planning
 pass is the contract layer's; the sink decides each unit with the same predicate
 (and a run from a font with shape-scene's route), skips what it refused, and adds
 only the entries it finds while drawing: an item past one of its resource
@@ -191,6 +191,75 @@ tolerance (`2^64 + 1 - 2^64` in screen, a value within its own error of one of B
 generator refuses it. Three fixtures (`blend-separable`, `blend-non-separable`, `blend-out-of-range`) add twelve
 goldens; every earlier golden is unchanged.
 
+### Strokes (SC1 to SC11)
+
+A stroke is a fill with another coverage, and `render.h` states the rules SC1 to SC11 that make it one. This section
+says why they are what they are and what each costs.
+
+**Nothing here strokes.** `src/render/stroke.c` calls `gshgeom_stroke_expand` and covers what it returns; it has no
+join, no cap, no offset and no dash. The style reaches it through shape-scene's one conversion
+(`gshscene_resource_stroke_geometry`), so the table of fields is written once and a field added to the style cannot be
+dropped by one sink and kept by another. Every field is honored by the expansion except the alignment, whose three
+parts the sink composes (SC5); that is why the caps claim `STROKE_EXPAND` and no native feature, and why no stroke is
+ever refused for its style.
+
+**The translation is split (SC3).** The expansion rounds each vertex to 26.6 after the map, so its bits depend on the
+map's translation, and a cache that served one translation's outline for another would make a picture depend on what was
+drawn before it. The region does not depend on position, so `gshgeom_stroke_canonical_map` splits the translation into
+whole pixels and a fraction in `[0, 1)`; the expansion is made with the fraction only and covered over the rectangle
+moved the other way by the whole pixels. The outline is then a function of the centerline, the style, the linear part and
+the fraction, and the same bits at every whole-pixel translation, which is the entry a cache can share. A sub-pixel
+animation misses every frame; scrolling that snaps to whole pixels hits every frame.
+
+**Three coverages become one (SC5).** The body, the aligned part and the clip path are each covered as a fill is. The
+composition is the union formula in D8's integer arithmetic, so `k` is exact where either part is (a centered stroke is
+the body's coverage bit for bit) and never above 255. Absent parts are zero, which is also why the arrays for the aligned
+part and the clip exist only when the list holds a stroke that aligns.
+
+**What the coverage is, and its tolerance.** The outline is a set of pieces (a quadrilateral for each stretch of a curve,
+a triangle or sector for each join, a shape for each cap) wound positively, and `k` is the coverage of their nonzero fill
+under story 9's accumulation: AD-12's definition, a saturating sum of signed areas. A pixel that two pieces cover in
+part with the pieces overlapping inside it is credited the sum of the two areas, up to the overlap more than the union's
+area. Interior and exterior pixels are exact. The bracket of SC5 (`tests/stroke_gate.h`, one function another backend
+can call on its own coverage) is the stroke's stated tolerance against the geometric oracle; the overshoot past the
+union it measures is the quantity `o` bounds.
+
+**The cache (SC7)** is keyed by resource ids, never by the resources' addresses or contents, because ids are never reused
+(a stale entry costs memory and nothing else). The value is the immutable outline. The bound is on the bytes the table
+accounts for (an entry's points and subpaths and a fixed overhead for its parts), and the order of eviction is least
+recently used first among the entries no render has pinned. A pinned entry that is evicted is unlinked and freed by the
+last render to release it. The lock is held for the lookup, the insert and the eviction, never across an expansion, so
+two renders that miss the same key both expand and the second to insert drops its copy. A hit checks the entry's parts
+against the current `max_points`, so a hit refuses exactly what a miss would. `CALLER_MEMORY` is the one mode that does
+not touch the cache, because that mode allocates nothing and its exact workspace may not depend on what an earlier
+render left behind.
+
+**Fast tiers (SC8).** The list of tiers, each with its detection, its counter and the gate that holds it equal to the
+general tier (which can be forced, and is the oracle):
+
+| Tier | Detection | Counter |
+| --- | --- | --- |
+| FT-1 cached expansion | the key is in the cache | `cache_hits` |
+| FT-2 sparse composite, solid hairline | a solid paint, one part, a bound of the deposits from the edges alone within a sixteenth of the rectangle's pixels and within `max_cells`; device width 1 | `sparse_hairline` |
+| FT-2 sparse composite, plain solid stroke | the same, any other width | `sparse_plain` |
+
+A second stroker for hairlines (a polyline offsetter that skips joins and caps) would be a second definition of SG6 to
+SG9 and cannot meet 1/16 of a pixel at width 1 (a round join at that width has a radius of half a pixel), so there is
+none. The cost of a thin stroke lies in its rectangle, which is mostly empty, not in its joins; the sparse composite
+drops that cost: it keeps the cell accumulator's rows clean between strokes, notes the first and last column each row
+deposited in, sweeps only those columns (and the constant tail, if the row ends inside a shape), and hands the sweep's
+bytes to the composite row by row, which composites the nonzero ones. Every skipped pixel has coverage zero and is not
+touched by the general loop either. The rectangle the detection reads is the outline's own (the pixels its points
+touch), never the damage or the clips, so whether a stroke takes the tier is a function of the stroke. Because every
+deposit of a row costs at least a cell, the tier is taken by strokes whose rectangle is large against their edges: long
+lines, axis-parallel ones above all (their long edges deposit nothing). A ring, a round join or a cap is a piece of
+its own with edges of its own, and counts.
+
+**Work.** A stroke counts the points of its parts, its cell deposits, the pixels of its rectangle (twice when it
+aligns) and the expansion's steps, whether the expansion was made or found, so that the report a render writes does not
+depend on the cache or on a tier. The expansion's steps are bounded by the depth cap for each element of the centerline,
+clamped to the resource limit of the store, which is the term the declared cancel bound adds.
+
 ### Why the layers cover the region, not bands of it
 
 D7 names `double` *bands*. The compositor works item by item over layers that
@@ -275,7 +344,8 @@ over its cells, and a whole render is unchanged.
 ### Memory
 
 A render takes one block (the walk, the frames, the layers, the maps, the
-touched map, the coverage, the clip coverages, the accumulator) from the sink's
+touched map, the coverage, the clip coverages, the accumulator, and for a list
+with a stroke that aligns three more arrays of a byte a pixel) from the sink's
 allocator, and the geometry of each item from the same allocator, released
 before the next item. With `CALLER_MEMORY` all of it comes from the workspace:
 the block first, then an arena (src/render/arena.c) for the geometry, reset at
@@ -290,7 +360,8 @@ allocated and no need in the summary (S9, decided 2026-10-21: before, the sink
 measured the need over its own allocator to report it). The query,
 `gshscene_sink_workspace_bytes`, gives the exact need, over the sink's allocator
 when the caller's workspace is too small. The need depends on the list and the
-region only, never on the workspace's address.
+region only, never on the address of the caller's memory. A stroke's expansion is geometry like any item's: made from the arena, and
+measured by the same conversion; the stroke cache is not used by such a render (SC7).
 
 ### The hash of a render
 
@@ -312,6 +383,18 @@ writes. `make check-planted` builds each defect in `tools/check-planted.py` and
 requires a test to fail on it (the defects it accepts as invisible, with
 reasons, are in its docstring). `suite/tools/xarch/shape.sh` (section 7) and
 `suite/tools/xwin/shape.sh` run the cross-target probe on every target.
+
+The stroke tests (`test_render_stroke.cpp`): the style's every value drawn and none refused for its style; a stroke at
+a whole-pixel translation is the same pixels moved, bit for bit, and another fraction another picture; the test sink's
+`outline=` is the hash of the outline drawn; what draws nothing (a singular chain, a singular product of invertible
+maps, width 0, a degenerate gradient) with one notice and strict `OK`; the composition against the rational union over
+every coverage; a centered stroke against a fill of its own body; each limit at its bound (points, cells summed over the
+parts and counted whole, a shifted coordinate, a map product); the cache (a hit equals a miss, the bound, the eviction
+by id, destruction, a bound of 1, an entry larger than the bound, caller memory neither reading nor writing it, threads);
+the tiers over the stroke fixtures on all four formats against the forced general tier, each taken; damage over aligned
+and centered strokes; groups; a stroked run refused for its centerline; the work within the declared bound.
+`tests/stroke_gate.h` is the bracket against the geometric oracle that shape-geometry installs
+(`<ghoti.io/shape-geometry/testing/stroke_oracle.h>`).
 
 The sink's tests: shape-scene's conformance suite, installed by shape-scene as
 `<ghoti.io/shape-scene/testing/sink_conformance.h>` and run unchanged

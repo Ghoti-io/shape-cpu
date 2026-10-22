@@ -33,9 +33,9 @@
  * premultiplied alpha form the raster's format records (it is read, never
  * assumed).  Every other format (gray, CMYK, planar, 12 or 16 bits), a `STREAM`
  * target and the reserved GPU kinds are ::GSHSCENE_ERR_UNSUPPORTED.  For a target
- * it draws, the caps are: the six item kinds it draws (fill, clip push and
- * pop, group push and pop, instance), named one by one, so that a kind
- * shape-scene adds later (the stroke, kind 7) is refused by the planning pass
+ * it draws, the caps are: the seven item kinds it draws (fill, clip push and
+ * pop, group push and pop, instance, stroke), named one by one, so that a kind
+ * shape-scene adds later is refused by the planning pass
  * (`ITEM_KIND`) and never reaches the sink; the composite operators it
  * composites, named one by one (the twelve Porter-Duff operators, `PLUS` and the
  * fifteen blend modes of color-paint story P3; an operator past them is refused
@@ -47,13 +47,14 @@
  * is drawn through its face's provider by shape-scene's route, glyph.h, the fast
  * tier wherever the route returns it); every gradient kind and `GRADIENT_SPACES`
  * (color-paint story P2: linear, radial and sweep, each in its stated
- * interpolation space); no `THREAD_AFFINE` (it holds no mutable
- * state of its own, so renders on distinct surfaces may run at once) and no
+ * interpolation space); `STROKE_EXPAND` and no stroke feature native (SC1); no `THREAD_AFFINE` (what it holds
+ * across renders, the cache of SC7, is guarded by one lock, so renders on distinct surfaces may run at once) and no
  * `PREPARE`.  Cancel is `BETWEEN_UNITS` (each unit
  * of the list's expansion); the work between two checks is counted in
- * `"cells+points+pixels"` and its bound is `max_points + max_cells + max_bytes`
- * of the sink's ::GSHCPU_Limits (each at its default when zero; `max_points`
- * defaults to `shape-geometry`'s).
+ * `"cells+points+pixels"` and its bound (SC11) is, for an aligned stroke,
+ * `3 max_points + max_cells + 2 max_bytes + elements * GSHGEOM_STROKE_MAX_DEPTH` of the sink's ::GSHCPU_Limits (each
+ * at its default when zero; `max_points` defaults to `shape-geometry`'s; `elements` is the most path elements a
+ * resource may hold, shape-scene's `max_resource_elements` of the limits the sink was created with).
  *
  * ### Geometry (S16, AD-12, AD-24)
  *
@@ -204,6 +205,76 @@
  *   tolerance, which near zero, where floats are far finer than it, is a range of
  *   floats.
  *
+ * ### Strokes (SC1 to SC11)
+ *
+ * A stroke is a fill with another coverage.  Which polygon, in which frame, and how its parts become one 8-bit
+ * coverage is decided here; the clips, the layers, the operators, the paint and its per-pixel source are the fill's.
+ * The polygon is `shape-geometry`'s one expansion: this sink offsets, joins, caps and dashes nothing itself.
+ * Every rule is in real arithmetic unless stated, and numbered so that tests and `design.md` cite it.
+ *
+ * - **SC1 What the sink claims, and how it honors each field.**  The caps gain the item kind `STROKE` (7) and
+ *   `STROKE_EXPAND`; `stroke_native` stays 0, so every required feature is met by expansion and no stroke is refused
+ *   for its style.  `width` and `width_space`, `join`, `miter_limit`, `cap`, `degenerate` and the dash fields are
+ *   honored by the expansion; `alignment` and `alignment_rule` by the expansion's three parts and then by this
+ *   sink (SC5), the one place it acts on a style field; `width_profile` never reaches it (refused at intern).  Every
+ *   paint kind draws.  A centerline that is a glyph run is refused by the planning pass, `STROKE_CENTERLINE`
+ *   (this sink does not set `STROKE_RUNS`).  The entries a stroke can receive while drawing are the fill's plus
+ *   `RESOURCE_LIMIT` (SC6).
+ * - **SC2 The style conversion.**  `gshscene_resource_stroke_geometry` converts the style to `shape-geometry`'s
+ *   parameters field by field, each enumeration asserted equal at compile time; `gshgeom_stroke_check` accepts every
+ *   style the store interns (a style that passes the store and fails the check is an internal error).
+ * - **SC3 The expansion map and the canonical translation.**  The map is `gshgeom_map_compose_chain(instances, item,
+ *   target)`, 2D.  Its translation is split exactly into its whole pixels and a fraction in `[0, 1)`
+ *   (`gshgeom_stroke_canonical_map`); the expansion is made at the default tolerance at the map with the fraction
+ *   only, and the outline is drawn moved by the whole pixels (the rectangle covered is moved the other way; nothing is
+ *   copied).  The region is translation-invariant, so SG17 holds at the true map; and the outline is a function of the
+ *   centerline, the style, the linear part and the fraction alone.  A coordinate the shift takes past
+ *   ::GSHCPU_RENDER_COORD_LIMIT (2^24 pixels) is the sink's resource limit.
+ * - **SC4 What draws nothing.**  A unit is skipped by `gshscene_stroke_notice`, which the plan wrote (some map of the
+ *   chain, or the composed map, singular; then width 0; then a degenerate gradient): the sink writes no notice and
+ *   never fails strict.  A composed map that cannot be formed is not a notice but SC6's limit.  Should the expansion
+ *   return `EMPTY` or `NOT_INVERTIBLE` anyway, nothing is drawn.
+ * - **SC5 Coverage and its composition.**  The parts are covered as fills are (story 9's accumulation, 8 bits): `b`
+ *   from the body (nonzero), `a` from the aligned part (nonzero), `c` from the clip path under its rule over the aligned
+ *   part's rectangle.  With `c' = c` (inside) or `255 - c` (outside, the outline's complement flag) and 8-bit integers,
+ *   `t = (a c' + 127) / 255` (D8's weigh) and `k = 255 - ((255 - b)(255 - t) + 127) / 255`: the union
+ *   `k_b + k_a c' - k_b k_a c'` in D8's arithmetic, exact at both ends, monotone, never above 255.  Absent parts are 0,
+ *   so a centered stroke is `k = b`, bit for bit what a fill of the body gives.  `k` then replaces the fill's coverage.
+ *   A gradient stroke is the fill's gradient path with this `k`, sampled in the item's local space under the chain
+ *   `T I_1 ... I_k M G`.  The coverage's tolerance is a **bracket**, `A(R minus D(tau)) - e <= k <= A(R plus D(tau)) + e
+ *   + o`, with `A` the area inside the pixel, `D(tau)` the disc of the expansion's tolerance, `e` the 8-bit rounding and
+ *   `o = 16/255` the overlap allowance: AD-12's accumulation sums the signed areas of overlapping pieces, so a pixel
+ *   two pieces cover in part (an inner join) can be credited up to their overlap more than their union.  Interior and
+ *   exterior pixels are exact.  Where the aligned part's boundary crosses the fill region's at an angle `alpha` the
+ *   composed error may reach `tau / sin(alpha / 2)`.
+ * - **SC6 Limits.**  A map or device path the geometry refuses, the expansion's `ERR_LIMIT` (a part past `max_points`,
+ *   the depth cap, the arithmetic bound), a shifted coordinate past the range, or cell deposits past `max_cells` (summed
+ *   over the item's parts and counted over what the whole render draws of the item, never only the damage) are the
+ *   sink's resource limit: the item is refused while drawing, strict stops with the finished prefix.  A refusal never
+ *   depends on the cache.  `ERR_OOM` is `ERR_OOM`.
+ * - **SC7 The expansion cache.**  The sink keeps expansions across renders: by the centerline's and the style's resource
+ *   ids, the bit patterns of the canonical map's linear part and fraction, and the construction's revision.  A hit is
+ *   the miss bit for bit.  It is bounded by ::GSHCPU_Limits `max_cache_bytes` (0 is 16 MiB, 1 keeps nothing, `UINT64_MAX`
+ *   no cap), least recently used first; an entry larger than the bound is used for its render and not kept; an entry a
+ *   render is using is never freed under it.  `gshscene_sink_evict` drops every entry naming the id; destruction drops
+ *   all; `static_bytes` reports the bytes held.  One lock guards the table, held for a lookup, an insert and an eviction
+ *   and never across an expansion.  A `CALLER_MEMORY` render neither reads nor writes the cache: its expansion lives in
+ *   the caller's memory (an arena) and is measured with any item's geometry.
+ * - **SC8 Fast tiers.**  Each tier is bit-equal to the general tier, which is the oracle and can be forced.  *FT-1* is
+ *   the cached expansion.  *FT-2* is the sparse composite: for a stroke with a solid paint and one part (centered, or no
+ *   closed subpath aligned) whose cell deposits are bounded, from its edges alone, by a sixteenth of the pixels of its
+ *   own rectangle (and by `max_cells`), the sweep hands over a row at a time only the pixels that can be nonzero.  It
+ *   is detected as a *solid hairline* (device width 1) or a *plain solid stroke* (any other width), each counted.
+ * - **SC9 Groups and order.**  A stroke is one unit of its sequence.  In an isolated group it composites `SRC_OVER`
+ *   into the group's layer and the group's blend mode acts at its pop.  A non-isolated, knockout or soft-masked group is
+ *   refused as before, and the strokes inside are skipped.
+ * - **SC10 The test sink.**  shape-scene's test sink states, for a stroke whose centerline is a path, the hash of the
+ *   outline this sink draws on a raster target (`outline=` of its `K` record): the canonical expansion of SC3.
+ * - **SC11 Work and cancel.**  A stroke counts the points of its parts, the cell deposits, two passes over its pixels
+ *   when aligned and one otherwise, and the expansion's own steps (the centerline's elements times the depth cap,
+ *   clamped to the resource limit the bound states), counted whether the expansion was made or found so that a report
+ *   does not depend on the cache or the tier.
+ *
  * ### Memory (S9)
  *
  * A render takes one block: the layers (32 bytes a pixel of the region for the
@@ -211,7 +282,8 @@
  * scratch (a byte a pixel each), a byte a pixel for each level of clip nesting,
  * the cell accumulator of ::GSHCPU_RENDER_BAND_ROWS rows, the walk, and for
  * gradients a table of twice the gradient fills of the expansion (a picture's
- * counted where it is drawn) and room for their stops.  The
+ * counted where it is drawn) and room for their stops, and, only when the expansion holds a stroke that aligns, three
+ * more arrays of a byte a pixel (the aligned part, the clip path's coverage and their composition, SC5).  The
  * geometry of each item (its device path and flattened path) is allocated from
  * the sink's allocator, or with `CALLER_MEMORY` from the rest of the workspace,
  * which is sized by converting every item once: the exact need is the block plus
@@ -229,7 +301,7 @@
  * The region drawn is at most `max_dimension` pixels wide and tall, at most
  * `max_bytes` pixels in all, and lies within ::GSHCPU_MAX_DIMENSION_CEILING
  * pixels of the origin; past either it is ::GSHSCENE_ERR_LIMIT before anything is
- * drawn.
+ * drawn.  `max_cache_bytes` bounds the stroke cache (SC7).
  *
  * ### Hash and dump of a render (AD-21)
  *

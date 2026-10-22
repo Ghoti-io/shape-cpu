@@ -135,6 +135,9 @@ typedef struct Cover {
   uint64_t cells;
   uint64_t max_cells;
   int over;             /* a deposit would have passed max_cells */
+  int track;            /* the sparse sweep: note the first and last column each row of the band deposited in */
+  int64_t lo[GSHCPU_RENDER_BAND_ROWS]; /* per row of the band; > hi when the row has none */
+  int64_t hi[GSHCPU_RENDER_BAND_ROWS];
 } Cover;
 
 /** One crossing of cell (@p ex, @p ey): column @p ex left of the rectangle is the fold column. */
@@ -154,6 +157,15 @@ static void deposit(Cover * c, int64_t ex, int64_t ey, int64_t dy, int64_t fx1, 
   size_t at = (size_t)((ey - c->band) * c->stride + column);
   c->cover[at] += dy;
   c->area[at] += dy * (fx1 + fx2);
+  if (c->track) {
+    size_t row = (size_t)(ey - c->band);
+    if (column < c->lo[row]) {
+      c->lo[row] = column;
+    }
+    if (column > c->hi[row]) {
+      c->hi[row] = column;
+    }
+  }
 }
 
 /** The point where the row piece from @p from to @p to crosses the column boundary at @p b. */
@@ -419,4 +431,99 @@ uint64_t gshcpu_render_cells_bound(const GSHGEOM_Flat_Path * const * paths, size
     }
   }
   return bound;
+}
+
+/* --- the sparse sweep (FT-2, strokes story S4) ---------------------------------------------------------------- */
+
+/**
+ * Sweep the band's rows that deposited something and hand each one's coverages to @p fn, then clear what was
+ * written.  A column before a row's first deposit has an accumulated cover of zero and no area, so its coverage is
+ * zero; the columns after its last have the accumulated cover and no area of their own, so their coverage is one
+ * constant, which is the dense sweep's value there too (the fold column is a deposit at column 0).
+ */
+static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx) {
+  for (int64_t r = 0; r < c->rows; r++) {
+    if (c->hi[r] < c->lo[r]) {
+      continue; /* no deposit: the row is zero */
+    }
+    int64_t * cv = c->cover + r * c->stride;
+    int64_t * ar = c->area + r * c->stride;
+    int64_t lo = c->lo[r];
+    int64_t hi = c->hi[r];
+    int64_t j0 = lo > 1 ? lo : 1;
+    int64_t accumulated = cv[0] * (ONE_PIXEL * 2);
+    int64_t j = j0;
+    for (; j <= hi && j <= width; j++) {
+      accumulated += cv[j] * (ONE_PIXEL * 2);
+      line[j - j0] = fold(accumulated - ar[j], rule);
+    }
+    int64_t last = j - 1; /* the last column given a value; j0 - 1 when none */
+    uint8_t tail = fold(accumulated, rule);
+    if (tail != 0 && last < width) {
+      for (int64_t t = last + 1; t <= width; t++) {
+        line[t - j0] = tail;
+      }
+      last = width;
+    }
+    if (last >= j0) {
+      fn(ctx, c->band + r, c->rect.x0 + (j0 - 1), (size_t)(last - j0 + 1), line);
+    }
+    for (int64_t t = lo; t <= hi && t <= width; t++) {
+      cv[t] = 0;
+      ar[t] = 0;
+    }
+  }
+}
+
+GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, int64_t * acc, uint8_t * line, uint64_t max_cells, uint64_t * cells,
+    GSHCPU_Span_Fn fn, void * ctx) {
+  Cover c;
+  memset(&c, 0, sizeof c);
+  c.rect = rect;
+  c.walk = walk;
+  c.stride = rect.x1 - rect.x0 + 1;
+  c.max_cells = max_cells;
+  int64_t width = rect.x1 - rect.x0;
+  if (gshcpu_render_rect_empty(rect)) {
+    count_rows(&c, paths, count, walk.y0, walk.y1);
+  } else {
+    count_rows(&c, paths, count, walk.y0, rect.y0);
+    count_rows(&c, paths, count, rect.y1, walk.y1);
+  }
+  if (c.over) {
+    *cells = c.cells;
+    return GSHCPU_ERR_LIMIT;
+  }
+  for (int64_t band = rect.y0; band < rect.y1; band += GSHCPU_RENDER_BAND_ROWS) {
+    c.band = band;
+    c.rows = rect.y1 - band < (int64_t)GSHCPU_RENDER_BAND_ROWS ? rect.y1 - band : (int64_t)GSHCPU_RENDER_BAND_ROWS;
+    size_t n = (size_t)(c.rows * c.stride);
+    c.cover = acc;
+    c.area = acc + n;
+    c.track = 1;
+    for (int64_t r = 0; r < c.rows; r++) {
+      c.lo[r] = INT64_MAX;
+      c.hi[r] = -1;
+    }
+    for (size_t i = 0; i < count && !c.over; i++) {
+      if (paths[i]) {
+        path_edges(&c, paths[i]);
+      }
+    }
+    if (c.over) {
+      /* Leave the accumulator clean, as it was found: clear what the deposits made before the limit wrote. */
+      for (int64_t r = 0; r < c.rows; r++) {
+        for (int64_t t = c.lo[r]; t <= c.hi[r]; t++) {
+          c.cover[r * c.stride + t] = 0;
+          c.area[r * c.stride + t] = 0;
+        }
+      }
+      *cells = c.cells;
+      return GSHCPU_ERR_LIMIT;
+    }
+    sweep_band(&c, rule, width, line, fn, ctx);
+  }
+  *cells = c.cells;
+  return GSHCPU_OK;
 }

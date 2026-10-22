@@ -25,9 +25,12 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   outline glyph runs, in premultiplied `double` with one rounding at the write.
   It passes shape-scene's sink conformance suite, cancels between list items,
   takes its memory from a caller's workspace when asked, and draws damage
-  exactly. `gshcpu_render_hash` and `gshcpu_render_dump` spell a render; the
+  exactly. Strokes: a centerline and a style, drawn by `shape-geometry`'s one expansion (every join, cap,
+  dash, width space and alignment), the expansion cached by resource id and the map's linear part and fractional
+  translation, so that a whole-pixel translation of a stroke reuses it (`GSHCPU_Limits.max_cache_bytes`).
+  `gshcpu_render_hash` and `gshcpu_render_dump` spell a render; the
   fixture set's renders are committed goldens, the same on every target.
-  `examples/render.c` renders a list.
+  `examples/render.c` renders a list; `examples/stroke.c` strokes a path and shows the cache serve a translation.
 
 ## Building
 

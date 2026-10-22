@@ -43,9 +43,12 @@
  * a solid paint's byte may give a component at `2^16` or one step past it in a
  * gamma-10 or gamma-0.1 space (past it the fill is refused, `ERR_LIMIT`; at it
  * the conversions reach the saturation), and a group may blend in gamma 0.1; a
- * float target's every stored value is then finite.  Strokes story S1: a fill whose rule byte has bits 1 and 2 set
- * is a stroke of the shape instead, which this sink refuses for its kind until it draws strokes (S4); every entry it
- * refuses for its kind is checked to be a stroke.
+ * float target's every stored value is then finite.  Strokes (stories S1 and S4): a fill whose rule byte has bits 1 and 2
+ * set is a stroke of the shape instead, in a style made once from the next three bytes: a width (zero, a hairline, a
+ * sixteenth of a pixel, wide), both width spaces, every join, cap and alignment, either alignment rule, either
+ * degenerate rule, dashes of a few patterns in either scope.  The sink draws it by expansion; a stroke of a glyph run
+ * is refused for its centerline (`STROKE_CENTERLINE`), and no stroke is ever refused for its kind.  The render is then
+ * drawn again by a second sink with every fast tier off, and the bytes must be the same.
  *
  * After the render the sink's stated properties are checked, and a violation is
  * an `abort`:
@@ -74,6 +77,8 @@
 
 #include <ghoti.io/image/raster.h>
 
+#include "../../src/render/render_internal.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -93,7 +98,8 @@ enum {
   OUT_OK = 0, OUT_REFUSED_WHILE_DRAWING, OUT_STRICT, OUT_LIMIT_REGION, OUT_CANCEL_MID, OUT_OOM, OUT_CALLER_MEMORY,
   OUT_WORKSPACE_SHORT, OUT_DAMAGE, OUT_GLYPHS_FAST, OUT_GLYPHS_GENERAL, OUT_FLOAT_TARGET, OUT_NESTED_GROUP,
   OUT_GRADIENT_DRAWN, OUT_GRADIENT_NOTICE, OUT_GRADIENT_LIMIT, OUT_COLOR_LIMIT, OUT_COLOR_AT_BOUND, OUT_BLEND_DRAWN,
-  OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_STROKE_REFUSED, OUT_COUNT
+  OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_STROKE_RUN_REFUSED, OUT_STROKE_DRAWN, OUT_STROKE_ALIGNED, OUT_STROKE_CACHED,
+  OUT_STROKE_SPARSE, OUT_STROKE_NOTICE, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -104,7 +110,9 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a gradient past G14's bounds, refused at intern", "a fill's color past N1's bound, refused",
     "a render with a color at N1's bound in a gamma space", "a render with a blend-mode group",
     "a blend-mode group on a float target", "a group of PDF's fields refused (S19)",
-    "a stroke refused for its kind (strokes story S1: drawn from S4)"};
+    "a stroke of a glyph run refused for its centerline (S20)", "a render with a stroke drawn (SC1)",
+    "a render with an aligned stroke drawn (SC5)", "a stroke served from the cache (SC7)",
+    "a stroke drawn by the sparse composite (SC8)", "a stroke that draws nothing (a notice)"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -215,6 +223,9 @@ typedef struct World {
   const GSHSCENE_Resource * runs[2]; /* from a face with the fast tier, and from one without */
   const GSHSCENE_Resource * style;   /* a stroke style, made on first use (strokes story S1) */
   size_t strokes;                    /* strokes recorded */
+  size_t aligned;                    /* ... whose style aligns */
+  int aligned_style;
+  double dashes[4];                  /* the style's dash lengths */
 } World;
 
 static void intern_paths(Input * in, GSHSCENE_Store * store, const GSHGEOM_Allocator * alloc, World * w) {
@@ -506,16 +517,38 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
        * refuses for its kind until it draws strokes (S4). */
       const uint8_t rule = next(in);
       if ((rule & 6) == 6 && !w->style) {
+        static const double widths[8] = {1.0, 0.0, 2.5, 6.0, 0.0625, 17.0, 1.5, 3.0};
+        static const double patterns[4][2] = {{0.0, 0.0}, {3.0, 2.0}, {1.0, 1.0}, {0.0, 2.0}};
+        const uint8_t a = next(in);
+        const uint8_t b = next(in);
+        const uint8_t c = next(in);
         GSHSCENE_Stroke_Style st;
         gshscene_stroke_style_init(&st);
-        st.join = GSHSCENE_STROKE_JOIN_ROUND;
+        st.width = widths[a & 7];
+        st.width_space = (a >> 3) & 1;
+        st.join = b % 5;
+        st.cap = (b >> 3) % 3;
+        st.degenerate = (b >> 5) & 1;
+        st.alignment = c % 3;
+        st.alignment_rule = (c >> 2) & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO;
+        st.miter_limit = (c >> 6) & 1 ? 1.0 : 4.0;
+        w->dashes[0] = patterns[(c >> 3) & 3][0];
+        w->dashes[1] = patterns[(c >> 3) & 3][1];
+        if ((c >> 3) & 3) {
+          st.dash_count = 2;
+          st.dashes = w->dashes;
+          st.dash_offset = (c >> 7) & 1 ? 0.5 : 0.0;
+          st.dash_scope = (c >> 5) & 1;
+        }
         GSHSCENE_Result sr = gshscene_store_intern_stroke_style(w->store, &st, &w->style);
         CHECK(sr == GSHSCENE_OK || sr == GSHSCENE_ERR_OOM || sr == GSHSCENE_ERR_LIMIT);
+        w->aligned_style = st.alignment != 0;
       }
       GSHSCENE_Result fr = (rule & 6) == 6
           ? (w->style ? gshscene_list_stroke(list, r, w->style, &map, &paint, 0, 0.0) : GSHSCENE_ERR_OOM)
           : gshscene_list_fill(list, r, &map, rule & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint, 0, 0.0);
       w->strokes += (rule & 6) == 6 && fr == GSHSCENE_OK;
+      w->aligned += (rule & 6) == 6 && fr == GSHSCENE_OK && w->aligned_style;
       if (past) {
         CHECK(fr == GSHSCENE_ERR_LIMIT || fr == GSHSCENE_ERR_OOM); /* N1: never recorded */
         outcomes[OUT_COLOR_LIMIT] += fr == GSHSCENE_ERR_LIMIT;
@@ -695,7 +728,9 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   World world;
   memset(&world, 0, sizeof world);
 
-  GSHCPU_Result cr = gshcpu_sink_create(&sink_alloc, NULL, &limits, &sink);
+  GSHCPU_Render_Counters counters;
+  GSHCPU_Result cr = gshcpu_render_sink_create_tiered(&sink_alloc, NULL, &limits, GSHCPU_RENDER_TIERS_ALL, &counters, NULL,
+      NULL, &sink);
   CHECK(cr == GSHCPU_OK || cr == GSHCPU_ERR_OOM);
   if (gshscene_store_create(&alloc, NULL, &store) != GSHSCENE_OK || !sink ||
       gshscene_report_create(&alloc, NULL, &report) != GSHSCENE_OK ||
@@ -843,12 +878,22 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
       CHECK(e.entry_class == GSHSCENE_ENTRY_REFUSED);
       outcomes[OUT_PDF_REFUSED]++;
     }
-    if (e.reason == GSHSCENE_REASON_ITEM_KIND) {
-      /* The sink claims the six kinds it draws and no other: what it refuses for its kind is a stroke. */
+    /* The sink claims the seven kinds it draws: nothing is refused for its kind, and a stroke is never refused for its
+     * style (every feature is met by expansion, SC1). */
+    CHECK(e.reason != GSHSCENE_REASON_ITEM_KIND && e.reason != GSHSCENE_REASON_STROKE_STYLE);
+    if (e.reason == GSHSCENE_REASON_STROKE_CENTERLINE) {
       const GSHSCENE_Item * item = NULL;
+      GSHSCENE_Glyph_Run run;
       CHECK(e.entry_class == GSHSCENE_ENTRY_REFUSED && e.chain_count == 1);
       CHECK(gshscene_list_item(list, e.chain[0], &item) == GSHSCENE_OK && item->kind == GSHSCENE_ITEM_STROKE);
-      outcomes[OUT_STROKE_REFUSED]++;
+      CHECK(gshscene_resource_glyph_run(item->resource, &run) == GSHSCENE_OK);
+      outcomes[OUT_STROKE_RUN_REFUSED]++;
+    }
+    if (e.entry_class == GSHSCENE_ENTRY_NOTICE && world.strokes > 0) {
+      const GSHSCENE_Item * item = NULL;
+      if (gshscene_list_item(list, e.chain[0], &item) == GSHSCENE_OK && item->kind == GSHSCENE_ITEM_STROKE) {
+        outcomes[OUT_STROKE_NOTICE]++;
+      }
     }
   }
   if (r == GSHSCENE_OK && (target_byte & 3) >= 2) {
@@ -900,6 +945,9 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     }
   }
 
+  outcomes[OUT_STROKE_DRAWN] += r == GSHSCENE_OK && counters.strokes > 0;
+  outcomes[OUT_STROKE_ALIGNED] += r == GSHSCENE_OK && counters.strokes > 0 && world.aligned > 0;
+  outcomes[OUT_STROKE_SPARSE] += counters.sparse_hairline + counters.sparse_plain > 0;
   const uint64_t first_entries = entries_hash(report);
   if (r == GSHSCENE_OK) {
     outcomes[OUT_OK]++;
@@ -920,6 +968,23 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
         ((uint8_t *)gimg_raster_pixels(again))[0] ^= 1; /* the replay gate's plant: the check below must see it */
 #endif
         CHECK(same_bytes(raster, again));
+        outcomes[OUT_STROKE_CACHED] += counters.cache_hits > 0;
+        /* The general tier is the oracle of the fast ones (SC8): a second sink with them off gives the same bytes. */
+        if (counters.strokes > 0) {
+          GSHSCENE_Sink * general = NULL;
+          GIMG_Raster * other = copy_of(backdrop, format);
+          if (other && gshcpu_render_sink_create_tiered(NULL, NULL, &limits, 0, NULL, NULL, NULL, &general) == GSHCPU_OK) {
+            target.surface = other;
+            GSHSCENE_Result r3 = gshscene_sink_render(general, &request);
+            CHECK(r3 == GSHSCENE_OK || r3 == GSHSCENE_ERR_OOM);
+            if (r3 == GSHSCENE_OK) {
+              CHECK(same_bytes(raster, other));
+            }
+            target.surface = again;
+          }
+          gshscene_sink_destroy(general);
+          gimg_raster_destroy(other);
+        }
         /* Inside the damage the damage-limited render is the whole render. */
         if (request_byte & 8) {
           memcpy(gimg_raster_pixels(again), gimg_raster_pixels_const(backdrop), raster_bytes(backdrop));

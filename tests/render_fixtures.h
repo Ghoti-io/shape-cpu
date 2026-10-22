@@ -48,6 +48,14 @@
  * | gradient-paints | interpolation in linear sRGB premultiplied and in a P3 gamma, foreground and palette stops, equal offsets, a group in another blend space under a clip, a picture instanced turned, and two fills that draw nothing (degenerate, a flat map) |
  * | blend-separable | (color-paint story P3) each of the eleven separable blend modes, a group per cell over a partly transparent backdrop, with partial coverage, a clip, and opacity 0.8 on every other cell |
  * | blend-non-separable | the four non-separable modes over a saturated and a grey backdrop, in the target's sRGB-encoded space and inside a linear-light parent group (B5), and a blending group with a space of its own |
+ * | strokes-joins | (strokes story S4) a zigzag stroked with each of the five joins (a miter limit that makes one miter a bevel), a closed curve, a tight corner |
+ * | strokes-caps | open lines with each cap, dashes with each cap and dots, a path-scoped pattern across subpaths, degenerate subpaths drawn and omitted |
+ * | strokes-widths | local width under a non-uniform scale (the elliptical pen), device width under a scale, hairlines, a wide stroke, a width under a quarter of a pixel |
+ * | strokes-align | inside and outside alignment of a square, a star under both rules, a figure of a closed and an open subpath, dashed and with round joins |
+ * | strokes-paints | linear, radial and sweep gradients, a foreground, a translucent and a premultiplied-space color on strokes, with a fill under each |
+ * | strokes-groups | strokes in isolated groups (opacity, multiply, a clip), a fill and a stroke of one element, strokes of one path at whole-pixel translations and at a fraction |
+ * | strokes-sparse | long hairlines and plain strokes, flat and slanted, far longer than the raster: the sparse composite is taken |
+ * | strokes-nothing | strokes that draw nothing: width 0, a singular map, a singular product, a degenerate gradient |
  * | blend-out-of-range | blend modes on sources out of range (negative, above 1, the recorded bound 2^16), dodge and burn past their poles, ClipColor with both steps, in a gamma-0.1 parent, nested blending groups, and a blend over the backdrop's transparent pixels |
  */
 
@@ -71,7 +79,7 @@
 /** What one fixture's lists hold on to; released by rf_release. */
 typedef struct RF_Ctx {
   GSHSCENE_Store * store;
-  const GSHSCENE_Resource * held[96];
+  const GSHSCENE_Resource * held[192];
   size_t held_count;
   GSHSCENE_List * lists[8];
   size_t list_count;
@@ -857,6 +865,373 @@ static inline GSHSCENE_List * rf_blend_out_of_range(RF_Ctx * c) {
   return l;
 }
 
+/* --- strokes (strokes story S4) -------------------------------------------------------------------------------- */
+
+/** A style: every field named, the dashes copied by the store. */
+static inline const GSHSCENE_Resource * rf_style(RF_Ctx * c, double width, uint32_t space, uint32_t join, double miter,
+    uint32_t cap, uint32_t degenerate, const double * dashes, size_t dash_count, double offset, uint32_t scope,
+    uint32_t align, GSHGEOM_Fill_Rule rule) {
+  GSHSCENE_Stroke_Style st;
+  gshscene_stroke_style_init(&st);
+  st.width = width;
+  st.width_space = space;
+  st.join = join;
+  st.miter_limit = miter;
+  st.cap = cap;
+  st.degenerate = degenerate;
+  st.dash_count = dash_count;
+  st.dashes = dashes;
+  st.dash_offset = offset;
+  st.dash_scope = scope;
+  st.alignment = align;
+  st.alignment_rule = rule;
+  const GSHSCENE_Resource * r = NULL;
+  rf_check(c, gshscene_store_intern_stroke_style(c->store, &st, &r) == GSHSCENE_OK);
+  return rf_hold(c, r);
+}
+
+/** A plain style: width, join, cap, local, centered. */
+static inline const GSHSCENE_Resource * rf_pen(RF_Ctx * c, double width, uint32_t join, uint32_t cap) {
+  return rf_style(c, width, GSHSCENE_STROKE_WIDTH_LOCAL, join, 4.0, cap, GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0,
+      GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO);
+}
+
+static inline void rf_stroke(RF_Ctx * c, GSHSCENE_List * l, const GSHSCENE_Resource * path, const GSHSCENE_Resource * style,
+    const GSHGEOM_Map * map, GSHSCENE_Paint paint) {
+  rf_check(c, gshscene_list_stroke(l, path, style, map, &paint, 0, 0.0) == GSHSCENE_OK);
+}
+
+/** A polyline through @p n points, closed or open. */
+static inline const GSHSCENE_Resource * rf_polyline(RF_Ctx * c, const double * xy, size_t n, int closed) {
+  GSHGEOM_Path * p = rf_path(c);
+  for (size_t i = 0; i < n; i++) {
+    i == 0 ? gshgeom_path_move_to(p, rf_pt(xy[2 * i], xy[2 * i + 1])) : gshgeom_path_line_to(p, rf_pt(xy[2 * i], xy[2 * i + 1]));
+  }
+  if (closed) {
+    gshgeom_path_close(p);
+  }
+  return rf_intern(c, p);
+}
+
+static inline GSHGEOM_Map rf_move(double tx, double ty) {
+  GSHGEOM_Map m;
+  gshgeom_map_translate(2, tx, ty, 0.0, &m);
+  return m;
+}
+
+static inline GSHSCENE_List * rf_strokes_joins(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  static const double zig[10] = {0.0, 8.0, 5.0, 1.0, 10.0, 8.0, 14.0, 2.0, 17.0, 7.0};
+  const GSHSCENE_Resource * z = rf_polyline(c, zig, 5, 0);
+  static const uint32_t joins[5] = {GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_JOIN_BEVEL,
+      GSHSCENE_STROKE_JOIN_MITER_CLIP, GSHSCENE_STROKE_JOIN_ARCS};
+  for (int i = 0; i < 5; i++) {
+    GSHGEOM_Map m = rf_move(2.0 + 14.5 * (double)(i % 3) + 0.25 * i, 2.5 + 15.0 * (double)(i / 3) + 0.125 * i);
+    GSHSCENE_Paint paint = rf_solid(0.1 + 0.2 * i, 0.5, 0.9 - 0.15 * i, 1.0);
+    /* the zigzag's sharp corners exceed a miter limit of 2: a bevel under miter, a clipped miter under miter-clip and arcs */
+    rf_stroke(c, l, z, rf_style(c, 2.5, GSHSCENE_STROKE_WIDTH_LOCAL, joins[i], 2.0, GSHSCENE_STROKE_CAP_BUTT,
+                                   GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                   GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+        &m, paint);
+  }
+  /* a closed curve with round and miter joins at its corners, translucent */
+  GSHGEOM_Path * p = rf_path(c);
+  gshgeom_path_move_to(p, rf_pt(0.0, 6.0));
+  gshgeom_path_cubic_to(p, rf_pt(0.0, 0.0), rf_pt(8.0, 0.0), rf_pt(8.0, 6.0));
+  gshgeom_path_line_to(p, rf_pt(4.0, 10.5));
+  gshgeom_path_close(p);
+  const GSHSCENE_Resource * blob = rf_intern(c, p);
+  GSHGEOM_Map m = rf_move(32.5, 19.25);
+  rf_stroke(c, l, blob, rf_pen(c, 3.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &m, rf_solid(0.8, 0.2, 0.1, 0.7));
+  static const double tight[6] = {0.0, 0.0, 12.0, 1.5, 0.0, 3.0};
+  GSHGEOM_Map m2 = rf_move(3.0, 30.0);
+  rf_stroke(c, l, rf_polyline(c, tight, 3, 0), rf_pen(c, 1.5, GSHSCENE_STROKE_JOIN_MITER_CLIP, GSHSCENE_STROKE_CAP_SQUARE), &m2,
+      rf_solid(0.1, 0.1, 0.1, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_strokes_caps(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  static const double line[6] = {0.0, 0.0, 10.0, 1.5, 17.0, 0.5};
+  const GSHSCENE_Resource * ln = rf_polyline(c, line, 3, 0);
+  static const uint32_t caps[3] = {GSHSCENE_STROKE_CAP_BUTT, GSHSCENE_STROKE_CAP_ROUND, GSHSCENE_STROKE_CAP_SQUARE};
+  static const double dash[3] = {3.0, 2.0, 1.0};
+  static const double dots[2] = {0.0, 2.5};
+  for (int i = 0; i < 3; i++) {
+    GSHGEOM_Map a = rf_move(3.0, 3.0 + 4.0 * i);
+    rf_stroke(c, l, ln, rf_pen(c, 2.5, GSHSCENE_STROKE_JOIN_ROUND, caps[i]), &a, rf_solid(0.1, 0.4, 0.8, 1.0));
+    GSHGEOM_Map b = rf_move(26.0, 3.0 + 4.0 * i);
+    rf_stroke(c, l, ln, rf_style(c, 2.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0, caps[i],
+                                    GSHSCENE_STROKE_DEGENERATE_DRAW, dash, 3, 0.75, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                    GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+        &b, rf_solid(0.9, 0.3, 0.1, 1.0));
+  }
+  /* dots: zero-length dashes under round and square caps (and butt: nothing) */
+  for (int i = 0; i < 3; i++) {
+    GSHGEOM_Map m = rf_move(3.0, 18.0 + 3.5 * i);
+    rf_stroke(c, l, ln, rf_style(c, 2.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0, caps[i],
+                                    GSHSCENE_STROKE_DEGENERATE_DRAW, dots, 2, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                    GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+        &m, rf_solid(0.2, 0.7, 0.3, 1.0));
+  }
+  /* one pattern for the path across two subpaths, and degenerate subpaths drawn and omitted */
+  GSHGEOM_Path * p = rf_path(c);
+  gshgeom_path_move_to(p, rf_pt(0.0, 0.0));
+  gshgeom_path_line_to(p, rf_pt(9.0, 0.0));
+  gshgeom_path_move_to(p, rf_pt(0.0, 4.0));
+  gshgeom_path_line_to(p, rf_pt(9.0, 4.0));
+  const GSHSCENE_Resource * two = rf_intern(c, p);
+  GSHGEOM_Map m = rf_move(27.0, 18.0);
+  rf_stroke(c, l, two, rf_style(c, 1.5, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                   GSHSCENE_STROKE_DEGENERATE_DRAW, dash, 3, 0.0, GSHSCENE_STROKE_DASH_PATH,
+                                   GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      &m, rf_solid(0.5, 0.2, 0.6, 1.0));
+  GSHGEOM_Path * d = rf_path(c);
+  gshgeom_path_move_to(d, rf_pt(2.0, 2.0));
+  gshgeom_path_line_to(d, rf_pt(2.0, 2.0));
+  gshgeom_path_move_to(d, rf_pt(8.0, 2.0));
+  gshgeom_path_close(d);
+  gshgeom_path_move_to(d, rf_pt(14.0, 2.0));
+  gshgeom_path_line_to(d, rf_pt(14.0, 2.0));
+  const GSHSCENE_Resource * dd = rf_intern(c, d);
+  GSHGEOM_Map m1 = rf_move(3.0, 32.0);
+  GSHGEOM_Map m2 = rf_move(3.0, 36.0);
+  rf_stroke(c, l, dd, rf_style(c, 4.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0, GSHSCENE_STROKE_CAP_ROUND,
+                                  GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                  GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      &m1, rf_solid(0.1, 0.1, 0.1, 1.0));
+  rf_stroke(c, l, dd, rf_style(c, 4.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0, GSHSCENE_STROKE_CAP_SQUARE,
+                                  GSHSCENE_STROKE_DEGENERATE_OMIT, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                  GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      &m2, rf_solid(0.7, 0.1, 0.1, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_strokes_widths(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  static const double tri[8] = {0.0, 8.0, 5.0, 0.0, 10.0, 8.0, 0.0, 8.0};
+  const GSHSCENE_Resource * t = rf_polyline(c, tri, 4, 1);
+  GSHGEOM_Map scale;
+  GSHGEOM_Map move;
+  GSHGEOM_Map map;
+  /* local width under a non-uniform scale: the pen is an ellipse */
+  gshgeom_map_scale(2, 2.0, 0.75, 1.0, &scale);
+  gshgeom_map_translate(2, 3.5, 4.25, 0.0, &move);
+  gshgeom_map_compose(&move, &scale, &map);
+  rf_stroke(c, l, t, rf_style(c, 2.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                 GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                 GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      &map, rf_solid(0.2, 0.3, 0.8, 1.0));
+  /* device width under the same scale: a fixed 2 pixels around the mapped centerline */
+  GSHGEOM_Map map2;
+  GSHGEOM_Map move2 = rf_move(26.0, 4.25);
+  gshgeom_map_compose(&move2, &scale, &map2);
+  rf_stroke(c, l, t, rf_style(c, 2.0, GSHSCENE_STROKE_WIDTH_DEVICE, GSHSCENE_STROKE_JOIN_ROUND, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                 GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                 GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      &map2, rf_solid(0.8, 0.3, 0.2, 1.0));
+  /* hairlines of both kinds, a wide stroke, a stroke under a quarter of a pixel */
+  static const double zig[10] = {0.0, 6.0, 6.0, 0.0, 12.0, 6.0, 18.0, 0.0, 24.0, 6.0};
+  const GSHSCENE_Resource * z = rf_polyline(c, zig, 5, 0);
+  GSHGEOM_Map h1 = rf_move(3.0, 18.0);
+  GSHGEOM_Map h2 = rf_move(3.5, 26.5);
+  GSHGEOM_Map h3 = rf_move(3.25, 33.0);
+  rf_stroke(c, l, z, rf_style(c, 1.0, GSHSCENE_STROKE_WIDTH_DEVICE, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                 GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                 GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      &h1, rf_solid(0.1, 0.1, 0.1, 1.0));
+  rf_stroke(c, l, z, rf_style(c, 1.0, GSHSCENE_STROKE_WIDTH_DEVICE, GSHSCENE_STROKE_JOIN_ROUND, 4.0, GSHSCENE_STROKE_CAP_ROUND,
+                                 GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                 GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      &h2, rf_solid(0.1, 0.5, 0.1, 1.0));
+  rf_stroke(c, l, z, rf_pen(c, 0.2, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_BUTT), &h3, rf_solid(0.4, 0.1, 0.5, 1.0));
+  GSHGEOM_Map wide = rf_move(31.0, 6.0);
+  rf_stroke(c, l, t, rf_pen(c, 7.0, GSHSCENE_STROKE_JOIN_BEVEL, GSHSCENE_STROKE_CAP_BUTT), &wide, rf_solid(0.9, 0.7, 0.1, 0.6));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_strokes_align(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Resource * sq = rf_rect(c, 0.0, 0.0, 9.0, 9.0);
+  const GSHSCENE_Resource * star = rf_star(c, 6.0, 6.0, 6.0);
+  static const double dashes[2] = {2.0, 1.0};
+  uint32_t aligns[3] = {GSHSCENE_STROKE_ALIGN_CENTER, GSHSCENE_STROKE_ALIGN_INSIDE, GSHSCENE_STROKE_ALIGN_OUTSIDE};
+  for (int i = 0; i < 3; i++) {
+    GSHGEOM_Map m = rf_move(3.0 + 15.0 * i, 3.0);
+    rf_stroke(c, l, sq, rf_style(c, 3.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                    GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH, aligns[i],
+                                    GSHGEOM_FILL_NONZERO),
+        &m, rf_solid(0.2 + 0.3 * i, 0.4, 0.8 - 0.3 * i, 0.9));
+  }
+  /* the star under both rules, inside and outside */
+  for (int i = 0; i < 4; i++) {
+    GSHGEOM_Map m = rf_move(0.5 + 12.0 * i, 16.25);
+    rf_stroke(c, l, star, rf_style(c, 2.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                      GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                      i % 2 ? GSHSCENE_STROKE_ALIGN_OUTSIDE : GSHSCENE_STROKE_ALIGN_INSIDE,
+                                      i < 2 ? GSHGEOM_FILL_NONZERO : GSHGEOM_FILL_EVEN_ODD),
+        &m, rf_solid(0.7, 0.2 + 0.1 * i, 0.3, 1.0));
+  }
+  /* a closed and an open subpath: the open one stays centered; dashed and aligned */
+  GSHGEOM_Path * p = rf_path(c);
+  gshgeom_path_move_to(p, rf_pt(0.0, 0.0));
+  gshgeom_path_line_to(p, rf_pt(10.0, 1.0));
+  gshgeom_path_line_to(p, rf_pt(9.0, 10.0));
+  gshgeom_path_line_to(p, rf_pt(1.0, 9.0));
+  gshgeom_path_close(p);
+  gshgeom_path_move_to(p, rf_pt(12.0, 2.0));
+  gshgeom_path_line_to(p, rf_pt(20.0, 12.0));
+  const GSHSCENE_Resource * mixed = rf_intern(c, p);
+  GSHGEOM_Map m1 = rf_move(2.5, 30.0);
+  GSHGEOM_Map m2 = rf_move(26.0, 28.5);
+  rf_stroke(c, l, mixed, rf_style(c, 2.5, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0, GSHSCENE_STROKE_CAP_ROUND,
+                                     GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                     GSHSCENE_STROKE_ALIGN_INSIDE, GSHGEOM_FILL_NONZERO),
+      &m1, rf_solid(0.1, 0.6, 0.5, 1.0));
+  rf_stroke(c, l, mixed, rf_style(c, 2.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                     GSHSCENE_STROKE_DEGENERATE_DRAW, dashes, 2, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                     GSHSCENE_STROKE_ALIGN_OUTSIDE, GSHGEOM_FILL_NONZERO),
+      &m2, rf_solid(0.6, 0.3, 0.1, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_strokes_paints(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Gradient_Stop three[3] = {rf_stop(0.0, rf_solid(0.9, 0.1, 0.1, 1.0)),
+      rf_stop(0.5, rf_solid(0.1, 0.8, 0.2, 0.7)), rf_stop(1.0, rf_solid(0.1, 0.2, 0.9, 1.0))};
+  static const double wave[12] = {0.0, 6.0, 4.0, 0.0, 8.0, 6.0, 12.0, 0.0, 16.0, 6.0, 20.0, 0.0};
+  const GSHSCENE_Resource * w = rf_polyline(c, wave, 6, 0);
+  const GSHSCENE_Resource * pen = rf_pen(c, 3.0, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND);
+  /* each paint over a fill of its own band, so that a translucent stroke shows what is under it */
+  rf_fill(c, l, rf_rect(c, 1, 1, 47, 39), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.9, 0.7, 1.0), 0, 0.0);
+  GSHGEOM_Map m1 = rf_move(3.0, 3.0);
+  rf_stroke(c, l, w, pen, &m1, rf_gradient_paint(rf_gradient(c, rf_linear(0, 0, 20, 0, 0, 0, GSHSCENE_EXTEND_PAD), three, 3), 1.0));
+  GSHGEOM_Map m2 = rf_move(26.0, 3.0);
+  rf_stroke(c, l, w, pen, &m2, rf_gradient_paint(rf_gradient(c, rf_radial(10, 3, 0, 10, 3, 12, GSHSCENE_EXTEND_REFLECT), three, 3), 0.9));
+  GSHGEOM_Map m3 = rf_move(3.0, 14.0);
+  /* a sweep, in a gradient map of the stroke's own item space: the paint is sampled in local space (SK6) */
+  rf_stroke(c, l, w, pen, &m3,
+      rf_gradient_paint(rf_gradient(c, rf_sweep(10, 3, GSHGEOM_ANGLE_DEGREES, 0.0, 360.0, GSHSCENE_EXTEND_PAD), three, 3), 1.0));
+  GSHGEOM_Map m4 = rf_move(26.0, 14.0);
+  GSHSCENE_Paint fg;
+  memset(&fg, 0, sizeof fg);
+  fg.kind = GSHSCENE_PAINT_FOREGROUND;
+  fg.rgba[3] = 0.8;
+  rf_stroke(c, l, w, pen, &m4, fg);
+  GSHGEOM_Map m5 = rf_move(3.0, 26.0);
+  rf_stroke(c, l, w, rf_pen(c, 6.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &m5, rf_solid(0.2, 0.4, 0.9, 0.5));
+  GSHGEOM_Map m6 = rf_move(26.0, 26.0);
+  rf_stroke(c, l, w, rf_pen(c, 6.0, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_SQUARE), &m6,
+      rf_solid_in(0.9, 0.3, 0.2, 0.6, rf_space(GCOL_PRIMARIES_DISPLAY_P3, GCOL_TRANSFER_SRGB, 0.0)));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_strokes_groups(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Resource * star = rf_star(c, 8.0, 8.0, 8.0);
+  const GSHSCENE_Resource * pen = rf_pen(c, 2.5, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND);
+  /* a fill and then the stroke of one element (SK14) */
+  GSHGEOM_Map a = rf_move(1.0, 1.0);
+  rf_fill(c, l, star, &a, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.8, 0.2, 1.0), 0, 0.0);
+  rf_stroke(c, l, star, pen, &a, rf_solid(0.5, 0.1, 0.1, 1.0));
+  /* an isolated group of opacity 0.6 holding two overlapping strokes: they composite as one layer */
+  GSHSCENE_Group g = rf_group(0.6, GSHSCENE_COMPOSITE_SRC_OVER);
+  rf_check(c, gshscene_list_group_push(l, &g, 0, 0.0) == GSHSCENE_OK);
+  GSHGEOM_Map b = rf_move(21.0, 1.0);
+  GSHGEOM_Map b2 = rf_move(26.0, 4.0);
+  rf_stroke(c, l, star, rf_pen(c, 4.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &b, rf_solid(0.1, 0.3, 0.9, 1.0));
+  rf_stroke(c, l, star, rf_pen(c, 4.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &b2, rf_solid(0.9, 0.3, 0.1, 1.0));
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  /* a multiply group, clipped */
+  GSHSCENE_Group mul = rf_group(1.0, GSHSCENE_COMPOSITE_MULTIPLY);
+  rf_check(c, gshscene_list_clip_push(l, rf_rect(c, 1.0, 20.0, 30.0, 39.0), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_group_push(l, &mul, 0, 0.0) == GSHSCENE_OK);
+  GSHGEOM_Map c1 = rf_move(4.0, 22.0);
+  GSHGEOM_Map c2 = rf_move(14.5, 24.25);
+  rf_stroke(c, l, star, rf_pen(c, 5.0, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND), &c1, rf_solid(0.9, 0.9, 0.2, 0.9));
+  rf_stroke(c, l, star, rf_pen(c, 5.0, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND), &c2, rf_solid(0.2, 0.9, 0.9, 0.9));
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+  /* one path stroked at whole-pixel translations (one expansion) and at a fraction (another) */
+  static const double ar[8] = {0.0, 0.0, 6.0, 0.0, 6.0, 6.0, 0.0, 6.0};
+  const GSHSCENE_Resource * box = rf_polyline(c, ar, 4, 1);
+  const GSHSCENE_Resource * thin = rf_pen(c, 1.5, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT);
+  for (int i = 0; i < 3; i++) {
+    GSHGEOM_Map m = rf_move(32.0 + 5.0 * (double)i, 22.25 + 4.0 * (double)i);
+    rf_stroke(c, l, box, thin, &m, rf_solid(0.1, 0.1, 0.1, 1.0));
+  }
+  GSHGEOM_Map f = rf_move(36.5, 34.5);
+  rf_stroke(c, l, box, thin, &f, rf_solid(0.1, 0.1, 0.1, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_strokes_sparse(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  /* far longer than the raster, so that a rectangle of its own is large against the few deposits of its edges */
+  static const double flat[4] = {-120.0, 7.5, 200.0, 7.5};
+  static const double slant[4] = {-90.0, -80.0, 160.0, 130.0};
+  static const double shallow[4] = {-100.0, 30.0, 160.0, 31.0};
+  const GSHSCENE_Resource * f = rf_polyline(c, flat, 2, 0);
+  const GSHSCENE_Resource * s = rf_polyline(c, slant, 2, 0);
+  const GSHSCENE_Resource * h = rf_polyline(c, shallow, 2, 0);
+  const GSHSCENE_Resource * hair = rf_style(c, 1.0, GSHSCENE_STROKE_WIDTH_DEVICE, GSHSCENE_STROKE_JOIN_ROUND, 4.0,
+      GSHSCENE_STROKE_CAP_BUTT, GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+      GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO);
+  const GSHSCENE_Resource * plain = rf_pen(c, 2.25, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_SQUARE);
+  GSHGEOM_Map id = rf_move(0.0, 0.0);
+  GSHGEOM_Map frac = rf_move(0.375, 0.625);
+  rf_stroke(c, l, f, hair, &id, rf_solid(0.1, 0.1, 0.1, 1.0));
+  rf_stroke(c, l, f, plain, &frac, rf_solid(0.8, 0.1, 0.1, 0.8));
+  rf_stroke(c, l, s, hair, &id, rf_solid(0.1, 0.5, 0.1, 1.0));
+  rf_stroke(c, l, s, plain, &frac, rf_solid(0.1, 0.1, 0.8, 0.8));
+  rf_stroke(c, l, h, hair, &frac, rf_solid(0.5, 0.1, 0.5, 1.0));
+  /* the same strokes again: the second expansion of each comes from the cache */
+  rf_stroke(c, l, f, plain, &frac, rf_solid(1.0, 1.0, 1.0, 0.4));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_strokes_nothing(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Resource * box = rf_rect(c, 0.0, 0.0, 8.0, 8.0);
+  GSHGEOM_Map m = rf_move(4.0, 4.0);
+  rf_fill(c, l, rf_rect(c, 1, 1, 47, 39), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.5, 0.7, 0.9, 1.0), 0, 0.0);
+  /* width 0 */
+  rf_stroke(c, l, box, rf_pen(c, 0.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &m, rf_solid(0, 0, 0, 1));
+  /* a flat map */
+  double flat[4] = {0.0, 0.0, 0.0, 1.0};
+  double zero[2] = {10.0, 10.0};
+  GSHGEOM_Map fm;
+  rf_check(c, gshgeom_map_from_matrix(2, flat, zero, &fm) == GSHGEOM_OK);
+  rf_stroke(c, l, box, rf_pen(c, 2.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &fm, rf_solid(0, 0, 0, 1));
+  /* each factor invertible, the product a singular map (SK9 as amended): a picture instanced under a tiny map, holding
+   * a stroke under a tiny map of its own */
+  double tinym[4] = {0x1p-600, 0.0, 0.0, 0x1p-600};
+  double nothing[2] = {0.0, 0.0};
+  GSHGEOM_Map tiny;
+  rf_check(c, gshgeom_map_from_matrix(2, tinym, nothing, &tiny) == GSHGEOM_OK);
+  GSHSCENE_List * inner = rf_open(c);
+  rf_stroke(c, inner, box, rf_pen(c, 2.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &tiny, rf_solid(0, 0, 0, 1));
+  rf_close(c, inner);
+  const GSHSCENE_Resource * picture = NULL;
+  rf_check(c, gshscene_store_intern_picture(c->store, inner, &picture) == GSHSCENE_OK);
+  rf_hold(c, picture);
+  rf_check(c, gshscene_list_instance(l, picture, &tiny, 0, 0.0) == GSHSCENE_OK);
+  /* a degenerate gradient (p0 = p1) */
+  const GSHSCENE_Gradient_Stop two[2] = {rf_stop(0.0, rf_solid(1, 0, 0, 1)), rf_stop(1.0, rf_solid(0, 0, 1, 1))};
+  GSHGEOM_Map gm = rf_move(20.0, 20.0);
+  rf_stroke(c, l, box, rf_pen(c, 3.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &gm,
+      rf_gradient_paint(rf_gradient(c, rf_linear(3, 3, 3, 3, 0, 0, GSHSCENE_EXTEND_PAD), two, 2), 1.0));
+  rf_close(c, l);
+  return l;
+}
+
 typedef struct RF_Fixture {
   const char * name;
   RF_Build build;
@@ -883,6 +1258,14 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"blend-separable", rf_blend_separable},
     {"blend-non-separable", rf_blend_non_separable},
     {"blend-out-of-range", rf_blend_out_of_range},
+    {"strokes-joins", rf_strokes_joins},
+    {"strokes-caps", rf_strokes_caps},
+    {"strokes-widths", rf_strokes_widths},
+    {"strokes-align", rf_strokes_align},
+    {"strokes-paints", rf_strokes_paints},
+    {"strokes-groups", rf_strokes_groups},
+    {"strokes-sparse", rf_strokes_sparse},
+    {"strokes-nothing", rf_strokes_nothing},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

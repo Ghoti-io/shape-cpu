@@ -931,6 +931,77 @@ PLANTS += [
     ("rn1-g4", "src", RGR, "      c[k] = a == 0.0 ? 0.0 : gshcpu_render_unpremultiply(c[k], a); /* N1: saturated */", "      c[k] = a == 0.0 ? 0.0 : c[k] / a; /* N1: saturated */", SAT),
 ]
 
+# --- strokes story S4 (SC1 to SC11): written with the story, swept in the consolidated pass -----------------------------
+RSK = "src/render/stroke.c"
+RSC = "src/render/stroke_cache.c"
+RST = ["testRender_stroke"]
+RSTT = ["testRender_stroke", "testRender"]
+
+PLANTS += [
+    # SC5: the composition of three coverages
+    ("sc5-complement-ignored", "src", RSK, "  uint32_t cp = complement ? 255u - c : c;", "  uint32_t cp = c;", RST),
+    ("sc5-complement-inverted", "src", RSK, "  uint32_t cp = complement ? 255u - c : c;", "  uint32_t cp = complement ? c : 255u - c;", RST),
+    ("sc5-weigh-unrounded", "src", RSK, "  uint32_t t = gshcpu_render_weigh(a, cp); /* D8: (a * c' + 127) / 255 */", "  uint32_t t = (a * cp) / 255u;", RST),
+    ("sc5-union-is-sum", "src", RSK, "  return 255u - ((255u - b) * (255u - t) + 127u) / 255u;", "  return b + t > 255u ? 255u : b + t;", RST),
+    ("sc5-union-is-max", "src", RSK, "  return 255u - ((255u - b) * (255u - t) + 127u) / 255u;", "  return b > t ? b : t;", RST),
+    ("sc5-union-unrounded", "src", RSK, "  return 255u - ((255u - b) * (255u - t) + 127u) / 255u;", "  return 255u - ((255u - b) * (255u - t)) / 255u;", RST),
+    ("sc5-aligned-unclipped", "src", RSK, "          (uint8_t)gshcpu_render_stroke_compose(b, a, c, complement);", "          (uint8_t)gshcpu_render_stroke_compose(b, a, 255u, 0);", RST),
+    ("sc5-clip-rule-ignored", "src", RSK, "    GSHGEOM_Fill_Rule rule = p == 2 ? gshgeom_stroke_outline_clip_rule(s->outline) : GSHGEOM_FILL_NONZERO;", "    GSHGEOM_Fill_Rule rule = GSHGEOM_FILL_NONZERO;", RST),
+    ("sc5-clip-rect-is-body", "src", RSK, "  clip.rect = aligned.rect; /* c over the aligned part's rectangle (SC5) */", "  clip.rect = body.rect;", RST),
+    ("sc5-complement-flag-dropped", "src", RSK, "  int complement = gshgeom_stroke_outline_clip_complement(s->outline);", "  int complement = 0;", RST),
+    ("sc5-aligned-dropped", "src", RSK, "  if (!aligned.path) {\n    *rect = body.rect;\n    *k = buffers->body;", "  if (1) {\n    *rect = body.rect;\n    *k = buffers->body;", RST),
+    ("sc5-body-dropped", "src", RSK, "        b = buffers->body[(size_t)(y - body.rect.y0) * bw + (size_t)(x - body.rect.x0)];", "        b = 0;", RST),
+    ("sc5-joint-is-body", "src", RSK, "  GSHCPU_Rect joint = gshcpu_render_rect_join(body.rect, aligned.rect);", "  GSHCPU_Rect joint = body.rect;", RST),
+    # SC3: the canonical translation
+    ("sc3-shift-x-dropped", "src", RSK, "  s.shift_x = sx;", "  s.shift_x = 0;", RSTT),
+    ("sc3-shift-y-sign", "src", RSK, "  s.shift_y = sy;", "  s.shift_y = -sy;", RSTT),
+    ("sc3-moved-x-sign", "src", RSK, "  r.x0 -= dx;", "  r.x0 += dx;", RSTT),
+    ("sc3-moved-one-axis", "src", RSK, "  r.y0 -= dy;\n  r.x1 -= dx;\n  r.y1 -= dy;", "  r.x1 -= dx;", RSTT),
+    ("sc3-box-shift-dropped", "src", RSK, "      int64_t x0 = s.meta.lo_x[p] + 64 * sx;", "      int64_t x0 = s.meta.lo_x[p];", RST),
+    ("sc3-coordinate-limit-y", "src", RSK, "          y1 > GSHCPU_RENDER_COORD_LIMIT) {\n        r = GSHCPU_ERR_LIMIT;", "          0) {\n        r = GSHCPU_ERR_LIMIT;", RST),
+    ("sc3-canonical-map-unused", "src", RSK, "  g = gshgeom_stroke_expand(path, &params, &canon, alloc, limits, &outline);", "  g = gshgeom_stroke_expand(path, &params, composed, alloc, limits, &outline);", RSTT),
+    # SC7: the key and the cache
+    ("sc7-key-path", "src", RSK, "  key.path_id = gshscene_resource_id(item->resource);", "  key.path_id = 0;", RST),
+    ("sc7-key-style", "src", RSK, "  key.style_id = gshscene_resource_id(item->style);", "  key.style_id = 0;", RST),
+    ("sc7-key-linear", "src", RSK, "    key.linear[i] = gshgeom_f64_bits(canon.m[i / 2][i % 2]);", "    key.linear[i] = 0;", RST),
+    ("sc7-key-fraction-x", "src", RSK, "  key.fraction[0] = gshgeom_f64_bits(canon.t[0]);", "  key.fraction[0] = 0;", RST),
+    ("sc7-key-fraction-y", "src", RSK, "  key.fraction[1] = gshgeom_f64_bits(canon.t[1]);", "  key.fraction[1] = 0;", RST),
+    ("sc7-key-revision", "src", RSK, "  key.revision = GSHGEOM_STROKE_REVISION;", "  key.revision = 0;", RST),
+    ("sc7-hit-limit-unchecked", "src", RSK, "    if (s.meta.present[p] && limits && s.meta.points[p] > (uint64_t)limits->max_points && limits->max_points != 0) {", "    if (0) {", RST),
+    ("sc7-cache-not-pinned", "src", RSC, "      e->refs++;\n      /* To the head of the recency list. */", "      /* To the head of the recency list. */", RST),
+    ("sc7-evict-pinned", "src", RSC, "      if (e->refs == 0) {\n        unlink_entry(c, e);", "      if (1) {\n        unlink_entry(c, e);", RST),
+    ("sc7-bound-ignored", "src", RSC, "  Entry * fresh = need <= c->bound ?", "  Entry * fresh = 1 ?", RST),
+    ("sc7-evict-path-only", "src", RSC, "      if (e->key.path_id == id || e->key.style_id == id) {", "      if (e->key.path_id == id) {", RST),
+    ("sc7-evict-style-only", "src", RSC, "      if (e->key.path_id == id || e->key.style_id == id) {", "      if (e->key.style_id == id) {", RST),
+    ("sc7-evicted-served", "src", RSC, "  e->listed = 0;\n  c->held -= e->meta.bytes;", "  e->listed = 1;\n  c->held -= e->meta.bytes;", RST),
+    ("sc7-held-not-reduced", "src", RSC, "  c->held -= e->meta.bytes;", "  (void)e;", RST),
+    ("sc7-held-not-added", "src", RSC, "      c->held += need;", "      (void)need;", RST),
+    ("sc7-oom-swallowed", "src", RSC, "  if (need <= c->bound && !fresh) {\n    return -1;\n  }", "  if (0) {\n    return -1;\n  }", ["testRender_limits"]),
+    ("sc7-lru-tail-first-reversed", "src", RSC, "    Entry * e = c->tail;\n    while (c->held > room && e) {\n      Entry * newer = e->newer;", "    Entry * e = c->head;\n    while (c->held > room && e) {\n      Entry * newer = e->older;", RST),
+    # SC8: the sparse tier
+    ("sc8-sparse-denominator", "src", RSK, "  uint64_t limit = pixels / 16u;", "  uint64_t limit = pixels / 2u;", RST),
+    ("sc8-sparse-aligned", "src", RSK, "  if (!s->drawn || s->meta.present[GSHCPU_STROKE_ALIGNED]) {\n    return 0;", "  if (!s->drawn) {\n    return 0;", RST),
+    ("sc8-hairline-width", "src", RSK, "params.width_space == (uint32_t)GSHGEOM_STROKE_WIDTH_DEVICE && params.width == 1.0;", "params.width_space == (uint32_t)GSHGEOM_STROKE_WIDTH_DEVICE;", RST),
+    ("sc8-hairline-space", "src", RSK, "params.width_space == (uint32_t)GSHGEOM_STROKE_WIDTH_DEVICE && params.width == 1.0;", "params.width == 1.0;", RST),
+    ("sc8-sparse-tail", "src", RV, "    if (tail != 0 && last < width) {", "    if (0) {", RST),
+    ("sc8-sparse-first-column", "src", RV, "    int64_t j0 = lo > 1 ? lo : 1;", "    int64_t j0 = lo > 2 ? lo : 2;", RST),
+    ("sc8-sparse-not-cleared", "src", RV, "    for (int64_t t = lo; t <= hi && t <= width; t++) {\n      cv[t] = 0;\n      ar[t] = 0;\n    }", "", RST),
+    ("sc8-sparse-skips-a-span", "src", RV, "    if (last >= j0) {\n      fn(ctx, c->band + r,", "    if (last >= j0 + 1) {\n      fn(ctx, c->band + r,", RST),
+    # SC4, SC6, SC11: what draws nothing, the limits and the work
+    ("sc4-stroke-notice-skipped", "src", RS, "          ? gshscene_stroke_notice(item, run->maps, count - 1, &run->job->target.map)", "          ? (GSHSCENE_Reason)0", RST),
+    ("sc6-limit-not-refused", "src", RS, "  if (opened == GSHCPU_ERR_LIMIT) {\n    return refuse(run, item, chain, count);\n  }", "  if (opened == GSHCPU_ERR_LIMIT) {\n    return GSHSCENE_OK;\n  }", RST),
+    ("sc6-compose-limit", "src", RS, "    return refuse(run, item, chain, count); /* SC4: a composed map that cannot be formed is the sink's own limit */", "    return GSHSCENE_OK;", RST),
+    ("sc6-cells-not-summed", "src", RSK, "        moved(walk, s->shift_x, s->shift_y), out, acc, max_cells - total, &used);", "        moved(walk, s->shift_x, s->shift_y), out, acc, max_cells, &used);", RST),
+    ("sc6-whole-count-dropped", "src", RSK, "    if (!same_rect(part->rect, walk) && !whole_count) {\n      walk = part->rect;", "    if (1) {\n      walk = part->rect;", RST),
+    ("sc9-caller-memory-reads-cache", "src", RS, "  GSHCPU_Stroke_Cache * cache = !run->caller && (cs->tiers & GSHCPU_RENDER_TIER_CACHE) ? cs->cache : NULL;", "  GSHCPU_Stroke_Cache * cache = (cs->tiers & GSHCPU_RENDER_TIER_CACHE) ? cs->cache : NULL;", RST),
+    ("sc11-expansion-uncounted", "src", RS, "  run->work += expansion_work(run, item, &s);", "", RST),
+    ("sc11-bound-pixels", "src", RS, "!gcu_safe_mul_u64((uint64_t)cs->max_bytes, 2u, &pixels)", "!gcu_safe_mul_u64((uint64_t)cs->max_bytes, 1u, &pixels)", ["testRender", "testRender_limits"]),
+    ("sc1-caps-no-expand", "src", RS, "  out->flags |= GSHSCENE_CAP_STROKE_EXPAND;", "", ["testRender", "testRender_conformance"]),
+    ("sc1-caps-no-kind", "src", RS, "      (UINT32_C(1) << GSHSCENE_ITEM_STROKE);", "      0;", ["testRender", "testRender_conformance"]),
+    ("sc5-aligned-buffers-always", "src", RS, "  int ok = place(&at, sizeof(Run), &ignored)", "  L->aligned = 0;\n  int ok = place(&at, sizeof(Run), &ignored)", RST),
+]
+
+
 # The generated plants (tools/gen-render-plants.py): the mutations of src/render the sweep was seen to catch, and
 # PLANT_EXTRA_JSON, a file of candidates to run as well (for re-making tools/render-plants.json).
 import json as _json

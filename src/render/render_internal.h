@@ -37,6 +37,7 @@
 #include <ghoti.io/shape-cpu/render.h>
 
 #include <ghoti.io/shape-geometry/flatten.h>
+#include <ghoti.io/shape-geometry/stroke.h>
 #include <ghoti.io/shape-scene/list.h>
 #include <ghoti.io/shape-scene/paint.h>
 #include <ghoti.io/shape-scene/resource.h>
@@ -297,6 +298,174 @@ void gshcpu_render_gradient_color(const GSHCPU_Gradient * g, double t, double ou
 /** Both: the straight color at device point (@p qx, @p qy); 0 where nothing is drawn. */
 int gshcpu_render_gradient_at(const GSHCPU_Gradient * g, double qx, double qy, double out[4]);
 
+/* --- strokes (stroke.c, stroke_cache.c; strokes story S4) -------------------------------------- */
+
+/** Tiers a test can switch off to force the general tier (render.h, SC8).  Every tier is on by default. */
+#define GSHCPU_RENDER_TIER_CACHE 1u   /* FT-1: the cached expansion */
+#define GSHCPU_RENDER_TIER_SPARSE 2u  /* FT-2: the sparse composite of a solid single-part stroke */
+#define GSHCPU_RENDER_TIERS_ALL (GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE)
+
+/**
+ * What a sink counted (render.h, SC7, SC8): how often each tier was taken.  A test reads it after the renders it
+ * made, to show a tier taken; the counts are kept under the cache's lock.
+ */
+typedef struct GSHCPU_Render_Counters {
+  uint64_t strokes;          /* strokes drawn (their expansion drew something) */
+  uint64_t cache_hits;       /* FT-1: an expansion found in the cache */
+  uint64_t cache_misses;     /* an expansion made because the cache had none */
+  uint64_t cache_kept;       /* ... and kept */
+  uint64_t cache_evictions;  /* entries dropped to make room, by an eviction or by the sink's destruction */
+  uint64_t sparse_hairline;  /* FT-2 for a solid hairline (device width 1) */
+  uint64_t sparse_plain;     /* FT-2 for any other solid stroke */
+} GSHCPU_Render_Counters;
+
+/** What identifies an expansion in the cache (SC7). */
+typedef struct GSHCPU_Stroke_Key {
+  uint64_t path_id;          /* the centerline's resource id */
+  uint64_t style_id;         /* the style's */
+  uint64_t linear[4];        /* the bit patterns of the canonical map's linear part, row major */
+  uint64_t fraction[2];      /* ... and of its translation, in [0, 1) */
+  int32_t revision;          /* GSHGEOM_STROKE_REVISION */
+} GSHCPU_Stroke_Key;
+
+/** The parts of an outline, in the order of its accessors. */
+enum { GSHCPU_STROKE_BODY = 0, GSHCPU_STROKE_ALIGNED = 1, GSHCPU_STROKE_CLIP = 2, GSHCPU_STROKE_PARTS = 3 };
+
+/** What is known of an outline without a pass over it: each part's points and the extent of its 26.6 coordinates. */
+typedef struct GSHCPU_Stroke_Meta {
+  int present[GSHCPU_STROKE_PARTS];
+  uint64_t points[GSHCPU_STROKE_PARTS];
+  int64_t lo_x[GSHCPU_STROKE_PARTS], lo_y[GSHCPU_STROKE_PARTS], hi_x[GSHCPU_STROKE_PARTS], hi_y[GSHCPU_STROKE_PARTS];
+  size_t bytes;              /* what the cache accounts for it (stroke_cache.c) */
+} GSHCPU_Stroke_Meta;
+
+/** A receiver of the pixels one row of a sparse sweep covers: `n` coverages from pixel @p x (in the paths' frame). */
+typedef void (*GSHCPU_Span_Fn)(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8);
+
+/** The cache of stroke expansions (SC7). */
+typedef struct GSHCPU_Stroke_Cache GSHCPU_Stroke_Cache;
+
+/**
+ * A cache bounded to @p bound bytes (0 is the default, 1 keeps nothing, `UINT64_MAX` no cap), its counters in
+ * @p counters.  Entries are made from @p alloc.  @return ::GSHCPU_OK or ::GSHCPU_ERR_OOM.
+ */
+GSHCPU_Result gshcpu_stroke_cache_create(const GSHGEOM_Allocator * alloc, uint64_t bound,
+    GSHCPU_Render_Counters * counters, GSHCPU_Stroke_Cache ** out);
+
+/** Free every entry (no render is in flight) and the cache. */
+void gshcpu_stroke_cache_destroy(GSHCPU_Stroke_Cache * cache);
+
+/** The bytes held by the entries in the table (static_bytes, S9). */
+uint64_t gshcpu_stroke_cache_bytes(GSHCPU_Stroke_Cache * cache);
+
+/** Drop every entry that names resource @p id as its centerline or its style; one in use goes at its last release. */
+void gshcpu_stroke_cache_evict(GSHCPU_Stroke_Cache * cache, uint64_t id);
+
+/**
+ * Find the expansion for @p key and pin it.  @return 1 and the entry, its outline and its meta; 0 when there is none.
+ * A hit counts.
+ */
+int gshcpu_stroke_cache_acquire(GSHCPU_Stroke_Cache * cache, const GSHCPU_Stroke_Key * key, void ** entry,
+    GSHGEOM_Stroke_Outline ** outline, GSHCPU_Stroke_Meta * meta);
+
+/**
+ * Offer a fresh expansion for @p key.  @return 1 when the cache took it (it owns @p outline now, which is pinned until
+ * ::gshcpu_stroke_cache_release); 2 when an entry for the key was there already (that one is pinned, @p entry and
+ * @p outline are it, and the caller still owns, and must free, its own); 0 when it was not kept (larger than the
+ * bound, or nothing could be dropped to make room): the caller keeps it; -1 when the entry could not be allocated
+ * (out of memory: the caller still owns the outline).  A miss counts.
+ */
+int gshcpu_stroke_cache_store(GSHCPU_Stroke_Cache * cache, const GSHCPU_Stroke_Key * key, GSHGEOM_Stroke_Outline * outline,
+    const GSHCPU_Stroke_Meta * meta, void ** entry, GSHGEOM_Stroke_Outline ** held);
+
+/** Unpin an entry; the last release of one that was dropped frees it. */
+void gshcpu_stroke_cache_release(GSHCPU_Stroke_Cache * cache, void * entry);
+
+/** Count a tier taken (stroke.c): one of the counters of ::GSHCPU_Render_Counters, by offset. */
+void gshcpu_stroke_cache_count(GSHCPU_Stroke_Cache * cache, size_t offset);
+
+/** A stroke ready to cover: its outline (pinned in the cache, or owned), the whole-pixel shift and its meta (SC3). */
+typedef struct GSHCPU_Stroke {
+  GSHGEOM_Stroke_Outline * outline;
+  GSHGEOM_Stroke_Outline * owned;  /* the outline to destroy at the end; NULL when the cache holds it */
+  void * pin;                      /* the cache entry to release; NULL when none */
+  int drawn;                       /* the outline's status is DRAWN: parts to cover */
+  int64_t shift_x, shift_y;        /* whole pixels (SC3) */
+  GSHCPU_Stroke_Meta meta;
+  GSHCPU_Rect box[GSHCPU_STROKE_PARTS]; /* each part's pixels, shifted (empty when absent) */
+  int hairline;                    /* a solid device width of 1 (FT-2's detection) */
+  int sparse_ok;                   /* the style and paint admit FT-2 (the outline has one part is decided from the parts) */
+} GSHCPU_Stroke;
+
+/**
+ * SC2 to SC7: expand @p item's centerline under @p composed (the chain composed, in pixels) at the canonical
+ * translation, from the cache (@p cache not NULL) or made from @p alloc.  @p limits' `max_points` bounds each part.
+ *
+ * @return ::GSHCPU_OK (a status other than DRAWN leaves `drawn` 0: nothing to draw); ::GSHCPU_ERR_LIMIT (a part past
+ *   `max_points`, the depth cap, a shifted coordinate past ::GSHCPU_RENDER_COORD_LIMIT: the sink's resource limit);
+ *   ::GSHCPU_ERR_OOM; ::GSHCPU_ERR_INTERNAL.  Nothing is held on failure.
+ */
+GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, const GSHSCENE_Item * item, const GSHGEOM_Map * composed, GSHCPU_Stroke * out);
+
+/** Release what ::gshcpu_render_stroke_open holds. */
+void gshcpu_render_stroke_close(GSHCPU_Stroke_Cache * cache, GSHCPU_Stroke * s);
+
+/** The arrays a stroke's coverage is built in: the region's pixels each; the last three only for an aligned stroke. */
+typedef struct GSHCPU_Stroke_Buffers {
+  uint8_t * body;
+  uint8_t * aligned;
+  uint8_t * clip;
+  uint8_t * result;
+} GSHCPU_Stroke_Buffers;
+
+/**
+ * SC5, SC6: the coverage of @p s composed to one 8-bit `k` over the pixels it can reach.
+ *
+ * @param reach The pixels the clips in force allow, in the drawn region; @p whole the same in the whole render (S4).
+ * @param k Receives the array holding the composed coverage (`body`, or `result` for an aligned stroke), row by row over @p rect.
+ * @param rect Receives the pixels `k` is for (reach meet the parts' boxes); @p whole_rect the rectangle of the whole render.
+ * @param cells Receives the cell deposits counted, over what the whole render draws of the item.
+ * @return ::GSHCPU_OK; ::GSHCPU_ERR_LIMIT when the deposits of all its parts pass @p max_cells.
+ */
+GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
+    uint64_t max_cells, int64_t * acc, const GSHCPU_Stroke_Buffers * buffers, uint8_t ** k, GSHCPU_Rect * rect,
+    GSHCPU_Rect * whole_rect, uint64_t * cells);
+
+/**
+ * FT-2 (SC8): whether @p s qualifies for the sparse composite: a single part, and `cells_bound` of its rectangle at
+ * most a sixteenth of that rectangle's pixels and at most @p max_cells (so the cap cannot be met and the stroke cannot
+ * be refused for its cells).  A function of the outline, the shift and the cap only, never of the damage or the clips.
+ */
+int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_cells);
+
+/** The pixels ::gshcpu_render_stroke_cover would cover (@p rect) and the whole render's (@p whole_rect), without covering. */
+void gshcpu_render_stroke_rects(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole, GSHCPU_Rect * rect,
+    GSHCPU_Rect * whole_rect);
+
+/**
+ * FT-2: ::gshcpu_render_stroke_cover for a qualifying stroke, handing each row's coverages to @p fn (in the destination's
+ * frame) instead of building `k`.  @p acc must be all zero and is left so; @p line is `rect`'s width bytes.
+ */
+GSHCPU_Result gshcpu_render_stroke_cover_sparse(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
+    uint64_t max_cells, int64_t * acc, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx, GSHCPU_Rect * rect,
+    GSHCPU_Rect * whole_rect, uint64_t * cells);
+
+/**
+ * SC5's composition of three coverages, one pixel: `t = (a * c' + 127) / 255` with `c'` the clip's coverage or
+ * its complement, then `k = 255 - ((255 - b) * (255 - t) + 127) / 255`.
+ */
+uint32_t gshcpu_render_stroke_compose(uint32_t b, uint32_t a, uint32_t c, int complement);
+
+/**
+ * FT-2: what ::gshcpu_render_cover_counted computes, handed to @p fn a row at a time and only where it can be
+ * nonzero, with the cells counted as it counts them.  @p acc must be all zero on entry and is left so.  @p line holds
+ * `rect`'s width bytes.  @return as ::gshcpu_render_cover_counted.
+ */
+GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, int64_t * acc, uint8_t * line, uint64_t max_cells, uint64_t * cells,
+    GSHCPU_Span_Fn fn, void * ctx);
+
 /* --- the sink (sink.c) ---------------------------------------------------------------- */
 
 /**
@@ -308,6 +477,15 @@ typedef void (*GSHCPU_Render_Observer)(void * ctx, GSHCPU_Rect region, const dou
 /** ::gshcpu_sink_create with an observer of every render (for tests). */
 GSHCPU_Result gshcpu_render_sink_create_observed(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
     const GSHCPU_Limits * limits, GSHCPU_Render_Observer observer, void * observer_ctx, GSHSCENE_Sink ** out);
+
+/**
+ * ::gshcpu_sink_create with the tiers named by @p tiers on (`GSHCPU_RENDER_TIER_*`; the rest are forced off, which makes
+ * the general tier the oracle of the others), an observer if not NULL, and the sink's counters written to
+ * @p counters if not NULL (it must outlive the sink).
+ */
+GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
+    const GSHCPU_Limits * limits, unsigned tiers, GSHCPU_Render_Counters * counters, GSHCPU_Render_Observer observer,
+    void * observer_ctx, GSHSCENE_Sink ** out);
 
 #ifdef __cplusplus
 }
