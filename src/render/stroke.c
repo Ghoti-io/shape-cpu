@@ -279,6 +279,16 @@ static Part part_rects(const GSHCPU_Stroke * s, int p, GSHCPU_Rect reach, GSHCPU
 }
 
 /**
+ * Whether a cell of part @p p could hold more pieces than @p ex allows: an edge has at most one piece in a cell, and an
+ * outline has fewer edges than twice its points (one for each point and one closing line for each subpath), so one of
+ * at most half that many points cannot.  A function of the outline alone, so that whether a stroke is refused does not
+ * depend on the damage.
+ */
+static int may_exceed(const GSHCPU_Stroke * s, int p, const GSHCPU_Exact * ex) {
+  return ex && s->meta.points[p] + s->meta.points[p] > ex->max_pieces;
+}
+
+/**
  * The cap decided over what the whole render draws (S4), as sink.c's `shape` decides it for a fill: when the edges
  * alone bound the deposits of every part by the cap, count only where it is drawn; else count the whole while drawing
  * the part.
@@ -298,8 +308,8 @@ static int count_whole(const Part * parts, size_t n, uint64_t max_cells) {
 }
 
 GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
-    uint64_t max_cells, int64_t * acc, const GSHCPU_Stroke_Buffers * buffers, uint8_t ** k, GSHCPU_Rect * rect,
-    GSHCPU_Rect * whole_rect, uint64_t * cells) {
+    uint64_t max_cells, int64_t * acc, GSHCPU_Exact * ex, const GSHCPU_Stroke_Buffers * buffers, uint8_t ** k,
+    GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells) {
   Part body = part_rects(s, GSHCPU_STROKE_BODY, reach, whole);
   Part aligned = part_rects(s, GSHCPU_STROKE_ALIGNED, reach, whole);
   Part clip = part_rects(s, GSHCPU_STROKE_CLIP, reach, whole);
@@ -317,14 +327,15 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
       continue;
     }
     GSHCPU_Rect walk = part->walk;
-    if (!same_rect(part->rect, walk) && !whole_count) {
-      walk = part->rect; /* the cap cannot be met anywhere: count where it is drawn */
+    GSHCPU_Exact * exact = p == GSHCPU_STROKE_CLIP ? NULL : ex;
+    if (!same_rect(part->rect, walk) && !whole_count && !may_exceed(s, p, exact)) {
+      walk = part->rect; /* the caps cannot be met anywhere: count where it is drawn */
     }
     uint8_t * out = p == 0 ? buffers->body : p == 1 ? buffers->aligned : buffers->clip;
     GSHGEOM_Fill_Rule rule = p == 2 ? gshgeom_stroke_outline_clip_rule(s->outline) : GSHGEOM_FILL_NONZERO;
     uint64_t used = 0;
-    GSHCPU_Result r = gshcpu_render_cover_counted(&part->path, 1, rule, moved(part->rect, s->shift_x, s->shift_y),
-        moved(walk, s->shift_x, s->shift_y), out, acc, max_cells - total, &used);
+    GSHCPU_Result r = gshcpu_render_cover_exact(&part->path, 1, rule, moved(part->rect, s->shift_x, s->shift_y),
+        moved(walk, s->shift_x, s->shift_y), out, acc, max_cells - total, &used, exact);
     total += used;
     if (r != GSHCPU_OK) {
       *cells = total;
@@ -408,8 +419,8 @@ void gshcpu_render_stroke_rects(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHC
 }
 
 GSHCPU_Result gshcpu_render_stroke_cover_sparse(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
-    uint64_t max_cells, int64_t * acc, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx, GSHCPU_Rect * rect,
-    GSHCPU_Rect * whole_rect, uint64_t * cells) {
+    uint64_t max_cells, int64_t * acc, GSHCPU_Exact * ex, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx,
+    GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells) {
   Part body = part_rects(s, GSHCPU_STROKE_BODY, reach, whole);
   *rect = body.rect;
   *whole_rect = body.walk;
@@ -418,9 +429,9 @@ GSHCPU_Result gshcpu_render_stroke_cover_sparse(const GSHCPU_Stroke * s, GSHCPU_
     return GSHCPU_OK;
   }
   GSHCPU_Rect walk = body.walk;
-  if (!same_rect(body.rect, walk) && !count_whole(&body, 1, max_cells)) {
+  if (!same_rect(body.rect, walk) && !count_whole(&body, 1, max_cells) && !may_exceed(s, GSHCPU_STROKE_BODY, ex)) {
     walk = body.rect;
   }
   return gshcpu_render_cover_sparse(&body.path, 1, GSHGEOM_FILL_NONZERO, moved(body.rect, s->shift_x, s->shift_y),
-      moved(walk, s->shift_x, s->shift_y), acc, line, max_cells, cells, fn, ctx);
+      moved(walk, s->shift_x, s->shift_y), acc, line, max_cells, cells, fn, ctx, ex);
 }

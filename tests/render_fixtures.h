@@ -56,6 +56,9 @@
  * | strokes-groups | strokes in isolated groups (opacity, multiply, a clip), a fill and a stroke of one element, strokes of one path at whole-pixel translations and at a fraction |
  * | strokes-sparse | long hairlines and plain strokes, flat and slanted, far longer than the raster: the sparse composite is taken |
  * | strokes-nothing | strokes that draw nothing: width 0, a singular map, a singular product, a degenerate gradient |
+ * | strokes-dash-overlap | (strokes story S4b) translucent dashes with square, butt and round caps whose gaps are shorter than the caps' reach, a hairline of square-cap dashes, and square-cap dashes round a circle |
+ * | strokes-tight-joins | a zigzag whose segments are shorter than the stroke is wide, with each of the five joins, a device width and a non-uniform map: the inner side of every join overlaps |
+ * | strokes-rings | a circle and a lens, the lens turned, stroked from one pixel to wider than the radius: the triangles of the inner side overlap |
  * | blend-out-of-range | blend modes on sources out of range (negative, above 1, the recorded bound 2^16), dodge and burn past their poles, ClipColor with both steps, in a gamma-0.1 parent, nested blending groups, and a blend over the backdrop's transparent pixels |
  */
 
@@ -1232,6 +1235,130 @@ static inline GSHSCENE_List * rf_strokes_nothing(RF_Ctx * c) {
   return l;
 }
 
+/** A map from a 2 by 2 matrix (row major) and a translation. */
+static inline GSHGEOM_Map rf_affine(RF_Ctx * c, double a, double b, double cc, double d, double tx, double ty) {
+  double mm[4] = {a, b, cc, d};
+  double t[2] = {tx, ty};
+  GSHGEOM_Map m;
+  rf_check(c, gshgeom_map_from_matrix(2, mm, t, &m) == GSHGEOM_OK);
+  return m;
+}
+
+/** A closed circle of radius @p r about the origin, as four cubics. */
+static inline const GSHSCENE_Resource * rf_circle(RF_Ctx * c, double r) {
+  const double k = 0.5522847498307936 * r;
+  GSHGEOM_Path * p = rf_path(c);
+  gshgeom_path_move_to(p, rf_pt(r, 0.0));
+  gshgeom_path_cubic_to(p, rf_pt(r, k), rf_pt(k, r), rf_pt(0.0, r));
+  gshgeom_path_cubic_to(p, rf_pt(-k, r), rf_pt(-r, k), rf_pt(-r, 0.0));
+  gshgeom_path_cubic_to(p, rf_pt(-r, -k), rf_pt(-k, -r), rf_pt(0.0, -r));
+  gshgeom_path_cubic_to(p, rf_pt(k, -r), rf_pt(r, -k), rf_pt(r, 0.0));
+  gshgeom_path_close(p);
+  return rf_intern(c, p);
+}
+
+/** A lens (two cubics meeting at two points) 12 wide and 12 tall about the origin. */
+static inline const GSHSCENE_Resource * rf_lens(RF_Ctx * c) {
+  GSHGEOM_Path * p = rf_path(c);
+  gshgeom_path_move_to(p, rf_pt(0.0, -6.0));
+  gshgeom_path_cubic_to(p, rf_pt(8.0, -6.0), rf_pt(8.0, 6.0), rf_pt(0.0, 6.0));
+  gshgeom_path_cubic_to(p, rf_pt(-8.0, 6.0), rf_pt(-8.0, -6.0), rf_pt(0.0, -6.0));
+  gshgeom_path_close(p);
+  return rf_intern(c, p);
+}
+
+static inline GSHSCENE_List * rf_strokes_dash_overlap(RF_Ctx * c) {
+  /* (strokes story S4b) pieces that overlap inside a pixel: the caps of dashes whose gaps are shorter than their reach, a
+   * hairline of such dashes, and dashes along a curve, each translucent so that a credit of the overlap twice shows */
+  GSHSCENE_List * l = rf_open(c);
+  static const double line[4] = {0.0, 0.0, 21.0, 0.0};
+  static const double diag[6] = {0.0, 0.0, 9.0, 7.0, 18.0, 0.5};
+  static const double short_gap[2] = {3.0, 1.0};
+  static const double tiny_gap[4] = {2.0, 0.5, 1.0, 0.25};
+  static const uint32_t caps[3] = {GSHSCENE_STROKE_CAP_SQUARE, GSHSCENE_STROKE_CAP_BUTT, GSHSCENE_STROKE_CAP_ROUND};
+  const GSHSCENE_Resource * ln = rf_polyline(c, line, 2, 0);
+  const GSHSCENE_Resource * dg = rf_polyline(c, diag, 3, 0);
+  for (int i = 0; i < 3; i++) {
+    GSHGEOM_Map a = rf_move(2.0, 3.0 + 4.5 * i);
+    rf_stroke(c, l, ln, rf_style(c, 2.5, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, caps[i],
+                                    GSHSCENE_STROKE_DEGENERATE_DRAW, short_gap, 2, 0.5, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                    GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+        &a, rf_solid(0.9, 0.3, 0.1, 0.5));
+    GSHGEOM_Map b = rf_move(26.0 + 0.25 * i, 2.5 + 8.0 * i);
+    rf_stroke(c, l, dg, rf_style(c, 3.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0, caps[i],
+                                    GSHSCENE_STROKE_DEGENERATE_DRAW, tiny_gap, 4, 0.25, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                    GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+        &b, rf_solid(0.1, 0.4, 0.8, 0.5));
+  }
+  /* a hairline of square-cap dashes, flat and slanted */
+  GSHGEOM_Map h1 = rf_move(2.0, 18.5);
+  GSHGEOM_Map h2 = rf_move(2.0, 21.0);
+  rf_stroke(c, l, ln, rf_style(c, 1.0, GSHSCENE_STROKE_WIDTH_DEVICE, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_SQUARE,
+                                  GSHSCENE_STROKE_DEGENERATE_DRAW, short_gap, 2, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                  GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      &h1, rf_solid(0.1, 0.1, 0.1, 0.6));
+  rf_stroke(c, l, dg, rf_style(c, 1.0, GSHSCENE_STROKE_WIDTH_DEVICE, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_SQUARE,
+                                  GSHSCENE_STROKE_DEGENERATE_DRAW, tiny_gap, 4, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                  GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      &h2, rf_solid(0.1, 0.1, 0.1, 0.6));
+  /* square-cap dashes round a curve: each cap reaches into its neighbour's */
+  GSHGEOM_Map r = rf_move(36.0, 31.0);
+  rf_stroke(c, l, rf_circle(c, 7.0), rf_style(c, 3.5, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0,
+                                              GSHSCENE_STROKE_CAP_SQUARE, GSHSCENE_STROKE_DEGENERATE_DRAW, short_gap, 2, 0.0,
+                                              GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_CENTER,
+                                              GSHGEOM_FILL_NONZERO),
+      &r, rf_solid(0.5, 0.2, 0.7, 0.5));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_strokes_tight_joins(RF_Ctx * c) {
+  /* (strokes story S4b) the inner side of joins whose segments are shorter than the stroke is wide, with each of the five
+   * joins, under a local width, a device width and a non-uniform map */
+  GSHSCENE_List * l = rf_open(c);
+  static const double saw[14] = {0.0, 6.0, 3.0, 0.0, 5.0, 6.0, 8.0, 0.0, 10.0, 6.0, 13.0, 0.0, 15.0, 6.0};
+  static const uint32_t joins[5] = {GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_JOIN_BEVEL,
+      GSHSCENE_STROKE_JOIN_MITER_CLIP, GSHSCENE_STROKE_JOIN_ARCS};
+  const GSHSCENE_Resource * zig = rf_polyline(c, saw, 7, 0);
+  for (int i = 0; i < 5; i++) {
+    GSHGEOM_Map m = rf_move(1.5 + 16.0 * (double)(i % 3) + 0.125 * i, 2.0 + 13.0 * (double)(i / 3) + 0.25 * i);
+    rf_stroke(c, l, zig, rf_style(c, 3.5, GSHSCENE_STROKE_WIDTH_LOCAL, joins[i], 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                     GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                     GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+        &m, rf_solid(0.8 - 0.1 * i, 0.2 + 0.1 * i, 0.4, 0.55));
+  }
+  GSHGEOM_Map dev = rf_move(18.0, 28.5);
+  rf_stroke(c, l, zig, rf_style(c, 3.5, GSHSCENE_STROKE_WIDTH_DEVICE, GSHSCENE_STROKE_JOIN_ROUND, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                   GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                   GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      &dev, rf_solid(0.1, 0.5, 0.2, 0.55));
+  GSHGEOM_Map skew = rf_affine(c, 1.1, 0.0, 0.35, 0.55, 2.0, 30.0);
+  rf_stroke(c, l, zig, rf_pen(c, 3.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_SQUARE), &skew, rf_solid(0.2, 0.2, 0.9, 0.55));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_strokes_rings(RF_Ctx * c) {
+  /* (strokes story S4b) the inner side of a curve, where the triangles of the flattened outline lie over one another: a
+   * circle and a lens at widths from one pixel to wider than their radius, the lens turned (0.9, 0.4) */
+  GSHSCENE_List * l = rf_open(c);
+  static const double widths[4] = {1.0, 2.5, 5.0, 9.0};
+  const GSHSCENE_Resource * circle = rf_circle(c, 6.0);
+  const GSHSCENE_Resource * lens = rf_lens(c);
+  for (int i = 0; i < 4; i++) {
+    GSHGEOM_Map m = rf_move(8.0 + 11.5 * (double)i + 0.25 * i, 9.0 + 0.125 * i);
+    rf_stroke(c, l, circle, rf_pen(c, widths[i], GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_BUTT), &m,
+        rf_solid(0.9, 0.4 - 0.1 * i, 0.1, 0.5));
+    /* the rotation whose cosine and sine are in the ratio 0.9 : 0.4, as literals (no libm in a fixture) */
+    GSHGEOM_Map t = rf_affine(c, 0.9138115486202572, -0.4061384660534476, 0.4061384660534476, 0.9138115486202572, 8.0 + 11.5 * (double)i, 27.0 + 0.25 * i);
+    rf_stroke(c, l, lens, rf_pen(c, widths[i], i % 2 ? GSHSCENE_STROKE_JOIN_MITER : GSHSCENE_STROKE_JOIN_ROUND,
+                                    GSHSCENE_STROKE_CAP_BUTT),
+        &t, rf_solid(0.1, 0.3 + 0.1 * i, 0.9, 0.5));
+  }
+  rf_close(c, l);
+  return l;
+}
+
 typedef struct RF_Fixture {
   const char * name;
   RF_Build build;
@@ -1266,6 +1393,9 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"strokes-groups", rf_strokes_groups},
     {"strokes-sparse", rf_strokes_sparse},
     {"strokes-nothing", rf_strokes_nothing},
+    {"strokes-dash-overlap", rf_strokes_dash_overlap},
+    {"strokes-tight-joins", rf_strokes_tight_joins},
+    {"strokes-rings", rf_strokes_rings},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

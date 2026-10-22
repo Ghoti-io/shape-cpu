@@ -969,11 +969,12 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
 #endif
         CHECK(same_bytes(raster, again));
         outcomes[OUT_STROKE_CACHED] += counters.cache_hits > 0;
-        /* The general tier is the oracle of the fast ones (SC8): a second sink with them off gives the same bytes. */
+        /* The general tier is the oracle of the fast ones (SC8): a second sink with them off (the exact step stays: it is the
+         * coverage, not a tier) gives the same bytes. */
         if (counters.strokes > 0) {
           GSHSCENE_Sink * general = NULL;
           GIMG_Raster * other = copy_of(backdrop, format);
-          if (other && gshcpu_render_sink_create_tiered(NULL, NULL, &limits, 0, NULL, NULL, NULL, &general) == GSHCPU_OK) {
+          if (other && gshcpu_render_sink_create_tiered(NULL, NULL, &limits, GSHCPU_RENDER_TIER_EXACT, NULL, NULL, NULL, &general) == GSHCPU_OK) {
             target.surface = other;
             GSHSCENE_Result r3 = gshscene_sink_render(general, &request);
             CHECK(r3 == GSHSCENE_OK || r3 == GSHSCENE_ERR_OOM);

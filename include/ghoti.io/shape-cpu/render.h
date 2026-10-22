@@ -241,11 +241,13 @@
  *   `k_b + k_a c' - k_b k_a c'` in D8's arithmetic, exact at both ends, monotone, never above 255.  Absent parts are 0,
  *   so a centered stroke is `k = b`, bit for bit what a fill of the body gives.  `k` then replaces the fill's coverage.
  *   A gradient stroke is the fill's gradient path with this `k`, sampled in the item's local space under the chain
- *   `T I_1 ... I_k M G`.  The coverage's tolerance is a **bracket**, `A(R minus D(tau)) - e <= k <= A(R plus D(tau)) + e
- *   + o`, with `A` the area inside the pixel, `D(tau)` the disc of the expansion's tolerance, `e` the 8-bit rounding and
- *   `o = 64/255` the overlap allowance, a stopgap that the gate fails past (the worst overshoot measured is 61.8/255, with square-cap dashes, a margin of 2.2/255; an exact union coverage is to bring it down): AD-12's accumulation sums the signed areas of overlapping pieces, so a pixel
- *   two pieces cover in part (an inner join) can be credited up to their overlap more than their union.  Interior and
- *   exterior pixels are exact.  Where the aligned part's boundary crosses the fill region's at an angle `alpha` the
+ *   `T I_1 ... I_k M G`.  What `b` and `a` are, a stroke part's coverage, is UC1: the area of the union of its pieces,
+ *   not the saturating sum of their areas.  The coverage's tolerance is a **bracket**, `A(R minus D(tau)) - e <= k <=
+ *   A(R plus D(tau)) + e + o`, with `A` the area inside the pixel, `D(tau)` the disc of the expansion's tolerance, `e`
+ *   the 8-bit rounding and arithmetic and `o = 1/255` the overlap allowance (UC12): the outline's union lies within
+ *   `D(tau)` of `R`, so what is left is the fold's rounding and the arithmetic's, under one level.  (Before the exact
+ *   step `o` was 64/255, the stopgap of F4: the sum of two partial coverages of one pixel is more than their union, by
+ *   as much as the overlap.)  Where the aligned part's boundary crosses the fill region's at an angle `alpha` the
  *   composed error may reach `tau / sin(alpha / 2)`.
  * - **SC6 Limits.**  A map or device path the geometry refuses, the expansion's `ERR_LIMIT` (a part past `max_points`,
  *   the depth cap, the arithmetic bound), a shifted coordinate past the range, or cell deposits past `max_cells` (summed
@@ -271,10 +273,114 @@
  * - **SC10 The test sink.**  shape-scene's test sink states, for a stroke whose centerline is a path, the hash of the
  *   outline this sink draws on a raster target (`outline=` of its `K` record): the canonical expansion of SC3.
  * - **SC11 Work and cancel.**  A stroke counts the points of its parts, the cell deposits, two passes over its pixels
- *   when aligned and one otherwise, and the expansion's own steps (the centerline's elements times the depth cap,
+ *   when aligned and one otherwise, the expansion's own steps (the centerline's elements times the depth cap,
  *   clamped to the resource limit the bound states), counted whether the expansion was made or found so that a report
- *   does not depend on the cache or the tier.
+ *   does not depend on the cache or the tier, and the exact step's (UC9).
  *
+ * ### Exact union coverage of a stroke (strokes story S4b, UC1 to UC12)
+ *
+ * The outline is made of positively wound pieces whose nonzero fill is the stroke region (D2), and they overlap: the
+ * inner side of a curve, the inside of a join, the caps of dashes against their neighbours, the aligned part against the
+ * body.  AD-12's accumulation sums the signed areas of the pieces, which is the area of what they cover only where no
+ * pixel is partly covered by two pieces that overlap in it; where they do, it credits the overlap twice.  A stroke's
+ * coverage is therefore defined as what the pieces cover, and computed in the scan converter's own arithmetic by an exact,
+ * integer-only step at the pixels where more than one piece lies.  (A self-overlapping fill has the same property today;
+ * this story does not change fills.)  The rules are in real arithmetic unless stated; a **cell** is a pixel of the
+ * accumulator, its frame the 26.6 square `[0, 64]^2`, y down, a point on its left or top boundary in the cell, one on its
+ * right or bottom boundary in its neighbour.
+ *
+ * - **UC1 What a stroke part's coverage is.**  For the body and the aligned part (nonzero fills, SC5) the coverage of a
+ *   pixel is the fold (UC7) of twice the area, in 26.6 units squared, of the part's nonzero fill inside the pixel, that is,
+ *   of the points where the winding number `w` of the part's pieces (as the rasterizer cuts them, UC2) is not zero.  In
+ *   the expansion's real arithmetic `w >= 0` (SG16); on the 26.6 lattice a piece of less than a unit's width may be turned
+ *   inside out and wind the other way, and the fill counts that sliver covered like any other.  The clip part is a fill of
+ *   its region under its own rule and is not changed.  A fill of any kind is not changed by this story.
+ * - **UC2 Pieces.**  The scan converter cuts each edge at row boundaries and then each row's piece at column boundaries,
+ *   every interior cut point the rounding of the cut from the piece's own start (coverage.c's), and an edge of a stroke part
+ *   that goes up is cut from its upper end: the two copies of a segment that two pieces of an outline share, one in each
+ *   direction, are then cut at the same points, and the lattice leaves no sliver between them (the cut from the other end
+ *   is up to a unit away, and a hole of a unit's width and a pixel's length is three levels).  What is deposited is the
+ *   same edge in its own direction.  A **piece** of a cell is one such cut with its two ends in the cell's frame, as
+ *   integers in `[0, 64]`, directed along the edge: a **fragment** when its height is not zero, a **flat piece** when it is
+ *   zero, has length, and touches the cell's left side (the dense accumulation deposits nothing for it, but it steps the
+ *   winding there).  Nothing else of the outline matters inside a cell.
+ * - **UC3 Which cells.**  A cell is **exact** when it holds two or more pieces of the part.  With none the winding is one
+ *   number, and the dense value (S4's accumulation) is right; with one the winding takes two adjacent values, and so
+ *   is it: a contour that enters a cell splits it in two, and two pieces that make one chain (a corner) do too.  For every
+ *   other cell the dense value is used unchanged, and the exact value of a cell without overlap is the dense value to the
+ *   bit.  (A count of fragments alone would leave to the sum the cell between the ends of two long horizontal strips, which
+ *   holds only flat pieces and is as overlapped as any.)
+ * - **UC4 The winding at the cell's left side.**  Let `W` be the signed crossing count of the ray to the left of a point
+ *   (an edge directed down counts +1), `w = eps W`, `eps` the sign that makes a positively wound piece's inside +1 (-1:
+ *   positive winding goes from +x toward +y around the inside, so the edge on the inside's left goes up).  The accumulated
+ *   cover of the cells strictly left of the cell in its row, the fold column included, is `A_left = integral_0^64 W(0-, y)
+ *   dy`, `W(0-, .)` piecewise constant, stepping only where a contour crosses the line `x = 0-`.  Let `J(h)` be the sum
+ *   over pieces of -1 for each that starts at `(0, h)` and +1 for each that ends there (a piece of length 0 counting
+ *   nothing: a vertical piece on `x = 0` counts at both its ends, a contour that touches the line and returns counts
+ *   nothing).  Then `W_top = (A_left - sum_h J(h) (64 - h)) / 64`, the winding at the top of the side, is an integer: the
+ *   division is exact, and a remainder is a piece missed or invented, which refuses the cell (UC9) and never guesses.
+ * - **UC5 Slabs, order, winding.**  The distinct heights of the fragments' ends and of the steps of `J` cut the cell into
+ *   at most 64 slabs of integer height `H`.  In a slab every fragment spans it or misses it; written top to bottom with sign
+ *   `s` (+1 if the contour went down along it) a fragment's `x` at depth `u` is `(a + dx u) / dy`, `a = p.x dy + (Ya - p.y)
+ *   dx`, `|a| <= 2^13`.  Two fragments meet at `u = N / D`, `|N| < 2^21`, `0 < D <= 2^13`; the earliest meeting of the
+ *   neighbours cuts the slab into sub-slabs in which no two fragments cross, so their left-to-right order is one order,
+ *   decided exactly at the sub-slab's start by `(a_i D_0 + dx_i N_0) dy_k` against `(a_k D_0 + dx_k N_0) dy_i` (every
+ *   operand below `2^34`), ties by slope (the one that moves left faster with depth is left), then by the piece's place
+ *   in the cell's sorted list (the pieces are sorted before the walk, so the result does not depend on the order they
+ *   were found in; only coincident fragments, of zero width, reach the last tie).  Walking left to right, the winding of
+ *   the gap before the first fragment is `eps (W_top + sum_{h <= Ya} J(h))` and each fragment adds `eps s`.
+ * - **UC6 The shared area and its arithmetic.**  What the dense sum holds over what the fill covers, in doubled units, is
+ *   `2 O - 4 N`, with `O` the integral of `(|w| - 1)^+` (what is counted more than once) and `N` the integral of `-w` where
+ *   `w < 0` (the lattice's slivers, which the sum counts negatively and the fill covers).  Over a sub-slab from `u_a` to
+ *   `u_b` the gaps' widths are linear in `u`, so a gap's share is its weight times the mean of its widths at the two ends
+ *   times `u_b - u_a`, exactly.  The arithmetic is fixed so that every target gets the same bits: a boundary is rounded to
+ *   16 fractional bits, `u_fp = floor(2^16 N / D)`; a fragment's `x` at `u_fp` is held to 20 fractional bits, `X =
+ *   floor((a 2^20 + dx u_fp 2^4) / dy)`; a gap's width at either end is taken as 0 if two fragments that meet exactly have
+ *   rounded the other way; a gap's term is `(weight (Wa + Wb) (u_fp,b - u_fp,a)) >> 17` in units of `2^-20` unit squared,
+ *   `Wa + Wb` below `2^27`, the depth below `2^22` and the weight at most 255 (UC9), so every product is below `2^57` in
+ *   `uint64_t`.  An `x` is low by less than `2^-20` unit, a term by less than `2^-20` unit squared, and a boundary off by
+ *   less than `2^-16` mis-orders a meeting for a sliver under `2^-25` unit squared: a cell of `m` pieces and `T`
+ *   sub-slabs is low by at most `2^-13 (m + 1) W + T 2^-20` unit squared (`W` the largest winding), under 17 at the
+ *   default cap and the winding bound and under `0.3` for `m <= 64`, `W <= 32`.  The same walk integrates `w` itself, which
+ *   must give back the dense area within that bound: it checks the pieces, the order and `W_top` at once.  No
+ *   `long double`, no `__int128`, no libm, no FMA.
+ * - **UC7 The fold.**  The coverage of a cell is `min(255, v' >> 5)` where `v'` is the doubled area of the nonzero fill:
+ *   the dense value `v` of the accumulation, less `2 O - 4 N`, at least 0.  A pixel the pieces cover wholly is 255, and one
+ *   they cover twice but the fill only in part is the fill's part.  The shift is taken on the magnitude (a stroke's pieces
+ *   are wound so that the accumulation is negative, and its shift rounds toward negative infinity), the floor of a level
+ *   either way round, so `|k - 255 A|` is at most one level for the area `A` the fill covers and a quarter more for the
+ *   arithmetic.
+ * - **UC9 Limits, refusals, work, memory.**  `GSHCPU_Limits.max_exact_fragments` (a `uint64_t`; 0 is 512, any other value
+ *   is used as given up to `2^20`, which a larger value is ::GSHCPU_ERR_INVALID for at sink creation; `UINT64_MAX` is not
+ *   "no cap": the step is quadratic) bounds the pieces of one part in one cell.  A cell with more, or a winding past 255 in
+ *   magnitude (anywhere in an exact cell: an internal bound the arithmetic's products depend on), or a cell whose pieces do
+ *   not reproduce the rasterizer's sums, is the sink's resource limit: the item's block is skipped (strict stops with the
+ *   finished prefix), as the cell cap (SC6).  The pieces are counted over what the whole render draws of the item, so a
+ *   damaged render refuses what the whole one does, unless the outline has too few points for any cell to hold that many
+ *   (a piece is at most one for each edge, an outline has fewer edges than twice its points); a winding past the bound
+ *   is found where the step runs, the pixels drawn.  The step's work counts toward SC11's: a piece is one unit, a pair of
+ *   neighbours' meetings, an area and a comparison of the ordering one each, and the declared `cancel_work_bound` adds
+ *   the most the step may do over the pieces an item can hold (its deposits and the horizontal pieces on cells' left sides,
+ *   at most one for each point and each column of the widest raster), which for a cell of `m` pieces is under
+ *   `64 (m + (m^2/2 + 1)(3m + 2) + m^2/2)`.  Memory is a function of the limits and the region only: a count of
+ *   pieces and a place in the pool for each cell of a band of the region's width, a pool of pieces (at least 4096, at least
+ *   one cell's worth), and the scratch of one cell, counted by `workspace_bytes`, never allocated under `CALLER_MEMORY`; the
+ *   cells of a band whose pieces do not fit the pool are made exact a window at a time.
+ * - **UC10 Tiers (AD-13).**  The exact step is one function used by every route: the dense sweep and the sparse composite
+ *   (FT-2, where a cell the step changes is noted as a deposit is, so that the sweep visits it).  Both are bit-equal to
+ *   the general tier by construction and by the gate that holds each to it.  The step is not a tier: the sink with it off
+ *   (a test switch, `GSHCPU_RENDER_TIER_EXACT`) is the sum of F4's stopgap, which the gates are shown to fail.
+ * - **UC11 Determinism (AD-17, AD-22).**  The result of a cell is a function of its pieces and the cover to its left, in
+ *   `int64_t` and `uint64_t` within the bounds above, with no floating point and no division by anything unchecked; it does
+ *   not depend on the thread, the cache, the band, the damage or the order the pieces were found in, so the stroke goldens are
+ *   the same on every target.
+ * - **UC12 The bracket and `o`.**  The bracket keeps `e` (2/255) and takes `o = 1/255`.  A second instrument, the union gate
+ *   (`tests/stroke_gate.h`), tests exactness itself: an independent reference computes the area of the union of the pieces
+ *   (the polygon the rasterizer covers) per pixel by a scanline sweep of the whole outline in `long double`, and the
+ *   coverage must be within a level and a half of it at every pixel of every case.  It exists because the bracket's
+ *   `D(tau)` is a sixteenth of a pixel and hides an error of a few levels on a thin feature.
+ *
+
  * ### Memory (S9)
  *
  * A render takes one block: the layers (32 bytes a pixel of the region for the
@@ -283,7 +389,9 @@
  * the cell accumulator of ::GSHCPU_RENDER_BAND_ROWS rows, the walk, and for
  * gradients a table of twice the gradient fills of the expansion (a picture's
  * counted where it is drawn) and room for their stops, and, only when the expansion holds a stroke that aligns, three
- * more arrays of a byte a pixel (the aligned part, the clip path's coverage and their composition, SC5).  The
+ * more arrays of a byte a pixel (the aligned part, the clip path's coverage and their composition, SC5), and, only when it
+ * holds a stroke, the exact step's memory (UC9: a count and a place for each cell of a band as wide as the whole render's
+ * region, a pool of pieces and the scratch of one cell, sized by `max_exact_fragments`).  The
  * geometry of each item (its device path and flattened path) is allocated from
  * the sink's allocator, or with `CALLER_MEMORY` from the rest of the workspace,
  * which is sized by converting every item once: the exact need is the block plus
@@ -301,7 +409,8 @@
  * The region drawn is at most `max_dimension` pixels wide and tall, at most
  * `max_bytes` pixels in all, and lies within ::GSHCPU_MAX_DIMENSION_CEILING
  * pixels of the origin; past either it is ::GSHSCENE_ERR_LIMIT before anything is
- * drawn.  `max_cache_bytes` bounds the stroke cache (SC7).
+ * drawn.  `max_cache_bytes` bounds the stroke cache (SC7); `max_exact_fragments` the pieces of a stroke part in one
+ * pixel (UC9).
  *
  * ### Hash and dump of a render (AD-21)
  *

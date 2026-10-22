@@ -1,11 +1,15 @@
 /**
  * @file
  *
- * The coverage-level bracket of a stroke against the geometric oracle (strokes story S4, SC5, F4): every join, cap and width
- * space, dashes, degenerate subpaths and hairlines, both alignments, and the lens under rotation with every join.  The
- * allowance for overlapping pieces is a stopgap bound of 64/255 that the gate fails past (stroke_gate.h); a control runs
- * the worst case with the first allowance, 16/255, and must be seen to fail.  A failing case prints a record of its worst
- * pixels and the pieces of the outline that cover them.
+ * The coverage-level bracket of a stroke against the geometric oracle (strokes story S4, SC5, F4) and the union gate
+ * (strokes story S4b, UC12): every join, cap and width space, dashes, degenerate subpaths and hairlines, both alignments,
+ * and the lens under rotation with every join.  The allowance for overlapping pieces is one level (UC12: the sink's
+ * coverage is the area of the union of the pieces, so what is left is rounding) and the gate fails past it.  The union
+ * gate holds every pixel of every case within one and a half levels of the area an independent instrument finds for the
+ * union of the outline's pieces.  Both are seen to fail: on the build with the exact step off, which is the stopgap of F4
+ * (it passes only at 64/255 and fails the union gate on the dashes), and on the instrument planted with the sum of the
+ * pieces' areas, which fails its own self-check against closed forms.  A failing case prints a record of its worst pixels
+ * and the pieces of the outline that cover them.
  *
  * Copyright 2026 by Corey Pennycuff
  */
@@ -112,16 +116,27 @@ void record(GateCase & c, const stroke_gate::Result & r, const std::vector<uint8
   }
 }
 
-stroke_gate::Result gate_one(GateCase & c, int size = 26, double overlap = stroke_gate::kOverlap, bool quiet = false) {
+/** What one case found: the bracket's and the union gate's. */
+struct Found {
+  stroke_gate::Result bracket;
+  stroke_gate::UnionResult union_gate;
+};
+
+Found gate_one(GateCase & c, int size = 26, double overlap = stroke_gate::kOverlap, bool quiet = false,
+    unsigned tiers = GSHCPU_RENDER_TIERS_ALL, bool aligned_too = false) {
   c.p.s.alignment = (uint32_t)c.alignment;
   c.p.s.alignment_rule = c.even_odd ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO;
   Store s;
-  Sink sink;
+  Sink sink(tiers);
   Drawn d = render_list(sink.sink, one_stroke(s, *c.ops, c.p.get(), c.map), (uint32_t)size, (uint32_t)size);
   EXPECT_EQ(d.result, GSHSCENE_OK) << c.name;
+  EXPECT_TRUE(d.entries.empty()) << c.name << ": nothing is refused";
   GSHGEOM_Path * path = stroke_gate::build(*c.ops);
-  stroke_gate::Result r = stroke_gate::bracket(path, c.p.get(), c.map, c.alignment, c.even_odd, size, size, d.alpha, overlap);
+  Found f;
+  f.bracket = stroke_gate::bracket(path, c.p.get(), c.map, c.alignment, c.even_odd, size, size, d.alpha, overlap);
+  f.union_gate = stroke_gate::union_gate(path, c.p.get(), c.map, size, size, d.alpha, aligned_too, 1024);
   gshgeom_path_destroy(path);
+  const stroke_gate::Result & r = f.bracket;
   if (r.violations && !quiet) {
     record(c, r, d.alpha, size);
   }
@@ -131,7 +146,26 @@ stroke_gate::Result gate_one(GateCase & c, int size = 26, double overlap = strok
     std::printf("--- %s: %ld violations, worst over %.1f/255\n%s", c.name.c_str(), r.violations, r.worst_over,
         stroke_gate::picture(r, size, size, d.alpha).c_str());
   }
-  return r;
+  return f;
+}
+
+/** The worst of each class over the cases that ran (the table the story's change log quotes). */
+struct Worst {
+  double over = 0;
+  double under = 0;
+  double unioned = 0;
+  long cases = 0;
+  void add(const Found & f) {
+    over = std::max(over, f.bracket.worst_over);
+    under = std::max(under, f.bracket.worst_under);
+    unioned = std::max(unioned, f.union_gate.worst);
+    cases++;
+  }
+};
+
+void print_class(const char * name, const Worst & w) {
+  std::printf("stroke class %-34s %3ld cases: worst overshoot past the bracket %5.2f/255, undershoot %5.2f/255, off the union %4.2f levels\n", name,
+      w.cases, w.over, w.under, w.unioned);
 }
 
 }  // namespace
@@ -168,16 +202,20 @@ TEST(RenderStrokeBracket, EveryJoinCapAndWidthSpaceStaysInsideTheBracket) {
     }
   }
   stroke_gate::Result total;
+  Worst joins;
   for (GateCase & c : cases) {
-    stroke_gate::Result r = gate_one(c);
-    EXPECT_EQ(r.violations, 0) << c.name << ": " << r.first;
-    total.pixels += r.pixels;
-    total.decided += r.decided;
-    total.worst_over = std::max(total.worst_over, r.worst_over);
-    total.worst_under = std::max(total.worst_under, r.worst_under);
+    Found f = gate_one(c);
+    EXPECT_EQ(f.bracket.violations, 0) << c.name << ": " << f.bracket.first;
+    EXPECT_EQ(f.union_gate.violations, 0) << c.name << ": " << f.union_gate.first;
+    total.pixels += f.bracket.pixels;
+    total.decided += f.bracket.decided;
+    total.worst_over = std::max(total.worst_over, f.bracket.worst_over);
+    total.worst_under = std::max(total.worst_under, f.bracket.worst_under);
+    joins.add(f);
   }
   std::printf("stroke bracket (centered): %zu cases, %ld pixels, %ld decided; worst overshoot past the union %.2f/255 (bound %.2f/255), worst undershoot %.2f/255\n",
       cases.size(), total.pixels, total.decided, total.worst_over, stroke_gate::kOverlap * 255.0, total.worst_under);
+  print_class("joins and caps, centered", joins);
   EXPECT_GT(total.decided, 1000);
   EXPECT_LE(total.worst_over, stroke_gate::kOverlap * 255.0);
 }
@@ -217,11 +255,19 @@ TEST(RenderStrokeBracket, DashesDegenerateSubpathsAndHairlinesStayInsideTheBrack
     c.map = affine_map(1.2, 0.0, 0.3, 1.0, 0.125, 0.5);
     cases.push_back(c);
   }
+  Worst dashes;
+  Worst square;
+  Worst others;
   for (GateCase & c : cases) {
-    stroke_gate::Result r = gate_one(c);
-    EXPECT_EQ(r.violations, 0) << c.name << ": " << r.first;
-    EXPECT_LE(r.worst_over, stroke_gate::kOverlap * 255.0) << c.name;
+    Found f = gate_one(c);
+    EXPECT_EQ(f.bracket.violations, 0) << c.name << ": " << f.bracket.first;
+    EXPECT_EQ(f.union_gate.violations, 0) << c.name << ": " << f.union_gate.first;
+    EXPECT_LE(f.bracket.worst_over, stroke_gate::kOverlap * 255.0) << c.name;
+    (c.name.find("dashes") == 0 ? (c.name.back() == '2' ? square : dashes) : others).add(f);
   }
+  print_class("dashes, butt and round caps", dashes);
+  print_class("dashes, square caps", square);
+  print_class("degenerate subpaths and hairlines", others);
 }
 
 TEST(RenderStrokeBracket, InsideAndOutsideAlignmentStaysInsideTheBracketAndReportsWhatItExcluded) {
@@ -247,21 +293,24 @@ TEST(RenderStrokeBracket, InsideAndOutsideAlignmentStaysInsideTheBracketAndRepor
   long excluded = 0;
   long pixels = 0;
   double over = 0;
+  Worst aligned;
   for (GateCase & c : cases) {
-    stroke_gate::Result r = gate_one(c);
-    EXPECT_EQ(r.violations, 0) << c.name << ": " << r.first;
-    excluded += r.excluded;
-    pixels += r.pixels;
-    over = std::max(over, r.worst_over);
+    Found f = gate_one(c);
+    EXPECT_EQ(f.bracket.violations, 0) << c.name << ": " << f.bracket.first;
+    excluded += f.bracket.excluded;
+    pixels += f.bracket.pixels;
+    over = std::max(over, f.bracket.worst_over);
+    aligned.add(f);
   }
   std::printf("stroke bracket (aligned): %zu cases, %ld pixels, %ld excluded around crossings of the aligned part and the fill; worst overshoot %.2f/255\n",
       cases.size(), pixels, excluded, over);
+  print_class("aligned strokes", aligned);
   EXPECT_LE(over, stroke_gate::kOverlap * 255.0);
 }
 
-
 TEST(RenderStrokeBracket, TheLensUnderRotationWithEveryJoin) {
   const double angles[3][4] = {{1, 0, 0, 1}, {0.9205, -0.3907, 0.3907, 0.9205}, {0.3907, -0.9205, 0.9205, 0.3907}};
+  Worst lens;
   for (int a = 0; a < 3; a++) for (uint32_t space = 0; space < 2; space++) for (uint32_t join = 0; join < 5; join++) {
     GateCase c;
     c.name = "lens rot " + std::to_string(a) + " space " + std::to_string(space) + " join " + std::to_string(join);
@@ -269,13 +318,18 @@ TEST(RenderStrokeBracket, TheLensUnderRotationWithEveryJoin) {
     c.p = params(3.0, join);
     c.p.s.width_space = space;
     c.map = affine_map(angles[a][0], angles[a][1], angles[a][2], angles[a][3], 3.375 + a, 2.625);
-    gate_one(c);
+    Found f = gate_one(c);
+    EXPECT_EQ(f.bracket.violations, 0) << c.name << ": " << f.bracket.first;
+    EXPECT_EQ(f.union_gate.violations, 0) << c.name << ": " << f.union_gate.first;
+    lens.add(f);
   }
+  print_class("adjacent curve triangles (the lens)", lens);
 }
 
-TEST(RenderStrokeBracket, TheGateIsSeenToFailWithTheFirstAllowance) {
-  // The control: the worst case measured (dashes with square caps over two subpaths, 61.8/255 past the union) passes the
-  // stopgap allowance, 64/255, with a margin of about 2/255, and fails the first allowance, 16/255.
+TEST(RenderStrokeBracket, TheGatesAreSeenToFailOnTheBuildWithoutTheExactStep) {
+  // The control: the worst case measured before the exact step (dashes with square caps over two subpaths, 61.8/255 past the
+  // bracket) is the stopgap build, which has the exact step off.  It passes the stopgap allowance, 64/255, fails the
+  // allowance of one level and fails the union gate; the sink with the step on passes all three.
   GateCase c;
   c.name = "control: dashes scope 1 cap 2";
   c.ops = &kMixed;
@@ -284,15 +338,78 @@ TEST(RenderStrokeBracket, TheGateIsSeenToFailWithTheFirstAllowance) {
   c.p.s.dash_scope = 1;
   c.p.s.dash_offset = 1.5;
   c.map = frac_map();
-  stroke_gate::Result pass = gate_one(c, 26, stroke_gate::kOverlap, true);
-  EXPECT_EQ(pass.violations, 0);
-  EXPECT_GT(pass.worst_over, 40.0) << "the case is a worst case: it has real overlap";
-  EXPECT_LE(pass.worst_over, stroke_gate::kOverlap * 255.0);
-  stroke_gate::Result tight = gate_one(c, 26, stroke_gate::kOverlapFirst, true);
-  EXPECT_GT(tight.violations, 0) << "the gate fails past a tightened bound";
-  std::printf("stroke bracket control: worst %.1f/255 against the bound %.1f/255 (margin %.1f), the first bound %.1f/255 fails on %ld pixels\n",
-      pass.worst_over, stroke_gate::kOverlap * 255.0, stroke_gate::kOverlap * 255.0 - pass.worst_over,
-      stroke_gate::kOverlapFirst * 255.0, tight.violations);
+  const unsigned off = GSHCPU_RENDER_TIERS_ALL & ~GSHCPU_RENDER_TIER_EXACT;
+  Found stop = gate_one(c, 26, stroke_gate::kOverlapStopgap, true, off);
+  EXPECT_EQ(stop.bracket.violations, 0);
+  EXPECT_GT(stop.bracket.worst_over, 40.0) << "the case is a worst case: it has real overlap";
+  EXPECT_LE(stop.bracket.worst_over, stroke_gate::kOverlapStopgap * 255.0);
+  Found tight = gate_one(c, 26, stroke_gate::kOverlap, true, off);
+  EXPECT_GT(tight.bracket.violations, 0) << "the gate fails past the allowance of one level on the stopgap build";
+  EXPECT_GT(tight.union_gate.violations, 0) << "and the union gate fails it";
+  Found exact = gate_one(c, 26, stroke_gate::kOverlap, true);
+  EXPECT_EQ(exact.bracket.violations, 0);
+  EXPECT_EQ(exact.union_gate.violations, 0);
+  EXPECT_LE(exact.bracket.worst_over, stroke_gate::kOverlap * 255.0);
+  // The allowance first decided, 16/255, is failed by the stopgap build too.
+  Found first = gate_one(c, 26, stroke_gate::kOverlapFirst, true, off);
+  EXPECT_GT(first.bracket.violations, 0);
+  std::printf("stroke bracket control: the stopgap build is %.1f/255 past the bracket (passes %.1f, fails %.1f on %ld pixels and the union gate by %.1f levels); the exact step: %.2f/255 and %.2f levels\n",
+      stop.bracket.worst_over, stroke_gate::kOverlapStopgap * 255.0, stroke_gate::kOverlap * 255.0, tight.bracket.violations,
+      tight.union_gate.worst, exact.bracket.worst_over, exact.union_gate.worst);
+}
+
+namespace {
+
+/** A closed contour of the 26.6 points @p xy (pixels times 64), positively wound as the expansion's pieces are. */
+stroke_gate::Contour rect_contour(double x0, double y0, double x1, double y1) {
+  auto pt = [](double x, double y) {
+    stroke_gate::Pt p;
+    p.x = (int64_t)std::llround(x * 64);
+    p.y = (int64_t)std::llround(y * 64);
+    return p;
+  };
+  return {pt(x0, y0), pt(x1, y0), pt(x1, y1), pt(x0, y1)};
+}
+
+}  // namespace
+
+TEST(RenderStrokeBracket, TheUnionInstrumentIsRightOnClosedFormsAndTheSumOfPiecesIsSeenToFail) {
+  // Two squares of side 2 overlapping in a square of side 1: A = [0.5, 2.5]^2, B = [1.5, 3.5]^2.  In pixel (1, 1) A covers it
+  // all and B the quarter [1.5, 2]^2: the union is 1, the sum 1.25; pixel (2, 2) is B's whole against A's quarter: 1 and
+  // 1.25; pixel (1, 2) is A's [1,2]x[2,2.5] (a half) and B's [1.5,2]x[2,3] (a half) overlapping in a quarter: 0.75 and 1.
+  stroke_gate::Part body;
+  body.contours.push_back(stroke_gate::cut_contour(rect_contour(0.5, 0.5, 2.5, 2.5)));
+  body.contours.push_back(stroke_gate::cut_contour(rect_contour(1.5, 1.5, 3.5, 3.5)));
+  std::vector<double> u = stroke_gate::union_area(body, nullptr, nullptr, 5, 5, 512);
+  auto at = [&](const std::vector<double> & v, int x, int y) { return v[(size_t)y * 5 + (size_t)x]; };
+  EXPECT_NEAR(at(u, 1, 1), 1.0, 1e-3);
+  EXPECT_NEAR(at(u, 2, 2), 1.0, 1e-3);
+  EXPECT_NEAR(at(u, 1, 2), 0.75, 1e-3);
+  EXPECT_NEAR(at(u, 2, 1), 0.75, 1e-3);
+  EXPECT_NEAR(at(u, 0, 0), 0.25, 1e-3);
+  EXPECT_NEAR(at(u, 3, 3), 0.25, 1e-3);
+  EXPECT_NEAR(at(u, 0, 3), 0.0, 1e-3);
+  // The plant: the instrument that adds each piece's own area instead of taking the union disagrees with every closed form
+  // at the overlap, so a self-check of this kind fails it.
+  std::vector<double> sum = stroke_gate::union_area(body, nullptr, nullptr, 5, 5, 512, stroke_gate::Rule::SumOfPieces);
+  EXPECT_NEAR(at(sum, 1, 1), 1.25, 1e-3);
+  EXPECT_GT(std::fabs(at(sum, 1, 1) - 1.0), 0.2) << "the plant fails the self-check";
+  EXPECT_GT(std::fabs(at(sum, 1, 2) - 0.75), 0.2);
+  // The aligned region: body U (aligned & clip), clip nonzero or complemented.
+  stroke_gate::Part aligned;
+  stroke_gate::Part clip;
+  aligned.contours.push_back(stroke_gate::cut_contour(rect_contour(0.0, 0.0, 4.0, 1.5)));
+  clip.contours.push_back(stroke_gate::cut_contour(rect_contour(1.0, 0.0, 3.0, 4.0)));
+  stroke_gate::Part none;
+  std::vector<double> inside = stroke_gate::union_area(none, &aligned, &clip, 5, 5, 512);
+  EXPECT_NEAR(at(inside, 1, 0), 1.0, 1e-3);
+  EXPECT_NEAR(at(inside, 1, 1), 0.5, 1e-3);
+  EXPECT_NEAR(at(inside, 0, 0), 0.0, 1e-3);
+  clip.complement = true;
+  std::vector<double> outside = stroke_gate::union_area(none, &aligned, &clip, 5, 5, 512);
+  EXPECT_NEAR(at(outside, 0, 0), 1.0, 1e-3);
+  EXPECT_NEAR(at(outside, 1, 0), 0.0, 1e-3);
+  EXPECT_NEAR(at(outside, 3, 1), 0.5, 1e-3);
 }
 
 int main(int argc, char ** argv) {

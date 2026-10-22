@@ -28,6 +28,8 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   exactly. Strokes: a centerline and a style, drawn by `shape-geometry`'s one expansion (every join, cap,
   dash, width space and alignment), the expansion cached by resource id and the map's linear part and fractional
   translation, so that a whole-pixel translation of a stroke reuses it (`GSHCPU_Limits.max_cache_bytes`).
+  A stroke's coverage is the area of the union of its pieces, computed exactly in integers at the pixels where
+  pieces overlap, not the sum of their areas (`GSHCPU_Limits.max_exact_fragments` bounds the pieces of one pixel).
   `gshcpu_render_hash` and `gshcpu_render_dump` spell a render; the
   fixture set's renders are committed goldens, the same on every target.
   `examples/render.c` renders a list; `examples/stroke.c` strokes a path and shows the cache serve a translation.

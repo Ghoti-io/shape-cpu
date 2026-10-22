@@ -217,17 +217,56 @@ the body's coverage bit for bit) and never above 255. Absent parts are zero, whi
 part and the clip exist only when the list holds a stroke that aligns.
 
 **What the coverage is, and its tolerance.** The outline is a set of pieces (a quadrilateral for each stretch of a curve,
-a triangle or sector for each join, a shape for each cap) wound positively, and `k` is the coverage of their nonzero fill
-under story 9's accumulation: AD-12's definition, a saturating sum of signed areas. A pixel that two pieces cover in
-part with the pieces overlapping inside it is credited the sum of the two areas, up to the overlap more than the union's
-area. Interior and exterior pixels are exact. The bracket of SC5 (`tests/stroke_gate.h`, one function another backend
-can call on its own coverage) is the stroke's stated tolerance against the geometric oracle; the overshoot past the
-union it measures is the quantity `o` bounds. `o` is 64/255 as a stopgap, a bound the gate fails past: the largest
-overshoot measured is 61.8/255 (dashes with square caps over two subpaths, where the caps of neighbouring dashes overlap
-one another), then 49.8 (a closed bevel under a device width), 45.8 to 46.6 (a sharp corner under a non-uniform map; square
-caps), 37.5 (the aligned part) and about 20 to 26 at the inner side of an ordinary curve or polygon; the lens, a smooth
-curve, shows 9 to 22 whatever the join. Their cause is the overlap of the outline's pieces (the triangles a curve is cut
-into, the inner side of a join, the caps of abutting dashes), which an exact union coverage removes.
+a triangle or sector for each join, a shape for each cap, a piece for each dash) wound positively, and `k` is the coverage
+of what they cover: the area, in the pixel, of their nonzero fill (UC1). That is not what AD-12's accumulation, a
+saturating sum of signed areas, gives where two pieces cover a pixel in part and overlap inside it: the sum credits the
+overlap twice, up to the overlap more than the union's area (the inner side of a curve or a join, the caps of abutting
+dashes). So a pixel that holds two or more pieces of a part is made exact (below), and the sum remains the mechanism for
+everything else: for fills (a self-overlapping fill has the property today; extending the exact step to fills is a
+separate decision) and for the cells where pieces do not overlap. Interior and exterior pixels are exact. The bracket of
+SC5 (`tests/stroke_gate.h`, one function another backend can call on its own coverage) is the stroke's stated tolerance
+against the geometric oracle, and `o`, its allowance for what is left of the overlap, is one level (UC12). Before the exact
+step it was 64/255, a stopgap: the worst overshoot measured on the build without the step is 61.8/255 (dashes with square
+caps over two subpaths), then 49.8 (a closed bevel under a device width), 45.8 to 46.6 (a sharp corner under a non-uniform
+map; square caps), 37.5 (the aligned part) and about 20 to 26 at the inner side of an ordinary curve or polygon, and the gate
+runs that build (`GSHCPU_RENDER_TIER_EXACT` off) as the control it must fail. The bracket's `D(tau)` is a sixteenth of a
+pixel, which hides an overlap error of a few levels on a thin feature, so a second instrument, the union gate, holds every
+pixel to a level and a half of an independent scanline sweep of the union of the pieces.
+
+**The exact step (UC1 to UC7).** The dense accumulation is an exact integer sum of the winding over the pixel. The area of
+what the nonzero fill covers differs from it by `2 O - 4 N` in doubled units: `O` what is covered by more than one winding
+(`(|w| - 1)^+`) and `N` what is wound the wrong way (the 26.6 lattice can turn a sliver of a piece inside out; the fill
+covers it, the sum subtracts it). Subtracting that, rather than rebuilding the union, leaves a cell without either as the
+dense value to the bit: fills, cells of one piece, corners and the interior never change. The step works in one cell, from
+its pieces and the cover to its left. A piece is what the rasterizer deposits for an edge in the cell, and a horizontal one
+that touches the cell's left side: the dense pass deposits nothing for it, and it steps the winding along that side. The
+winding at the side's top comes from the dense sum: `A_left`, what the cells to the left accumulated, is the integral of the
+winding along the side, and the winding steps only where a contour crosses the line, which the cell's own pieces show, so
+`64 W_top = A_left - sum J(h) (64 - h)` is one exact integer division whose remainder is a consistency check on every cell
+(a top or bottom side would be crossed by the pieces the dense pass keeps, but then the slabs would run in `x`, where the
+horizontal pieces are the ones that cross and are not kept). Slabs in `y` between the integer heights of the ends and steps
+have pieces that each span them; within a slab, the earliest meeting of two neighbours is the next event, the order is
+decided exactly at each sub-slab's start, and the area is a sum of trapezoids in fixed point (the arithmetic and its
+bounds are UC6 and the file header of `src/render/exact.c`). The same walk integrates the winding itself and must give the
+dense area back, which checks the pieces, `W_top` and the order at once; a cell that fails is refused, never guessed. The
+orientation sign `eps` is -1 (positive winding goes from +x toward +y, so the inside's left edge goes up) and a test pins it.
+
+**Why the cut is canonical (UC2).** An interior cut point is the rounding of a cut from the edge's own start. The two
+pieces that share a segment traverse it in opposite directions, so cut from their own ends they get cut points up to a unit
+apart, and the sliver between them is a hole in the union: a pixel in the middle of a stroke came out three levels short in
+the first measurement of the exact step, where the sum's overlap had hidden it. An edge that goes up is therefore cut from its
+upper end, and deposited in its own direction. This changes which lattice points a stroke's pixels are the area of, and no
+fill's.
+
+**The fold.** The accumulation of a stroke is negative (its pieces are wound so), and the shared fold shifts before it
+drops the sign, so a stroke part would come out a level high wherever the area is not a whole level. The stroke's parts
+fold the magnitude: the floor of a level either way round.
+
+**Windows and memory.** The pieces of the exact cells of a band go in a pool by a counting sort (a count per cell from the
+first pass, a second pass over the edges storing them); a band whose exact cells hold more than the pool is made exact a
+window of cells at a time. The pool, the counts and the one cell's scratch are in the render's block, sized by the limits
+(`max_exact_fragments`) and the region alone, so the exact workspace is still exact and the step allocates nothing under
+`CALLER_MEMORY`.
 
 **The cache (SC7)** is keyed by resource ids, never by the resources' addresses or contents, because ids are never reused
 (a stale entry costs memory and nothing else). The value is the immutable outline. The bound is on the bytes the table
@@ -261,8 +300,9 @@ lines, axis-parallel ones above all (their long edges deposit nothing). A ring, 
 its own with edges of its own, and counts.
 
 **Work.** A stroke counts the points of its parts, its cell deposits, the pixels of its rectangle (twice when it
-aligns) and the expansion's steps, whether the expansion was made or found, so that the report a render writes does not
-depend on the cache or on a tier. The expansion's steps are bounded by the depth cap for each element of the centerline,
+aligns), the expansion's steps, whether the expansion was made or found, and the exact step's (a piece, a meeting of
+neighbours, an area and a comparison one each), so that the report a render writes does not depend on the cache or on a
+tier. The expansion's steps are bounded by the depth cap for each element of the centerline,
 clamped to the resource limit of the store, which is the term the declared cancel bound adds.
 
 ### Why the layers cover the region, not bands of it
@@ -399,7 +439,15 @@ by id, destruction, a bound of 1, an entry larger than the bound, caller memory 
 the tiers over the stroke fixtures on all four formats against the forced general tier, each taken; damage over aligned
 and centered strokes; groups; a stroked run refused for its centerline; the work within the declared bound.
 `tests/stroke_gate.h` is the bracket against the geometric oracle that shape-geometry installs
-(`<ghoti.io/shape-geometry/testing/stroke_oracle.h>`).
+(`<ghoti.io/shape-geometry/testing/stroke_oracle.h>`), and the union gate with its independent instrument
+(`test_render_stroke_bracket.cpp`: every case within `o = 1/255` of the bracket and a level and a half of the union, the
+build without the exact step failing both, the instrument planted with the sum of the pieces failing its self-check against
+closed forms). The exact step (`test_render_exact.cpp`): closed forms (nested, crossing, coincident edges, through a lattice
+point, a contour that touches the left side, a vertical piece on it, a cell of flat pieces only); random sets of pieces
+against the instrument; a window equal to the whole render there and the order of the pieces changing nothing; the sparse
+sweep equal to the dense one; the cap at 512 and 513 and at small values, over the walk and not the window; a winding of
+255 and 256; the field `max_exact_fragments` through the sink (validated, defaulted, refused at its bound, damage, strict,
+caller memory).
 
 The sink's tests: shape-scene's conformance suite, installed by shape-scene as
 `<ghoti.io/shape-scene/testing/sink_conformance.h>` and run unchanged

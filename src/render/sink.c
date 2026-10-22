@@ -49,6 +49,7 @@ typedef struct Cpu_Sink {
   size_t max_dimension;      /* the effective limits */
   size_t max_bytes;
   uint64_t max_cells;
+  uint64_t max_exact;        /* the most pieces of a stroke part in one pixel (UC9) */
   GSHGEOM_Limits geometry;   /* max_points for the flattener */
   GSHCPU_Render_Observer observer;
   void * observer_ctx;
@@ -111,8 +112,10 @@ typedef struct Layout {
   size_t stops;              /* their stops */
   size_t table;              /* the resolved table's slots: a power of two at least twice the gradient fills */
   int aligned;               /* the expansion holds a stroke that aligns: three more coverage arrays (SC5) */
+  int strokes;               /* the expansion holds a stroke: the exact step's memory (UC9) */
+  size_t exact_bytes;
   size_t at_walk, at_maps, at_stop, at_frames, at_clips, at_root, at_layers, at_touched, at_coverage, at_clip_memory,
-      at_acc, at_table, at_pool, at_items; /* offsets from the aligned base */
+      at_acc, at_exact, at_table, at_pool, at_items; /* offsets from the aligned base */
   size_t at_cov_aligned, at_cov_clip, at_cov_result; /* the aligned stroke's arrays */
   size_t fixed;              /* the bytes before the items' arena, the alignment slack included */
 } Layout;
@@ -143,6 +146,7 @@ typedef struct Run {
   uint8_t * cov_clip;
   uint8_t * cov_result;
   int64_t * acc;
+  GSHCPU_Exact exact;        /* UC9: the exact step's arrays, when the layout has them (strokes) */
   int acc_dirty;             /* the dense sweep leaves the accumulator written; the sparse one needs it zero */
   int caller;                /* CALLER_MEMORY: nothing allocated, so no cache */
   Resolved * resolved;       /* the gradients resolved so far (S17), open addressing on the id */
@@ -191,7 +195,7 @@ static size_t mul3(size_t a, size_t b, size_t c) {
  * gradient fills and their stops added to @p gradients and @p stops (0 when a sum would overflow).
  */
 static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops,
-    int * aligned) {
+    int * aligned, int * strokes) {
   size_t g = 0;
   size_t c = 0;
   size_t most_g = 0;
@@ -210,6 +214,9 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
       ok = ok && gcu_safe_add_size(*gradients, 1u, gradients) && gcu_safe_add_size(*stops, gradient.stop_count, stops);
     }
     GSHSCENE_Stroke_Style style;
+    if (item->kind == GSHSCENE_ITEM_STROKE) {
+      *strokes = 1; /* UC9: the exact step's counts and pool */
+    }
     if (item->kind == GSHSCENE_ITEM_STROKE && gshscene_resource_stroke_style(item->style, &style) == GSHSCENE_OK &&
         style.alignment != (uint32_t)GSHSCENE_STROKE_ALIGN_CENTER) {
       *aligned = 1; /* SC5: the parts and their composition need arrays of their own */
@@ -230,7 +237,7 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
       case GSHSCENE_ITEM_INSTANCE: {
         size_t ig = 0;
         size_t ic = 0;
-        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops, aligned) && ok;
+        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops, aligned, strokes) && ok;
         most_g = g + ig > most_g ? g + ig : most_g;
         most_c = c + ic > most_c ? c + ic : most_c;
         break;
@@ -283,9 +290,11 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
   }
   L->walk = gshscene_expansion_bytes(list);
   L->levels = L->walk / (sizeof(const GSHSCENE_List *) + sizeof(size_t));
-  if (!nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned)) {
+  if (!nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned, &L->strokes)) {
     return GSHCPU_ERR_LIMIT;
   }
+  /* UC9: the walk of a stroke is as wide as the whole render's region at most. */
+  L->exact_bytes = L->strokes ? gshcpu_exact_bytes((size_t)(L->whole.x1 - L->whole.x0), cs->max_exact, 1) : 0;
   L->table = 0;
   if (L->gradients) {
     L->table = 1;
@@ -310,6 +319,7 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
       place(&at, L->aligned ? L->pixels : 0, &L->at_cov_result) &&
       place(&at, mul3(L->clips, L->pixels, 1), &L->at_clip_memory) &&
       place(&at, mul3(2u * (L->width + 1u), GSHCPU_RENDER_BAND_ROWS, sizeof(int64_t)), &L->at_acc) &&
+      place(&at, L->exact_bytes, &L->at_exact) &&
       place(&at, mul3(L->table, sizeof(Resolved), 1), &L->at_table) &&
       place(&at, mul3(L->stops, sizeof(GSHCPU_Stop), 1), &L->at_pool);
   L->at_items = at;
@@ -498,6 +508,13 @@ static uint64_t work_bound(const Cpu_Sink * cs) {
   if (!gcu_safe_mul_u64((uint64_t)cs->geometry.max_points, 3u, &b) || !gcu_safe_mul_u64((uint64_t)cs->max_bytes, 2u, &pixels) ||
       !gcu_safe_mul_u64((uint64_t)cs->elements, (uint64_t)GSHGEOM_STROKE_MAX_DEPTH, &expansion) ||
       !gcu_safe_add_u64(b, cs->max_cells, &b) || !gcu_safe_add_u64(b, pixels, &b) || !gcu_safe_add_u64(b, expansion, &b)) {
+    return UINT64_MAX;
+  }
+  /* UC9: and the exact step's, over the pieces of the item's parts (its deposits, which the cap counts, and the
+   * horizontal pieces on cells' left sides, at most one for each point and each column of the widest raster). */
+  uint64_t exact = gshcpu_exact_work_bound((uint64_t)cs->max_cells, (uint64_t)cs->geometry.max_points,
+      (uint64_t)cs->max_dimension, cs->max_exact);
+  if (!gcu_safe_add_u64(b, exact, &b)) {
     return UINT64_MAX;
   }
   return b;
@@ -963,6 +980,7 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
   uint64_t cells = 0;
   GSHCPU_Result r;
   uint8_t * cov = run->coverage;
+  GSHCPU_Exact * exact = cs->tiers & GSHCPU_RENDER_TIER_EXACT ? &run->exact : NULL; /* UC1 to UC11 (off only as a gate's control) */
   int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT;
   if (solid && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_cells)) {
     /* FT-2 (SC8): the sweep gives only the pixels that can be nonzero; the rest the general loop would skip. */
@@ -977,8 +995,10 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
     Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
     GSHCPU_Rect drawn;
     GSHCPU_Rect counted;
-    r = gshcpu_render_stroke_cover_sparse(&s, reach, wreach, cs->max_cells, run->acc, run->coverage, sparse_span, &sp, &drawn,
-        &counted, &cells);
+    r = gshcpu_render_stroke_cover_sparse(&s, reach, wreach, cs->max_cells, run->acc, exact, run->coverage, sparse_span,
+        &sp, &drawn, &counted, &cells);
+    run->work += run->exact.work;
+    run->exact.work = 0;
     /* Never refused for its cells (the cap was bounded by the detection), but the arithmetic is shown to hold. */
     if (r == GSHCPU_OK) {
       run->work += cells + (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
@@ -990,9 +1010,10 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
     return r == GSHCPU_OK ? GSHSCENE_OK : r == GSHCPU_ERR_LIMIT ? refuse(run, item, chain, count) : scene_result(r);
   }
   GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result};
-  r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_cells, run->acc, &buffers, &cov, &rect, &whole, &cells);
+  r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_cells, run->acc, exact, &buffers, &cov, &rect, &whole, &cells);
   run->acc_dirty = 1;
-  run->work += cells;
+  run->work += cells + run->exact.work;
+  run->exact.work = 0;
   GSHSCENE_Result result;
   if (r == GSHCPU_ERR_LIMIT) {
     result = refuse(run, item, chain, count);
@@ -1232,6 +1253,10 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
     run->cov_result = base + L.at_cov_result;
   }
   run->acc = (int64_t *)(void *)(base + L.at_acc);
+  if (L.strokes) {
+    gshcpu_exact_init(&run->exact, base + L.at_exact, (size_t)(L.whole.x1 - L.whole.x0), cs->max_exact, 1);
+    run->exact.eps = GSHCPU_RENDER_EXACT_EPS;
+  }
   run->acc_dirty = 1; /* the caller's memory is not zeroed: the sparse sweep clears the accumulator before its first use */
   run->caller = caller;
   run->resolved = (Resolved *)(void *)(base + L.at_table);
@@ -1335,6 +1360,9 @@ GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, c
   if (!out) {
     return GSHCPU_ERR_INVALID;
   }
+  if (limits && limits->max_exact_fragments > GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS) {
+    return GSHCPU_ERR_INVALID; /* UC9: the step is quadratic in a pixel's pieces: a value past the ceiling is refused, not clamped */
+  }
   if (!alloc) {
     alloc = gshgeom_allocator_default();
   }
@@ -1356,6 +1384,8 @@ GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, c
   }
   cs->max_bytes = limits && limits->max_bytes ? limits->max_bytes : GSHCPU_LIMITS_DEFAULT_MAX_BYTES;
   cs->max_cells = limits && limits->max_cells ? limits->max_cells : GSHCPU_LIMITS_DEFAULT_MAX_CELLS;
+  cs->max_exact = limits && limits->max_exact_fragments ? limits->max_exact_fragments
+                                                        : GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS;
   gshgeom_limits_default(&cs->geometry);
   if (limits && limits->max_points) {
     cs->geometry.max_points = limits->max_points;

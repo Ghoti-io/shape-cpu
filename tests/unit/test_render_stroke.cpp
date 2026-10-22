@@ -331,12 +331,17 @@ TEST(RenderStroke, TheCompositionIsTheUnionFormulaInD8sArithmeticAndExactAtBothE
   }
 }
 
-TEST(RenderStroke, ACenteredStrokeIsBitForBitAFillOfItsBody) {
+TEST(RenderStroke, ACenteredStrokeIsAFillOfItsBodyWhereNothingOverlapsAndTheUnionWhereItDoes) {
   Params p = params(3.0, GSHGEOM_STROKE_JOIN_MITER, GSHGEOM_STROKE_CAP_SQUARE);
   const GSHGEOM_Map map = affine_map(1.2, 0.3, -0.2, 0.9, 2.375, 3.625);
   Store s;
   Sink sink;
-  Drawn stroked = render_list(sink.sink, one_stroke(s, kOpen, p.get(), map), 32, 32);
+  // With the exact step off (the stopgap build of F4, the control of the gates) the coverage is the saturating sum of the
+  // pieces' areas: the body's fill, bit for bit.  With it on, the pieces' union (UC1): never more than the sum by more
+  // than the rounding of a cut (an edge that goes up is cut from its upper end), and less where pieces overlap.
+  Sink stopgap(GSHCPU_RENDER_TIERS_ALL & ~GSHCPU_RENDER_TIER_EXACT);
+  Drawn stroked = render_list(stopgap.sink, one_stroke(s, kOpen, p.get(), map), 32, 32);
+  Drawn unioned = render_list(sink.sink, one_stroke(s, kOpen, p.get(), map), 32, 32);
   // The body, expanded as the sink does (the canonical map, moved by the whole pixels) and filled as a path.
   GSHGEOM_Path * path = stroke_gate::build(kOpen);
   GSHGEOM_Map canon;
@@ -366,8 +371,14 @@ TEST(RenderStroke, ACenteredStrokeIsBitForBitAFillOfItsBody) {
   ASSERT_EQ(gshscene_list_fill(l, res, nullptr, GSHGEOM_FILL_NONZERO, &white, 0, 0.0), GSHSCENE_OK);
   ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
   Drawn filled = render_list(sink.sink, l, 32, 32);
-  EXPECT_EQ(stroked.alpha, filled.alpha) << "k = b, bit for bit what a fill of the body gives";
+  EXPECT_EQ(stroked.alpha, filled.alpha) << "k = b, bit for bit what a fill of the body gives, without the exact step";
   EXPECT_EQ(stroked.hash, filled.hash);
+  size_t less = 0;
+  for (size_t i = 0; i < filled.alpha.size(); i++) {
+    EXPECT_LE(unioned.alpha[i], filled.alpha[i] + 1) << "the union is never more than the sum, pixel " << i;
+    less += unioned.alpha[i] + 1 < filled.alpha[i];
+  }
+  EXPECT_GT(less, 0u) << "where the body's pieces overlap the union is less than the sum";
   gshgeom_stroke_outline_destroy(o);
   gshgeom_path_destroy(path);
 }
@@ -692,7 +703,7 @@ TEST(RenderStrokeTiers, EachTierIsTakenAndBitEqualToTheGeneralTier) {
       Store s;
       const GSHSCENE_List * l = one_stroke(s, *c.ops, c.p.get(), c.map);
       Sink tiered;
-      Sink general(0);
+      Sink general(GSHCPU_RENDER_TIER_EXACT); // the general tier: the exact step is the coverage, not a tier
       Drawn general_draw = render_list(general.sink, l, 48, 24, format);
       Drawn first = render_list(tiered.sink, l, 48, 24, format);
       Drawn second = render_list(tiered.sink, l, 48, 24, format);
@@ -768,7 +779,7 @@ TEST(RenderStrokeTiers, EveryStrokeFixtureIsBitEqualToTheGeneralTierOnEveryForma
     fixtures++;
     for (GSHCPU_Format format : formats) {
       Sink tiered;
-      Sink general(0);
+      Sink general(GSHCPU_RENDER_TIER_EXACT); // the general tier: the exact step is the coverage, not a tier
       uint64_t first = 0;
       uint64_t second = draw_fixture_twice(tiered.sink, i, format, &first);
       uint64_t oracle = draw_fixture_twice(general.sink, i, format);
@@ -785,7 +796,7 @@ TEST(RenderStrokeTiers, EveryStrokeFixtureIsBitEqualToTheGeneralTierOnEveryForma
       total.strokes += tiered.counters.strokes;
     }
   }
-  EXPECT_EQ(fixtures, 8u);
+  EXPECT_EQ(fixtures, 11u) << "the eight of S4 and S4b's three";
   EXPECT_GT(total.cache_hits, 0u) << "FT-1 is taken";
   EXPECT_GT(total.sparse_hairline, 0u) << "FT-2 is taken for a solid hairline";
   EXPECT_GT(total.sparse_plain, 0u) << "FT-2 is taken for a plain solid stroke";

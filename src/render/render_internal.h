@@ -167,6 +167,20 @@ GSHCPU_Result gshcpu_render_cover(const GSHGEOM_Flat_Path * const * paths, size_
 GSHCPU_Result gshcpu_render_cover_counted(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
     GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_cells, uint64_t * cells);
 
+/** The memory and settings of the exact step (below). */
+typedef struct GSHCPU_Exact GSHCPU_Exact;
+
+/**
+ * ::gshcpu_render_cover_counted for a stroke part under the nonzero rule, with the exact step (UC1 to UC7): where a cell
+ * holds two or more pieces its coverage is the area of the union of what lies in it, not the saturating sum.  @p ex holds
+ * the step's memory (its count arrays are as wide as @p walk); `NULL` is ::gshcpu_render_cover_counted.  A cell with more
+ * pieces than `ex->max_pieces`, a winding past the bound, or a cell whose pieces do not reproduce the rasterizer's sums is
+ * ::GSHCPU_ERR_LIMIT.
+ */
+GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_cells, uint64_t * cells,
+    GSHCPU_Exact * ex);
+
 /**
  * A bound, from the edges alone, of the cell deposits of the paths over @p walk (what ::gshcpu_render_cover over
  * @p walk counts): never less than that count, and found without a pass over the cells.  It stops adding once it
@@ -174,6 +188,132 @@ GSHCPU_Result gshcpu_render_cover_counted(const GSHGEOM_Flat_Path * const * path
  */
 uint64_t gshcpu_render_cells_bound(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHCPU_Rect walk,
     uint64_t limit);
+
+/* --- the exact step (exact.c, cover.c; strokes story S4b, UC1 to UC11) ------------------------------------------ */
+
+/**
+ * One piece of an edge inside one cell of the accumulator, both ends in the cell's frame (26.6, `0..64`, y down), directed
+ * along the contour.  A piece of nonzero height is a fragment; one of height 0 that touches the cell's left side is a flat
+ * piece (UC2).
+ */
+typedef struct GSHCPU_Piece {
+  uint8_t x0, y0, x1, y1;
+} GSHCPU_Piece;
+
+/**
+ * The sign `eps` of the expansion's orientation (UC4): `w = eps W` where `W` counts an edge directed down +1 and `w` is 1
+ * inside a positively wound piece.  Positive winding goes from +x toward +y around the inside (shape-geometry's orient.h),
+ * so the edge on the left of a piece's inside is directed up and `W` is -1 there.
+ */
+#define GSHCPU_RENDER_EXACT_EPS (-1)
+
+/** The most pieces a cell may be allowed to hold: `GSHCPU_Limits.max_exact_fragments` is accepted up to this. */
+#define GSHCPU_EXACT_FRAGMENTS_CEILING ((uint64_t)1 << 20)
+
+/** The smallest pool of pieces a render keeps for the cells of one window (a cell holds at most `max_exact_fragments`). */
+#define GSHCPU_EXACT_PIECES_MIN 4096u
+
+/** What ::gshcpu_exact_cell reports. */
+enum {
+  GSHCPU_EXACT_OK = 0,
+  GSHCPU_EXACT_LIMIT,    /* a winding past the internal bound (UC9): the sink's resource limit */
+  GSHCPU_EXACT_IDENTITY  /* the cell's pieces do not reproduce what the rasterizer summed: a defect, refused rather than guessed */
+};
+
+/** What the weight of a gap is: the overlap `(w - 1)^+` of one part (UC6) or UC8's area of the three parts' region. */
+enum { GSHCPU_EXACT_OVERLAP = 0, GSHCPU_EXACT_UNION3 = 1 };
+
+/** A fragment oriented top to bottom: its upper end, `dx` to its lower end, its height and sign. */
+typedef struct GSHCPU_Exact_Frag {
+  int16_t px, py;
+  int16_t dx, dy;
+  int8_t s;       /* +1 when the contour goes down along it */
+  uint8_t part;
+  uint32_t idx;   /* its place in the sorted list: the last tie-break */
+} GSHCPU_Exact_Frag;
+
+/** A fragment as one slab sees it: `x(u) = (a + dx u) / dy` at depth `u` below the slab's top. */
+typedef struct GSHCPU_Exact_Active {
+  int32_t a;
+  int16_t dx, dy;
+  int8_t s;
+  uint8_t part;
+  uint32_t idx;
+} GSHCPU_Exact_Active;
+
+/** One cell's working memory, carved from a block of ::gshcpu_exact_scratch_bytes. */
+typedef struct GSHCPU_Exact_Scratch {
+  size_t capacity;            /* pieces of the cell, all parts */
+  GSHCPU_Exact_Frag * frag;
+  GSHCPU_Exact_Active * act;
+  uint32_t * ord;
+  uint32_t * xa;
+  uint32_t * xb;
+  GSHCPU_Piece * sorted;
+} GSHCPU_Exact_Scratch;
+
+/** Bytes of scratch for cells of up to @p max_pieces pieces in each of @p parts parts (1 or 3). */
+size_t gshcpu_exact_scratch_bytes(uint64_t max_pieces, int parts);
+
+/** Carve @p s from @p memory (@p gshcpu_exact_scratch_bytes bytes). */
+void gshcpu_exact_scratch_init(GSHCPU_Exact_Scratch * s, void * memory, uint64_t max_pieces, int parts);
+
+/** What the exact step is to compute for a cell. */
+typedef struct GSHCPU_Exact_Params {
+  int parts;                  /* 1, or 3 (body, aligned, clip) */
+  int mode;                   /* GSHCPU_EXACT_OVERLAP or GSHCPU_EXACT_UNION3 */
+  int eps[3];                 /* each part's orientation sign: `w = eps W` */
+  int even_odd;               /* UNION3: the clip part's rule */
+  int complement;             /* UNION3: the region is the clip's complement */
+} GSHCPU_Exact_Params;
+
+/** One cell as the exact step sees it, per part: its pieces, the cover to its left and the dense area summed there. */
+typedef struct GSHCPU_Exact_Cell {
+  const GSHCPU_Piece * pieces[3];
+  size_t count[3];
+  int64_t a_left[3];          /* the sum of the covers of the cells strictly left of this one, the fold column included */
+  int64_t dense[3];           /* `eps (accumulated - area)`: the dense doubled area of the part's winding, signed */
+} GSHCPU_Exact_Cell;
+
+/**
+ * UC4 to UC7: the exact area of one cell.  @p out receives `2 O` in doubled units (OVERLAP: what the pieces share of the
+ * dense area) or the doubled area of the region (UNION3).  @p work is incremented by the steps taken (SC11).
+ *
+ * @return ::GSHCPU_EXACT_OK, or one of the codes above.
+ */
+int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s, const GSHCPU_Exact_Cell * cell,
+    int64_t * out, uint64_t * work);
+
+/**
+ * The memory and the settings of the exact step inside a cover (cover.c): per accumulator cell the number of pieces,
+ * a pool for the pieces of the cells of one window, and the scratch of ::gshcpu_exact_cell.
+ */
+struct GSHCPU_Exact {
+  uint64_t max_pieces;        /* a cell with more pieces than this is refused (UC9) */
+  int eps;                    /* the orientation sign of the part covered */
+  uint32_t * count;           /* GSHCPU_RENDER_BAND_ROWS rows of the walk's width */
+  uint32_t * slot;            /* the same: where a cell's pieces are in the pool */
+  GSHCPU_Piece * pool;
+  size_t pool_cap;            /* pieces */
+  GSHCPU_Exact_Scratch scratch;
+  /* what happened, added to as covers run */
+  uint64_t work;              /* SC11's units */
+  uint64_t cells;             /* cells made exact */
+  uint64_t failures;          /* IDENTITY results (a defect: the cover then refuses) */
+};
+
+/**
+ * The most work (SC11's units) the exact step may do in one item whose cells are capped at @p max_cells, whose outlines
+ * have at most @p max_points points and whose raster is at most @p max_dimension wide, with cells of at most
+ * @p max_pieces pieces: held at `UINT64_MAX`.
+ */
+uint64_t gshcpu_exact_work_bound(uint64_t max_cells, uint64_t max_points, uint64_t max_dimension, uint64_t max_pieces);
+
+/** The bytes of the arrays of an ::GSHCPU_Exact for walks up to @p width cells wide and @p max_pieces. */
+size_t gshcpu_exact_bytes(size_t width, uint64_t max_pieces, int parts);
+
+/** Set @p ex up over @p memory (::gshcpu_exact_bytes bytes, aligned to 16). */
+void gshcpu_exact_init(GSHCPU_Exact * ex, void * memory, size_t width, uint64_t max_pieces, int parts);
 
 /* --- the workspace arena (arena.c) ------------------------------------------------- */
 
@@ -303,7 +443,13 @@ int gshcpu_render_gradient_at(const GSHCPU_Gradient * g, double qx, double qy, d
 /** Tiers a test can switch off to force the general tier (render.h, SC8).  Every tier is on by default. */
 #define GSHCPU_RENDER_TIER_CACHE 1u   /* FT-1: the cached expansion */
 #define GSHCPU_RENDER_TIER_SPARSE 2u  /* FT-2: the sparse composite of a solid single-part stroke */
-#define GSHCPU_RENDER_TIERS_ALL (GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE)
+/**
+ * UC1 to UC11: the exact union coverage of a stroke.  Not an optimization (a render without it is the sum of partial
+ * coverages that credits an overlap twice, the stopgap F4 bounded): the control of the gates, which show the bracket and
+ * the union gate fail on the build that has it off.
+ */
+#define GSHCPU_RENDER_TIER_EXACT 4u
+#define GSHCPU_RENDER_TIERS_ALL (GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE | GSHCPU_RENDER_TIER_EXACT)
 
 /**
  * What a sink counted (render.h, SC7, SC8): how often each tier was taken.  A test reads it after the renders it
@@ -429,8 +575,8 @@ typedef struct GSHCPU_Stroke_Buffers {
  * @return ::GSHCPU_OK; ::GSHCPU_ERR_LIMIT when the deposits of all its parts pass @p max_cells.
  */
 GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
-    uint64_t max_cells, int64_t * acc, const GSHCPU_Stroke_Buffers * buffers, uint8_t ** k, GSHCPU_Rect * rect,
-    GSHCPU_Rect * whole_rect, uint64_t * cells);
+    uint64_t max_cells, int64_t * acc, GSHCPU_Exact * ex, const GSHCPU_Stroke_Buffers * buffers, uint8_t ** k,
+    GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells);
 
 /**
  * FT-2 (SC8): whether @p s qualifies for the sparse composite: a single part, and `cells_bound` of its rectangle at
@@ -448,8 +594,8 @@ void gshcpu_render_stroke_rects(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHC
  * frame) instead of building `k`.  @p acc must be all zero and is left so; @p line is `rect`'s width bytes.
  */
 GSHCPU_Result gshcpu_render_stroke_cover_sparse(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
-    uint64_t max_cells, int64_t * acc, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx, GSHCPU_Rect * rect,
-    GSHCPU_Rect * whole_rect, uint64_t * cells);
+    uint64_t max_cells, int64_t * acc, GSHCPU_Exact * ex, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx,
+    GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells);
 
 /**
  * SC5's composition of three coverages, one pixel: `t = (a * c' + 127) / 255` with `c'` the clip's coverage or
@@ -464,7 +610,7 @@ uint32_t gshcpu_render_stroke_compose(uint32_t b, uint32_t a, uint32_t c, int co
  */
 GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
     GSHCPU_Rect rect, GSHCPU_Rect walk, int64_t * acc, uint8_t * line, uint64_t max_cells, uint64_t * cells,
-    GSHCPU_Span_Fn fn, void * ctx);
+    GSHCPU_Span_Fn fn, void * ctx, GSHCPU_Exact * ex);
 
 /* --- the sink (sink.c) ---------------------------------------------------------------- */
 
