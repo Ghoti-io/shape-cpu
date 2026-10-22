@@ -294,7 +294,8 @@
  *   of the points where the winding number `w` of the part's pieces (as the rasterizer cuts them, UC2) is not zero.  In
  *   the expansion's real arithmetic `w >= 0` (SG16); on the 26.6 lattice a piece of less than a unit's width may be turned
  *   inside out and wind the other way, and the fill counts that sliver covered like any other.  The clip part is a fill of
- *   its region under its own rule and is not changed.  A fill of any kind is not changed by this story.
+ *   its region under its own rule and is not changed; where it and an aligned stroke's other parts share a pixel the
+ *   coverage is UC8's.  A fill of any kind is not changed by this story.
  * - **UC2 Pieces.**  The scan converter cuts each edge at row boundaries and then each row's piece at column boundaries,
  *   every interior cut point the rounding of the cut from the piece's own start (coverage.c's), and an edge of a stroke part
  *   that goes up is cut from its upper end: the two copies of a segment that two pieces of an outline share, one in each
@@ -346,13 +347,30 @@
  *   `long double`, no `__int128`, no libm, no FMA.
  * - **UC7 The fold.**  The coverage of a cell is `min(255, v' >> 5)` where `v'` is the doubled area of the nonzero fill:
  *   the dense value `v` of the accumulation, less `2 O - 4 N`, at least 0.  A pixel the pieces cover wholly is 255, and one
- *   they cover twice but the fill only in part is the fill's part.  The shift is taken on the magnitude (a stroke's pieces
- *   are wound so that the accumulation is negative, and its shift rounds toward negative infinity), the floor of a level
+ *   they cover twice but the fill only in part is the fill's part.  The shift is taken on the magnitude, and an even-odd
+ *   clip's parity is reduced before it (a stroke's pieces are wound so that the accumulation is negative, the shared fold's
+ *   shift rounds toward negative infinity, and its even-odd ramp back down rounds the other way): the floor of a level
  *   either way round, so `|k - 255 A|` is at most one level for the area `A` the fill covers and a quarter more for the
  *   arithmetic.
+ * - **UC8 Parts that share a pixel.**  For a stroke with an aligned part the three parts are covered together a band at a
+ *   time, and in a cell where at least two of them hold a piece (the clip's too) the coverage is the fold of the doubled area
+ *   of `P = {w_b != 0} U ({w_a != 0} & F')`, `F'` the clip's region under its rule (`W_c != 0`, or `W_c` odd) or, when the
+ *   outline says so, its complement: the same slab walk with three windings, each from its own part's cover to the left and
+ *   its own pieces and flat pieces, and the predicate in place of `(|w| - 1)^+`.  A cell where one part has pieces and the
+ *   others have none needs nothing new: a part without a piece has the one winding its cover to the left gives it, so its
+ *   coverage is exactly 0 or 255, and SC5's formula with such constants is exact (each nonzero part made exact for its own
+ *   overlap first, UC3).  SC5's formula remains the composition everywhere else and the waist's text for a sink that holds
+ *   only the three coverages, with its error stated: with `k_b` and `t = k_a c'` as fractions it lies between the region's
+ *   bounds `max(k_b, t)` and `min(1, k_b + t)` and differs from the area by up to `min(k_b, t) (1 - max(k_b, t))`, at most
+ *   1/4; a thin aligned stroke, whose band and fill edge lie in every pixel along the path, is where it shows (a band
+ *   `[0.1, 0.5]` against a fill `x < 0.3` is 0.2 of the pixel by area and 0.12 by the formula).  The clip is the fill
+ *   region `F` of the closed subpaths, which can overlap itself (a star's, under the nonzero rule): where only it has pieces
+ *   in a cell and they overlap, its coverage is the area of its region by its rule, exactly (the nonzero or the odd
+ *   windings), since the area of `F` is what the formula's constants stand for.  This is the clip part of a stroke, not a
+ *   fill item: a fill is not changed, and extending the exact step to fills is a separate decision.
  * - **UC9 Limits, refusals, work, memory.**  `GSHCPU_Limits.max_exact_fragments` (a `uint64_t`; 0 is 512, any other value
  *   is used as given up to `2^20`, which a larger value is ::GSHCPU_ERR_INVALID for at sink creation; `UINT64_MAX` is not
- *   "no cap": the step is quadratic) bounds the pieces of one part in one cell.  A cell with more, or a winding past 255 in
+ *   "no cap": the step is superlinear in the pieces of a pixel) bounds the pieces of one part in one cell.  A cell with more, or a winding past 255 in
  *   magnitude (anywhere in an exact cell: an internal bound the arithmetic's products depend on), or a cell whose pieces do
  *   not reproduce the rasterizer's sums, is the sink's resource limit: the item's block is skipped (strict stops with the
  *   finished prefix), as the cell cap (SC6).  The pieces are counted over what the whole render draws of the item, so a
@@ -360,10 +378,13 @@
  *   (a piece is at most one for each edge, an outline has fewer edges than twice its points); a winding past the bound
  *   is found where the step runs, the pixels drawn.  The step's work counts toward SC11's: a piece is one unit, a pair of
  *   neighbours' meetings, an area and a comparison of the ordering one each, and the declared `cancel_work_bound` adds
- *   the most the step may do over the pieces an item can hold (its deposits and the horizontal pieces on cells' left sides,
- *   at most one for each point and each column of the widest raster), which for a cell of `m` pieces is under
- *   `64 (m + (m^2/2 + 1)(3m + 2) + m^2/2)`.  Memory is a function of the limits and the region only: a count of
- *   pieces and a place in the pool for each cell of a band of the region's width, a pool of pieces (at least 4096, at least
+ *   the most the step may do in an item: its horizontal pieces on cells' left sides (at most one for each point and each
+ *   column of the widest raster) and its fragments (at most `max_cells` of them, which the cap counts) each at the cost of
+ *   the largest cell, where a cell of `f` fragments takes at most `64 ((f^2/2 + 1)(3 f + 2) + f^2/2)`: at most 64 slabs,
+ *   each with at most `f^2/2 + 1` sub-slabs (two fragments meet once) that cost a pass over the fragments.  The worst case
+ *   is cubic in the fragments of one pixel, reached only by an outline whose pieces cross each other pairwise inside it,
+ *   and it is finite and very large at the default; lowering `max_exact_fragments` lowers it with the cube.  Memory is a
+ *   function of the limits and the region only: a count of pieces and a place in the pool for each cell of a band of the region's width, a pool of pieces (at least 4096, at least
  *   one cell's worth), and the scratch of one cell, counted by `workspace_bytes`, never allocated under `CALLER_MEMORY`; the
  *   cells of a band whose pieces do not fit the pool are made exact a window at a time.
  * - **UC10 Tiers (AD-13).**  The exact step is one function used by every route: the dense sweep and the sparse composite

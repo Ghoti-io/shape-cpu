@@ -99,7 +99,7 @@ enum {
   OUT_WORKSPACE_SHORT, OUT_DAMAGE, OUT_GLYPHS_FAST, OUT_GLYPHS_GENERAL, OUT_FLOAT_TARGET, OUT_NESTED_GROUP,
   OUT_GRADIENT_DRAWN, OUT_GRADIENT_NOTICE, OUT_GRADIENT_LIMIT, OUT_COLOR_LIMIT, OUT_COLOR_AT_BOUND, OUT_BLEND_DRAWN,
   OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_STROKE_RUN_REFUSED, OUT_STROKE_DRAWN, OUT_STROKE_ALIGNED, OUT_STROKE_CACHED,
-  OUT_STROKE_SPARSE, OUT_STROKE_NOTICE, OUT_COUNT
+  OUT_STROKE_SPARSE, OUT_STROKE_NOTICE, OUT_STROKE_EXACT, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -112,7 +112,8 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a blend-mode group on a float target", "a group of PDF's fields refused (S19)",
     "a stroke of a glyph run refused for its centerline (S20)", "a render with a stroke drawn (SC1)",
     "a render with an aligned stroke drawn (SC5)", "a stroke served from the cache (SC7)",
-    "a stroke drawn by the sparse composite (SC8)", "a stroke that draws nothing (a notice)"};
+    "a stroke drawn by the sparse composite (SC8)", "a stroke that draws nothing (a notice)",
+    "a stroke with cells made exact (UC3)"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -713,6 +714,9 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     case 4:
       limits.max_bytes = 1 + (limit_byte >> 3) % 64;
       break;
+    case 5: /* UC9: the pieces of a stroke part in one pixel */
+      limits.max_exact_fragments = 2 + (limit_byte >> 3) % 24;
+      break;
     default:
       break;
   }
@@ -948,6 +952,9 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   outcomes[OUT_STROKE_DRAWN] += r == GSHSCENE_OK && counters.strokes > 0;
   outcomes[OUT_STROKE_ALIGNED] += r == GSHSCENE_OK && counters.strokes > 0 && world.aligned > 0;
   outcomes[OUT_STROKE_SPARSE] += counters.sparse_hairline + counters.sparse_plain > 0;
+  outcomes[OUT_STROKE_EXACT] += counters.exact_cells > 0;
+  /* UC4: the pieces of every cell the exact step made reproduce what the rasterizer summed, whatever the geometry. */
+  CHECK(counters.exact_failures == 0);
   const uint64_t first_entries = entries_hash(report);
   if (r == GSHSCENE_OK) {
     outcomes[OUT_OK]++;
@@ -974,7 +981,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
         if (counters.strokes > 0) {
           GSHSCENE_Sink * general = NULL;
           GIMG_Raster * other = copy_of(backdrop, format);
-          if (other && gshcpu_render_sink_create_tiered(NULL, NULL, &limits, GSHCPU_RENDER_TIER_EXACT, NULL, NULL, NULL, &general) == GSHCPU_OK) {
+          if (other && gshcpu_render_sink_create_tiered(NULL, NULL, &limits, GSHCPU_RENDER_TIERS_GENERAL, NULL, NULL, NULL, &general) == GSHCPU_OK) {
             target.surface = other;
             GSHSCENE_Result r3 = gshscene_sink_render(general, &request);
             CHECK(r3 == GSHSCENE_OK || r3 == GSHSCENE_ERR_OOM);

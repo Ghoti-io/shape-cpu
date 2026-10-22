@@ -59,6 +59,7 @@
  * | strokes-dash-overlap | (strokes story S4b) translucent dashes with square, butt and round caps whose gaps are shorter than the caps' reach, a hairline of square-cap dashes, and square-cap dashes round a circle |
  * | strokes-tight-joins | a zigzag whose segments are shorter than the stroke is wide, with each of the five joins, a device width and a non-uniform map: the inner side of every join overlaps |
  * | strokes-rings | a circle and a lens, the lens turned, stroked from one pixel to wider than the radius: the triangles of the inner side overlap |
+ * | strokes-thin-aligned | aligned strokes thinner than two pixels (a square and a circle inside and outside, thin rectangles at fractional offsets, a star under even-odd, a closed subpath beside an open one): the aligned part and the fill's edge lie in every pixel |
  * | blend-out-of-range | blend modes on sources out of range (negative, above 1, the recorded bound 2^16), dodge and burn past their poles, ClipColor with both steps, in a gamma-0.1 parent, nested blending groups, and a blend over the backdrop's transparent pixels |
  */
 
@@ -1359,6 +1360,63 @@ static inline GSHSCENE_List * rf_strokes_rings(RF_Ctx * c) {
   return l;
 }
 
+static inline GSHSCENE_List * rf_strokes_thin_aligned(RF_Ctx * c) {
+  /* (strokes story S4b, UC8) aligned strokes whose bands are thinner than two pixels, so that the aligned part and the fill's
+   * edge lie in every pixel along the path: a square and a circle inside and outside, thin rectangles at fractional offsets
+   * (an off-centre strip), a star under even-odd, and a closed subpath beside an open one whose body abuts it */
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Resource * sq = rf_rect(c, 0.0, 0.0, 10.0, 10.0);
+  const GSHSCENE_Resource * circle = rf_circle(c, 5.5);
+  const GSHSCENE_Resource * star = rf_star(c, 6.0, 6.0, 6.0);
+  const GSHSCENE_Resource * strip = rf_rect(c, 0.0, 0.0, 0.6, 12.0);
+  for (int i = 0; i < 2; i++) {
+    uint32_t align = i ? GSHSCENE_STROKE_ALIGN_OUTSIDE : GSHSCENE_STROKE_ALIGN_INSIDE;
+    GSHGEOM_Map m = rf_move(2.25 + 13.0 * i, 2.375);
+    rf_stroke(c, l, sq, rf_style(c, 0.9, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                    GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH, align,
+                                    GSHGEOM_FILL_NONZERO),
+        &m, rf_solid(0.2, 0.3 + 0.4 * i, 0.8, 0.7));
+    GSHGEOM_Map mc = rf_move(33.5 + 7.0 * i, 8.25);
+    rf_stroke(c, l, circle, rf_style(c, 0.7, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                        GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH, align,
+                                        GSHGEOM_FILL_NONZERO),
+        &mc, rf_solid(0.8, 0.2 + 0.3 * i, 0.2, 0.7));
+  }
+  /* thin rectangles: the band lies on the edge of the fill, at an offset that is not a pixel's */
+  for (int i = 0; i < 4; i++) {
+    GSHGEOM_Map m = rf_move(3.3 + 3.75 * i, 17.0 + 0.125 * i);
+    rf_stroke(c, l, strip, rf_style(c, 0.2 + 0.1 * i, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0,
+                                       GSHSCENE_STROKE_CAP_BUTT, GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0,
+                                       GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                       i % 2 ? GSHSCENE_STROKE_ALIGN_OUTSIDE : GSHSCENE_STROKE_ALIGN_INSIDE, GSHGEOM_FILL_NONZERO),
+        &m, rf_solid(0.1, 0.1, 0.1, 0.8));
+  }
+  for (int i = 0; i < 2; i++) {
+    GSHGEOM_Map m = rf_move(19.5 + 14.0 * i, 22.75);
+    rf_stroke(c, l, star, rf_style(c, 0.8, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                      GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                      i ? GSHSCENE_STROKE_ALIGN_OUTSIDE : GSHSCENE_STROKE_ALIGN_INSIDE, GSHGEOM_FILL_EVEN_ODD),
+        &m, rf_solid(0.5, 0.2, 0.6, 0.7));
+  }
+  /* a closed subpath beside an open one: the open one's body abuts the closed one's aligned part */
+  GSHGEOM_Path * p = rf_path(c);
+  gshgeom_path_move_to(p, rf_pt(0.0, 0.0));
+  gshgeom_path_line_to(p, rf_pt(8.0, 0.0));
+  gshgeom_path_line_to(p, rf_pt(8.0, 6.0));
+  gshgeom_path_line_to(p, rf_pt(0.0, 6.0));
+  gshgeom_path_close(p);
+  gshgeom_path_move_to(p, rf_pt(8.0, 3.0));
+  gshgeom_path_line_to(p, rf_pt(15.0, 3.0));
+  const GSHSCENE_Resource * both = rf_intern(c, p);
+  GSHGEOM_Map mb = rf_move(2.375, 31.25);
+  rf_stroke(c, l, both, rf_style(c, 1.1, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                                    GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                                    GSHSCENE_STROKE_ALIGN_INSIDE, GSHGEOM_FILL_NONZERO),
+      &mb, rf_solid(0.1, 0.5, 0.3, 0.8));
+  rf_close(c, l);
+  return l;
+}
+
 typedef struct RF_Fixture {
   const char * name;
   RF_Build build;
@@ -1396,6 +1454,7 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"strokes-dash-overlap", rf_strokes_dash_overlap},
     {"strokes-tight-joins", rf_strokes_tight_joins},
     {"strokes-rings", rf_strokes_rings},
+    {"strokes-thin-aligned", rf_strokes_thin_aligned},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

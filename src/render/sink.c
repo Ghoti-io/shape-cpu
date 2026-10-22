@@ -113,7 +113,9 @@ typedef struct Layout {
   size_t table;              /* the resolved table's slots: a power of two at least twice the gradient fills */
   int aligned;               /* the expansion holds a stroke that aligns: three more coverage arrays (SC5) */
   int strokes;               /* the expansion holds a stroke: the exact step's memory (UC9) */
-  size_t exact_bytes;
+  size_t exact_bytes;        /* ... of the first part's, and (only when something aligns) of the second's and the third's */
+  size_t exact_second, exact_third; /* ... where, from at_exact */
+  size_t acc_bytes;          /* the cell accumulator: one for each of the three parts when something aligns (UC8) */
   size_t at_walk, at_maps, at_stop, at_frames, at_clips, at_root, at_layers, at_touched, at_coverage, at_clip_memory,
       at_acc, at_exact, at_table, at_pool, at_items; /* offsets from the aligned base */
   size_t at_cov_aligned, at_cov_clip, at_cov_result; /* the aligned stroke's arrays */
@@ -146,7 +148,7 @@ typedef struct Run {
   uint8_t * cov_clip;
   uint8_t * cov_result;
   int64_t * acc;
-  GSHCPU_Exact exact;        /* UC9: the exact step's arrays, when the layout has them (strokes) */
+  GSHCPU_Exact exact[3];     /* UC9: the exact step's arrays, when the layout has them (strokes): one for each part of an aligned stroke */
   int acc_dirty;             /* the dense sweep leaves the accumulator written; the sparse one needs it zero */
   int caller;                /* CALLER_MEMORY: nothing allocated, so no cache */
   Resolved * resolved;       /* the gradients resolved so far (S17), open addressing on the id */
@@ -294,7 +296,25 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
     return GSHCPU_ERR_LIMIT;
   }
   /* UC9: the walk of a stroke is as wide as the whole render's region at most. */
-  L->exact_bytes = L->strokes ? gshcpu_exact_bytes((size_t)(L->whole.x1 - L->whole.x0), cs->max_exact, 1) : 0;
+  {
+    size_t width = (size_t)(L->whole.x1 - L->whole.x0);
+    size_t first = L->strokes ? gshcpu_exact_bytes(width, cs->max_exact, L->aligned ? 3 : 1) : 0;
+    size_t other = L->strokes && L->aligned ? gshcpu_exact_bytes(width, cs->max_exact, 0) : 0;
+    size_t at_second = align_up(first);
+    size_t at_third = align_up(other);
+    L->exact_second = 0;
+    L->exact_third = 0;
+    L->exact_bytes = SIZE_MAX;
+    if (first != SIZE_MAX && other != SIZE_MAX && at_second != SIZE_MAX && at_third != SIZE_MAX &&
+        gcu_safe_add_size(at_second, at_third, &L->exact_third) && gcu_safe_add_size(L->exact_third, other, &L->exact_bytes)) {
+      L->exact_second = at_second;
+      L->exact_third = at_second + at_third;
+    }
+    L->acc_bytes = mul3(2u * (L->width + 1u), GSHCPU_RENDER_BAND_ROWS, sizeof(int64_t));
+    if (L->aligned && L->acc_bytes != SIZE_MAX) {
+      L->acc_bytes = mul3(L->acc_bytes, 3u, 1u);
+    }
+  }
   L->table = 0;
   if (L->gradients) {
     L->table = 1;
@@ -318,7 +338,7 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
       place(&at, L->aligned ? L->pixels : 0, &L->at_cov_aligned) && place(&at, L->aligned ? L->pixels : 0, &L->at_cov_clip) &&
       place(&at, L->aligned ? L->pixels : 0, &L->at_cov_result) &&
       place(&at, mul3(L->clips, L->pixels, 1), &L->at_clip_memory) &&
-      place(&at, mul3(2u * (L->width + 1u), GSHCPU_RENDER_BAND_ROWS, sizeof(int64_t)), &L->at_acc) &&
+      place(&at, L->acc_bytes, &L->at_acc) &&
       place(&at, L->exact_bytes, &L->at_exact) &&
       place(&at, mul3(L->table, sizeof(Resolved), 1), &L->at_table) &&
       place(&at, mul3(L->stops, sizeof(GSHCPU_Stop), 1), &L->at_pool);
@@ -510,10 +530,15 @@ static uint64_t work_bound(const Cpu_Sink * cs) {
       !gcu_safe_add_u64(b, cs->max_cells, &b) || !gcu_safe_add_u64(b, pixels, &b) || !gcu_safe_add_u64(b, expansion, &b)) {
     return UINT64_MAX;
   }
-  /* UC9: and the exact step's, over the pieces of the item's parts (its deposits, which the cap counts, and the
-   * horizontal pieces on cells' left sides, at most one for each point and each column of the widest raster). */
-  uint64_t exact = gshcpu_exact_work_bound((uint64_t)cs->max_cells, (uint64_t)cs->geometry.max_points,
-      (uint64_t)cs->max_dimension, cs->max_exact);
+  /* UC9: and the exact step's, over the pieces of the item's three parts (its deposits, which the cap counts, and the
+   * horizontal pieces on cells' left sides, at most one for each point and each column of the widest raster), a cell of
+   * an aligned stroke holding the pieces of all three. */
+  uint64_t points3;
+  uint64_t cell3;
+  if (!gcu_safe_mul_u64((uint64_t)cs->geometry.max_points, 3u, &points3) || !gcu_safe_mul_u64(cs->max_exact, 3u, &cell3)) {
+    return UINT64_MAX;
+  }
+  uint64_t exact = gshcpu_exact_work_bound((uint64_t)cs->max_cells, points3, (uint64_t)cs->max_dimension, cell3);
   if (!gcu_safe_add_u64(b, exact, &b)) {
     return UINT64_MAX;
   }
@@ -931,6 +956,27 @@ static void sparse_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_
   }
 }
 
+/**
+ * The exact step's work since the last call, in all three parts' memory (it is counted once, whichever part did it); the
+ * cells it made exact and the cells it could not reproduce go to the sink's counters.
+ */
+static uint64_t exact_work(Run * run) {
+  uint64_t w = 0;
+  uint64_t cells = 0;
+  uint64_t failures = 0;
+  for (int p = 0; p < 3; p++) {
+    w += run->exact[p].work;
+    cells += run->exact[p].cells;
+    failures += run->exact[p].failures;
+    run->exact[p].work = 0;
+    run->exact[p].cells = 0;
+    run->exact[p].failures = 0;
+  }
+  gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, exact_cells), cells);
+  gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, exact_failures), failures);
+  return w;
+}
+
 /** SC11: the expansion's own steps, counted whether the expansion was made or found, so a report does not depend on the cache. */
 static uint64_t expansion_work(const Run * run, const GSHSCENE_Item * item, const GSHCPU_Stroke * s) {
   uint64_t points = 0;
@@ -980,7 +1026,7 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
   uint64_t cells = 0;
   GSHCPU_Result r;
   uint8_t * cov = run->coverage;
-  GSHCPU_Exact * exact = cs->tiers & GSHCPU_RENDER_TIER_EXACT ? &run->exact : NULL; /* UC1 to UC11 (off only as a gate's control) */
+  GSHCPU_Exact * exact = cs->tiers & GSHCPU_RENDER_TIER_EXACT ? run->exact : NULL; /* UC1 to UC11 (off only as a gate's control) */
   int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT;
   if (solid && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_cells)) {
     /* FT-2 (SC8): the sweep gives only the pixels that can be nonzero; the rest the general loop would skip. */
@@ -997,8 +1043,7 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
     GSHCPU_Rect counted;
     r = gshcpu_render_stroke_cover_sparse(&s, reach, wreach, cs->max_cells, run->acc, exact, run->coverage, sparse_span,
         &sp, &drawn, &counted, &cells);
-    run->work += run->exact.work;
-    run->exact.work = 0;
+    run->work += exact_work(run);
     /* Never refused for its cells (the cap was bounded by the detection), but the arithmetic is shown to hold. */
     if (r == GSHCPU_OK) {
       run->work += cells + (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
@@ -1010,10 +1055,10 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
     return r == GSHCPU_OK ? GSHSCENE_OK : r == GSHCPU_ERR_LIMIT ? refuse(run, item, chain, count) : scene_result(r);
   }
   GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result};
-  r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_cells, run->acc, exact, &buffers, &cov, &rect, &whole, &cells);
+  r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_cells, run->acc,
+      2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS, exact, (cs->tiers & GSHCPU_RENDER_TIER_JOINT) != 0, &buffers, &cov, &rect, &whole, &cells);
   run->acc_dirty = 1;
-  run->work += cells + run->exact.work;
-  run->exact.work = 0;
+  run->work += cells + exact_work(run);
   GSHSCENE_Result result;
   if (r == GSHCPU_ERR_LIMIT) {
     result = refuse(run, item, chain, count);
@@ -1254,8 +1299,15 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   }
   run->acc = (int64_t *)(void *)(base + L.at_acc);
   if (L.strokes) {
-    gshcpu_exact_init(&run->exact, base + L.at_exact, (size_t)(L.whole.x1 - L.whole.x0), cs->max_exact, 1);
-    run->exact.eps = GSHCPU_RENDER_EXACT_EPS;
+    size_t width = (size_t)(L.whole.x1 - L.whole.x0);
+    gshcpu_exact_init(&run->exact[0], base + L.at_exact, width, cs->max_exact, L.aligned ? 3 : 1);
+    run->exact[0].eps = GSHCPU_RENDER_EXACT_EPS;
+    if (L.aligned) {
+      gshcpu_exact_init(&run->exact[1], base + L.at_exact + L.exact_second, width, cs->max_exact, 0);
+      gshcpu_exact_init(&run->exact[2], base + L.at_exact + L.exact_third, width, cs->max_exact, 0);
+      run->exact[1].eps = GSHCPU_RENDER_EXACT_EPS;
+      run->exact[2].eps = GSHCPU_RENDER_EXACT_EPS;
+    }
   }
   run->acc_dirty = 1; /* the caller's memory is not zeroed: the sparse sweep clears the accumulator before its first use */
   run->caller = caller;

@@ -267,6 +267,23 @@ def scripted():
          stroke(2, gradient=SWEEP)])
     out["scripted-stroke-zero-width.bin"] = header(request=STRICT) + body_with_line(
         [fill(0), stroke(0, first=style(width=1)), stroke(1)])
+    # Strokes story S4b (UC1 to UC12): outlines whose pieces overlap in a pixel, so that the exact step runs: dashes with short
+    # gaps and square caps, a wide stroke over a tight polyline, an aligned stroke, damage and caller memory over each, and
+    # the pieces of a pixel capped small (the sink's own limit, whole or damaged).
+    out["scripted-stroke-overlap-dashes.bin"] = header() + body_with_line(
+        [stroke(0, first=style(width=3, dashes=2, cap=2, join=1)), stroke(1, ROTATED), stroke(2)])
+    out["scripted-stroke-overlap-wide.bin"] = header(target=T64 | 3) + body_with_line(
+        [stroke(0, first=style(width=5, join=0, cap=1)), stroke(1, ROTATED), stroke(2, ROTATED)])
+    out["scripted-stroke-overlap-aligned.bin"] = header(request=DAMAGE | CALLER_MEMORY) + body_with_line(
+        [fill(0), stroke(0, first=style(width=3, alignment=1, join=2)), stroke(1, ROTATED), stroke(2)])
+    out["scripted-stroke-overlap-aligned-outside.bin"] = header() + body_with_line(
+        [stroke(0, first=style(width=2, alignment=2, rule=1, dashes=2, cap=2)), stroke(1), stroke(2, ROTATED)])
+    out["scripted-stroke-exact-cap.bin"] = header(limit=5 | 8) + body_with_line(
+        [stroke(0, first=style(width=3, dashes=2, cap=2)), stroke(1)])
+    out["scripted-stroke-exact-cap-damage.bin"] = header(request=DAMAGE, limit=5 | 16) + body_with_line(
+        [stroke(0, first=style(width=3, dashes=2, cap=2)), stroke(1, ROTATED)])
+    out["scripted-stroke-exact-cap-strict.bin"] = header(request=STRICT, limit=5) + body_with_line(
+        [stroke(0, first=style(width=5, join=0)), stroke(1)])
     out["scripted-stroke-point-cap.bin"] = header(limit=1) + body_with_line([stroke(1, first=style(width=3))])
     out["scripted-stroke-cell-cap.bin"] = header(limit=2 | 16) + body_with_line(
         [stroke(0, first=style(width=3)), stroke(1)])

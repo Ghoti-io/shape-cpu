@@ -12,7 +12,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <random>
+#include <cstring>
 
 using namespace sh;
 using stroke_gate::Contour;
@@ -289,6 +291,10 @@ TEST(RenderExact, ACellWithNoFragmentsButFlatPiecesIsTheUnionToo) {
   EXPECT_LE(worst_off(c, ref), 1.5);
   EXPECT_EQ(c.k[1], 180) << "45/64 of 256, not the sum's 60/64";
   EXPECT_EQ(c.failures, 0u);
+  // The sparse sweep visits the cell too: nothing deposits there, and the cells after the last deposit are constant to it.
+  Covered sparse = cover_sparse(f, rect_of(0, 0, 3, 1));
+  ASSERT_EQ(sparse.result, GSHCPU_OK);
+  EXPECT_EQ(sparse.k, c.k);
 }
 
 /* --- random sets against the instrument ------------------------------------------------------------------------------ */
@@ -425,6 +431,234 @@ TEST(RenderExact, TheSparseSweepIsTheDenseOneEveryPixel) {
     EXPECT_EQ(dense.k, sparse.k) << round;
     EXPECT_EQ(sparse.failures, 0u);
   }
+}
+
+/* --- UC8: the three parts of an aligned stroke ------------------------------------------------------------------------- */
+
+namespace {
+
+struct Aligned {
+  GSHCPU_Result result = GSHCPU_OK;
+  std::vector<uint8_t> k;
+  uint64_t failures = 0;
+  uint64_t exact_cells = 0;
+};
+
+/** The coverage of the region body U (aligned & clip) over @p rect, the parts as polygons (an empty list is an absent part). */
+Aligned cover_aligned(const std::vector<Contour> & body, const std::vector<Contour> & aligned, const std::vector<Contour> & clip,
+    GSHGEOM_Fill_Rule clip_rule, bool complement, GSHCPU_Rect rect, GSHCPU_Rect walk, uint64_t cap = 512) {
+  Aligned out;
+  const std::vector<Contour> * polys[3] = {&body, &aligned, &clip};
+  std::unique_ptr<Flat> flats[3];
+  size_t w = (size_t)(rect.x1 - rect.x0);
+  size_t h = (size_t)(rect.y1 - rect.y0);
+  size_t wide = (size_t)(walk.x1 - walk.x0);
+  std::vector<int64_t> acc[3];
+  std::vector<uint8_t> parts[3];
+  std::vector<unsigned char> raw[3];
+  GSHCPU_Exact ex[3];
+  GSHCPU_Aligned_Input in[3];
+  for (int p = 0; p < 3; p++) {
+    if (!polys[p]->empty()) {
+      flats[p].reset(new Flat(*polys[p]));
+    }
+    acc[p].assign(2 * (w + 1) * GSHCPU_RENDER_BAND_ROWS, 31);
+    parts[p].assign(w * h, 0xee);
+    raw[p].resize(gshcpu_exact_bytes(wide, cap, p == 0 ? 3 : 0) + 16);
+    uintptr_t at = ((uintptr_t)raw[p].data() + 15u) & ~(uintptr_t)15u;
+    gshcpu_exact_init(&ex[p], (void *)at, wide, cap, p == 0 ? 3 : 0);
+    ex[p].eps = GSHCPU_RENDER_EXACT_EPS;
+    in[p].path = flats[p] ? flats[p]->flat : nullptr;
+    in[p].walk = walk;
+    in[p].rule = p == 2 ? clip_rule : GSHGEOM_FILL_NONZERO;
+    in[p].acc = acc[p].data();
+    in[p].out = parts[p].data();
+    in[p].ex = &ex[p];
+  }
+  out.k.assign(w * h, 0xee);
+  uint64_t cells = 0;
+  out.result = gshcpu_render_cover_aligned(in, rect, complement, out.k.data(), UINT64_MAX, &cells);
+  out.failures = ex[0].failures;
+  out.exact_cells = ex[0].cells;
+  return out;
+}
+
+std::vector<double> reference3(const std::vector<Contour> & body, const std::vector<Contour> & aligned,
+    const std::vector<Contour> & clip, int rule, bool complement, int w, int h) {
+  stroke_gate::Part b;
+  stroke_gate::Part a;
+  stroke_gate::Part c;
+  for (const Contour & q : body) b.contours.push_back(stroke_gate::cut_contour(q));
+  for (const Contour & q : aligned) a.contours.push_back(stroke_gate::cut_contour(q));
+  for (const Contour & q : clip) c.contours.push_back(stroke_gate::cut_contour(q));
+  c.rule = rule;
+  c.complement = complement;
+  std::vector<double> area = stroke_gate::union_area(b, aligned.empty() ? nullptr : &a, aligned.empty() ? nullptr : &c, w, h, 768);
+  for (double & v : area) {
+    v *= 255.0;
+  }
+  return area;
+}
+
+}  // namespace
+
+TEST(RenderExactAligned, TheRegionOfThreePartsIsTheAreaOfBodyUnionAlignedAndClipExactlyInEveryPixel) {
+  std::mt19937 rng(77);
+  double worst = 0;
+  long shared = 0;
+  for (int round = 0; round < 100; round++) {
+    std::vector<Contour> body;
+    std::vector<Contour> aligned;
+    std::vector<Contour> clip;
+    int nb = (int)(rng() % 4);  // the body may be absent
+    for (int i = 0; i < nb; i++) body.push_back(random_piece(rng, -U, 5 * U));
+    int na = 1 + (int)(rng() % 4);
+    for (int i = 0; i < na; i++) aligned.push_back(random_piece(rng, -U, 5 * U));
+    // The clip is the fill region of the closed subpaths: it may overlap itself (a star's), and its orientation is the
+    // path's, either sign.
+    int nc = 1 + (int)(rng() % 3);
+    for (int i = 0; i < nc; i++) {
+      Contour q = random_piece(rng, -U, 5 * U);
+      if (rng() % 3 == 0) std::reverse(q.begin(), q.end());
+      clip.push_back(q);
+    }
+    bool even_odd = rng() % 2;
+    bool complement = rng() % 2;
+    Aligned c = cover_aligned(body, aligned, clip, even_odd ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, complement,
+        rect_of(0, 0, 4, 4), rect_of(0, 0, 4, 4));
+    ASSERT_EQ(c.result, GSHCPU_OK) << round;
+    ASSERT_EQ(c.failures, 0u) << round;
+    std::vector<double> ref = reference3(body, aligned, clip, even_odd ? 1 : 0, complement, 4, 4);
+    double w = 0;
+    for (size_t i = 0; i < ref.size(); i++) {
+      w = std::max(w, std::fabs(c.k[i] - ref[i]));
+    }
+    EXPECT_LE(w, 1.5) << "round " << round << (even_odd ? " even-odd" : " nonzero") << (complement ? " complement" : "");
+    worst = std::max(worst, w);
+    shared += (long)c.exact_cells;
+  }
+  std::printf("exact step, three parts, vs the instrument: 100 random sets, %ld cells made exact, worst %.2f levels\n", shared, worst);
+  EXPECT_GT(shared, 150);
+}
+
+TEST(RenderExactAligned, AWindowIsTheWholeRendersPixelsThere) {
+  std::mt19937 rng(78);
+  for (int round = 0; round < 30; round++) {
+    std::vector<Contour> body = {random_piece(rng, -U, 6 * U), random_piece(rng, -U, 6 * U)};
+    std::vector<Contour> aligned = {random_piece(rng, -U, 6 * U), random_piece(rng, -U, 6 * U)};
+    std::vector<Contour> clip = {random_piece(rng, -U, 6 * U), random_piece(rng, -U, 6 * U)};
+    bool complement = rng() % 2;
+    Aligned whole = cover_aligned(body, aligned, clip, GSHGEOM_FILL_NONZERO, complement, rect_of(0, 0, 7, 7), rect_of(0, 0, 7, 7));
+    ASSERT_EQ(whole.result, GSHCPU_OK);
+    for (int k = 0; k < 4; k++) {
+      int64_t x0 = (int64_t)(rng() % 6), y0 = (int64_t)(rng() % 6);
+      int64_t x1 = x0 + 1 + (int64_t)(rng() % (uint32_t)(7 - x0)), y1 = y0 + 1 + (int64_t)(rng() % (uint32_t)(7 - y0));
+      Aligned w = cover_aligned(body, aligned, clip, GSHGEOM_FILL_NONZERO, complement, rect_of(x0, y0, x1, y1), rect_of(0, 0, 7, 7));
+      ASSERT_EQ(w.result, GSHCPU_OK);
+      for (int64_t y = y0; y < y1; y++) {
+        for (int64_t x = x0; x < x1; x++) {
+          ASSERT_EQ(w.k[(size_t)((y - y0) * (x1 - x0) + (x - x0))], whole.k[(size_t)(y * 7 + x)])
+              << "round " << round << " window " << x0 << "," << y0 << "," << x1 << "," << y1 << " pixel " << x << "," << y;
+        }
+      }
+    }
+  }
+}
+
+TEST(RenderExactAligned, ACellWithPiecesOfOnePartAloneIsSC5sFormulaWithConstants) {
+  // The clip covers the pixel wholly, the aligned part partly (a half), the body not at all: a = 128, c = 255, b = 0 and the
+  // formula's k = a; the same with the body wholly covering: 255.
+  std::vector<Contour> aligned = {box(-100, -100, 32, 164)};
+  std::vector<Contour> clip = {box(-200, -200, 300, 300)};
+  Aligned only = cover_aligned({}, aligned, clip, GSHGEOM_FILL_NONZERO, false, rect_of(0, 0, 1, 1), rect_of(0, 0, 1, 1));
+  ASSERT_EQ(only.result, GSHCPU_OK);
+  EXPECT_EQ(only.k[0], 128);
+  Aligned outside = cover_aligned({}, aligned, clip, GSHGEOM_FILL_NONZERO, true, rect_of(0, 0, 1, 1), rect_of(0, 0, 1, 1));
+  ASSERT_EQ(outside.result, GSHCPU_OK);
+  EXPECT_EQ(outside.k[0], 0) << "the complement of a clip that covers the pixel";
+  Aligned covered = cover_aligned({box(-200, -200, 300, 300)}, aligned, clip, GSHGEOM_FILL_NONZERO, false, rect_of(0, 0, 1, 1),
+      rect_of(0, 0, 1, 1));
+  ASSERT_EQ(covered.result, GSHCPU_OK);
+  EXPECT_EQ(covered.k[0], 255);
+}
+
+TEST(RenderExactAligned, TheOffCentreStripSC5sFormulaGetsWrongIsTheAreaOfTheIntersection) {
+  // The story's case, in a pixel: the aligned band R_c = [0.1, 0.5] (x) lies along the edge of the fill F = x < 0.3 (the
+  // clip), so R_c & F = [0.1, 0.3], 0.2 of the pixel, while the band covers 0.4, the clip 0.3 and the formula's independent
+  // product says 0.12.  The pixel holds pieces of both parts.
+  std::vector<Contour> aligned = {box(6, -100, 32, 164)};   // x in [0.094, 0.5] pixels
+  std::vector<Contour> clip = {box(-100, -100, 19, 164)};   // x < 0.297
+  Aligned c = cover_aligned({}, aligned, clip, GSHGEOM_FILL_NONZERO, false, rect_of(0, 0, 1, 1), rect_of(0, 0, 1, 1));
+  ASSERT_EQ(c.result, GSHCPU_OK);
+  EXPECT_EQ(c.k[0], 52) << "13/64 of 256: the area of the intersection, [6, 19] of 64";
+  // SC5's formula on the three coverages: the band 26/64, the clip 19/64
+  uint32_t b = 0;
+  uint32_t a = 104;      // 26/64 of 256
+  uint32_t cc = 76;      // 19/64 of 256
+  EXPECT_LT(gshcpu_render_stroke_compose(b, a, cc, 0), 40u) << "the product is low";
+}
+
+TEST(RenderExact, AnExactCellRefusesPiecesThatDoNotReproduceTheRasterizersSumsAndNeverGuesses) {
+  // Two fragments x = 30 and x = 40 down the whole cell, their left edges outside it: the cover to the left is -128 (two edges
+  // going up, 64 each), the dense doubled area 2 (2 * 30 * 64 + 10 * 64) = 8960 and the shared 2 * 30 * 64 = 3840.
+  GSHCPU_Piece pieces[2] = {{30, 0, 30, 64}, {40, 0, 40, 64}};
+  GSHCPU_Exact_Params params;
+  std::memset(&params, 0, sizeof params);
+  params.parts = 1;
+  params.mode = GSHCPU_EXACT_OVERLAP;
+  params.eps[0] = GSHCPU_RENDER_EXACT_EPS;
+  std::vector<unsigned char> memory(gshcpu_exact_scratch_bytes(8, 1) + 16);
+  GSHCPU_Exact_Scratch scratch;
+  gshcpu_exact_scratch_init(&scratch, (void *)(((uintptr_t)memory.data() + 15u) & ~(uintptr_t)15u), 8, 1);
+  auto run = [&](int64_t a_left, int64_t dense, int64_t * out) {
+    GSHCPU_Exact_Cell cell;
+    std::memset(&cell, 0, sizeof cell);
+    cell.pieces[0] = pieces;
+    cell.count[0] = 2;
+    cell.a_left[0] = a_left;
+    cell.dense[0] = dense;
+    uint64_t work = 0;
+    return gshcpu_exact_cell(&params, &scratch, &cell, out, &work);
+  };
+  int64_t out = -1;
+  EXPECT_EQ(run(-128, 8960, &out), GSHCPU_EXACT_OK);
+  EXPECT_EQ(out, 3840);
+  EXPECT_EQ(run(-127, 8960, &out), GSHCPU_EXACT_IDENTITY) << "a cover that no winding at the top of the side explains";
+  EXPECT_EQ(run(-192, 8960, &out), GSHCPU_EXACT_IDENTITY) << "a winding of 3 gives another area";
+  EXPECT_EQ(run(-128, 9060, &out), GSHCPU_EXACT_IDENTITY) << "an area the pieces do not make";
+  EXPECT_EQ(run(-128, 8860, &out), GSHCPU_EXACT_IDENTITY);
+  EXPECT_EQ(run(-64 * 256, 8960, &out), GSHCPU_EXACT_LIMIT) << "a winding of 256";
+  pieces[1].x1 = 65;
+  EXPECT_EQ(run(-128, 8960, &out), GSHCPU_EXACT_IDENTITY) << "a piece that is not in the cell";
+  pieces[1].x1 = 40;
+  GSHCPU_Piece vertex[2] = {{30, 10, 30, 10}, {40, 0, 40, 64}};
+  GSHCPU_Exact_Cell cell;
+  std::memset(&cell, 0, sizeof cell);
+  cell.pieces[0] = vertex;
+  cell.count[0] = 2;
+  cell.a_left[0] = -128;
+  cell.dense[0] = 8960;
+  uint64_t work = 0;
+  EXPECT_EQ(gshcpu_exact_cell(&params, &scratch, &cell, &out, &work), GSHCPU_EXACT_IDENTITY) << "a piece of no length";
+}
+
+TEST(RenderExact, TheCellsOfABandNeedMoreThanOneWindowOfThePoolAndThePoolsSizeChangesNothing) {
+  // 80 bars across a band of 48 pixels: far more pieces in the band's exact cells than the smallest pool (4096) holds.
+  std::mt19937 rng(2026);
+  std::vector<Contour> polys;
+  for (int i = 0; i < 80; i++) {
+    polys.push_back(random_piece(rng, -U, 48 * U));
+  }
+  Flat f(polys);
+  Covered small = cover_exact(f, rect_of(0, 0, 48, 14), 512);   // a pool of 4096 pieces
+  Covered large = cover_exact(f, rect_of(0, 0, 48, 14), 8192);  // a pool of 8192
+  ASSERT_EQ(small.result, GSHCPU_OK);
+  ASSERT_EQ(large.result, GSHCPU_OK);
+  EXPECT_EQ(small.k, large.k) << "the windows change nothing";
+  EXPECT_EQ(small.failures + large.failures, 0u);
+  EXPECT_GT(small.exact_cells, 100u);
+  std::vector<double> ref = reference(polys, 48, 14);
+  EXPECT_LE(worst_off(small, ref), 1.5);
 }
 
 /* --- UC9: the cap, the winding bound ---------------------------------------------------------------------------------- */

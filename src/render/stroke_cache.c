@@ -317,10 +317,14 @@ void gshcpu_stroke_cache_release(GSHCPU_Stroke_Cache * c, void * entry) {
 }
 
 void gshcpu_stroke_cache_count(GSHCPU_Stroke_Cache * c, size_t offset) {
-  if (!c->counters) {
+  gshcpu_stroke_cache_add(c, offset, 1u);
+}
+
+void gshcpu_stroke_cache_add(GSHCPU_Stroke_Cache * c, size_t offset, uint64_t amount) {
+  if (!c->counters || amount == 0) {
     return;
   }
   GCU_MUTEX_LOCK(c->lock);
-  (*(uint64_t *)(void *)((unsigned char *)c->counters + offset))++;
+  (*(uint64_t *)(void *)((unsigned char *)c->counters + offset)) += amount;
   GCU_MUTEX_UNLOCK(c->lock);
 }

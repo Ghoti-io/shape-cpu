@@ -308,7 +308,7 @@ static int count_whole(const Part * parts, size_t n, uint64_t max_cells) {
 }
 
 GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
-    uint64_t max_cells, int64_t * acc, GSHCPU_Exact * ex, const GSHCPU_Stroke_Buffers * buffers, uint8_t ** k,
+    uint64_t max_cells, int64_t * acc, size_t acc_stride, GSHCPU_Exact * ex, int joint_tier, const GSHCPU_Stroke_Buffers * buffers, uint8_t ** k,
     GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells) {
   Part body = part_rects(s, GSHCPU_STROKE_BODY, reach, whole);
   Part aligned = part_rects(s, GSHCPU_STROKE_ALIGNED, reach, whole);
@@ -320,22 +320,55 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
   }
   Part parts[3] = {body, aligned, clip};
   int whole_count = count_whole(parts, 3, max_cells);
+  *whole_rect = gshcpu_render_rect_join(body.walk, aligned.walk);
+  /* The walk of each part: the whole render's, unless the caps cannot be met anywhere (the cells' by the edges alone, the
+   * pieces of a cell by the outline's points) and then only where it is drawn. */
+  GSHCPU_Rect walks[3];
+  for (int p = 0; p < 3; p++) {
+    walks[p] = parts[p].walk;
+    GSHCPU_Exact * exact = p == GSHCPU_STROKE_CLIP ? NULL : ex;
+    if (!same_rect(parts[p].rect, walks[p]) && !whole_count && !may_exceed(s, p, p == GSHCPU_STROKE_CLIP ? NULL : exact)) {
+      walks[p] = parts[p].rect; /* the caps cannot be met anywhere: count where it is drawn */
+    }
+  }
+  int complement = gshgeom_stroke_outline_clip_complement(s->outline);
+  if (aligned.path && ex && joint_tier) {
+    /* UC8: the three parts together, so that a pixel two of them have pieces in is the area of the region and not the
+     * composition of three coverages that treats them as independent. */
+    GSHCPU_Rect joint = gshcpu_render_rect_join(body.rect, aligned.rect);
+    if (gshcpu_render_rect_empty(joint)) {
+      joint.x1 = joint.x0;
+      joint.y1 = joint.y0;
+    }
+    GSHCPU_Rect moved_joint = moved(joint, s->shift_x, s->shift_y);
+    GSHCPU_Aligned_Input in[3];
+    for (int p = 0; p < 3; p++) {
+      in[p].path = parts[p].path && !gshcpu_render_rect_empty(parts[p].walk) ? parts[p].path : NULL;
+      in[p].walk = gshcpu_render_rect_join(moved(walks[p], s->shift_x, s->shift_y), moved_joint);
+      if (gshcpu_render_rect_empty(moved_joint)) {
+        in[p].walk = moved(walks[p], s->shift_x, s->shift_y);
+      }
+      in[p].rule = p == GSHCPU_STROKE_CLIP ? gshgeom_stroke_outline_clip_rule(s->outline) : GSHGEOM_FILL_NONZERO;
+      in[p].acc = acc + (size_t)p * acc_stride;
+      in[p].out = p == 0 ? buffers->body : p == 1 ? buffers->aligned : buffers->clip;
+      in[p].ex = ex + p;
+    }
+    GSHCPU_Result r = gshcpu_render_cover_aligned(in, moved_joint, complement, buffers->result, max_cells, cells);
+    *rect = joint;
+    *k = buffers->result;
+    return r;
+  }
   uint64_t total = 0;
   for (int p = 0; p < 3; p++) {
     Part * part = &parts[p];
     if (!part->path || gshcpu_render_rect_empty(part->walk)) {
       continue;
     }
-    GSHCPU_Rect walk = part->walk;
-    GSHCPU_Exact * exact = p == GSHCPU_STROKE_CLIP ? NULL : ex;
-    if (!same_rect(part->rect, walk) && !whole_count && !may_exceed(s, p, exact)) {
-      walk = part->rect; /* the caps cannot be met anywhere: count where it is drawn */
-    }
     uint8_t * out = p == 0 ? buffers->body : p == 1 ? buffers->aligned : buffers->clip;
     GSHGEOM_Fill_Rule rule = p == 2 ? gshgeom_stroke_outline_clip_rule(s->outline) : GSHGEOM_FILL_NONZERO;
     uint64_t used = 0;
     GSHCPU_Result r = gshcpu_render_cover_exact(&part->path, 1, rule, moved(part->rect, s->shift_x, s->shift_y),
-        moved(walk, s->shift_x, s->shift_y), out, acc, max_cells - total, &used, exact);
+        moved(walks[p], s->shift_x, s->shift_y), out, acc, max_cells - total, &used, p == GSHCPU_STROKE_CLIP ? NULL : ex);
     total += used;
     if (r != GSHCPU_OK) {
       *cells = total;
@@ -343,19 +376,17 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
     }
   }
   *cells = total;
-  *whole_rect = gshcpu_render_rect_join(body.walk, aligned.walk);
   if (!aligned.path) {
     *rect = body.rect;
     *k = buffers->body;
     return GSHCPU_OK;
   }
-  /* SC5: the three coverages composed over the pixels either part reaches. */
+  /* SC5: the three coverages composed over the pixels either part reaches (the stopgap build, without the exact step). */
   GSHCPU_Rect joint = gshcpu_render_rect_join(body.rect, aligned.rect);
   if (gshcpu_render_rect_empty(joint)) {
     joint.x1 = joint.x0;
     joint.y1 = joint.y0;
   }
-  int complement = gshgeom_stroke_outline_clip_complement(s->outline);
   size_t bw = (size_t)(body.rect.x1 - body.rect.x0);
   size_t aw = (size_t)(aligned.rect.x1 - aligned.rect.x0);
   for (int64_t y = joint.y0; y < joint.y1; y++) {

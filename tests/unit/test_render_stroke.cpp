@@ -703,7 +703,7 @@ TEST(RenderStrokeTiers, EachTierIsTakenAndBitEqualToTheGeneralTier) {
       Store s;
       const GSHSCENE_List * l = one_stroke(s, *c.ops, c.p.get(), c.map);
       Sink tiered;
-      Sink general(GSHCPU_RENDER_TIER_EXACT); // the general tier: the exact step is the coverage, not a tier
+      Sink general(GSHCPU_RENDER_TIERS_GENERAL); // the general tier: the exact step is the coverage, not a tier
       Drawn general_draw = render_list(general.sink, l, 48, 24, format);
       Drawn first = render_list(tiered.sink, l, 48, 24, format);
       Drawn second = render_list(tiered.sink, l, 48, 24, format);
@@ -779,7 +779,7 @@ TEST(RenderStrokeTiers, EveryStrokeFixtureIsBitEqualToTheGeneralTierOnEveryForma
     fixtures++;
     for (GSHCPU_Format format : formats) {
       Sink tiered;
-      Sink general(GSHCPU_RENDER_TIER_EXACT); // the general tier: the exact step is the coverage, not a tier
+      Sink general(GSHCPU_RENDER_TIERS_GENERAL); // the general tier: the exact step is the coverage, not a tier
       uint64_t first = 0;
       uint64_t second = draw_fixture_twice(tiered.sink, i, format, &first);
       uint64_t oracle = draw_fixture_twice(general.sink, i, format);
@@ -796,7 +796,7 @@ TEST(RenderStrokeTiers, EveryStrokeFixtureIsBitEqualToTheGeneralTierOnEveryForma
       total.strokes += tiered.counters.strokes;
     }
   }
-  EXPECT_EQ(fixtures, 11u) << "the eight of S4 and S4b's three";
+  EXPECT_EQ(fixtures, 12u) << "the eight of S4 and S4b's four";
   EXPECT_GT(total.cache_hits, 0u) << "FT-1 is taken";
   EXPECT_GT(total.sparse_hairline, 0u) << "FT-2 is taken for a solid hairline";
   EXPECT_GT(total.sparse_plain, 0u) << "FT-2 is taken for a plain solid stroke";

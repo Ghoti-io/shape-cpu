@@ -87,6 +87,9 @@ typedef struct Event {
 /** Bytes of one cell's scratch for @p max_pieces pieces over @p parts parts. */
 size_t gshcpu_exact_scratch_bytes(uint64_t max_pieces, int parts) {
   size_t m = (size_t)max_pieces * (size_t)parts;
+  if (parts == 0) {
+    return 0;
+  }
   size_t bytes = 0;
   bytes += m * sizeof(Frag) + 16u;
   bytes += m * sizeof(Active) + 16u;
@@ -229,6 +232,9 @@ static uint32_t weight_of(const GSHCPU_Exact_Params * p, const int64_t w[3]) {
   if (p->mode == GSHCPU_EXACT_OVERLAP) {
     int64_t m = w[0] < 0 ? -w[0] : w[0];
     return m > 1 ? (uint32_t)(m - 1) : 0u;
+  }
+  if (p->mode == GSHCPU_EXACT_REGION) {
+    return (p->even_odd ? (w[0] & 1) != 0 : w[0] != 0) ? 1u : 0u;
   }
   /* UC8: P = {w_b != 0} U ({w_a != 0} & F'), F' the clip's region (or its complement). */
   if (w[0] != 0) {
@@ -401,8 +407,10 @@ int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch *
   size_t at = 0;
   for (int p = 0; p < params->parts; p++) {
     GSHCPU_Piece * v = s->sorted + at;
-    memcpy(v, cell->pieces[p], cell->count[p] * sizeof *v);
-    sort_pieces(v, cell->count[p]);
+    if (cell->count[p]) {
+      memcpy(v, cell->pieces[p], cell->count[p] * sizeof *v);
+      sort_pieces(v, cell->count[p]);
+    }
     for (size_t i = 0; i < cell->count[p]; i++) {
       GSHCPU_Piece pc = v[i];
       if (pc.x0 > 64 || pc.x1 > 64 || pc.y0 > 64 || pc.y1 > 64 || (pc.x0 == pc.x1 && pc.y0 == pc.y1)) {
@@ -537,17 +545,27 @@ static size_t pool_pieces(uint64_t max_pieces) {
 }
 
 size_t gshcpu_exact_bytes(size_t width, uint64_t max_pieces, int parts) {
+  size_t columns;
   size_t cells;
   size_t arrays;
   size_t pool;
   size_t total;
-  if (max_pieces > (uint64_t)GSHCPU_EXACT_FRAGMENTS_CEILING || !gcu_safe_add_size(width, 1u, &cells) ||
-      !gcu_safe_mul_size(cells, GSHCPU_RENDER_BAND_ROWS, &cells) || !gcu_safe_mul_size(cells, 2u * sizeof(uint32_t), &arrays) ||
+  if (max_pieces > (uint64_t)GSHCPU_EXACT_FRAGMENTS_CEILING || !gcu_safe_add_size(width, 1u, &columns) ||
+      !gcu_safe_mul_size(columns, GSHCPU_RENDER_BAND_ROWS, &cells) || !gcu_safe_mul_size(cells, 2u * sizeof(uint32_t), &arrays) ||
       !gcu_safe_mul_size(pool_pieces(max_pieces), sizeof(GSHCPU_Piece), &pool) ||
       !gcu_safe_add_size(arrays, pool, &total) ||
       !gcu_safe_add_size(total, gshcpu_exact_scratch_bytes(max_pieces, parts), &total) ||
       !gcu_safe_add_size(total, 64u, &total)) {
     return SIZE_MAX;
+  }
+  if (parts == 3) {
+    size_t composed;
+    size_t sums;
+    if (!gcu_safe_mul_size(cells, 2u * sizeof(uint16_t), &composed) || !gcu_safe_mul_size(columns, 3u * sizeof(int64_t), &sums) ||
+        !gcu_safe_add_size(total, composed, &total) || !gcu_safe_add_size(total, sums, &total) ||
+        !gcu_safe_add_size(total, 32u, &total)) {
+      return SIZE_MAX;
+    }
   }
   return total;
 }
@@ -562,6 +580,11 @@ void gshcpu_exact_init(GSHCPU_Exact * ex, void * memory, size_t width, uint64_t 
   ex->pool_cap = pool_pieces(max_pieces);
   ex->pool = (GSHCPU_Piece *)(void *)carve(&at, ex->pool_cap * sizeof(GSHCPU_Piece));
   gshcpu_exact_scratch_init(&ex->scratch, carve(&at, gshcpu_exact_scratch_bytes(max_pieces, parts)), max_pieces, parts);
+  if (parts == 3) {
+    ex->union_k = (uint16_t *)(void *)carve(&at, cells * sizeof(uint16_t));
+    ex->clip_k = (uint16_t *)(void *)carve(&at, cells * sizeof(uint16_t));
+    ex->prefix = (int64_t *)(void *)carve(&at, (width + 1u) * 3u * sizeof(int64_t));
+  }
 }
 
 /* --- the declared bound of the step's work (SC11) ------------------------------------------------------------------- */
@@ -577,17 +600,18 @@ static uint64_t sat_mul(uint64_t a, uint64_t b) {
 }
 
 uint64_t gshcpu_exact_work_bound(uint64_t max_cells, uint64_t max_points, uint64_t max_dimension, uint64_t max_pieces) {
-  /* One cell of m pieces: m to collect them; at most 64 slabs, each a scan of the m pieces, and at most P + 1 sub-slabs
-   * (P = m (m - 1) / 2, since two fragments meet once), each costing the m neighbours' meetings, the area of m + 1 gaps and
-   * the ordering (m comparisons, and a swap for every meeting, P in all in a slab). */
+  /* One cell of m pieces, f of them fragments: m to collect them; at most 64 slabs, each a scan of the f fragments and then
+   * at most P + 1 sub-slabs (P = f (f - 1) / 2, since two fragments meet once), each costing the f - 1 neighbours' meetings,
+   * the f + 1 gaps' areas and the ordering (f comparisons, and a swap for every meeting, P in all in a slab).  Only the
+   * fragments make sub-slabs, and they are deposits, which the cell cap counts: at most `max_cells` of them in the whole
+   * item, however they fall in cells, and the cost of a fragment grows with the cell it is in, so the worst is all of them
+   * in cells of the cap's size.  The pieces that are not fragments (a horizontal piece on a cell's left side) cost a
+   * visit and a collection each. */
   uint64_t m = max_pieces;
   uint64_t p = sat_mul(m, m > 0 ? m - 1u : 0u) / 2u;
-  uint64_t sub = sat_mul(sat_add(p, 1u), sat_add(sat_mul(3u, m), 2u));
-  uint64_t slab = sat_add(sat_add(m, sub), p);
-  uint64_t cell = sat_add(m, sat_mul(64u, slab));
-  uint64_t per_piece = m > 0 ? cell / m + (cell % m != 0) : 0u;
-  /* The pieces to be had in an item: its deposits (at most the cell cap) and the horizontal pieces on cells' left sides,
-   * which no cap counts: at most one for each point and each column of the widest raster. */
+  uint64_t z = sat_add(sat_mul(sat_add(p, 1u), sat_add(sat_mul(3u, m), 2u)), p);
+  uint64_t per_fragment = m > 0 ? z / m + (z % m != 0) : 0u;
   uint64_t pieces = sat_add(max_cells, sat_mul(max_points, max_dimension));
-  return sat_mul(pieces, per_piece);
+  uint64_t fragments = sat_mul(max_cells, sat_mul(64u, sat_add(1u, per_fragment)));
+  return sat_add(pieces, fragments);
 }

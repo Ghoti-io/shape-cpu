@@ -30,6 +30,8 @@ const Ops kStar = {{'M', {12.0, 2.5}}, {'L', {16.0, 19.0}}, {'L', {3.0, 8.0}}, {
 const Ops kMixed = {{'M', {3.0, 3.0}}, {'L', {14.0, 3.5}}, {'L', {13.0, 13.0}}, {'L', {4.0, 12.5}}, {'Z', {}},
     {'M', {16.0, 6.0}}, {'L', {23.0, 19.0}}, {'L', {17.0, 22.0}}};
 const Ops kDot = {{'M', {10.0, 10.0}}, {'L', {10.0, 10.0}}, {'M', {15.0, 15.0}}, {'Z', {}}};
+// a strip 0.6 wide with its edge at x = 4.3: stroked at width 0.2 its aligned band lies on the fill's edge, off a pixel's centre
+const Ops kStrip = {{'M', {4.3, 3.0}}, {'L', {4.9, 3.0}}, {'L', {4.9, 15.0}}, {'L', {4.3, 15.0}}, {'Z', {}}};
 
 Params params(double width = 3.0, uint32_t join = GSHGEOM_STROKE_JOIN_ROUND, uint32_t cap = GSHGEOM_STROKE_CAP_BUTT) {
   Params p;
@@ -290,13 +292,29 @@ TEST(RenderStrokeBracket, InsideAndOutsideAlignmentStaysInsideTheBracketAndRepor
       }
     }
   }
+  // thin ones: the band is under two pixels wide, so the aligned part and the fill's edge lie in every pixel along the path
+  for (int shape = 0; shape < 5; shape++) {
+    for (int alignment = 1; alignment < 3; alignment++) {
+      GateCase c;
+      const Ops * thin[5] = {&kClosed, &kLens, &kStar, &kMixed, &kStrip};
+      c.name = "thin shape " + std::to_string(shape) + (alignment == 1 ? " inside" : " outside");
+      c.ops = thin[shape];
+      c.p = params(shape == 4 ? 0.2 : (shape % 2 ? 0.7 : 0.9), shape == 2 ? GSHGEOM_STROKE_JOIN_MITER : GSHGEOM_STROKE_JOIN_ROUND);
+      c.map = shape == 3 ? affine_map(0.95, 0.2, -0.2, 0.95, 0.375, 0.5) : frac_map();
+      c.alignment = alignment;
+      c.even_odd = shape == 2 && alignment == 2;
+      cases.push_back(c);
+    }
+  }
   long excluded = 0;
   long pixels = 0;
   double over = 0;
   Worst aligned;
   for (GateCase & c : cases) {
-    Found f = gate_one(c);
+    Found f = gate_one(c, 26, stroke_gate::kOverlap, false, GSHCPU_RENDER_TIERS_ALL, true);
     EXPECT_EQ(f.bracket.violations, 0) << c.name << ": " << f.bracket.first;
+    EXPECT_EQ(f.union_gate.violations, 0) << c.name << ": " << f.union_gate.first;
+    EXPECT_GT(f.union_gate.pixels, 0) << c.name << ": the union gate judged the aligned part too";
     excluded += f.bracket.excluded;
     pixels += f.bracket.pixels;
     over = std::max(over, f.bracket.worst_over);
@@ -356,6 +374,33 @@ TEST(RenderStrokeBracket, TheGatesAreSeenToFailOnTheBuildWithoutTheExactStep) {
   std::printf("stroke bracket control: the stopgap build is %.1f/255 past the bracket (passes %.1f, fails %.1f on %ld pixels and the union gate by %.1f levels); the exact step: %.2f/255 and %.2f levels\n",
       stop.bracket.worst_over, stroke_gate::kOverlapStopgap * 255.0, stroke_gate::kOverlap * 255.0, tight.bracket.violations,
       tight.union_gate.worst, exact.bracket.worst_over, exact.union_gate.worst);
+}
+
+TEST(RenderStrokeBracket, TheUnionGateIsSeenToFailOnThinAlignedStrokesWithoutTheJointStep) {
+  // The control of UC8: with the exact step on but each part covered alone and SC5's formula composing them (which treats
+  // the three coverages as independent), a thin aligned stroke is wrong where the aligned part and the fill's edge share
+  // pixels, by up to 20 levels on an off-centre strip; covered together it is within the gate.
+  Worst without;
+  Worst with;
+  for (int alignment = 1; alignment < 3; alignment++) {
+    for (int shape = 0; shape < 3; shape++) {
+      GateCase c;
+      const Ops * thin[3] = {&kStrip, &kLens, &kClosed};
+      c.name = "control: thin shape " + std::to_string(shape) + (alignment == 1 ? " inside" : " outside");
+      c.ops = thin[shape];
+      c.p = params(shape == 0 ? 0.2 : 0.7, GSHGEOM_STROKE_JOIN_ROUND);
+      c.map = frac_map();
+      c.alignment = alignment;
+      Found off = gate_one(c, 26, stroke_gate::kOverlap, true, GSHCPU_RENDER_TIERS_ALL & ~GSHCPU_RENDER_TIER_JOINT, true);
+      Found on = gate_one(c, 26, stroke_gate::kOverlap, true, GSHCPU_RENDER_TIERS_ALL, true);
+      EXPECT_EQ(on.union_gate.violations, 0) << c.name << ": " << on.union_gate.first;
+      without.add(off);
+      with.add(on);
+    }
+  }
+  EXPECT_GT(without.unioned, stroke_gate::kUnionBound) << "SC5's formula in a shared pixel fails the union gate";
+  print_class("thin aligned, parts covered alone", without);
+  print_class("thin aligned, parts covered together", with);
 }
 
 namespace {

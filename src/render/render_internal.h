@@ -220,8 +220,11 @@ enum {
   GSHCPU_EXACT_IDENTITY  /* the cell's pieces do not reproduce what the rasterizer summed: a defect, refused rather than guessed */
 };
 
-/** What the weight of a gap is: the overlap `(w - 1)^+` of one part (UC6) or UC8's area of the three parts' region. */
-enum { GSHCPU_EXACT_OVERLAP = 0, GSHCPU_EXACT_UNION3 = 1 };
+/**
+ * What the weight of a gap is: the overlap `(|w| - 1)^+` of one nonzero part (UC6), UC8's area of the three parts' region, or
+ * (in an aligned stroke) the area of the clip's own region by its rule, where the clip alone has pieces in a cell.
+ */
+enum { GSHCPU_EXACT_OVERLAP = 0, GSHCPU_EXACT_UNION3 = 1, GSHCPU_EXACT_REGION = 2 };
 
 /** A fragment oriented top to bottom: its upper end, `dx` to its lower end, its height and sign. */
 typedef struct GSHCPU_Exact_Frag {
@@ -296,6 +299,9 @@ struct GSHCPU_Exact {
   GSHCPU_Piece * pool;
   size_t pool_cap;            /* pieces */
   GSHCPU_Exact_Scratch scratch;
+  uint16_t * union_k;         /* aligned strokes, the first of the three only: a cell's UC8 coverage, or 0xffff for none */
+  uint16_t * clip_k;          /* ... and the clip's own coverage in a cell only it has pieces in, or 0xffff for none */
+  int64_t * prefix;           /* ... and a row's running sums of cover, for each of the three parts */
   /* what happened, added to as covers run */
   uint64_t work;              /* SC11's units */
   uint64_t cells;             /* cells made exact */
@@ -309,11 +315,41 @@ struct GSHCPU_Exact {
  */
 uint64_t gshcpu_exact_work_bound(uint64_t max_cells, uint64_t max_points, uint64_t max_dimension, uint64_t max_pieces);
 
-/** The bytes of the arrays of an ::GSHCPU_Exact for walks up to @p width cells wide and @p max_pieces. */
+/**
+ * The bytes of the arrays of an ::GSHCPU_Exact for walks up to @p width cells wide and @p max_pieces.  @p parts is the
+ * parts whose pieces its scratch holds at once: 1 for a part's own overlap, 3 for the cells of an aligned stroke where
+ * the parts share a pixel (UC8, which also takes the arrays of its composition), 0 for none (the second and third part's
+ * memory in an aligned stroke only keeps counts and pieces).
+ */
 size_t gshcpu_exact_bytes(size_t width, uint64_t max_pieces, int parts);
 
 /** Set @p ex up over @p memory (::gshcpu_exact_bytes bytes, aligned to 16). */
 void gshcpu_exact_init(GSHCPU_Exact * ex, void * memory, size_t width, uint64_t max_pieces, int parts);
+
+/** The place a cell has in the pool when none of its pieces are kept. */
+#define GSHCPU_EXACT_NO_SLOT UINT32_MAX
+
+/** One part of an aligned stroke for ::gshcpu_render_cover_aligned (body, aligned, clip: the order of GSHCPU_STROKE_*). */
+typedef struct GSHCPU_Aligned_Input {
+  const GSHGEOM_Flat_Path * path;  /* NULL when the part is absent */
+  GSHCPU_Rect walk;                /* the cells counted: holds the rectangle drawn */
+  GSHGEOM_Fill_Rule rule;
+  int64_t * acc;                   /* the part's accumulator, as ::gshcpu_render_cover_counted's */
+  uint8_t * out;                   /* the part's coverage over the rectangle drawn, row by row */
+  GSHCPU_Exact * ex;               /* the part's exact memory; the first part's holds the step's scratch for three parts */
+} GSHCPU_Aligned_Input;
+
+/**
+ * UC8: the coverage of an aligned stroke over @p joint, the three parts covered together a band at a time, written to
+ * @p result: in a cell where two of them have pieces the area of `{w_b != 0} U ({w_a != 0} & F')` with `F'` the clip's
+ * region (or its complement when @p complement), exactly; in every other the three coverages composed as SC5 does
+ * (::gshcpu_render_stroke_compose), each part's own overlap made exact.  The parts' own coverages are left in
+ * their `out`.  The cells are counted over each part's walk and met against @p max_cells together.
+ *
+ * @return ::GSHCPU_OK or ::GSHCPU_ERR_LIMIT (the cell cap, the pieces of a cell, a winding, the identity).
+ */
+GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHCPU_Rect joint, int complement,
+    uint8_t * result, uint64_t max_cells, uint64_t * cells);
 
 /* --- the workspace arena (arena.c) ------------------------------------------------- */
 
@@ -449,7 +485,16 @@ int gshcpu_render_gradient_at(const GSHCPU_Gradient * g, double qx, double qy, d
  * the union gate fail on the build that has it off.
  */
 #define GSHCPU_RENDER_TIER_EXACT 4u
-#define GSHCPU_RENDER_TIERS_ALL (GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE | GSHCPU_RENDER_TIER_EXACT)
+/**
+ * UC8: the three parts of an aligned stroke covered together, a pixel two of them have pieces in the area of the region.
+ * Off (with the exact step on), each part is exact for its own overlap and SC5's formula composes them, which treats the
+ * three as independent: the control of the gate that holds a thin aligned stroke to the union.
+ */
+#define GSHCPU_RENDER_TIER_JOINT 8u
+#define GSHCPU_RENDER_TIERS_ALL \
+  (GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE | GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT)
+/** What the general tier is: the coverage (the exact step and UC8), none of the fast tiers. */
+#define GSHCPU_RENDER_TIERS_GENERAL (GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT)
 
 /**
  * What a sink counted (render.h, SC7, SC8): how often each tier was taken.  A test reads it after the renders it
@@ -463,6 +508,8 @@ typedef struct GSHCPU_Render_Counters {
   uint64_t cache_evictions;  /* entries dropped to make room, by an eviction or by the sink's destruction */
   uint64_t sparse_hairline;  /* FT-2 for a solid hairline (device width 1) */
   uint64_t sparse_plain;     /* FT-2 for any other solid stroke */
+  uint64_t exact_cells;      /* cells the exact step made exact (UC3), whichever part or parts */
+  uint64_t exact_failures;   /* cells whose pieces did not reproduce the rasterizer's sums (UC4): a defect, refused */
 } GSHCPU_Render_Counters;
 
 /** What identifies an expansion in the cache (SC7). */
@@ -530,6 +577,9 @@ void gshcpu_stroke_cache_release(GSHCPU_Stroke_Cache * cache, void * entry);
 /** Count a tier taken (stroke.c): one of the counters of ::GSHCPU_Render_Counters, by offset. */
 void gshcpu_stroke_cache_count(GSHCPU_Stroke_Cache * cache, size_t offset);
 
+/** Add @p amount to one of the counters, by offset. */
+void gshcpu_stroke_cache_add(GSHCPU_Stroke_Cache * cache, size_t offset, uint64_t amount);
+
 /** A stroke ready to cover: its outline (pinned in the cache, or owned), the whole-pixel shift and its meta (SC3). */
 typedef struct GSHCPU_Stroke {
   GSHGEOM_Stroke_Outline * outline;
@@ -569,14 +619,17 @@ typedef struct GSHCPU_Stroke_Buffers {
  * SC5, SC6: the coverage of @p s composed to one 8-bit `k` over the pixels it can reach.
  *
  * @param reach The pixels the clips in force allow, in the drawn region; @p whole the same in the whole render (S4).
+ * @param acc The cell accumulators: one of @p acc_stride elements, or three in a row when the stroke aligns (UC8).
+ * @param ex The exact step's memory, NULL for none (the stopgap build): three in a row when the stroke aligns.
+ * @param joint Whether an aligned stroke is covered by UC8 (nonzero) or composed from its parts by SC5's formula.
  * @param k Receives the array holding the composed coverage (`body`, or `result` for an aligned stroke), row by row over @p rect.
  * @param rect Receives the pixels `k` is for (reach meet the parts' boxes); @p whole_rect the rectangle of the whole render.
  * @param cells Receives the cell deposits counted, over what the whole render draws of the item.
  * @return ::GSHCPU_OK; ::GSHCPU_ERR_LIMIT when the deposits of all its parts pass @p max_cells.
  */
 GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
-    uint64_t max_cells, int64_t * acc, GSHCPU_Exact * ex, const GSHCPU_Stroke_Buffers * buffers, uint8_t ** k,
-    GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells);
+    uint64_t max_cells, int64_t * acc, size_t acc_stride, GSHCPU_Exact * ex, int joint, const GSHCPU_Stroke_Buffers * buffers,
+    uint8_t ** k, GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells);
 
 /**
  * FT-2 (SC8): whether @p s qualifies for the sparse composite: a single part, and `cells_bound` of its rectangle at

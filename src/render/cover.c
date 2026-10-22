@@ -210,8 +210,8 @@ static void store_piece(Cover * c, int64_t ex, int64_t ey, Point a, Point b) {
     return;
   }
   size_t k = exact_cell_index(c, ex, ey);
-  if (c->ex->count[k] < 2) {
-    return;
+  if (c->ex->slot[k] == GSHCPU_EXACT_NO_SLOT) {
+    return; /* a cell none of whose pieces the step keeps, or one of another window */
   }
   c->ex->pool[c->ex->slot[k]++] = local_piece(ex, ey, a, b);
   c->ex->work++;
@@ -432,12 +432,21 @@ static void edge(Cover * c, Point from, Point to) {
 /**
  * coverage.c's fold of an accumulated area into 0..255 under @p rule.  Its shift rounds toward negative infinity before
  * the sign is dropped, so a region wound the other way (a stroke's pieces are, UC1) comes out one level up wherever the
- * area is not a whole level: @p magnitude folds the area's magnitude instead, the floor of a level either way round (the
- * fold of UC7).
+ * area is not a whole level, and its even-odd ramp back down (512 less the shifted value) rounds the other way again:
+ * @p magnitude folds the area's magnitude, reduced by the rule before it is shifted, so that the coverage is the floor of
+ * the level of the area of the region either way round (the fold of UC7).
  */
 static uint8_t fold(int64_t area, GSHGEOM_Fill_Rule rule, int magnitude) {
-  if (magnitude && area < 0) {
-    area = -area;
+  if (magnitude) {
+    uint64_t m = (uint64_t)(area < 0 ? -area : area);
+    if (rule == GSHGEOM_FILL_EVEN_ODD) {
+      m &= 16383u; /* 2 * 2^13: the winding's parity repeats every two pixels' area */
+      if (m > 8192u) {
+        m = 16384u - m;
+      }
+    }
+    uint64_t level = m >> AREA_SHIFT;
+    return (uint8_t)(level >= 256u ? 255u : level);
   }
   int64_t value = area >> AREA_SHIFT;
   if (value < 0) {
@@ -487,7 +496,9 @@ GSHCPU_Result gshcpu_render_cover(const GSHGEOM_Flat_Path * const * paths, size_
 
 /** Clear the exact step's count array for the band's rows. */
 static void exact_clear(Cover * c) {
-  memset(c->ex->count, 0, (size_t)c->rows * (size_t)c->cstride * sizeof *c->ex->count);
+  size_t cells = (size_t)c->rows * (size_t)c->cstride;
+  memset(c->ex->count, 0, cells * sizeof *c->ex->count);
+  memset(c->ex->slot, 0xff, cells * sizeof *c->ex->slot); /* GSHCPU_EXACT_NO_SLOT: no cell has a place in the pool yet */
 }
 
 /**
@@ -834,5 +845,290 @@ GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths
     sweep_band(&c, rule, width, line, fn, ctx);
   }
   *cells = c.cells;
+  return GSHCPU_OK;
+}
+
+/* --- the parts of an aligned stroke, together (UC8) ----------------------------------------------------------------------- */
+
+/** What one cell of an aligned stroke holds: each part's pieces and where they are kept. */
+typedef struct Joint_Cell {
+  uint32_t n[3];
+  size_t k[3];
+  int multi;     /* the parts that hold at least one piece */
+  int store[3];  /* the parts whose pieces the step keeps for this cell */
+} Joint_Cell;
+
+static const int64_t JOINT_EPS_CLIP = 1;
+
+static void joint_cell(const Cover c[3], const GSHCPU_Aligned_Input in[3], int64_t x, int64_t y, Joint_Cell * out) {
+  out->multi = 0;
+  for (int p = 0; p < 3; p++) {
+    out->n[p] = 0;
+    out->k[p] = 0;
+    if (in[p].path) {
+      out->k[p] = exact_cell_index(&c[p], x, y);
+      out->n[p] = in[p].ex->count[out->k[p]];
+      out->multi += out->n[p] > 0;
+    }
+  }
+  for (int p = 0; p < 3; p++) {
+    /* A cell where two parts have pieces is UC8's, and every piece of it is kept; one part alone is made exact for its own
+     * overlap (the body and the aligned part by the fill they are, the clip by its rule), and the others are constants. */
+    out->store[p] = out->n[p] > 0 && (out->multi >= 2 || out->n[p] >= 2);
+  }
+}
+
+GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHCPU_Rect joint, int complement,
+    uint8_t * result, uint64_t max_cells, uint64_t * cells) {
+  Cover c[3];
+  int64_t width = joint.x1 - joint.x0;
+  memset(c, 0, sizeof c);
+  *cells = 0;
+  for (int p = 0; p < 3; p++) {
+    if (!in[p].path) {
+      continue;
+    }
+    c[p].rect = joint;
+    c[p].walk = in[p].walk;
+    c[p].ex = in[p].ex;
+    c[p].cstride = in[p].walk.x1 - in[p].walk.x0;
+    c[p].stride = width + 1;
+  }
+#define OTHERS(p) ((c[0].cells + c[1].cells + c[2].cells) - c[p].cells)
+#define TOTAL() (c[0].cells + c[1].cells + c[2].cells)
+  /* The rows counted and not drawn: above the rectangle drawn and below it. */
+  for (int p = 0; p < 3; p++) {
+    if (!in[p].path) {
+      continue;
+    }
+    const GSHGEOM_Flat_Path * one[1] = {in[p].path};
+    c[p].max_cells = max_cells - OTHERS(p);
+    if (gshcpu_render_rect_empty(joint)) {
+      count_rows(&c[p], one, 1, in[p].walk.y0, in[p].walk.y1);
+    } else {
+      count_rows(&c[p], one, 1, in[p].walk.y0, joint.y0);
+      count_rows(&c[p], one, 1, joint.y1, in[p].walk.y1);
+    }
+    if (c[p].over) {
+      *cells = TOTAL();
+      return GSHCPU_ERR_LIMIT;
+    }
+  }
+  GSHCPU_Exact * lead = in[0].ex;
+  GSHCPU_Exact_Params one_part;
+  memset(&one_part, 0, sizeof one_part);
+  one_part.parts = 1;
+  one_part.mode = GSHCPU_EXACT_OVERLAP;
+  GSHCPU_Exact_Params three;
+  memset(&three, 0, sizeof three);
+  three.parts = 3;
+  three.mode = GSHCPU_EXACT_UNION3;
+  three.even_odd = in[2].rule == GSHGEOM_FILL_EVEN_ODD;
+  three.complement = complement;
+  for (int64_t band = joint.y0; band < joint.y1; band += GSHCPU_RENDER_BAND_ROWS) {
+    int64_t rows = joint.y1 - band < (int64_t)GSHCPU_RENDER_BAND_ROWS ? joint.y1 - band : (int64_t)GSHCPU_RENDER_BAND_ROWS;
+    int64_t total = rows * width;
+    for (int64_t i = 0; i < total; i++) {
+      lead->union_k[i] = 0xffffu;
+      lead->clip_k[i] = 0xffffu;
+    }
+    for (int p = 0; p < 3; p++) {
+      if (!in[p].path) {
+        continue;
+      }
+      c[p].band = band;
+      c[p].rows = rows;
+      size_t n = (size_t)(rows * c[p].stride);
+      c[p].cover = in[p].acc;
+      c[p].area = in[p].acc + n;
+      memset(in[p].acc, 0, 2 * n * sizeof *in[p].acc);
+      exact_clear(&c[p]);
+      c[p].max_cells = max_cells - OTHERS(p);
+      path_edges(&c[p], in[p].path);
+      if (c[p].over) {
+        *cells = TOTAL();
+        return GSHCPU_ERR_LIMIT;
+      }
+    }
+    /* The cells that hold pieces of more than one part, or two of one: made exact a window of the pools at a time. */
+    int64_t pos = 0;
+    while (pos < total) {
+      int64_t idx = pos;
+      uint64_t kept[3] = {0, 0, 0};
+      while (idx < total) {
+        Joint_Cell jc;
+        joint_cell(c, in, joint.x0 + idx % width, band + idx / width, &jc);
+        int fits = 1;
+        for (int p = 0; p < 3; p++) {
+          fits = fits && (!jc.store[p] || kept[p] + jc.n[p] <= in[p].ex->pool_cap);
+        }
+        if (!fits) {
+          break;
+        }
+        for (int p = 0; p < 3; p++) {
+          if (jc.store[p]) {
+            in[p].ex->slot[jc.k[p]] = (uint32_t)kept[p];
+            kept[p] += jc.n[p];
+          }
+        }
+        idx++;
+      }
+      if (kept[0] + kept[1] + kept[2] == 0) {
+        pos = idx;
+        continue;
+      }
+      for (int p = 0; p < 3; p++) {
+        if (kept[p]) {
+          c[p].win0 = pos;
+          c[p].win1 = idx;
+          c[p].store = 1;
+          path_edges(&c[p], in[p].path);
+          c[p].store = 0;
+        }
+      }
+      for (int64_t r = pos / width; r <= (idx - 1) / width; r++) {
+        int64_t * pre = lead->prefix;
+        for (int p = 0; p < 3; p++) {
+          int64_t * row = pre + (size_t)p * (size_t)(width + 1);
+          if (!in[p].path) {
+            for (int64_t j = 0; j <= width; j++) {
+              row[j] = 0;
+            }
+            continue;
+          }
+          const int64_t * cv = c[p].cover + r * c[p].stride;
+          row[0] = cv[0];
+          for (int64_t j = 1; j <= width; j++) {
+            row[j] = row[j - 1] + cv[j];
+          }
+        }
+        for (int64_t j = 1; j <= width; j++) {
+          int64_t at = r * width + (j - 1);
+          if (at < pos || at >= idx) {
+            continue;
+          }
+          Joint_Cell jc;
+          joint_cell(c, in, joint.x0 + (j - 1), band + r, &jc);
+          int status = GSHCPU_EXACT_OK;
+          if (jc.multi >= 2) {
+            GSHCPU_Exact_Cell cell;
+            memset(&cell, 0, sizeof cell);
+            for (int p = 0; p < 3; p++) {
+              int64_t eps = p < 2 ? in[p].ex->eps : JOINT_EPS_CLIP;
+              three.eps[p] = (int)eps;
+              int64_t * row = pre + (size_t)p * (size_t)(width + 1);
+              cell.count[p] = jc.n[p];
+              cell.pieces[p] = jc.n[p] ? in[p].ex->pool + (in[p].ex->slot[jc.k[p]] - jc.n[p]) : NULL;
+              cell.a_left[p] = row[j - 1];
+              if (in[p].path) {
+                const int64_t * ar = c[p].area + r * c[p].stride;
+                cell.dense[p] = eps * (row[j] * (ONE_PIXEL * 2) - ar[j]);
+              }
+            }
+            int64_t area2 = 0;
+            status = gshcpu_exact_cell(&three, &lead->scratch, &cell, &area2, &lead->work);
+            if (status == GSHCPU_EXACT_OK) {
+              int64_t v = area2 >> AREA_SHIFT;
+              lead->union_k[at] = (uint16_t)(v >= 256 ? 255 : v < 0 ? 0 : v);
+              lead->cells++;
+            }
+          } else if (jc.n[2] >= 2) {
+            /* Only the clip has pieces here, and they overlap: the area of its region under its rule. */
+            GSHCPU_Exact * ex = in[2].ex;
+            int64_t * row = pre + 2 * (size_t)(width + 1);
+            const int64_t * ar = c[2].area + r * c[2].stride;
+            GSHCPU_Exact_Params region;
+            memset(&region, 0, sizeof region);
+            region.parts = 1;
+            region.mode = GSHCPU_EXACT_REGION;
+            region.eps[0] = (int)JOINT_EPS_CLIP;
+            region.even_odd = three.even_odd;
+            GSHCPU_Exact_Cell cell;
+            memset(&cell, 0, sizeof cell);
+            cell.pieces[0] = ex->pool + (ex->slot[jc.k[2]] - jc.n[2]);
+            cell.count[0] = jc.n[2];
+            cell.a_left[0] = row[j - 1];
+            cell.dense[0] = JOINT_EPS_CLIP * (row[j] * (ONE_PIXEL * 2) - ar[j]);
+            int64_t area2 = 0;
+            status = gshcpu_exact_cell(&region, &lead->scratch, &cell, &area2, &lead->work);
+            if (status == GSHCPU_EXACT_OK) {
+              int64_t v = area2 >> AREA_SHIFT;
+              lead->clip_k[at] = (uint16_t)(v >= 256 ? 255 : v < 0 ? 0 : v);
+              lead->cells++;
+            }
+          } else {
+            for (int p = 0; p < 2 && status == GSHCPU_EXACT_OK; p++) {
+              if (jc.n[p] < 2) {
+                continue;
+              }
+              GSHCPU_Exact * ex = in[p].ex;
+              int64_t * row = pre + (size_t)p * (size_t)(width + 1);
+              int64_t * ar = c[p].area + r * c[p].stride;
+              GSHCPU_Exact_Cell cell;
+              memset(&cell, 0, sizeof cell);
+              one_part.eps[0] = ex->eps;
+              cell.pieces[0] = ex->pool + (ex->slot[jc.k[p]] - jc.n[p]);
+              cell.count[0] = jc.n[p];
+              cell.a_left[0] = row[j - 1];
+              int64_t accumulated = row[j] * (ONE_PIXEL * 2);
+              int64_t dense = ex->eps * (accumulated - ar[j]);
+              cell.dense[0] = dense;
+              int64_t shared = 0;
+              status = gshcpu_exact_cell(&one_part, &lead->scratch, &cell, &shared, &lead->work);
+              if (status == GSHCPU_EXACT_OK) {
+                int64_t value = dense - shared;
+                ar[j] = accumulated - ex->eps * (value < 0 ? 0 : value);
+                lead->cells++;
+              }
+            }
+          }
+          if (status != GSHCPU_EXACT_OK) {
+            if (status == GSHCPU_EXACT_IDENTITY) {
+              lead->failures++;
+            }
+            *cells = TOTAL();
+            return GSHCPU_ERR_LIMIT;
+          }
+        }
+      }
+      pos = idx;
+    }
+    /* The parts' coverages, and the composition of the cells the step did not make whole. */
+    for (int p = 0; p < 3; p++) {
+      for (int64_t r = 0; r < rows; r++) {
+        uint8_t * line = in[p].out + (size_t)((band - joint.y0 + r) * width);
+        if (!in[p].path) {
+          memset(line, 0, (size_t)width);
+          continue;
+        }
+        const int64_t * cv = c[p].cover + r * c[p].stride;
+        const int64_t * ar = c[p].area + r * c[p].stride;
+        int64_t accumulated = cv[0] * (ONE_PIXEL * 2);
+        for (int64_t j = 1; j <= width; j++) {
+          accumulated += cv[j] * (ONE_PIXEL * 2);
+          line[j - 1] = fold(accumulated - ar[j], in[p].rule, 1);
+        }
+        if (p == 2) {
+          for (int64_t j = 0; j < width; j++) {
+            if (lead->clip_k[r * width + j] != 0xffffu) {
+              line[j] = (uint8_t)lead->clip_k[r * width + j]; /* the clip's own overlap, made exact */
+            }
+          }
+        }
+      }
+    }
+    for (int64_t r = 0; r < rows; r++) {
+      size_t row = (size_t)((band - joint.y0 + r) * width);
+      for (int64_t j = 0; j < width; j++) {
+        uint16_t k = lead->union_k[r * width + j];
+        result[row + (size_t)j] = k != 0xffffu ? (uint8_t)k
+            : (uint8_t)gshcpu_render_stroke_compose(in[0].out[row + (size_t)j], in[1].out[row + (size_t)j],
+                  in[2].out[row + (size_t)j], complement);
+      }
+    }
+  }
+  *cells = TOTAL();
+#undef OTHERS
+#undef TOTAL
   return GSHCPU_OK;
 }
