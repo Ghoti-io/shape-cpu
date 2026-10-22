@@ -787,8 +787,8 @@ PLANTS += [
     # Story 14c: a palette fill takes the list's palette, in the paint's resolution and in the sink's disposition.
     ("r-palette-resolve", "src", RS, "gshscene_paint_resolve(&item->paint, &run->foreground, run->palette, &color)",
      "gshscene_paint_resolve(&item->paint, &run->foreground, NULL, &color)", RT),
-    ("r-palette-disposition", "src", RS, "gshscene_caps_disposition(&run->job->caps, item, gshscene_job_target_space(run->job), run->palette);",
-     "gshscene_caps_disposition(&run->job->caps, item, gshscene_job_target_space(run->job), NULL);", RT),
+    ("r-palette-disposition", "src", RS, "&run->job->target.map, gshscene_job_target_space(run->job), run->palette);",
+     "&run->job->target.map, gshscene_job_target_space(run->job), NULL);", RT),
     ("r-palette-taken", "src", RS, "  run->palette = gshscene_list_palette(request->list);\n", "", RT),
     ("r-paint-target-space", "src", RS, "    space = *gshscene_job_target_space(run->job);", "    space = frame->space;", RT),
     ("r-group-space-inherit", "src", RS, "? parent->space : item->group.blend_space;", "? (parent ? *gshscene_job_target_space(run->job) : parent->space) : item->group.blend_space;", RT),
