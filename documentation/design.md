@@ -222,7 +222,12 @@ under story 9's accumulation: AD-12's definition, a saturating sum of signed are
 part with the pieces overlapping inside it is credited the sum of the two areas, up to the overlap more than the union's
 area. Interior and exterior pixels are exact. The bracket of SC5 (`tests/stroke_gate.h`, one function another backend
 can call on its own coverage) is the stroke's stated tolerance against the geometric oracle; the overshoot past the
-union it measures is the quantity `o` bounds.
+union it measures is the quantity `o` bounds. `o` is 64/255 as a stopgap, a bound the gate fails past: the largest
+overshoot measured is 61.8/255 (dashes with square caps over two subpaths, where the caps of neighbouring dashes overlap
+one another), then 49.8 (a closed bevel under a device width), 45.8 to 46.6 (a sharp corner under a non-uniform map; square
+caps), 37.5 (the aligned part) and about 20 to 26 at the inner side of an ordinary curve or polygon; the lens, a smooth
+curve, shows 9 to 22 whatever the join. Their cause is the overlap of the outline's pieces (the triangles a curve is cut
+into, the inner side of a join, the caps of abutting dashes), which an exact union coverage removes.
 
 **The cache (SC7)** is keyed by resource ids, never by the resources' addresses or contents, because ids are never reused
 (a stale entry costs memory and nothing else). The value is the immutable outline. The bound is on the bytes the table

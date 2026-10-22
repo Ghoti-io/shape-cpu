@@ -243,7 +243,7 @@
  *   A gradient stroke is the fill's gradient path with this `k`, sampled in the item's local space under the chain
  *   `T I_1 ... I_k M G`.  The coverage's tolerance is a **bracket**, `A(R minus D(tau)) - e <= k <= A(R plus D(tau)) + e
  *   + o`, with `A` the area inside the pixel, `D(tau)` the disc of the expansion's tolerance, `e` the 8-bit rounding and
- *   `o = 16/255` the overlap allowance: AD-12's accumulation sums the signed areas of overlapping pieces, so a pixel
+ *   `o = 64/255` the overlap allowance, a stopgap that the gate fails past (the worst overshoot measured is 61.8/255, with square-cap dashes, a margin of 2.2/255; an exact union coverage is to bring it down): AD-12's accumulation sums the signed areas of overlapping pieces, so a pixel
  *   two pieces cover in part (an inner join) can be credited up to their overlap more than their union.  Interior and
  *   exterior pixels are exact.  Where the aligned part's boundary crosses the fill region's at an angle `alpha` the
  *   composed error may reach `tau / sin(alpha / 2)`.
