@@ -1037,6 +1037,10 @@ PLANTS += [
     ("uc4-fold-column-left-out", "src", RV, "      int64_t sum = cv[0];\n      for (int64_t j = 1; j <= width; j++) {\n        int64_t left = sum;", "      int64_t sum = 0;\n      for (int64_t j = 1; j <= width; j++) {\n        int64_t left = sum;", UCX),
     ("uc4-fold-column-left-out-aligned", "src", RV, "          row[0] = cv[0];", "          row[0] = 0;", UCX),
     # UC5: slabs, order, winding
+    ("uc5-cancel-pairs-dropped", "src", RX, "      kept = cancel_pairs(v, cell->count[p]);", "      kept = cell->count[p];", UCX),
+    ("uc5-cancel-keeps-the-wrong-way", "src", RX, "      v[out++] = net > 0 ? forward : backward;", "      v[out++] = net > 0 ? backward : forward;", UCX),
+    ("uc5-cancel-reverse-sign", "src", RX, "        net--;\n        backward = v[j];", "        net++;\n        backward = v[j];", UCX),
+    ("uc5-one-piece-shortcut-too-wide", "src", RX, "params->mode == GSHCPU_EXACT_OVERLAP && w.kept_total <= 1u", "params->mode == GSHCPU_EXACT_OVERLAP && w.kept_total <= 2u", UCX),
     ("uc5-active-top", "src", RX, "      if (f->py <= ya && f->py + f->dy >= yb) {", "      if (f->py < ya && f->py + f->dy >= yb) {", UCX),
     ("uc5-active-bottom", "src", RX, "      if (f->py <= ya && f->py + f->dy >= yb) {", "      if (f->py <= ya && f->py + f->dy > yb) {", UCX),
     ("uc5-order-at-end", "src", RX, "    order_at(w, cur);", "    order_at(w, end);", UCX),
@@ -1053,7 +1057,9 @@ PLANTS += [
     ("uc6-wrong-way-area-factor", "src", RX, "    int64_t t = 2 * (int64_t)w.area - 4 * (int64_t)w.integral_neg[0];", "    int64_t t = 2 * (int64_t)w.area - 2 * (int64_t)w.integral_neg[0];", UCX),
     ("uc6-term-shift", "src", RX, "      w->area += ((uint64_t)weight * span) >> 17;", "      w->area += ((uint64_t)weight * span) >> 16;", UCX),
     ("uc6-rounding", "src", RX, "    int64_t q = t + ((int64_t)1 << 19);", "    int64_t q = t;", UCX),
-    ("uc7-fold-signed", "src", RV, "  if (magnitude && area < 0) {", "  if (0) {", UCXB),
+    ("uc7-fold-signed", "src", RV, "  if (magnitude) {\n    uint64_t m = (uint64_t)(area < 0 ? -area : area);", "  if (0) {\n    uint64_t m = (uint64_t)(area < 0 ? -area : area);", UCXB),
+    ("uc7-even-odd-ramp-dropped", "src", RV, "      if (m > 8192u) {\n        m = 16384u - m;\n      }", "", UCXB),
+    ("uc7-even-odd-period", "src", RV, "      m &= 16383u; /* 2 * 2^13", "      m &= 32767u; /* 2 * 2^13", UCXB),
     ("uc7-shared-not-subtracted", "src", RV, "        int64_t value = dense - shared;\n        if (value < 0) {\n          value = 0;\n        }\n        ar[j] = accumulated - ex->eps * value;", "        int64_t value = dense;\n        if (value < 0) {\n          value = 0;\n        }\n        ar[j] = accumulated - ex->eps * value;", UCX),
     ("uc7-identity-integral-unchecked", "src", RX, "    if ((uint64_t)diff > exact_tolerance(nfrag, w.subslabs, w.wmax)) {", "    if (0) {", UCX),
     # UC2, UC3: pieces and which cells

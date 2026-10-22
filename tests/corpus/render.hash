@@ -126,8 +126,8 @@ render strokes-rings rgba8-premultiplied 28e43a8224965ce2
 render strokes-rings rgbaf32 63efbb20920f3fb3
 render strokes-rings rgbaf32-premultiplied d2bb2ab4ecb88ed1
 render strokes-thin-aligned rgba8 bb1b793682142121
-render strokes-thin-aligned rgba8-premultiplied 170ad94ce530f1ea
-render strokes-thin-aligned rgbaf32 7f7cd9d660a666fe
-render strokes-thin-aligned rgbaf32-premultiplied 92505a49f74e1da1
-hash ab6263e01030a4c1
+render strokes-thin-aligned rgba8-premultiplied 774fe5390bab2f27
+render strokes-thin-aligned rgbaf32 fd2eaae57db999d3
+render strokes-thin-aligned rgbaf32-premultiplied 671a8d3e8cab90e2
+hash 010361d84b54fc4a
 count 128

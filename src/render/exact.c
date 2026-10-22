@@ -148,10 +148,24 @@ static int order_cmp(const Active * p, const Active * q, int64_t n0, int64_t d0)
   return p->idx < q->idx ? -1 : p->idx > q->idx ? 1 : 0;
 }
 
-/** Sort @p n pieces in place by their four ends (an array of one cell: the result must not depend on its arrival order). */
+/** The code of a point of the cell: a total order on the 65 by 65 lattice. */
+static uint32_t point_code(uint8_t x, uint8_t y) {
+  return (uint32_t)y * 65u + (uint32_t)x;
+}
+
+/**
+ * The key a piece sorts by: its two ends in order (the lesser first), then which way it goes.  A piece and its reverse (the
+ * two copies of a seam that two pieces of an outline share) have keys that differ in the last bit alone.
+ */
+static uint64_t piece_key(GSHCPU_Piece pc) {
+  uint32_t a = point_code(pc.x0, pc.y0);
+  uint32_t b = point_code(pc.x1, pc.y1);
+  return a <= b ? ((uint64_t)a << 33) | ((uint64_t)b << 1) | 1u : ((uint64_t)b << 33) | ((uint64_t)a << 1);
+}
+
+/** Sort @p n pieces in place by their keys (a heap sort: no recursion, no allocation, O(n log n)). */
 static void sort_pieces(GSHCPU_Piece * v, size_t n) {
-  /* Heapsort on the four bytes as one 32-bit key: no recursion, no allocation, O(n log n). */
-#define KEY(i) (((uint32_t)v[i].x0 << 24) | ((uint32_t)v[i].y0 << 16) | ((uint32_t)v[i].x1 << 8) | (uint32_t)v[i].y1)
+#define KEY(i) piece_key(v[i])
   if (n < 2) {
     return;
   }
@@ -199,12 +213,45 @@ static void sort_pieces(GSHCPU_Piece * v, size_t n) {
 #undef KEY
 }
 
+/**
+ * Cancel what cancels: sorted pieces @p v, a piece and its reverse together wind nothing (opposite signs on one segment add
+ * to zero in every winding, the cover and the area), so a seam shared by two pieces of an outline, which is most of what a
+ * pixel in the middle of a thick stroke holds, is not a piece of the cell.  Equal pieces keep, and only the net of a segment
+ * is left, in the direction it has.  @return the pieces left, at the start of @p v.
+ */
+static size_t cancel_pairs(GSHCPU_Piece * v, size_t n) {
+  size_t out = 0;
+  for (size_t i = 0; i < n;) {
+    uint64_t group = piece_key(v[i]) >> 1;
+    size_t j = i;
+    int64_t net = 0;
+    GSHCPU_Piece forward = v[i];
+    GSHCPU_Piece backward = v[i];
+    while (j < n && (piece_key(v[j]) >> 1) == group) {
+      if (piece_key(v[j]) & 1u) {
+        net++;
+        forward = v[j];
+      } else {
+        net--;
+        backward = v[j];
+      }
+      j++;
+    }
+    for (int64_t k = 0; k < (net < 0 ? -net : net); k++) {
+      v[out++] = net > 0 ? forward : backward;
+    }
+    i = j;
+  }
+  return out;
+}
+
 /* --- the walk of one cell -------------------------------------------------------------------------------------------- */
 
 typedef struct Walk {
   const GSHCPU_Exact_Params * params;
   GSHCPU_Exact_Scratch * s;
   size_t nfrag;
+  size_t kept_total;      /* pieces left after the seams cancel, all parts */
   int64_t wtop[3];
   int32_t jnet[3][65];
   uint8_t mark[65];
@@ -407,15 +454,21 @@ int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch *
   size_t at = 0;
   for (int p = 0; p < params->parts; p++) {
     GSHCPU_Piece * v = s->sorted + at;
+    size_t kept = 0;
     if (cell->count[p]) {
       memcpy(v, cell->pieces[p], cell->count[p] * sizeof *v);
-      sort_pieces(v, cell->count[p]);
-    }
-    for (size_t i = 0; i < cell->count[p]; i++) {
-      GSHCPU_Piece pc = v[i];
-      if (pc.x0 > 64 || pc.x1 > 64 || pc.y0 > 64 || pc.y1 > 64 || (pc.x0 == pc.x1 && pc.y0 == pc.y1)) {
-        return GSHCPU_EXACT_IDENTITY; /* a piece that is not of this cell, or has no length */
+      for (size_t i = 0; i < cell->count[p]; i++) {
+        GSHCPU_Piece pc = v[i];
+        if (pc.x0 > 64 || pc.x1 > 64 || pc.y0 > 64 || pc.y1 > 64 || (pc.x0 == pc.x1 && pc.y0 == pc.y1)) {
+          return GSHCPU_EXACT_IDENTITY; /* a piece that is not of this cell, or has no length */
+        }
       }
+      sort_pieces(v, cell->count[p]);
+      kept = cancel_pairs(v, cell->count[p]);
+    }
+    w.kept_total += kept;
+    for (size_t i = 0; i < kept; i++) {
+      GSHCPU_Piece pc = v[i];
       if (pc.x0 == 0) {
         w.jnet[p][pc.y0] -= 1;
       }
@@ -441,6 +494,14 @@ int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch *
     w.work += cell->count[p];
   }
   w.nfrag = nfrag;
+  if (params->mode == GSHCPU_EXACT_OVERLAP && w.kept_total <= 1u) {
+    /* One piece left, or none, once the seams are cancelled: the cell is split by one contour into two parts whose windings
+     * differ by one, so the nonzero fill covers all of it or the part the dense sum measures, and the fold of the dense value
+     * is the fold of the area.  (Most of a stroke's boundary pixels: its edge, whose seams with the pieces beside it cancel.) */
+    *work += w.work;
+    *out = 0;
+    return GSHCPU_EXACT_OK;
+  }
   for (int p = 0; p < params->parts; p++) {
     int64_t sum = 0;
     for (int h = 0; h <= 64; h++) {

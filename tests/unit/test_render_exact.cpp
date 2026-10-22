@@ -642,6 +642,56 @@ TEST(RenderExact, AnExactCellRefusesPiecesThatDoNotReproduceTheRasterizersSumsAn
   EXPECT_EQ(gshcpu_exact_cell(&params, &scratch, &cell, &out, &work), GSHCPU_EXACT_IDENTITY) << "a piece of no length";
 }
 
+TEST(RenderExact, APieceAndItsReverseCancelAndAreNotWalked) {
+  // The cell of the test above with a seam added: a segment two pieces of an outline share, once in each direction, wherever
+  // it lies.  Both wind nothing (the cover and the area of the pair are zero), the result is the same, and the walk of the
+  // cell with the seam does no more than the walk of the cell without it.
+  GSHCPU_Exact_Params params;
+  std::memset(&params, 0, sizeof params);
+  params.parts = 1;
+  params.mode = GSHCPU_EXACT_OVERLAP;
+  params.eps[0] = GSHCPU_RENDER_EXACT_EPS;
+  std::vector<unsigned char> memory(gshcpu_exact_scratch_bytes(16, 1) + 16);
+  GSHCPU_Exact_Scratch scratch;
+  gshcpu_exact_scratch_init(&scratch, (void *)(((uintptr_t)memory.data() + 15u) & ~(uintptr_t)15u), 16, 1);
+  auto run = [&](const std::vector<GSHCPU_Piece> & pieces, int64_t * out, uint64_t * work) {
+    GSHCPU_Exact_Cell cell;
+    std::memset(&cell, 0, sizeof cell);
+    cell.pieces[0] = pieces.data();
+    cell.count[0] = pieces.size();
+    cell.a_left[0] = -128;
+    cell.dense[0] = 8960;
+    *work = 0;
+    return gshcpu_exact_cell(&params, &scratch, &cell, out, work);
+  };
+  int64_t bare = -1;
+  int64_t seamed = -1;
+  uint64_t bare_work = 0;
+  uint64_t seamed_work = 0;
+  std::vector<GSHCPU_Piece> pieces = {{30, 0, 30, 64}, {40, 0, 40, 64}};
+  ASSERT_EQ(run(pieces, &bare, &bare_work), GSHCPU_EXACT_OK);
+  pieces.push_back({10, 5, 22, 60});
+  pieces.push_back({22, 60, 10, 5});
+  pieces.push_back({0, 20, 64, 20});  // a flat piece across the cell, and its reverse
+  pieces.push_back({64, 20, 0, 20});
+  ASSERT_EQ(run(pieces, &seamed, &seamed_work), GSHCPU_EXACT_OK);
+  EXPECT_EQ(seamed, bare);
+  EXPECT_EQ(bare, 3840);
+  EXPECT_LE(seamed_work, bare_work + 6u + 64u) << "the pairs cost a visit each and no walk";
+  // Two of a kind do not cancel: the same segment the same way twice is a winding of 2 there.
+  std::vector<GSHCPU_Piece> twice = {{30, 0, 30, 64}, {30, 0, 30, 64}};
+  GSHCPU_Exact_Cell cell;
+  std::memset(&cell, 0, sizeof cell);
+  cell.pieces[0] = twice.data();
+  cell.count[0] = 2;
+  cell.a_left[0] = -128;
+  cell.dense[0] = 2 * 2 * 30 * 64;
+  uint64_t work = 0;
+  int64_t out = -1;
+  ASSERT_EQ(gshcpu_exact_cell(&params, &scratch, &cell, &out, &work), GSHCPU_EXACT_OK);
+  EXPECT_EQ(out, 2 * 30 * 64) << "coincident pieces of one direction keep: a winding of 2 over 30 of 64, shared once";
+}
+
 TEST(RenderExact, TheCellsOfABandNeedMoreThanOneWindowOfThePoolAndThePoolsSizeChangesNothing) {
   // 80 bars across a band of 48 pixels: far more pieces in the band's exact cells than the smallest pool (4096) holds.
   std::mt19937 rng(2026);
