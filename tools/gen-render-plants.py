@@ -43,10 +43,14 @@ FILES = {
     "src/render/hash.c": "rh",
     "src/render/sink.c": "rs",
     "src/render/gradient.c": "rd",
+    "src/render/exact.c": "rx",   # strokes story S4b: the exact step (UC1 to UC11)
+    "src/render/stroke.c": "rk",  # strokes story S4
 }
 # The order is the cost: the quick and the likely first, the sweep stops at the first that fails.
 TESTS = ["testRender_vectors", "testRender_parts", "testRender_gradient", "testRender", "testRender_limits", "testRender_conformance", "testGlyph_render", "probe"]
 TESTS_BY_FILE = {path: TESTS for path in FILES}
+TESTS_BY_FILE["src/render/exact.c"] = ["testRender_exact", "testRender_stroke_bracket", "testRender_stroke", "probe"]
+TESTS_BY_FILE["src/render/stroke.c"] = ["testRender_stroke", "testRender_stroke_bracket", "testRender_exact", "testRender", "probe"]
 
 REL = [("==", "!="), ("!=", "=="), ("<=", "<"), (">=", ">"), ("<", "<="), (">", ">=")]
 

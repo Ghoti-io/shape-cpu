@@ -128,7 +128,7 @@ typedef struct GSHCPU_Limits {
    * the part's outline that cross it, and horizontal ones that touch its left side.  0 is
    * ::GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS (512), any other value is used as given up to
    * ::GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS (2^20; a larger one is ::GSHCPU_ERR_INVALID at sink creation).  The step is
-   * quadratic in the pieces of a pixel, so `UINT64_MAX` is not "no cap" here.  A pixel past it is the sink's resource
+   * superlinear in the pieces of a pixel, so `UINT64_MAX` is not "no cap" here.  A pixel past it is the sink's resource
    * limit, ::GSHSCENE_REASON_RESOURCE_LIMIT, for the item, decided over what the whole render draws of it as the cell cap
    * is.  A `uint64_t` whatever the target, so that the structure has the same layout on every one.  Read by the sink; the
    * coverage functions ignore it.

@@ -84,6 +84,20 @@ Story 13b, the sink (src/render):
               clamp's two sides, the un-premultiply's guard, its bound and sign,
               and each point it is named at (a conversion's decode, matrix and
               encode, a group's un-premultiply, every apply, a straight store, G4)
+  uc-         strokes story S4b, by hand, one for each rule and branch of the exact union coverage (render.h, UC1 to UC12): the
+              winding on a cell's left side (the sign and weight of each step, the cover left of the cell and the fold
+              column in it, its exact division), the slabs and the order (the fragments a slab holds, the order decided at the
+              end, sub-slabs merged, the slope tie dropped or reversed, a fragment's sign), the shared area and its
+              arithmetic (the weight, the wrong-way area, the shift, the rounding, the floor of an x), the fold of the
+              magnitude, the integral check, the pieces (flat pieces counted, walked, touching the left side; cut from the
+              upper end), which cells (the threshold, the window of the pool, the sparse sweep visiting them), the three parts
+              (each term of the predicate, the complement, the rule, the clip's own overlap, the threshold, the value kept,
+              the step skipped), the cap and the field (off by one, a fallback to the sum, the damage, the ceiling, the
+              default read for a set field, the refusal swallowed, work uncounted, the need short, stale counts), and the
+              routes of UC10.  Written with the story and not run: their anchors were checked to match once, and the
+              generated candidates for cover.c and sink.c, whose lines have moved since the last sweep (503 anchors in
+              render-plants.json did not match before this story), are to be regenerated with tools/gen-render-plants.py,
+              which now also reads exact.c and stroke.c, and swept again
   rc- rv- rg- generated (tools/gen-render-plants.py; tools/render-plants.json
   ra- rh- rs- holds the ones caught): every comparison, logical operator,
               condition, statement, hash width, printed width, output letter and
@@ -746,8 +760,9 @@ PLANTS += [
      "int64_t column = ex < c->rect.x0 ? 1 : ex - c->rect.x0 + 1;", RT),
     ("r-cover-round-half", "src", RV, "uint64_t quotient = (n + d / 2) / d;", "uint64_t quotient = (n + (d - 1) / 2) / d;", RT),
     ("r-cover-floor", "src", RV, "    q -= 1;", "    q += 0;", RT),
-    ("r-cover-cells-limit", "src", RV, "  if (c->cells >= c->max_cells) {", "  if (c->cells > c->max_cells) {", RT),
-    ("r-cover-sweep-scale", "src", RV, "      int64_t accumulated = cv[0] * (ONE_PIXEL * 2);", "      int64_t accumulated = cv[0] * ONE_PIXEL;", RT),
+    ("r-cover-cells-limit", "src", RV, "  if (c->cells >= c->max_cells) {\n    c->over = 1;\n    return;\n  }\n  c->cells++;\n  if (c->ex) {", "  if (c->cells > c->max_cells) {\n    c->over = 1;\n    return;\n  }\n  c->cells++;\n  if (c->ex) {", RT),
+    ("r-cover-fold-cells-limit", "src", RV, "  if (c->cells >= c->max_cells) {\n    c->over = 1;\n    return;\n  }\n  c->cells++;\n  if (!c->cover) {\n    return; /* counted, not drawn */", "  if (c->cells > c->max_cells) {\n    c->over = 1;\n    return;\n  }\n  c->cells++;\n  if (!c->cover) {\n    return; /* counted, not drawn */", RT),
+    ("r-cover-sweep-scale", "src", RV, "      int64_t accumulated = cv[0] * (ONE_PIXEL * 2);\n      for (int64_t j = 1; j <= width; j++) {\n        accumulated += cv[j] * (ONE_PIXEL * 2);\n        line[j - 1] = fold(accumulated - ar[j], rule, ex != NULL);", "      int64_t accumulated = cv[0] * ONE_PIXEL;\n      for (int64_t j = 1; j <= width; j++) {\n        accumulated += cv[j] * (ONE_PIXEL * 2);\n        line[j - 1] = fold(accumulated - ar[j], rule, ex != NULL);", RT),
     ("r-cover-even-odd-fold", "src", RV, "      value = 512 - value;", "      value = 511 - value;", RT),
     ("r-cover-even-odd-mask", "src", RV, "    value &= 511;", "    value &= 1023;", RT),
     ("r-cover-saturate", "src", RV, "  } else if (value >= 256) {\n    value = 255;", "  } else if (value >= 255) {\n    value = 254;", RT),
@@ -951,7 +966,8 @@ PLANTS += [
     ("sc5-complement-flag-dropped", "src", RSK, "  int complement = gshgeom_stroke_outline_clip_complement(s->outline);", "  int complement = 0;", RST),
     ("sc5-aligned-dropped", "src", RSK, "  if (!aligned.path) {\n    *rect = body.rect;\n    *k = buffers->body;", "  if (1) {\n    *rect = body.rect;\n    *k = buffers->body;", RST),
     ("sc5-body-dropped", "src", RSK, "        b = buffers->body[(size_t)(y - body.rect.y0) * bw + (size_t)(x - body.rect.x0)];", "        b = 0;", RST),
-    ("sc5-joint-is-body", "src", RSK, "  GSHCPU_Rect joint = gshcpu_render_rect_join(body.rect, aligned.rect);", "  GSHCPU_Rect joint = body.rect;", RST),
+    ("sc5-joint-is-body", "src", RSK, "  GSHCPU_Rect joint = gshcpu_render_rect_join(body.rect, aligned.rect);\n  if (gshcpu_render_rect_empty(joint)) {\n    joint.x1 = joint.x0;\n    joint.y1 = joint.y0;\n  }\n  size_t bw", "  GSHCPU_Rect joint = body.rect;\n  if (gshcpu_render_rect_empty(joint)) {\n    joint.x1 = joint.x0;\n    joint.y1 = joint.y0;\n  }\n  size_t bw", RST),
+    ("uc8-joint-is-body", "src", RSK, "    GSHCPU_Rect joint = gshcpu_render_rect_join(body.rect, aligned.rect);\n    if (gshcpu_render_rect_empty(joint)) {\n      joint.x1 = joint.x0;\n      joint.y1 = joint.y0;\n    }\n    GSHCPU_Rect moved_joint", "    GSHCPU_Rect joint = body.rect;\n    if (gshcpu_render_rect_empty(joint)) {\n      joint.x1 = joint.x0;\n      joint.y1 = joint.y0;\n    }\n    GSHCPU_Rect moved_joint", RST),
     # SC3: the canonical translation
     ("sc3-shift-x-dropped", "src", RSK, "  s.shift_x = sx;", "  s.shift_x = 0;", RSTT),
     ("sc3-shift-y-sign", "src", RSK, "  s.shift_y = sy;", "  s.shift_y = -sy;", RSTT),
@@ -991,8 +1007,8 @@ PLANTS += [
     ("sc4-stroke-notice-skipped", "src", RS, "          ? gshscene_stroke_notice(item, run->maps, count - 1, &run->job->target.map)", "          ? (GSHSCENE_Reason)0", RST),
     ("sc6-limit-not-refused", "src", RS, "  if (opened == GSHCPU_ERR_LIMIT) {\n    return refuse(run, item, chain, count);\n  }", "  if (opened == GSHCPU_ERR_LIMIT) {\n    return GSHSCENE_OK;\n  }", RST),
     ("sc6-compose-limit", "src", RS, "    return refuse(run, item, chain, count); /* SC4: a composed map that cannot be formed is the sink's own limit */", "    return GSHSCENE_OK;", RST),
-    ("sc6-cells-not-summed", "src", RSK, "        moved(walk, s->shift_x, s->shift_y), out, acc, max_cells - total, &used);", "        moved(walk, s->shift_x, s->shift_y), out, acc, max_cells, &used);", RST),
-    ("sc6-whole-count-dropped", "src", RSK, "    if (!same_rect(part->rect, walk) && !whole_count) {\n      walk = part->rect;", "    if (1) {\n      walk = part->rect;", RST),
+    ("sc6-cells-not-summed", "src", RSK, "out, acc, max_cells - total, &used, p == GSHCPU_STROKE_CLIP ? NULL : ex);", "out, acc, max_cells, &used, p == GSHCPU_STROKE_CLIP ? NULL : ex);", RST),
+    ("sc6-whole-count-dropped", "src", RSK, "    if (!same_rect(parts[p].rect, walks[p]) && !whole_count && !may_exceed(s, p, p == GSHCPU_STROKE_CLIP ? NULL : exact)) {\n      walks[p] = parts[p].rect;", "    if (1) {\n      walks[p] = parts[p].rect;", RST),
     ("sc9-caller-memory-reads-cache", "src", RS, "  GSHCPU_Stroke_Cache * cache = !run->caller && (cs->tiers & GSHCPU_RENDER_TIER_CACHE) ? cs->cache : NULL;", "  GSHCPU_Stroke_Cache * cache = (cs->tiers & GSHCPU_RENDER_TIER_CACHE) ? cs->cache : NULL;", RST),
     ("sc11-expansion-uncounted", "src", RS, "  run->work += expansion_work(run, item, &s);", "", RST),
     ("sc11-bound-pixels", "src", RS, "!gcu_safe_mul_u64((uint64_t)cs->max_bytes, 2u, &pixels)", "!gcu_safe_mul_u64((uint64_t)cs->max_bytes, 1u, &pixels)", ["testRender", "testRender_limits"]),
@@ -1001,6 +1017,83 @@ PLANTS += [
     ("sc5-aligned-buffers-always", "src", RS, "  int ok = place(&at, sizeof(Run), &ignored)", "  L->aligned = 0;\n  int ok = place(&at, sizeof(Run), &ignored)", RST),
 ]
 
+
+# --- strokes story S4b (UC1 to UC12): written with the story, swept in the consolidated pass ------------------------------
+RX = "src/render/exact.c"
+UCX = ["testRender_exact"]
+UCB = ["testRender_stroke_bracket"]
+UCXB = ["testRender_exact", "testRender_stroke_bracket"]
+
+PLANTS += [
+    # UC4: the winding at the cell's left side
+    ("uc4-j-start-sign", "src", RX, "        w.jnet[p][pc.y0] -= 1;", "        w.jnet[p][pc.y0] += 1;", UCX),
+    ("uc4-j-end-sign", "src", RX, "        w.jnet[p][pc.y1] += 1;", "        w.jnet[p][pc.y1] -= 1;", UCX),
+    ("uc4-j-start-dropped", "src", RX, "      if (pc.x0 == 0) {", "      if (0) {", UCX),
+    ("uc4-j-end-dropped", "src", RX, "      if (pc.x1 == 0) {", "      if (0) {", UCX),
+    ("uc4-j-weight", "src", RX, "        sum += (int64_t)w.jnet[p][h] * (64 - h);", "        sum += (int64_t)w.jnet[p][h] * h;", UCX),
+    ("uc4-wtop-from-zero", "src", RX, "    w.wtop[p] = rem / 64;", "    w.wtop[p] = 0;", UCX),
+    ("uc4-left-cover-ignored", "src", RX, "    int64_t rem = cell->a_left[p] - sum;", "    int64_t rem = -sum;", UCX),
+    ("uc4-remainder-unchecked", "src", RX, "    if (rem % 64 != 0) {\n      return GSHCPU_EXACT_IDENTITY;\n    }\n", "", UCX),
+    ("uc4-fold-column-left-out", "src", RV, "      int64_t sum = cv[0];\n      for (int64_t j = 1; j <= width; j++) {\n        int64_t left = sum;", "      int64_t sum = 0;\n      for (int64_t j = 1; j <= width; j++) {\n        int64_t left = sum;", UCX),
+    ("uc4-fold-column-left-out-aligned", "src", RV, "          row[0] = cv[0];", "          row[0] = 0;", UCX),
+    # UC5: slabs, order, winding
+    ("uc5-active-top", "src", RX, "      if (f->py <= ya && f->py + f->dy >= yb) {", "      if (f->py < ya && f->py + f->dy >= yb) {", UCX),
+    ("uc5-active-bottom", "src", RX, "      if (f->py <= ya && f->py + f->dy >= yb) {", "      if (f->py <= ya && f->py + f->dy > yb) {", UCX),
+    ("uc5-order-at-end", "src", RX, "    order_at(w, cur);", "    order_at(w, end);", UCX),
+    ("uc5-subslabs-merged", "src", RX, "      next = e;", "      (void)e;", UCX),
+    ("uc5-slope-tie-dropped", "src", RX, "  if (sp != sq) {\n    return sp < sq ? -1 : 1;\n  }\n", "", UCX),
+    ("uc5-slope-tie-reversed", "src", RX, "    return sp < sq ? -1 : 1;", "    return sp < sq ? 1 : -1;", UCX),
+    ("uc5-fragment-sign", "src", RX, "      wind[f->part] += pr->eps[f->part] * f->s;", "      wind[f->part] -= pr->eps[f->part] * f->s;", UCX),
+    ("uc5-boundary-rounded-coarsely", "src", RX, "  uint64_t ua = ((uint64_t)cur.n << 16) / (uint64_t)cur.d;", "  uint64_t ua = ((uint64_t)cur.n << 15) / (uint64_t)cur.d;", UCX),
+    ("uc5-x-rounded-up", "src", RX, "  return (uint32_t)((uint64_t)num / (uint64_t)f->dy);", "  return (uint32_t)(((uint64_t)num + (uint64_t)f->dy - 1u) / (uint64_t)f->dy);", UCX),
+    # UC6: the shared area
+    ("uc6-weight-is-w", "src", RX, "    return m > 1 ? (uint32_t)(m - 1) : 0u;", "    return (uint32_t)m;", UCX),
+    ("uc6-weight-signed", "src", RX, "    int64_t m = w[0] < 0 ? -w[0] : w[0];\n    return m > 1", "    int64_t m = w[0];\n    return m > 1", UCX),
+    ("uc6-wrong-way-area-dropped", "src", RX, "    int64_t t = 2 * (int64_t)w.area - 4 * (int64_t)w.integral_neg[0];", "    int64_t t = 2 * (int64_t)w.area;", UCX),
+    ("uc6-wrong-way-area-factor", "src", RX, "    int64_t t = 2 * (int64_t)w.area - 4 * (int64_t)w.integral_neg[0];", "    int64_t t = 2 * (int64_t)w.area - 2 * (int64_t)w.integral_neg[0];", UCX),
+    ("uc6-term-shift", "src", RX, "      w->area += ((uint64_t)weight * span) >> 17;", "      w->area += ((uint64_t)weight * span) >> 16;", UCX),
+    ("uc6-rounding", "src", RX, "    int64_t q = t + ((int64_t)1 << 19);", "    int64_t q = t;", UCX),
+    ("uc7-fold-signed", "src", RV, "  if (magnitude && area < 0) {", "  if (0) {", UCXB),
+    ("uc7-shared-not-subtracted", "src", RV, "        int64_t value = dense - shared;\n        if (value < 0) {\n          value = 0;\n        }\n        ar[j] = accumulated - ex->eps * value;", "        int64_t value = dense;\n        if (value < 0) {\n          value = 0;\n        }\n        ar[j] = accumulated - ex->eps * value;", UCX),
+    ("uc7-identity-integral-unchecked", "src", RX, "    if ((uint64_t)diff > exact_tolerance(nfrag, w.subslabs, w.wmax)) {", "    if (0) {", UCX),
+    # UC2, UC3: pieces and which cells
+    ("uc2-cut-from-upper-end-dropped", "src", RV, "  if (c->ex && from.y > to.y) {", "  if (0) {", UCXB),
+    ("uc2-flat-pieces-not-counted", "src", RV, "    if (c->ex && piece_kind(ex, a, b) == 2) {", "    if (c->ex && piece_kind(ex, a, b) == 3) {", UCX),
+    ("uc2-flat-piece-any-touch", "src", RV, "  return a.x == left || b.x == left ? 2 : 0;", "  return a.x == left ? 2 : 0;", UCX),
+    ("uc2-flat-edges-not-walked", "src", RV, "    if (c->ex) {\n      flat_edge(c, from, to);\n    }", "", UCX),
+    ("uc3-exact-threshold", "src", RV, "      if (n >= 2) {\n        if (kept + n > ex->pool_cap) {", "      if (n >= 3) {\n        if (kept + n > ex->pool_cap) {", UCX),
+    ("uc3-window-unbounded", "src", RV, "        if (kept + n > ex->pool_cap) {\n          break;\n        }", "", UCX),
+    ("uc3-sparse-exact-cell-not-visited", "src", RV, "  if (*n == 2 && c->track && c->cover && ex >= c->rect.x0 && ex < c->rect.x1) {", "  if (0) {", UCX),
+    # UC8: parts that share a pixel
+    ("uc8-predicate-body", "src", RX, "  if (w[0] != 0) {\n    return 1u;\n  }\n  if (w[1] == 0) {", "  if (w[0] == 0) {\n    return 1u;\n  }\n  if (w[1] == 0) {", UCX),
+    ("uc8-aligned-unclipped", "src", RX, "  return in ? 1u : 0u;\n}\n\n/** `x` of active fragment", "  return 1u;\n}\n\n/** `x` of active fragment", UCX),
+    ("uc8-complement-ignored", "src", RX, "  if (p->complement) {\n    in = !in;\n  }", "", UCX),
+    ("uc8-even-odd-ignored", "src", RX, "  int in = p->even_odd ? ((c & 1) != 0) : (c != 0);", "  int in = c != 0;", UCX),
+    ("uc8-region-even-odd-ignored", "src", RX, "    return (p->even_odd ? (w[0] & 1) != 0 : w[0] != 0) ? 1u : 0u;", "    return w[0] != 0 ? 1u : 0u;", UCX),
+    ("uc8-shared-cell-threshold", "src", RV, "          if (jc.multi >= 2) {\n            GSHCPU_Exact_Cell cell;", "          if (jc.multi >= 3) {\n            GSHCPU_Exact_Cell cell;", UCX),
+    ("uc8-pieces-kept-threshold", "src", RV, "    out->store[p] = out->n[p] > 0 && (out->multi >= 2 || out->n[p] >= 2);", "    out->store[p] = out->n[p] > 0 && out->n[p] >= 2;", UCX),
+    ("uc8-union-value-ignored", "src", RV, "        result[row + (size_t)j] = k != 0xffffu ? (uint8_t)k\n            : (uint8_t)", "        result[row + (size_t)j] = 0 ? (uint8_t)k\n            : (uint8_t)", UCX),
+    ("uc8-clip-overlap-not-exact", "src", RV, "          } else if (jc.n[2] >= 2) {", "          } else if (0) {", UCX),
+    ("uc8-complement-flag-dropped", "src", RV, "  three.complement = complement;", "  three.complement = 0;", UCX),
+    ("uc8-clip-rule-dropped", "src", RV, "  three.even_odd = in[2].rule == GSHGEOM_FILL_EVEN_ODD;", "  three.even_odd = 0;", UCX),
+    ("uc8-joint-step-skipped", "src", RSK, "  if (aligned.path && ex && joint_tier) {", "  if (0) {", UCB),
+    ("uc8-clip-fold-signed", "src", RV, "          line[j - 1] = fold(accumulated - ar[j], in[p].rule, 1);", "          line[j - 1] = fold(accumulated - ar[j], in[p].rule, p < 2);", UCXB),
+    # UC9: the cap, the field, the refusal
+    ("uc9-cap-off-by-one", "src", RV, "  if ((uint64_t)*n >= c->ex->max_pieces) {", "  if ((uint64_t)*n > c->ex->max_pieces) {", UCX),
+    ("uc9-cap-falls-back-to-dense", "src", RV, "  if ((uint64_t)*n >= c->ex->max_pieces) {\n    c->over = 1;\n    return;\n  }", "  if ((uint64_t)*n >= c->ex->max_pieces) {\n    return;\n  }", UCX),
+    ("uc9-damage-refusal-differs", "src", RSK, "  return ex && s->meta.points[p] + s->meta.points[p] > ex->max_pieces;", "  return 0;", UCX),
+    ("uc9-field-ignored", "src", RS, "  cs->max_exact = limits && limits->max_exact_fragments ? limits->max_exact_fragments", "  cs->max_exact = 0 ? limits->max_exact_fragments", UCX),
+    ("uc9-field-ceiling-off-by-one", "src", RS, "  if (limits && limits->max_exact_fragments > GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS) {", "  if (limits && limits->max_exact_fragments >= GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS) {", UCX),
+    ("uc9-refusal-swallowed", "src", RS, "  if (r == GSHCPU_ERR_LIMIT) {\n    result = refuse(run, item, chain, count);", "  if (r == GSHCPU_ERR_LIMIT) {\n    result = GSHSCENE_OK;", UCX),
+    ("uc9-work-uncounted", "src", RS, "  run->work += cells + exact_work(run);", "  run->work += cells;", ["testRender_stroke"]),
+    ("uc9-work-bound-uncounted", "src", RS, "  if (!gcu_safe_add_u64(b, exact, &b)) {\n    return UINT64_MAX;\n  }", "", ["testRender", "testRender_limits"]),
+    ("uc9-workspace-short", "src", RS, "    size_t first = L->strokes ? gshcpu_exact_bytes(width, cs->max_exact, L->aligned ? 3 : 1) : 0;", "    size_t first = L->strokes ? gshcpu_exact_bytes(width, cs->max_exact, 1) : 0;", UCX),
+    ("uc9-exact-counts-stale", "src", RV, "  memset(c->ex->count, 0, cells * sizeof *c->ex->count);", "", UCX),
+    ("uc9-slots-stale", "src", RV, "  memset(c->ex->slot, 0xff, cells * sizeof *c->ex->slot);", "", UCX),
+    # UC10: tiers; the exact step on every route
+    ("uc10-sparse-exact-skipped", "src", RV, "    if (c.over || (ex && exact_band(&c, paths, count))) {\n      /* Leave the accumulator clean", "    if (c.over) {\n      /* Leave the accumulator clean", UCX),
+    ("uc10-dense-exact-skipped", "src", RV, "    if (c.over || (ex && exact_band(&c, paths, count))) {\n      *cells = c.cells;\n      return GSHCPU_ERR_LIMIT;\n    }\n    for (int64_t r = 0; r < c.rows; r++) {\n      const int64_t * cv = c.cover + r * c.stride;\n      const int64_t * ar = c.area + r * c.stride;\n      uint8_t * line = out", "    if (c.over) {\n      *cells = c.cells;\n      return GSHCPU_ERR_LIMIT;\n    }\n    for (int64_t r = 0; r < c.rows; r++) {\n      const int64_t * cv = c.cover + r * c.stride;\n      const int64_t * ar = c.area + r * c.stride;\n      uint8_t * line = out", UCX),
+]
 
 # The generated plants (tools/gen-render-plants.py): the mutations of src/render the sweep was seen to catch, and
 # PLANT_EXTRA_JSON, a file of candidates to run as well (for re-making tools/render-plants.json).

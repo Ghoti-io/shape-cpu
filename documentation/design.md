@@ -36,6 +36,18 @@ again), a ramp up to 256 and back, 256 itself being 255.
 This is FreeType's `ftgrays` arithmetic with 6 sub-pixel bits instead of 8,
 because 26.6 is the family's pixel space.
 
+**What "exact area" means where pieces overlap.** The family's definition is that a shape's coverage is its area inside
+the pixel, in 8 bits, computed by this saturating sum of signed areas. The sum is that area for a shape whose pieces do
+not overlap inside a pixel. Where they do, it is more than the area by the overlap: it credits the part two pieces share
+twice. For a stroke item, whose outline is pieces that overlap by construction, the definition is the area of the union
+of the pieces, and the mechanism is the exact step of UC1 to UC8 (below, and `render.h`): the saturating sum remains the
+mechanism for fills and for the pixels where the pieces of a stroke do not overlap. This is a clarification of how the
+definition applies, not a change of the rule. A fill whose own contours overlap (a figure eight under the nonzero rule, a
+variable glyph's overlapping contours, an SVG path that crosses itself) has the same property today: the sum credits its
+overlap twice at a pixel it covers in part. The exact step for strokes does not change fills, and extending it to them is a
+separate, later decision (it would move every golden of a fill with overlapping contours and the oracles `font` agrees with,
+which credit the sum), not taken by it.
+
 The cells of a rectangle live in an array merged as they are made (an edge
 stays in a cell for several steps), sorted by a counting sort on the row and an
 insertion sort within it, and merged again; `qsort` is not used because the
@@ -251,6 +263,18 @@ bounds are UC6 and the file header of `src/render/exact.c`). The same walk integ
 dense area back, which checks the pieces, `W_top` and the order at once; a cell that fails is refused, never guessed. The
 orientation sign `eps` is -1 (positive winding goes from +x toward +y, so the inside's left edge goes up) and a test pins it.
 
+**Parts that share a pixel (UC8).** SC5's composition, `k_b + k_a c' - k_b k_a c'`, is exact where at most one of the three
+parts has an edge in the pixel, because the others are then 0 or 1. It is not elsewhere, and S4's bracket could not show it
+(its width, a sixteenth of a pixel, is wider than the error): for a thin aligned stroke the band and the fill's edge lie in
+every pixel along the path, and a band `[0.1, 0.5]` against a fill `x < 0.3` is 0.2 of the pixel by area and 0.12 by the
+formula, twenty levels low. So an aligned stroke is covered by its three parts together, a band of rows at a time, each part
+with its own accumulator and its own pieces, and a pixel where two of them hold a piece is the area of `{w_b != 0} U ({w_a
+!= 0} & F')` by the same walk with three windings (the clip's `F'` by its rule, or its complement). A pixel where one part
+alone has pieces keeps the formula with constants, each part made exact for its own overlap first: the body and the aligned
+part as fills of nonzero pieces, the clip by its rule (a star's fill region overlaps itself, and its area is what the
+formula's constants stand for; an even-odd clip needs the parity, not the overlap). That is the clip part of a stroke, not a
+fill item, and no fill changes.
+
 **Why the cut is canonical (UC2).** An interior cut point is the rounding of a cut from the edge's own start. The two
 pieces that share a segment traverse it in opposite directions, so cut from their own ends they get cut points up to a unit
 apart, and the sliver between them is a hole in the union: a pixel in the middle of a stroke came out three levels short in
@@ -259,8 +283,10 @@ upper end, and deposited in its own direction. This changes which lattice points
 fill's.
 
 **The fold.** The accumulation of a stroke is negative (its pieces are wound so), and the shared fold shifts before it
-drops the sign, so a stroke part would come out a level high wherever the area is not a whole level. The stroke's parts
-fold the magnitude: the floor of a level either way round.
+drops the sign, so a stroke part would come out a level high wherever the area is not a whole level; its even-odd ramp back
+down (512 less the shifted value) rounds the other way again, so the clip of an aligned stroke under even-odd would be high
+wherever the odd winding is the larger. The stroke's parts fold the magnitude, reduced by the rule before the shift: the
+floor of a level either way round.
 
 **Windows and memory.** The pieces of the exact cells of a band go in a pool by a counting sort (a count per cell from the
 first pass, a second pass over the edges storing them); a band whose exact cells hold more than the pool is made exact a
@@ -445,8 +471,9 @@ build without the exact step failing both, the instrument planted with the sum o
 closed forms). The exact step (`test_render_exact.cpp`): closed forms (nested, crossing, coincident edges, through a lattice
 point, a contour that touches the left side, a vertical piece on it, a cell of flat pieces only); random sets of pieces
 against the instrument; a window equal to the whole render there and the order of the pieces changing nothing; the sparse
-sweep equal to the dense one; the cap at 512 and 513 and at small values, over the walk and not the window; a winding of
-255 and 256; the field `max_exact_fragments` through the sink (validated, defaulted, refused at its bound, damage, strict,
+sweep equal to the dense one; three parts together against the instrument, a window equal to the whole, one part's pieces
+alone against SC5's formula with constants, the off-centre strip the formula gets wrong; the cap at 512 and 513 and at small
+values, over the walk and not the window; a winding of 255 and 256; the field `max_exact_fragments` through the sink (validated, defaulted, refused at its bound, damage, strict,
 caller memory).
 
 The sink's tests: shape-scene's conformance suite, installed by shape-scene as
