@@ -1148,7 +1148,7 @@ PLANTS += [
     ("uc15-no-half", "src", RX, "    int64_t t = v - ((int64_t)1 << 29) - (int64_t)beta;", "    int64_t t = v - (int64_t)beta;", UCXD),
     ("uc15-fraction-dropped", "src", RX, "  return (q << 30) + ((rm << 30) / den);", "  return (q << 30) + 0 * rm;", UCXD),
     ("uc15-quadratic-term-dropped", "src", RX, "  int64_t num = 2 * (int64_t)s->a[id] * (int64_t)n * (int64_t)d + (int64_t)f->dx * (int64_t)n * (int64_t)n;", "  int64_t num = 2 * (int64_t)s->a[id] * (int64_t)n * (int64_t)d;", UCXD),
-    ("uc16-deposits-unchecked", "src", RX, "    if (verify && cell->dense[p] != params->eps[p] * (128 * (cell->a_left[p] + cover) - area)) {", "    if (0 && area && cover) {", UCXD),
+    ("uc16-deposits-unchecked", "src", RX, "    if (verify && cell->dense[p] != params->eps[p] * (128 * (cell->a_left[p] + cover) - area)) {", "    if (0 && area && cover && verify) {", UCXD),
     ("uc16-deposits-tolerant", "src", RX, "    if (verify && cell->dense[p] != params->eps[p] * (128 * (cell->a_left[p] + cover) - area)) {", "    if (verify && (cell->dense[p] - params->eps[p] * (128 * (cell->a_left[p] + cover) - area) > 1 ||\n                   cell->dense[p] - params->eps[p] * (128 * (cell->a_left[p] + cover) - area) < -1)) {", UCXD),
     ("uc19-budget-not-checked", "src", RX, "      if (total > limit) {", "      if (0 && limit) {", UCXD),
     ("uc19-budget-off-by-one", "src", RX, "      if (total > limit) {", "      if (total >= limit) {", UCXD),
@@ -1177,7 +1177,7 @@ PLANTS += [
     ("pl7-coverage-clear", "src", RS, "    memset(run->coverage, 0xFF, (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0));", "    memset(run->coverage, 0x00, (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0));", PLN),
     ("pl7-plane-as-path", "src", RS, "  if (gshscene_resource_kind(item->resource) == GSHSCENE_RESOURCE_PLANE) {\n    return fill_plane(run, item, chain, count);\n  }", "", PLN),
     ("pl7-clips-ignored", "src", RS, "  GSHCPU_Rect rect = reach_of(run, frame->clip_base, run->clip_count);\n  GSHCPU_Rect whole = whole_reach_of(run, frame->clip_base, run->clip_count);\n  if (gshcpu_render_rect_empty(rect)) {\n    rect.x1 = rect.x0;", "  GSHCPU_Rect rect = reach_of(run, frame->clip_base, frame->clip_base);\n  GSHCPU_Rect whole = whole_reach_of(run, frame->clip_base, run->clip_count);\n  if (gshcpu_render_rect_empty(rect)) {\n    rect.x1 = rect.x0;", PLN),
-    ("pl7-paint-tail-skipped", "src", RS, "  return paint_coverage(run, item, chain, count, frame, rect, whole, run->coverage);\n}\n\nstatic GSHSCENE_Result fill(", "  (void)whole;\n  (void)item;\n  return GSHSCENE_OK;\n}\n\nstatic GSHSCENE_Result fill(", PLN),
+    ("pl7-paint-tail-skipped", "src", RS, "  return paint_coverage(run, item, chain, count, frame, rect, whole, run->coverage);\n}\n\nstatic GSHSCENE_Result fill(", "  (void)whole;\n  (void)item;\n  (void)chain;\n  (void)count;\n  (void)frame;\n  (void)rect;\n  return GSHSCENE_OK;\n}\n\nstatic GSHSCENE_Result fill(", PLN),
 ]
 
 # Color-paint story P5: the placeholder is gone through and never drawn (PH6).  Written with the story; the sweep is
