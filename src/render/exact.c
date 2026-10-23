@@ -439,8 +439,13 @@ static uint64_t exact_tolerance(size_t m, uint64_t subslabs, int64_t wmax) {
   return (((uint64_t)(m + 1u) * (uint64_t)wmax) >> 12) + (subslabs >> 19) + 3u;
 }
 
+GSHCPU_Exact_Cell_Fn gshcpu_exact_hook = NULL;
+
 int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s, const GSHCPU_Exact_Cell * cell,
     int64_t * out, uint64_t * work) {
+  if (gshcpu_exact_hook) {
+    return gshcpu_exact_hook(params, s, cell, out, work);
+  }
   Walk w;
   memset(&w, 0, sizeof w);
   w.params = params;

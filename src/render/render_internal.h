@@ -288,6 +288,17 @@ typedef struct GSHCPU_Exact_Cell {
 int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s, const GSHCPU_Exact_Cell * cell,
     int64_t * out, uint64_t * work);
 
+/** The shape of ::gshcpu_exact_cell, for the hook below. */
+typedef int (*GSHCPU_Exact_Cell_Fn)(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s,
+    const GSHCPU_Exact_Cell * cell, int64_t * out, uint64_t * work);
+
+/**
+ * A test hook: when set, ::gshcpu_exact_cell calls it in place of the step.  Nothing in the library sets it; a test program
+ * sets it to a second engine (the earlier step, kept in the tests) to render the same list with both and compare the pixels
+ * (the dual render).  Read without a lock: set it before the renders it is to apply to, from the thread that makes them.
+ */
+extern GSHCPU_Exact_Cell_Fn gshcpu_exact_hook;
+
 /**
  * The memory and the settings of the exact step inside a cover (cover.c): per accumulator cell the number of pieces,
  * a pool for the pieces of the cells of one window, and the scratch of ::gshcpu_exact_cell.

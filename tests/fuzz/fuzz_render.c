@@ -80,6 +80,7 @@
 #include <ghoti.io/image/raster.h>
 
 #include "../../src/render/render_internal.h"
+#include "../support/exact_s4b.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -101,7 +102,7 @@ enum {
   OUT_WORKSPACE_SHORT, OUT_DAMAGE, OUT_GLYPHS_FAST, OUT_GLYPHS_GENERAL, OUT_FLOAT_TARGET, OUT_NESTED_GROUP,
   OUT_GRADIENT_DRAWN, OUT_GRADIENT_NOTICE, OUT_GRADIENT_LIMIT, OUT_COLOR_LIMIT, OUT_COLOR_AT_BOUND, OUT_BLEND_DRAWN,
   OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_STROKE_RUN_DRAWN, OUT_STROKE_DRAWN, OUT_STROKE_ALIGNED, OUT_STROKE_CACHED,
-  OUT_STROKE_SPARSE, OUT_STROKE_NOTICE, OUT_STROKE_EXACT, OUT_STROKE_RUN_TWIN, OUT_COUNT
+  OUT_STROKE_SPARSE, OUT_STROKE_NOTICE, OUT_STROKE_EXACT, OUT_STROKE_RUN_TWIN, OUT_STROKE_DUAL, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -115,7 +116,8 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a render with a stroke of a glyph run drawn (ST8)", "a render with a stroke drawn (SC1)",
     "a render with an aligned stroke drawn (SC5)", "a stroke served from the cache (SC7)",
     "a stroke drawn by the sparse composite (SC8)", "a stroke that draws nothing (a notice)",
-    "a stroke with cells made exact (UC3)", "a stroked run equal to the stroke of its path (ST11)"};
+    "a stroke with cells made exact (UC3)", "a stroked run equal to the stroke of its path (ST11)",
+    "a stroke drawn the same by the earlier exact step (the dual render)"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -1056,6 +1058,26 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
           }
           gshscene_sink_destroy(general);
           gimg_raster_destroy(other);
+          /* The dual render (strokes story S4c, C4): the earlier step, kept in the tests, as a second engine.  Where it renders
+           * the list it draws the same bytes; it is exact to a bound that grows with the pieces of a cell, so a cell it is not
+           * (see the call's comment) is left to the exact references of the unit tests. */
+          GSHCPU_Limits lim = limits;
+          GSHSCENE_Sink * dual = NULL;
+          GIMG_Raster * twin_out = copy_of(backdrop, format);
+          if (twin_out && gshcpu_render_sink_create_tiered(NULL, NULL, &lim, GSHCPU_RENDER_TIERS_ALL, NULL, NULL, NULL, &dual) == GSHCPU_OK) {
+            target.surface = twin_out;
+            gshcpu_exact_hook = gshcpu_s4b_exact_cell;
+            GSHSCENE_Result r5 = gshscene_sink_render(dual, &request);
+            gshcpu_exact_hook = NULL;
+            CHECK(r5 == GSHSCENE_OK || r5 == GSHSCENE_ERR_OOM || r5 == GSHSCENE_ERR_LIMIT);
+            if (r5 == GSHSCENE_OK) {
+              CHECK(same_bytes(raster, twin_out));
+              outcomes[OUT_STROKE_DUAL]++;
+            }
+            target.surface = again;
+          }
+          gshscene_sink_destroy(dual);
+          gimg_raster_destroy(twin_out);
         }
         /* ST11: the list with every stroked run replaced by the stroke of its path draws the same bytes. */
         if (world.run_strokes > 0 && counters.strokes > 0 && !(request_byte & 8)) {

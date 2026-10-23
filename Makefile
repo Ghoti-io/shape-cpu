@@ -269,6 +269,10 @@ VALGRIND_FLAGS := --leak-check=full --show-leak-kinds=definite,indirect,possible
 
 TEST_HELPER_SRC := $(wildcard tests/test_helpers.cpp)
 TEST_HELPER_OBJ := $(patsubst tests/%.cpp,$(OBJ_DIR)/tests/%.o,$(TEST_HELPER_SRC))
+# The tests' second engines, C compiled for test programs only (tests/support/exact_s4b.c: the exact step of strokes
+# story S4b, frozen, the other side of the dual render).  Never part of the library or its archive.
+TEST_SUPPORT_SRC := $(wildcard tests/support/*.c)
+TEST_SUPPORT_OBJ := $(patsubst tests/%.c,$(OBJ_DIR)/tests/%.o,$(TEST_SUPPORT_SRC))
 
 # The archive, not the shared library: a static link resolves hidden symbols.
 # --whole-archive because a constructor-registered object would otherwise be
@@ -295,7 +299,7 @@ EXAMPLES := $(patsubst examples/%.c,$(APP_DIR)/examples/%$(EXE_EXTENSION),$(EXAM
 all: $(APP_DIR)/$(TARGET) $(APP_DIR)/$(STATIC_TARGET) ## Build shared + static libraries
 
 TEST_DEPFILES := $(foreach pair,$(TEST_PAIRS),$(OBJ_DIR)/tests/$(basename $(notdir $(word 1,$(subst |, ,$(pair))))).d)
-DEPFILES := $(LIBOBJECTS:.o=.d) $(TEST_HELPER_OBJ:.o=.d) $(TEST_DEPFILES)
+DEPFILES := $(LIBOBJECTS:.o=.d) $(TEST_HELPER_OBJ:.o=.d) $(TEST_SUPPORT_OBJ:.o=.d) $(TEST_DEPFILES)
 -include $(DEPFILES)
 
 LIBVER_GEN := $(GEN_DIR)/ghoti.io/$(PROJECT)/libver_gen.h
@@ -354,6 +358,10 @@ $(TEST_HELPER_OBJ): $(TEST_HELPER_SRC) $(FLAGS_STAMP) | $(LIBVER_GEN)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -MMD -MP -MF $(@:.o=.d) -o $@
 endif
 
+$(OBJ_DIR)/tests/support/%.o: tests/support/%.c $(FLAGS_STAMP) | $(LIBVER_GEN)
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS) $(INCLUDE) -c $< -MMD -MP -MF $(@:.o=.d) -o $@
+
 $(OBJ_DIR)/tests/%.o: tests/%.cpp $(FLAGS_STAMP) | $(LIBVER_GEN)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -Itests -c $< -MMD -MP -MF $(@:.o=.d) -o $@
@@ -365,10 +373,10 @@ $(OBJ_DIR)/tests/%.o: tests/unit/%.cpp $(FLAGS_STAMP) | $(LIBVER_GEN)
 define test-executable-rule
 TEST_OBJ_$1 := $(OBJ_DIR)/tests/$(basename $(notdir $1)).o
 
-$(APP_DIR)/$2$(EXE_EXTENSION): $$(TEST_OBJ_$1) $(TEST_HELPER_OBJ) \
+$(APP_DIR)/$2$(EXE_EXTENSION): $$(TEST_OBJ_$1) $(TEST_HELPER_OBJ) $(TEST_SUPPORT_OBJ) \
 		$(APP_DIR)/$(STATIC_TARGET) | $(APP_DIR)/$(TARGET)
 	@mkdir -p $$(@D)
-	$(CXX) $(CXXFLAGS) -o $$@ $$(TEST_OBJ_$1) $(TEST_HELPER_OBJ) $(LDFLAGS) $(TEST_LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS) $(TESTFLAGS)
+	$(CXX) $(CXXFLAGS) -o $$@ $$(TEST_OBJ_$1) $(TEST_HELPER_OBJ) $(TEST_SUPPORT_OBJ) $(LDFLAGS) $(TEST_LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS) $(TESTFLAGS)
 endef
 
 $(foreach pair,$(TEST_PAIRS),\
@@ -407,10 +415,10 @@ examples: $(APP_DIR)/$(TARGET) $(EXAMPLES) ## Build the examples
 FUZZ_INPUTS = $(shell find tests/fuzz/corpus/render -type f 2>/dev/null | sort)
 REPLAY := $(APP_DIR)/fuzz/replay_render$(EXE_EXTENSION)
 
-$(REPLAY): tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(APP_DIR)/$(STATIC_TARGET) \
+$(REPLAY): tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(TEST_SUPPORT_SRC) $(APP_DIR)/$(STATIC_TARGET) \
 		$(FLAGS_STAMP) | $(APP_DIR)/$(TARGET) $(LIBVER_GEN)
 	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) $(INCLUDE) -o $@ tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
+	$(CC) $(CFLAGS) $(INCLUDE) -o $@ tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(TEST_SUPPORT_SRC) $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
 
 check-fuzz-corpus: ## Fail if the committed fuzz corpus is not what tools/gen-fuzz-corpus.py writes
 	@python3 tools/gen-fuzz-corpus.py --check
@@ -420,10 +428,10 @@ check-fuzz-corpus: ## Fail if the committed fuzz corpus is not what tools/gen-fu
 # must refuse a corpus that leaves an outcome unreached.
 REPLAY_PLANTED := $(APP_DIR)/fuzz/replay_render_planted$(EXE_EXTENSION)
 
-$(REPLAY_PLANTED): tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(APP_DIR)/$(STATIC_TARGET) \
+$(REPLAY_PLANTED): tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(TEST_SUPPORT_SRC) $(APP_DIR)/$(STATIC_TARGET) \
 		$(FLAGS_STAMP) | $(APP_DIR)/$(TARGET) $(LIBVER_GEN)
 	@mkdir -p $(@D)
-	$(CC) $(CFLAGS) -DGSHCPU_FUZZ_PLANT $(INCLUDE) -o $@ tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
+	$(CC) $(CFLAGS) -DGSHCPU_FUZZ_PLANT $(INCLUDE) -o $@ tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(TEST_SUPPORT_SRC) $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
 
 fuzz-replay: $(REPLAY) $(REPLAY_PLANTED) ## Feed every corpus file once through the fuzz entry point
 	@if [ -z "$(strip $(FUZZ_INPUTS))" ]; then printf 'fuzz-replay: the corpus is empty; this measures nothing\n' >&2; exit 1; fi
@@ -699,6 +707,12 @@ $(ASAN_ARCHIVE): $(ASAN_LIBOBJECTS)
 	@rm -f $@
 	ar rcs $@ $^
 
+ASAN_TEST_SUPPORT_OBJ := $(patsubst tests/%.c,$(ASAN_OBJ_DIR)/tests/%.o,$(TEST_SUPPORT_SRC))
+
+$(ASAN_OBJ_DIR)/tests/support/%.o: tests/support/%.c $(ASAN_FLAGS_STAMP) | $(LIBVER_GEN)
+	@mkdir -p $(@D)
+	$(CC) $(ASAN_CFLAGS) $(INCLUDE) -c $< -MMD -MP -MF $(@:.o=.d) -o $@
+
 $(ASAN_OBJ_DIR)/tests/%.o: tests/%.cpp $(ASAN_FLAGS_STAMP) | $(LIBVER_GEN)
 	@mkdir -p $(@D)
 	$(CXX) $(ASAN_CXXFLAGS) $(INCLUDE) -Itests -c $< -MMD -MP -MF $(@:.o=.d) -o $@
@@ -710,9 +724,9 @@ $(ASAN_OBJ_DIR)/tests/%.o: tests/unit/%.cpp $(ASAN_FLAGS_STAMP) | $(LIBVER_GEN)
 define asan-test-executable-rule
 ASAN_TEST_OBJ_$1 := $(ASAN_OBJ_DIR)/tests/$(basename $(notdir $1)).o
 
-$(ASAN_APP_DIR)/$2$(EXE_EXTENSION): $$(ASAN_TEST_OBJ_$1) $(ASAN_ARCHIVE)
+$(ASAN_APP_DIR)/$2$(EXE_EXTENSION): $$(ASAN_TEST_OBJ_$1) $(ASAN_TEST_SUPPORT_OBJ) $(ASAN_ARCHIVE)
 	@mkdir -p $$(@D)
-	$(CXX) $(ASAN_CXXFLAGS) -o $$@ $$(ASAN_TEST_OBJ_$1) $(ASAN_LDFLAGS) $(ASAN_SELF_LIBRARY) $(DEP_LIBS) $(TESTFLAGS)
+	$(CXX) $(ASAN_CXXFLAGS) -o $$@ $$(ASAN_TEST_OBJ_$1) $(ASAN_TEST_SUPPORT_OBJ) $(ASAN_LDFLAGS) $(ASAN_SELF_LIBRARY) $(DEP_LIBS) $(TESTFLAGS)
 endef
 
 $(foreach pair,$(TEST_PAIRS),\
@@ -722,9 +736,9 @@ ASAN_TEST_EXECUTABLES := $(addprefix $(ASAN_APP_DIR)/,$(addsuffix $(EXE_EXTENSIO
 ASAN_RUNTIME := $(shell $(CC) -print-file-name=libasan.so 2>/dev/null)
 ASAN_REPLAY := $(ASAN_APP_DIR)/fuzz/replay_render$(EXE_EXTENSION)
 
-$(ASAN_REPLAY): tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(ASAN_ARCHIVE) $(ASAN_FLAGS_STAMP)
+$(ASAN_REPLAY): tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(TEST_SUPPORT_SRC) $(ASAN_ARCHIVE) $(ASAN_FLAGS_STAMP)
 	@mkdir -p $(@D)
-	$(CC) $(ASAN_CFLAGS) $(INCLUDE) -o $@ tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(ASAN_LDFLAGS) $(ASAN_SELF_LIBRARY) $(DEP_LIBS)
+	$(CC) $(ASAN_CFLAGS) $(INCLUDE) -o $@ tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(TEST_SUPPORT_SRC) $(ASAN_LDFLAGS) $(ASAN_SELF_LIBRARY) $(DEP_LIBS)
 
 test-asan: $(ASAN_TEST_EXECUTABLES) $(ASAN_REPLAY) ## Build with ASan+UBSan and run the tests, and the fuzz replay
 	@for test_exe in $(ASAN_TEST_EXECUTABLES); do \
@@ -754,7 +768,7 @@ fuzz: | $(LIBVER_GEN) ## Build the libFuzzer target and run it for FUZZ_TIME sec
 		printf 'fuzz: needs %s (libFuzzer); `make fuzz-replay` runs the committed corpus without it\n' "$(FUZZ_CC)" >&2; exit 1; \
 	fi
 	@mkdir -p $(BUILD_DIR)/fuzz $(BUILD_DIR)/fuzz-corpus
-	$(FUZZ_CC) $(FUZZ_CFLAGS) $(INCLUDE) -o $(BUILD_DIR)/fuzz/fuzz_render tests/fuzz/fuzz_render.c $(SOURCES) $(LDFLAGS) $(DEP_LIBS)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) $(INCLUDE) -o $(BUILD_DIR)/fuzz/fuzz_render tests/fuzz/fuzz_render.c $(TEST_SUPPORT_SRC) $(SOURCES) $(LDFLAGS) $(DEP_LIBS)
 	LD_LIBRARY_PATH="$(TEST_LD_PATH)" $(BUILD_DIR)/fuzz/fuzz_render -max_total_time=$(FUZZ_TIME) $(BUILD_DIR)/fuzz-corpus tests/fuzz/corpus/render
 
 fuzz-clean: ## Remove the fuzz build
