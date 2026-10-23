@@ -50,10 +50,13 @@ FILES = {
     "src/render/stroke.c": "rk",  # strokes story S4
 }
 # The order is the cost: the quick and the likely first, the sweep stops at the first that fails.
-TESTS = ["testRender_vectors", "testRender_parts", "testRender_gradient", "testRender", "testRender_limits", "testRender_conformance", "testGlyph_render", "probe"]
+# Every test of the library, in the order of the cheap ones first: a candidate is caught by the first that fails, and one
+# that no test fails is a survivor, so a list that leaves a test out turns what that test sees into a survivor.
+TESTS = ["testRender_vectors", "testRender_parts", "testRender_gradient", "testRender", "testRender_limits",
+         "testRender_conformance", "testRender_plane", "testRender_placeholder", "testGlyph_render", "testCore",
+         "testCoverage", "testCoverage_limits", "testCoverage_report", "testRender_stroke", "testRender_stroke_text",
+         "testRender_stroke_bracket", "testRender_exact", "testRender_dual", "testRender_dense", "probe"]
 TESTS_BY_FILE = {path: TESTS for path in FILES}
-TESTS_BY_FILE["src/render/exact.c"] = ["testRender_dense", "testRender_exact", "testRender_dual", "testRender_stroke_bracket", "testRender_stroke", "probe"]
-TESTS_BY_FILE["src/render/stroke.c"] = ["testRender_stroke", "testRender_stroke_bracket", "testRender_exact", "testRender", "probe"]
 
 REL = [("==", "!="), ("!=", "=="), ("<=", "<"), (">=", ">"), ("<", "<="), (">", ">=")]
 

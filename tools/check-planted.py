@@ -954,25 +954,25 @@ RSTT = ["testRender_stroke", "testRender"]
 
 PLANTS += [
     # SC5: the composition of three coverages
-    ("sc5-complement-ignored", "src", RSK, "  uint32_t cp = complement ? 255u - c : c;", "  uint32_t cp = c;", RST),
+    ("sc5-complement-ignored", "src", RSK, "  uint32_t cp = complement ? 255u - c : c;", "  (void)complement;\n  uint32_t cp = c;", RST),
     ("sc5-complement-inverted", "src", RSK, "  uint32_t cp = complement ? 255u - c : c;", "  uint32_t cp = complement ? c : 255u - c;", RST),
     ("sc5-weigh-unrounded", "src", RSK, "  uint32_t t = gshcpu_render_weigh(a, cp); /* D8: (a * c' + 127) / 255 */", "  uint32_t t = (a * cp) / 255u;", RST),
     ("sc5-union-is-sum", "src", RSK, "  return 255u - ((255u - b) * (255u - t) + 127u) / 255u;", "  return b + t > 255u ? 255u : b + t;", RST),
     ("sc5-union-is-max", "src", RSK, "  return 255u - ((255u - b) * (255u - t) + 127u) / 255u;", "  return b > t ? b : t;", RST),
     ("sc5-union-unrounded", "src", RSK, "  return 255u - ((255u - b) * (255u - t) + 127u) / 255u;", "  return 255u - ((255u - b) * (255u - t)) / 255u;", RST),
-    ("sc5-aligned-unclipped", "src", RSK, "          (uint8_t)gshcpu_render_stroke_compose(b, a, c, complement);", "          (uint8_t)gshcpu_render_stroke_compose(b, a, 255u, 0);", RST),
+    ("sc5-aligned-unclipped", "src", RSK, "          (uint8_t)gshcpu_render_stroke_compose(b, a, c, complement);", "          (uint8_t)gshcpu_render_stroke_compose(b, a, 255u + 0u * c, 0);", RST),
     ("sc5-clip-rule-ignored", "src", RSK, "    GSHGEOM_Fill_Rule rule = p == 2 ? gshgeom_stroke_outline_clip_rule(s->outline) : GSHGEOM_FILL_NONZERO;", "    GSHGEOM_Fill_Rule rule = GSHGEOM_FILL_NONZERO;", RST),
     ("sc5-clip-rect-is-body", "src", RSK, "  clip.rect = aligned.rect; /* c over the aligned part's rectangle (SC5) */", "  clip.rect = body.rect;", RST),
     ("sc5-complement-flag-dropped", "src", RSK, "  int complement = gshgeom_stroke_outline_clip_complement(s->outline);", "  int complement = 0;", RST),
     ("sc5-aligned-dropped", "src", RSK, "  if (!aligned.path) {\n    *rect = body.rect;\n    *k = buffers->body;", "  if (1) {\n    *rect = body.rect;\n    *k = buffers->body;", RST),
-    ("sc5-body-dropped", "src", RSK, "        b = buffers->body[(size_t)(y - body.rect.y0) * bw + (size_t)(x - body.rect.x0)];", "        b = 0;", RST),
+    ("sc5-body-dropped", "src", RSK, "        b = buffers->body[(size_t)(y - body.rect.y0) * bw + (size_t)(x - body.rect.x0)];", "        b = (uint8_t)(0u * bw);", RST),
     ("sc5-joint-is-body", "src", RSK, "  GSHCPU_Rect joint = gshcpu_render_rect_join(body.rect, aligned.rect);\n  if (gshcpu_render_rect_empty(joint)) {\n    joint.x1 = joint.x0;\n    joint.y1 = joint.y0;\n  }\n  size_t bw", "  GSHCPU_Rect joint = body.rect;\n  if (gshcpu_render_rect_empty(joint)) {\n    joint.x1 = joint.x0;\n    joint.y1 = joint.y0;\n  }\n  size_t bw", RST),
     ("uc8-joint-is-body", "src", RSK, "    GSHCPU_Rect joint = gshcpu_render_rect_join(body.rect, aligned.rect);\n    if (gshcpu_render_rect_empty(joint)) {\n      joint.x1 = joint.x0;\n      joint.y1 = joint.y0;\n    }\n    GSHCPU_Rect moved_joint", "    GSHCPU_Rect joint = body.rect;\n    if (gshcpu_render_rect_empty(joint)) {\n      joint.x1 = joint.x0;\n      joint.y1 = joint.y0;\n    }\n    GSHCPU_Rect moved_joint", RST),
     # SC3: the canonical translation
     ("sc3-shift-x-dropped", "src", RSK, "  s.shift_x = sx;", "  s.shift_x = 0;", RSTT),
     ("sc3-shift-y-sign", "src", RSK, "  s.shift_y = sy;", "  s.shift_y = -sy;", RSTT),
     ("sc3-moved-x-sign", "src", RSK, "  r.x0 -= dx;", "  r.x0 += dx;", RSTT),
-    ("sc3-moved-one-axis", "src", RSK, "  r.y0 -= dy;\n  r.x1 -= dx;\n  r.y1 -= dy;", "  r.x1 -= dx;", RSTT),
+    ("sc3-moved-one-axis", "src", RSK, "  r.y0 -= dy;\n  r.x1 -= dx;\n  r.y1 -= dy;", "  r.x1 -= dx;\n  (void)dy;", RSTT),
     ("sc3-box-shift-dropped", "src", RSK, "      int64_t x0 = s.meta.lo_x[p] + 64 * sx;", "      int64_t x0 = s.meta.lo_x[p];", RST),
     ("sc3-coordinate-limit-y", "src", RSK, "          y1 > GSHCPU_RENDER_COORD_LIMIT) {\n        r = GSHCPU_ERR_LIMIT;", "          0) {\n        r = GSHCPU_ERR_LIMIT;", RST),
     ("sc3-canonical-map-unused", "src", RSK, "  g = gshgeom_stroke_expand(path, &params, &canon, alloc, limits, &outline);", "  g = gshgeom_stroke_expand(path, &params, composed, alloc, limits, &outline);", RSTT),
@@ -1031,7 +1031,7 @@ PLANTS += [
     ("st8-notes-not-kept", "src", RSK, "    s.meta.note_count = note_count;\n    s.meta.notes = made;", "    s.meta.note_count = 0;\n    s.meta.notes = NULL;", RTX),
     ("st8-hit-without-notes", "src", RSK, "    s.notes = copy;\n    s.note_count = s.meta.note_count;", "    alloc->free_fn(alloc->ctx, copy);", RTX),
     ("st8-run-elements-lost", "src", RSK, "      s.meta.run_elements = gshgeom_path_element_count(built);", "      s.meta.run_elements = 0;", RTX),
-    ("st8-run-elements-not-kept", "src", RSK, "    s.meta.run_elements = run_elements;", "    s.meta.run_elements = 0;", RTX),
+    ("st8-run-elements-not-kept", "src", RSK, "    s.meta.run_elements = run_elements;", "    s.meta.run_elements = 0 * run_elements;", RTX),
     ("st8-limit-not-the-items", "src", RSK, "return cr == GSHSCENE_ERR_OOM ? GSHCPU_ERR_OOM : cr == GSHSCENE_ERR_LIMIT ? GSHCPU_ERR_LIMIT : GSHCPU_ERR_INTERNAL;", "return cr == GSHSCENE_ERR_OOM ? GSHCPU_ERR_OOM : GSHCPU_ERR_INTERNAL;", RTX),
     ("st8-centerline-from-the-path", "src", RSK, "      path = built;\n    }", "    }", RTX),
     ("st8-nothing-drawn-notes-dropped", "src", RS, "  GSHSCENE_Result noted = report_run_notes(run, &s, chain, count);\n  if (noted != GSHSCENE_OK) {", "  GSHSCENE_Result noted = s.drawn ? report_run_notes(run, &s, chain, count) : GSHSCENE_OK;\n  if (noted != GSHSCENE_OK) {", RTX),
@@ -1063,7 +1063,7 @@ PLANTS += [
     ("uc4-fold-column-left-out-aligned", "src", RV, "          row[0] = cv[0];", "          row[0] = 0;", UCX),
     # UC5: slabs, order, winding
     # UC6: the shared area
-    ("uc7-fold-signed", "src", RV, "  if (magnitude) {\n    uint64_t m = (uint64_t)(area < 0 ? -area : area);", "  if (0) {\n    uint64_t m = (uint64_t)(area < 0 ? -area : area);", UCXB),
+    ("uc7-fold-signed", "src", RV, "  if (magnitude) {\n    uint64_t m = (uint64_t)(area < 0 ? -area : area);", "  if (0 && magnitude) {\n    uint64_t m = (uint64_t)(area < 0 ? -area : area);", UCXB),
     ("uc7-even-odd-ramp-dropped", "src", RV, "      if (m > 8192u) {\n        m = 16384u - m;\n      }", "", UCXB),
     ("uc7-even-odd-period", "src", RV, "      m &= 16383u; /* 2 * 2^13", "      m &= 32767u; /* 2 * 2^13", UCXB),
     ("uc7-shared-not-subtracted", "src", RV, "        int64_t value = dense - shared;\n        if (value < 0) {\n          value = 0;\n        }\n        ar[j] = accumulated - ex->eps * value;", "        int64_t value = dense;\n        if (value < 0) {\n          value = 0;\n        }\n        ar[j] = accumulated - ex->eps * value;", UCX),
@@ -1092,7 +1092,7 @@ PLANTS += [
     ("uc9-field-ceiling-off-by-one", "src", RS, "  if (limits && limits->max_exact_fragments > GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS) {", "  if (limits && limits->max_exact_fragments >= GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS) {", UCX),
     ("uc9-refusal-swallowed", "src", RS, "  if (r == GSHCPU_ERR_LIMIT) {\n    result = refuse(run, item, chain, count);", "  if (r == GSHCPU_ERR_LIMIT) {\n    result = GSHSCENE_OK;", UCX),
     ("uc9-work-uncounted", "src", RS, "  run->work += cells + exact_work(run);", "  run->work += cells;", ["testRender_stroke"]),
-    ("uc9-work-bound-uncounted", "src", RS, "  if (!gcu_safe_add_u64(b, exact, &b)) {\n    return UINT64_MAX;\n  }", "", ["testRender", "testRender_limits"]),
+    ("uc9-work-bound-uncounted", "src", RS, "  if (!gcu_safe_add_u64(b, exact, &b)) {\n    return UINT64_MAX;\n  }", "  (void)exact;", ["testRender", "testRender_limits"]),
     ("uc9-workspace-short", "src", RS, "    size_t first = L->strokes ? gshcpu_exact_bytes(width, cs->max_exact, L->aligned ? 3 : 1) : 0;", "    size_t first = L->strokes ? gshcpu_exact_bytes(width, cs->max_exact, 1) : 0;", UCX),
     ("uc9-exact-counts-stale", "src", RV, "  memset(c->ex->count, 0, cells * sizeof *c->ex->count);", "", UCX),
     ("uc9-slots-stale", "src", RV, "  memset(c->ex->slot, 0xff, cells * sizeof *c->ex->slot);", "", UCX),
@@ -1109,7 +1109,7 @@ PLANTS += [
     ("uc4-j-end-dropped", "src", RX, '      if (x1 == 0) {\n        *jstep(c, p, y1)', '      if (0) {\n        *jstep(c, p, y1)', UCXD),
     ("uc4-j-weight", "src", RX, '      sum += (int64_t)c->jnet[p][h] * (64 - h);', '      sum += (int64_t)c->jnet[p][h] * h;', UCXD),
     ("uc4-wtop-from-zero", "src", RX, "    c->wtop[p] = rem / 64;", "    c->wtop[p] = 0;", UCXD),
-    ("uc4-left-cover-ignored", "src", RX, "    int64_t rem = cell->a_left[p] - sum;", "    int64_t rem = -sum;", UCXD),
+    ("uc4-left-cover-ignored", "src", RX, "    int64_t rem = cell->a_left[p] - sum;", "    int64_t rem = -sum + 0 * cell->a_left[p];", UCXD),
     ("uc4-remainder-unchecked", "src", RX, "    if (rem % 64 != 0) {\n      return GSHCPU_EXACT_IDENTITY;\n    }\n", "", UCXD),
     ("uc13-cancel-keeps-the-wrong-way", "src", RX, '      const uint32_t from = net > 0 ? hi : lo;\n      const uint32_t to = net > 0 ? lo : hi;', '      const uint32_t from = net > 0 ? lo : hi;\n      const uint32_t to = net > 0 ? hi : lo;', UCXD),
     ("uc13-reverse-sign", "src", RX, '        net += (keys[j] & 1u) ? 1 : -1;', '        net += (keys[j] & 1u) ? -1 : 1;', UCXD),
@@ -1146,11 +1146,11 @@ PLANTS += [
     ("uc15-tie-offset-dropped", "src", RX, "  uint64_t beta = 8u * c.events + 2u * c.end_evals + 1u;", "  uint64_t beta = 0u;", UCXD),
     ("uc15-shared-not-subtracted", "src", RX, "    *out = cell->dense[0] - up;", "    *out = up;", UCXD),
     ("uc15-no-half", "src", RX, "    int64_t t = v - ((int64_t)1 << 29) - (int64_t)beta;", "    int64_t t = v - (int64_t)beta;", UCXD),
-    ("uc15-fraction-dropped", "src", RX, "  return (q << 30) + ((rm << 30) / den);", "  return (q << 30);", UCXD),
+    ("uc15-fraction-dropped", "src", RX, "  return (q << 30) + ((rm << 30) / den);", "  return (q << 30) + 0 * rm;", UCXD),
     ("uc15-quadratic-term-dropped", "src", RX, "  int64_t num = 2 * (int64_t)s->a[id] * (int64_t)n * (int64_t)d + (int64_t)f->dx * (int64_t)n * (int64_t)n;", "  int64_t num = 2 * (int64_t)s->a[id] * (int64_t)n * (int64_t)d;", UCXD),
-    ("uc16-deposits-unchecked", "src", RX, "    if (verify && cell->dense[p] != params->eps[p] * (128 * (cell->a_left[p] + cover) - area)) {", "    if (0) {", UCXD),
+    ("uc16-deposits-unchecked", "src", RX, "    if (verify && cell->dense[p] != params->eps[p] * (128 * (cell->a_left[p] + cover) - area)) {", "    if (0 && area) {", UCXD),
     ("uc16-deposits-tolerant", "src", RX, "    if (verify && cell->dense[p] != params->eps[p] * (128 * (cell->a_left[p] + cover) - area)) {", "    if (verify && (cell->dense[p] - params->eps[p] * (128 * (cell->a_left[p] + cover) - area) > 1 ||\n                   cell->dense[p] - params->eps[p] * (128 * (cell->a_left[p] + cover) - area) < -1)) {", UCXD),
-    ("uc19-budget-not-checked", "src", RX, "      if (total > limit) {", "      if (0) {", UCXD),
+    ("uc19-budget-not-checked", "src", RX, "      if (total > limit) {", "      if (0 && limit) {", UCXD),
     ("uc19-budget-off-by-one", "src", RX, "      if (total > limit) {", "      if (total >= limit) {", UCXD),
     ("uc19-count-skipped-for-cells-that-can-pass", "src", RX, "  return budget != 0 && n >= 2 && (n * (n - 1)) / 2 > budget;", "  return budget != 0 && n >= 2 && (n * (n - 1)) / 4 > budget;", UCXD),
     ("uc19-count-ties-as-meetings", "src", RX, "        if (right_of_at(s, src[i], src[j], h)) {", "        if (!right_of_at(s, src[j], src[i], h)) {", UCXD),
@@ -1177,7 +1177,7 @@ PLANTS += [
     ("pl7-coverage-clear", "src", RS, "    memset(run->coverage, 0xFF, (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0));", "    memset(run->coverage, 0x00, (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0));", PLN),
     ("pl7-plane-as-path", "src", RS, "  if (gshscene_resource_kind(item->resource) == GSHSCENE_RESOURCE_PLANE) {\n    return fill_plane(run, item, chain, count);\n  }", "", PLN),
     ("pl7-clips-ignored", "src", RS, "  GSHCPU_Rect rect = reach_of(run, frame->clip_base, run->clip_count);\n  GSHCPU_Rect whole = whole_reach_of(run, frame->clip_base, run->clip_count);\n  if (gshcpu_render_rect_empty(rect)) {\n    rect.x1 = rect.x0;", "  GSHCPU_Rect rect = reach_of(run, frame->clip_base, frame->clip_base);\n  GSHCPU_Rect whole = whole_reach_of(run, frame->clip_base, run->clip_count);\n  if (gshcpu_render_rect_empty(rect)) {\n    rect.x1 = rect.x0;", PLN),
-    ("pl7-paint-tail-skipped", "src", RS, "  return paint_coverage(run, item, chain, count, frame, rect, whole, run->coverage);\n}\n\nstatic GSHSCENE_Result fill(", "  return GSHSCENE_OK;\n}\n\nstatic GSHSCENE_Result fill(", PLN),
+    ("pl7-paint-tail-skipped", "src", RS, "  return paint_coverage(run, item, chain, count, frame, rect, whole, run->coverage);\n}\n\nstatic GSHSCENE_Result fill(", "  (void)whole;\n  return GSHSCENE_OK;\n}\n\nstatic GSHSCENE_Result fill(", PLN),
 ]
 
 # Color-paint story P5: the placeholder is gone through and never drawn (PH6).  Written with the story; the sweep is
@@ -1306,7 +1306,12 @@ def do_plant(plant, control_objs):
         hdr.write_text(text)
         objs = compile_all(d / "obj", srcs, pre=["-I" + str(d / "include")])
     caught_by = []
-    for test in tests:
+    # PLANT_ALL_TESTS=1: a plant its own tests do not see is tried against every other test of the library and the probe
+    # before it is called a survivor; the test that sees it is named, and the plant's list is the one to correct.
+    order = list(tests)
+    if os.environ.get("PLANT_ALL_TESTS"):
+        order += [t for t in TESTS + ["probe"] if t not in order]
+    for test in order:
         if test == "probe":
             rc, msg = probe_hash(objs, d)
             failing = [msg.splitlines()[-1] if msg else "probe"]
@@ -1315,7 +1320,7 @@ def do_plant(plant, control_objs):
             link_test(test, objs, exe)
             rc, failing = run_test(exe)
         if rc != 0:
-            caught_by.append((test, failing[:1]))
+            caught_by.append((test + ("" if test in tests else " [not in its list]"), failing[:1]))
             break  # one test seeing it is enough; the lists are ordered by cost
     return pid, caught_by
 
