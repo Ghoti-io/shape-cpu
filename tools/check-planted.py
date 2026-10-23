@@ -291,13 +291,14 @@ hand-written plants 14 that did not compile were rewritten and 28 of the stroke,
 the tests added with the sweep see the aligned bands pixel by pixel on the union of the pieces and on the build without it,
 the union formula in D8's arithmetic, the boxes of a stroke on every side, the cache key's y fraction, which widths are
 hairlines, and when a stroke is the sparse composite's.  Of the 2891 generated candidates not held, 644 do not compile
-(dropped), 1633 are caught (now held) and 614 survive, by kind:
+(dropped), 1633 are caught (now held) and 614 survive; of those 613 are, by kind (the other was not reached by the
+second sweep):
 
-  - 288 comparisons flipped at a tie or a loop bound (the minimum of two equal numbers, a sort's equal keys, a loop one past
-    an array whose next element is unread), and 100 logic operators and negations where an earlier check decides alike
-  - 219 statements deleted: a store over zeroed memory, a ``memset`` over a record that is then written, a ``free`` or
+  - 293 comparisons flipped at a tie or a loop bound (the minimum of two equal numbers, a sort's equal keys, a loop one past
+    an array whose next element is unread), and 93 logic operators and negations where an earlier check decides alike
+  - 216 statements deleted: a store over zeroed memory, a ``memset`` over a record that is then written, a ``free`` or
     ``destroy`` (a leak, seen by a sanitizer), the terms of a workspace size
-  - 12 status codes swapped where the caller compares only against ``OK``, and one message
+  - 10 status codes swapped where the caller compares only against ``OK``, and one message
 
 Not seen and not shown equivalent, each needing a case built for it: the cells of the parts of an aligned stroke summed
 against the cap (``sc6-cells-not-summed``), the pinning of a cache entry while a render uses it and its eviction while pinned
