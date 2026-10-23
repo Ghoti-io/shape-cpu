@@ -57,6 +57,7 @@ typedef struct Entry {
   GSHCPU_Stroke_Key key;
   GSHGEOM_Stroke_Outline * outline;
   GSHCPU_Stroke_Meta meta;
+  GSHCPU_Run_Note * notes;      /* a run's glyph notes (ST8), the entry's own copy, which meta.notes names */
   size_t refs;                  /* renders that pinned it */
   int listed;                   /* in the table and the list: false once dropped */
 } Entry;
@@ -130,6 +131,9 @@ static void unlink_entry(GSHCPU_Stroke_Cache * c, Entry * e) {
 
 static void free_entry(GSHCPU_Stroke_Cache * c, Entry * e) {
   gshgeom_stroke_outline_destroy(e->outline);
+  if (e->notes) {
+    c->alloc.free_fn(c->alloc.ctx, e->notes);
+  }
   c->alloc.free_fn(c->alloc.ctx, e);
 }
 
@@ -233,6 +237,16 @@ int gshcpu_stroke_cache_store(GSHCPU_Stroke_Cache * c, const GSHCPU_Stroke_Key *
   if (need <= c->bound && !fresh) {
     return -1;
   }
+  /* ST8: the glyphs' notes of a run are the entry's own, copied (the caller's are its stroke's). */
+  GSHCPU_Run_Note * notes = NULL;
+  if (fresh && meta->note_count > 0) {
+    notes = c->alloc.malloc_fn(c->alloc.ctx, meta->note_count * sizeof *notes);
+    if (!notes) {
+      c->alloc.free_fn(c->alloc.ctx, fresh);
+      return -1;
+    }
+    memcpy(notes, meta->notes, meta->note_count * sizeof *notes);
+  }
   Entry * doomed = NULL;
   int result = 0;
   GCU_MUTEX_LOCK(c->lock);
@@ -270,6 +284,9 @@ int gshcpu_stroke_cache_store(GSHCPU_Stroke_Cache * c, const GSHCPU_Stroke_Key *
       fresh->outline = outline;
       fresh->meta = *meta;
       fresh->meta.bytes = (size_t)need; /* what is held and given back is the same number */
+      fresh->notes = notes;
+      fresh->meta.notes = notes;
+      notes = NULL;
       fresh->refs = 1;
       fresh->listed = 1;
       size_t b = bucket_of(key);
@@ -295,6 +312,9 @@ int gshcpu_stroke_cache_store(GSHCPU_Stroke_Cache * c, const GSHCPU_Stroke_Key *
   GCU_MUTEX_UNLOCK(c->lock);
   if (fresh) {
     c->alloc.free_fn(c->alloc.ctx, fresh);
+  }
+  if (notes) {
+    c->alloc.free_fn(c->alloc.ctx, notes);
   }
   while (doomed) {
     Entry * next = doomed->chain;

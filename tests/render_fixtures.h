@@ -59,6 +59,8 @@
  * | strokes-dash-overlap | (strokes story S4b) translucent dashes with square, butt and round caps whose gaps are shorter than the caps' reach, a hairline of square-cap dashes, and square-cap dashes round a circle |
  * | strokes-tight-joins | a zigzag whose segments are shorter than the stroke is wide, with each of the five joins, a device width and a non-uniform map: the inner side of every join overlaps |
  * | strokes-rings | a circle and a lens, the lens turned, stroked from one pixel to wider than the radius: the triangles of the inner side overlap |
+ * | strokes-text | (strokes story S5) runs from the test provider's font, stroked on the general route: a hinted fill with the unhinted stroke over it and the reverse order, translucent glyphs that overlap (one union), a gradient across a run, inside alignment, dashes with round caps, an elliptical pen and a hairline |
+ * | strokes-text-outlines | (strokes story S5) runs from outlines, with open subpaths: square-cap dashes, a path-scoped pattern across the glyphs, a wide stroke of a run under a rotation, and a run of one glyph beside a run of two |
  * | strokes-thin-aligned | aligned strokes thinner than two pixels (a square and a circle inside and outside, thin rectangles at fractional offsets, a star under even-odd, a closed subpath beside an open one): the aligned part and the fill's edge lie in every pixel |
  * | blend-out-of-range | blend modes on sources out of range (negative, above 1, the recorded bound 2^16), dodge and burn past their poles, ClipColor with both steps, in a gamma-0.1 parent, nested blending groups, and a blend over the backdrop's transparent pixels |
  */
@@ -1201,6 +1203,172 @@ static inline GSHSCENE_List * rf_strokes_sparse(RF_Ctx * c) {
   return l;
 }
 
+/* --- stroked text (strokes story S5) ------------------------------------------------------------------------ */
+
+/** A run of the test glyphs @p ids at the positions @p xy (x, y pairs) from @p tp's face (fast tier bound). */
+static inline const GSHSCENE_Resource * rf_text_run(RF_Ctx * c, GSHSCENE_Test_Provider * tp, double size, uint32_t mode,
+    const uint32_t * ids, const double * xy, size_t n) {
+  const GSHSCENE_Resource * face = rf_hold(c, gshscene_tp_face(c->store, tp, 1, tp == &rf_provider_plain ? 0x62u : 0x61u, 0));
+  rf_check(c, face != NULL);
+  GSHSCENE_Glyph glyphs[8];
+  memset(glyphs, 0, sizeof glyphs);
+  rf_check(c, n <= 8);
+  for (size_t i = 0; i < n; i++) {
+    glyphs[i].id = ids[i];
+    glyphs[i].x = xy[2 * i];
+    glyphs[i].y = xy[2 * i + 1];
+  }
+  GSHSCENE_Glyph_Run run;
+  memset(&run, 0, sizeof run);
+  run.source = GSHSCENE_GLYPHS_FROM_FONT;
+  run.face = face;
+  run.size = size;
+  run.hint_mode = mode;
+  run.glyph_count = n;
+  run.glyphs = glyphs;
+  const GSHSCENE_Resource * r = NULL;
+  rf_check(c, gshscene_store_intern_glyph_run(c->store, &run, &r) == GSHSCENE_OK);
+  return rf_hold(c, r);
+}
+
+static inline GSHSCENE_List * rf_strokes_text(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.97, 0.95, 0.88, 1.0), 0, 0.0);
+  /* a fill hinted at 10 ppem on a grid-aligned map, and over it the stroke of the same run, which is not hinted (ST3); and
+   * the reverse order at 27 (ST7) */
+  static const uint32_t abc[3] = {1, 2, 3};
+  static const double abc_xy[6] = {1.5, 11.0, 9.25, 11.0, 18.5, 11.0};
+  const GSHSCENE_Resource * pair = rf_text_run(c, &rf_provider_program, 10.0, GSHSCENE_HINT_FONT, abc, abc_xy, 3);
+  const GSHSCENE_Resource * pen = rf_pen(c, 1.0, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_BUTT);
+  rf_fill(c, l, pair, NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.7, 0.2, 1.0), 0, 0.0);
+  rf_stroke(c, l, pair, pen, NULL, rf_solid(0.4, 0.05, 0.05, 1.0));
+  GSHGEOM_Map right = rf_move(27.0, 0.0);
+  rf_stroke(c, l, pair, rf_pen(c, 1.5, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &right, rf_solid(0.05, 0.1, 0.5, 1.0));
+  rf_fill(c, l, pair, &right, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.7, 0.2, 0.8), 0, 0.0);
+  /* glyphs that overlap, a translucent stroke: one coverage where they cross (ST2) */
+  static const uint32_t rings[3] = {2, 2, 2};
+  static const double rings_xy[6] = {2.0, 27.0, 5.0, 27.0, 8.0, 27.0};
+  rf_stroke(c, l, rf_text_run(c, &rf_provider_program, 14.0, GSHSCENE_HINT_NONE, rings, rings_xy, 3),
+      rf_pen(c, 1.5, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND), NULL, rf_solid(0.1, 0.2, 0.8, 0.45));
+  /* one gradient across the run, in the run's model space (ST6) */
+  const GSHSCENE_Gradient_Stop two[2] = {rf_stop(0.0, rf_solid(0.9, 0.1, 0.1, 1.0)), rf_stop(1.0, rf_solid(0.1, 0.2, 0.9, 1.0))};
+  static const uint32_t gl[3] = {1, 3, 2};
+  static const double gl_xy[6] = {26.0, 27.0, 31.5, 27.0, 36.0, 27.0};
+  rf_stroke(c, l, rf_text_run(c, &rf_provider_program, 12.0, GSHSCENE_HINT_FONT_STRICT, gl, gl_xy, 3),
+      rf_pen(c, 1.75, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND), NULL,
+      rf_gradient_paint(rf_gradient(c, rf_linear(26, 0, 46, 0, 0, 0, GSHSCENE_EXTEND_PAD), two, 2), 1.0));
+  /* inside alignment of a frame (its counter is a hole), dashes with round caps, an elliptical pen, a hairline */
+  static const uint32_t frame[1] = {1};
+  static const double frame_xy[2] = {1.0, 38.0};
+  rf_stroke(c, l, rf_text_run(c, &rf_provider_program, 16.0, GSHSCENE_HINT_NONE, frame, frame_xy, 1),
+      rf_style(c, 3.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+          GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_INSIDE,
+          GSHGEOM_FILL_NONZERO),
+      NULL, rf_solid(0.1, 0.5, 0.2, 0.9));
+  static const double dashes[2] = {3.0, 1.5};
+  static const uint32_t pair2[2] = {1, 3};
+  static const double pair2_xy[4] = {13.0, 38.0, 19.0, 38.0};
+  rf_stroke(c, l, rf_text_run(c, &rf_provider_program, 12.0, GSHSCENE_HINT_NONE, pair2, pair2_xy, 2),
+      rf_style(c, 1.25, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0, GSHSCENE_STROKE_CAP_ROUND,
+          GSHSCENE_STROKE_DEGENERATE_DRAW, dashes, 2, 0.5, GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_CENTER,
+          GSHGEOM_FILL_NONZERO),
+      NULL, rf_solid(0.5, 0.1, 0.5, 1.0));
+  GSHGEOM_Map wide;
+  gshgeom_map_scale(2, 1.6, 0.8, 1.0, &wide);
+  static const uint32_t two_glyphs[2] = {1, 2};
+  static const double two_xy[4] = {0.0, 0.0, 6.0, 0.0};
+  const GSHSCENE_Resource * small = rf_text_run(c, &rf_provider_plain, 10.0, GSHSCENE_HINT_NONE, two_glyphs, two_xy, 2);
+  GSHGEOM_Map place = rf_move(29.0, 38.0);
+  gshgeom_map_compose(&place, &wide, &place);
+  rf_stroke(c, l, small, rf_pen(c, 1.5, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_BUTT), &place, rf_solid(0.05, 0.3, 0.35, 1.0));
+  GSHGEOM_Map hair = rf_move(30.0, 24.0);
+  rf_stroke(c, l, small, rf_style(c, 1.0, GSHSCENE_STROKE_WIDTH_DEVICE, GSHSCENE_STROKE_JOIN_ROUND, 4.0,
+                            GSHSCENE_STROKE_CAP_BUTT, GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0,
+                            GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      &hair, rf_solid(0.0, 0.0, 0.0, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_strokes_text_outlines(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.92, 0.95, 0.97, 1.0), 0, 0.0);
+  /* glyphs that are open polylines, a closed star and a blob; a glyph with an empty outline beside them */
+  static const double zig[10] = {0.0, 8.0, 3.0, 0.0, 6.0, 8.0, 9.0, 0.0, 12.0, 8.0};
+  static const double bar[4] = {0.0, 0.0, 0.0, 8.0};
+  const GSHSCENE_Resource * z = rf_polyline(c, zig, 5, 0);
+  const GSHSCENE_Resource * b = rf_polyline(c, bar, 2, 0);
+  const GSHSCENE_Resource * star = rf_star(c, 5.0, 5.0, 5.0);
+  const GSHSCENE_Resource * blob = rf_blob(c, 0.5, 0.5, 6.0);
+  GSHSCENE_Glyph glyphs[5];
+  memset(glyphs, 0, sizeof glyphs);
+  glyphs[0].id = 1;
+  glyphs[0].x = 2.0;
+  glyphs[0].y = 4.0;
+  glyphs[0].outline = z;
+  glyphs[1].id = 2;
+  glyphs[1].x = 17.0;
+  glyphs[1].y = 4.0;
+  glyphs[1].outline = b;
+  glyphs[2].id = 3;
+  glyphs[2].x = 21.0;
+  glyphs[2].y = 3.0;
+  glyphs[2].outline = star;
+  glyphs[3].id = 4;
+  glyphs[3].x = 31.0;
+  glyphs[3].y = 3.5;
+  glyphs[3].outline = rf_intern(c, rf_path(c)); /* a glyph with no outline: an empty path */
+  glyphs[4].id = 5;
+  glyphs[4].x = 36.0;
+  glyphs[4].y = 4.0;
+  glyphs[4].outline = blob;
+  GSHSCENE_Glyph_Run run;
+  memset(&run, 0, sizeof run);
+  run.source = GSHSCENE_GLYPHS_FROM_OUTLINES;
+  run.glyph_count = 5;
+  run.glyphs = glyphs;
+  const GSHSCENE_Resource * text = NULL;
+  rf_check(c, gshscene_store_intern_glyph_run(c->store, &run, &text) == GSHSCENE_OK);
+  rf_hold(c, text);
+  static const double dashes[2] = {3.0, 2.0};
+  rf_stroke(c, l, text,
+      rf_style(c, 2.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_BEVEL, 4.0, GSHSCENE_STROKE_CAP_SQUARE,
+          GSHSCENE_STROKE_DEGENERATE_DRAW, dashes, 2, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_CENTER,
+          GSHGEOM_FILL_NONZERO),
+      NULL, rf_solid(0.7, 0.1, 0.1, 0.85));
+  GSHGEOM_Map down = rf_move(0.0, 12.0);
+  rf_stroke(c, l, text,
+      rf_style(c, 1.5, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0, GSHSCENE_STROKE_CAP_ROUND,
+          GSHSCENE_STROKE_DEGENERATE_DRAW, dashes, 2, 1.0, GSHSCENE_STROKE_DASH_PATH, GSHSCENE_STROKE_ALIGN_CENTER,
+          GSHGEOM_FILL_NONZERO),
+      &down, rf_solid(0.1, 0.4, 0.7, 1.0));
+  GSHGEOM_Map turn;
+  GSHGEOM_Map spin;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 12.0, &turn);
+  spin = rf_move(2.0, 21.0);
+  gshgeom_map_compose(&spin, &turn, &spin);
+  rf_stroke(c, l, text, rf_pen(c, 4.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &spin, rf_solid(0.2, 0.6, 0.3, 0.5));
+  /* a run of one glyph, and the closed glyphs of the first run stroked inside */
+  GSHSCENE_Glyph one[1];
+  memset(one, 0, sizeof one);
+  one[0].id = 9;
+  one[0].x = 38.0;
+  one[0].y = 26.0;
+  one[0].outline = star;
+  run.glyph_count = 1;
+  run.glyphs = one;
+  const GSHSCENE_Resource * lone = NULL;
+  rf_check(c, gshscene_store_intern_glyph_run(c->store, &run, &lone) == GSHSCENE_OK);
+  rf_hold(c, lone);
+  rf_stroke(c, l, lone,
+      rf_style(c, 1.5, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+          GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_OUTSIDE,
+          GSHGEOM_FILL_NONZERO),
+      NULL, rf_solid(0.1, 0.1, 0.1, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
 static inline GSHSCENE_List * rf_strokes_nothing(RF_Ctx * c) {
   GSHSCENE_List * l = rf_open(c);
   const GSHSCENE_Resource * box = rf_rect(c, 0.0, 0.0, 8.0, 8.0);
@@ -1455,6 +1623,8 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"strokes-tight-joins", rf_strokes_tight_joins},
     {"strokes-rings", rf_strokes_rings},
     {"strokes-thin-aligned", rf_strokes_thin_aligned},
+    {"strokes-text", rf_strokes_text},
+    {"strokes-text-outlines", rf_strokes_text_outlines},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

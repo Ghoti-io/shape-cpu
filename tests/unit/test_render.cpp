@@ -64,15 +64,15 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
     }
     EXPECT_EQ(caps.flags, GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA |
         GSHSCENE_CAP_BLEND_SPACES | GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT | GSHSCENE_CAP_GRADIENT_SPACES |
-        GSHSCENE_CAP_STROKE_EXPAND);
-    EXPECT_EQ(caps.flags & GSHSCENE_CAP_STROKE_RUNS, 0u) << "a stroked run waits for strokes story S5";
+        GSHSCENE_CAP_STROKE_EXPAND | GSHSCENE_CAP_STROKE_RUNS);
+    EXPECT_NE(caps.flags & GSHSCENE_CAP_STROKE_RUNS, 0u) << "a stroked run is the stroke of its centerline (strokes story S5, ST8)";
     EXPECT_EQ(caps.gradient_kinds, (1u << GSHSCENE_GRADIENT_LINEAR) | (1u << GSHSCENE_GRADIENT_RADIAL) |
         (1u << GSHSCENE_GRADIENT_SWEEP)) << "every gradient kind (color-paint story P2)";
     EXPECT_EQ(caps.cancel_unit, (uint32_t)GSHSCENE_CANCEL_BETWEEN_UNITS);
     EXPECT_STREQ(caps.work_measure, "cells+points+pixels");
     EXPECT_EQ(caps.cancel_work_bound, 3 * (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS + GSHCPU_LIMITS_DEFAULT_MAX_CELLS +
         2 * (uint64_t)GSHCPU_LIMITS_DEFAULT_MAX_BYTES +
-        (uint64_t)GSHSCENE_LIMITS_DEFAULT_MAX_RESOURCE_ELEMENTS * GSHGEOM_STROKE_MAX_DEPTH +
+        (uint64_t)GSHSCENE_LIMITS_DEFAULT_MAX_RESOURCE_ELEMENTS * (GSHGEOM_STROKE_MAX_DEPTH + 1) +
         gshcpu_exact_work_bound(GSHCPU_LIMITS_DEFAULT_MAX_CELLS, 3 * (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS,
             GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION, 3 * GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS))
         << "SC11: an aligned stroke's three parts, its cells, two passes over the pixels, the expansion's steps and the exact step's (UC9)";
@@ -120,7 +120,7 @@ TEST(RenderCaps, TheWorkBoundIsTheWorstUnitsSumOfTheLimits) {
   ASSERT_EQ(gshcpu_sink_create(nullptr, &scene_limits, &limits, &small), GSHCPU_OK);
   // An aligned stroke: 3 parts of 100 points, 200 cells, two passes over 300 pixels, 10 elements to the depth cap, and
   // the exact step over the pieces its parts can hold (200 deposits and a horizontal piece for each point and column).
-  EXPECT_EQ(caps_for(small, r.raster).cancel_work_bound, 300u + 200u + 600u + 10u * GSHGEOM_STROKE_MAX_DEPTH +
+  EXPECT_EQ(caps_for(small, r.raster).cancel_work_bound, 300u + 200u + 600u + 10u * (GSHGEOM_STROKE_MAX_DEPTH + 1) +
       gshcpu_exact_work_bound(200u, 300u, GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION, 3 * GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS));
   EXPECT_EQ(gshscene_sink_destroy(small), GSHSCENE_OK);
   limits.max_cells = SIZE_MAX;

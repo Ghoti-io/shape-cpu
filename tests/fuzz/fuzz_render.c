@@ -46,9 +46,11 @@
  * float target's every stored value is then finite.  Strokes (stories S1 and S4): a fill whose rule byte has bits 1 and 2
  * set is a stroke of the shape instead, in a style made once from the next three bytes: a width (zero, a hairline, a
  * sixteenth of a pixel, wide), both width spaces, every join, cap and alignment, either alignment rule, either
- * degenerate rule, dashes of a few patterns in either scope.  The sink draws it by expansion; a stroke of a glyph run
- * is refused for its centerline (`STROKE_CENTERLINE`), and no stroke is ever refused for its kind.  The render is then
- * drawn again by a second sink with every fast tier off, and the bytes must be the same.
+ * degenerate rule, dashes of a few patterns in either scope.  The sink draws it by expansion, a stroke of a glyph run too
+ * (strokes story S5: the path ::gshscene_glyph_run_centerline defines for it), and no stroke is ever refused for its
+ * kind.  The render is then drawn again by a second sink with every fast tier off, and the bytes must be the same.  A
+ * list that holds a stroke of a run is also rebuilt with each such centerline replaced by its path (ST11): drawn, it is
+ * the same bytes.
  *
  * After the render the sink's stated properties are checked, and a violation is
  * an `abort`:
@@ -98,8 +100,8 @@ enum {
   OUT_OK = 0, OUT_REFUSED_WHILE_DRAWING, OUT_STRICT, OUT_LIMIT_REGION, OUT_CANCEL_MID, OUT_OOM, OUT_CALLER_MEMORY,
   OUT_WORKSPACE_SHORT, OUT_DAMAGE, OUT_GLYPHS_FAST, OUT_GLYPHS_GENERAL, OUT_FLOAT_TARGET, OUT_NESTED_GROUP,
   OUT_GRADIENT_DRAWN, OUT_GRADIENT_NOTICE, OUT_GRADIENT_LIMIT, OUT_COLOR_LIMIT, OUT_COLOR_AT_BOUND, OUT_BLEND_DRAWN,
-  OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_STROKE_RUN_REFUSED, OUT_STROKE_DRAWN, OUT_STROKE_ALIGNED, OUT_STROKE_CACHED,
-  OUT_STROKE_SPARSE, OUT_STROKE_NOTICE, OUT_STROKE_EXACT, OUT_COUNT
+  OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_STROKE_RUN_DRAWN, OUT_STROKE_DRAWN, OUT_STROKE_ALIGNED, OUT_STROKE_CACHED,
+  OUT_STROKE_SPARSE, OUT_STROKE_NOTICE, OUT_STROKE_EXACT, OUT_STROKE_RUN_TWIN, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -110,10 +112,10 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a gradient past G14's bounds, refused at intern", "a fill's color past N1's bound, refused",
     "a render with a color at N1's bound in a gamma space", "a render with a blend-mode group",
     "a blend-mode group on a float target", "a group of PDF's fields refused (S19)",
-    "a stroke of a glyph run refused for its centerline (S20)", "a render with a stroke drawn (SC1)",
+    "a render with a stroke of a glyph run drawn (ST8)", "a render with a stroke drawn (SC1)",
     "a render with an aligned stroke drawn (SC5)", "a stroke served from the cache (SC7)",
     "a stroke drawn by the sparse composite (SC8)", "a stroke that draws nothing (a notice)",
-    "a stroke with cells made exact (UC3)"};
+    "a stroke with cells made exact (UC3)", "a stroked run equal to the stroke of its path (ST11)"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -224,6 +226,7 @@ typedef struct World {
   const GSHSCENE_Resource * runs[2]; /* from a face with the fast tier, and from one without */
   const GSHSCENE_Resource * style;   /* a stroke style, made on first use (strokes story S1) */
   size_t strokes;                    /* strokes recorded */
+  size_t run_strokes;                /* ... whose centerline is a glyph run */
   size_t aligned;                    /* ... whose style aligns */
   int aligned_style;
   double dashes[4];                  /* the style's dash lengths */
@@ -514,8 +517,7 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
       for (int k = 0; k < 3; k++) {
         past |= !(paint.rgba[k] >= -0x1p16 && paint.rgba[k] <= 0x1p16);
       }
-      /* The rule byte's bits 1 and 2 both set: a stroke of the shape instead (strokes story S1), which this sink
-       * refuses for its kind until it draws strokes (S4). */
+      /* The rule byte's bits 1 and 2 both set: a stroke of the shape instead (strokes stories S1 and S5). */
       const uint8_t rule = next(in);
       if ((rule & 6) == 6 && !w->style) {
         static const double widths[8] = {1.0, 0.0, 2.5, 6.0, 0.0625, 17.0, 1.5, 3.0};
@@ -549,6 +551,7 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
           ? (w->style ? gshscene_list_stroke(list, r, w->style, &map, &paint, 0, 0.0) : GSHSCENE_ERR_OOM)
           : gshscene_list_fill(list, r, &map, rule & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint, 0, 0.0);
       w->strokes += (rule & 6) == 6 && fr == GSHSCENE_OK;
+      w->run_strokes += (rule & 6) == 6 && fr == GSHSCENE_OK && gshscene_resource_kind(r) == GSHSCENE_RESOURCE_GLYPH_RUN;
       w->aligned += (rule & 6) == 6 && fr == GSHSCENE_OK && w->aligned_style;
       if (past) {
         CHECK(fr == GSHSCENE_ERR_LIMIT || fr == GSHSCENE_ERR_OOM); /* N1: never recorded */
@@ -610,6 +613,72 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
   (void)groups;
   CHECK(gshscene_list_close(list) == GSHSCENE_OK);
   return deepest;
+}
+
+/**
+ * The list again with the centerline of every stroke that is a glyph run replaced by the path
+ * ::gshscene_glyph_run_centerline gives for it (interned in @p store): a stroke of a run and a stroke of its path are the same
+ * (ST11).  NULL when a path cannot be made or an item cannot be recorded (out of memory, a limit): nothing is compared then.
+ * The paths are held by the list.
+ */
+static GSHSCENE_List * twin_of(const GSHSCENE_List * list, GSHSCENE_Store * store, const GSHGEOM_Allocator * alloc) {
+  GSHSCENE_List * twin = NULL;
+  if (gshscene_list_create(alloc, NULL, store, &twin) != GSHSCENE_OK) {
+    return NULL;
+  }
+  const size_t count = gshscene_list_count(list);
+  for (size_t i = 0; i < count; i++) {
+    const GSHSCENE_Item * item = NULL;
+    CHECK(gshscene_list_item(list, i, &item) == GSHSCENE_OK);
+    GSHSCENE_Result r = GSHSCENE_OK;
+    switch (item->kind) {
+      case GSHSCENE_ITEM_FILL:
+        r = gshscene_list_fill(twin, item->resource, &item->map, item->fill_rule, &item->paint, item->layer, item->depth);
+        break;
+      case GSHSCENE_ITEM_STROKE: {
+        const GSHSCENE_Resource * centerline = item->resource;
+        const GSHSCENE_Resource * made = NULL;
+        if (gshscene_resource_kind(item->resource) == GSHSCENE_RESOURCE_GLYPH_RUN) {
+          GSHGEOM_Path * path = NULL;
+          r = gshscene_glyph_run_centerline(item->resource, alloc, NULL, &path, NULL);
+          if (r == GSHSCENE_OK) {
+            r = gshscene_store_intern_path(store, path, &made);
+            gshgeom_path_destroy(path);
+            centerline = made;
+          }
+        }
+        if (r == GSHSCENE_OK) {
+          r = gshscene_list_stroke(twin, centerline, item->style, &item->map, &item->paint, item->layer, item->depth);
+        }
+        gshscene_resource_release(made);
+        break;
+      }
+      case GSHSCENE_ITEM_CLIP_PUSH:
+        r = gshscene_list_clip_push(twin, item->resource, &item->map, item->fill_rule, item->layer, item->depth);
+        break;
+      case GSHSCENE_ITEM_CLIP_POP:
+        r = gshscene_list_clip_pop(twin);
+        break;
+      case GSHSCENE_ITEM_GROUP_PUSH:
+        r = gshscene_list_group_push(twin, &item->group, item->layer, item->depth);
+        break;
+      case GSHSCENE_ITEM_GROUP_POP:
+        r = gshscene_list_group_pop(twin);
+        break;
+      default:
+        r = GSHSCENE_ERR_UNSUPPORTED;
+        break;
+    }
+    if (r != GSHSCENE_OK) {
+      gshscene_list_destroy(twin);
+      return NULL;
+    }
+  }
+  if (gshscene_list_close(twin) != GSHSCENE_OK) {
+    gshscene_list_destroy(twin);
+    return NULL;
+  }
+  return twin;
 }
 
 /* --- the render and its checks -------------------------------------------------------------------------- */
@@ -885,14 +954,8 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     /* The sink claims the seven kinds it draws: nothing is refused for its kind, and a stroke is never refused for its
      * style (every feature is met by expansion, SC1). */
     CHECK(e.reason != GSHSCENE_REASON_ITEM_KIND && e.reason != GSHSCENE_REASON_STROKE_STYLE);
-    if (e.reason == GSHSCENE_REASON_STROKE_CENTERLINE) {
-      const GSHSCENE_Item * item = NULL;
-      GSHSCENE_Glyph_Run run;
-      CHECK(e.entry_class == GSHSCENE_ENTRY_REFUSED && e.chain_count == 1);
-      CHECK(gshscene_list_item(list, e.chain[0], &item) == GSHSCENE_OK && item->kind == GSHSCENE_ITEM_STROKE);
-      CHECK(gshscene_resource_glyph_run(item->resource, &run) == GSHSCENE_OK);
-      outcomes[OUT_STROKE_RUN_REFUSED]++;
-    }
+    /* This sink strokes runs (ST8): the plan never refuses a stroke for its centerline. */
+    CHECK(e.reason != GSHSCENE_REASON_STROKE_CENTERLINE);
     if (e.entry_class == GSHSCENE_ENTRY_NOTICE && world.strokes > 0) {
       const GSHSCENE_Item * item = NULL;
       if (gshscene_list_item(list, e.chain[0], &item) == GSHSCENE_OK && item->kind == GSHSCENE_ITEM_STROKE) {
@@ -950,6 +1013,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   }
 
   outcomes[OUT_STROKE_DRAWN] += r == GSHSCENE_OK && counters.strokes > 0;
+  outcomes[OUT_STROKE_RUN_DRAWN] += r == GSHSCENE_OK && counters.strokes > 0 && world.run_strokes > 0;
   outcomes[OUT_STROKE_ALIGNED] += r == GSHSCENE_OK && counters.strokes > 0 && world.aligned > 0;
   outcomes[OUT_STROKE_SPARSE] += counters.sparse_hairline + counters.sparse_plain > 0;
   outcomes[OUT_STROKE_EXACT] += counters.exact_cells > 0;
@@ -992,6 +1056,25 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
           }
           gshscene_sink_destroy(general);
           gimg_raster_destroy(other);
+        }
+        /* ST11: the list with every stroked run replaced by the stroke of its path draws the same bytes. */
+        if (world.run_strokes > 0 && counters.strokes > 0 && !(request_byte & 8)) {
+          GSHSCENE_List * twin = twin_of(list, store, &alloc);
+          GIMG_Raster * other = twin ? copy_of(backdrop, format) : NULL;
+          if (other) {
+            GSHSCENE_Render_Request tr = request;
+            tr.list = twin;
+            target.surface = other;
+            GSHSCENE_Result r4 = gshscene_sink_render(sink, &tr);
+            CHECK(r4 == GSHSCENE_OK || r4 == GSHSCENE_ERR_OOM || r4 == GSHSCENE_ERR_LIMIT);
+            if (r4 == GSHSCENE_OK) {
+              CHECK(same_bytes(again, other));
+              outcomes[OUT_STROKE_RUN_TWIN]++;
+            }
+            target.surface = again;
+          }
+          gimg_raster_destroy(other);
+          gshscene_list_destroy(twin);
         }
         /* Inside the damage the damage-limited render is the whole render. */
         if (request_byte & 8) {

@@ -796,7 +796,7 @@ TEST(RenderStrokeTiers, EveryStrokeFixtureIsBitEqualToTheGeneralTierOnEveryForma
       total.strokes += tiered.counters.strokes;
     }
   }
-  EXPECT_EQ(fixtures, 12u) << "the eight of S4 and S4b's four";
+  EXPECT_EQ(fixtures, 14u) << "the eight of S4, S4b's four and S5's two";
   EXPECT_GT(total.cache_hits, 0u) << "FT-1 is taken";
   EXPECT_GT(total.sparse_hairline, 0u) << "FT-2 is taken for a solid hairline";
   EXPECT_GT(total.sparse_plain, 0u) << "FT-2 is taken for a plain solid stroke";
@@ -883,11 +883,13 @@ TEST(RenderStroke, AStrokeInAnIsolatedGroupCompositesSrcOverAndTheGroupsModeActs
   EXPECT_EQ(strict.result, GSHSCENE_ERR_REFUSED);
 }
 
-TEST(RenderStroke, AStrokeOfAGlyphRunIsRefusedByThePlanForItsCenterline) {
+TEST(RenderStroke, AStrokeOfAGlyphRunIsDrawnAsTheStrokeOfItsCenterline) {
+  // Strokes story S5: this sink says STROKE_RUNS, so a stroke of a run is planned in and drawn (test_render_stroke_text.cpp
+  // holds the rest); here the one-glyph run of a square draws its square's stroke.
   Store s;
   Params p = params();
   const GSHSCENE_Resource * style = intern_style(s, p.get());
-  GSHSCENE_Glyph glyphs[1] = {{1, 0.0, 0.0, s.rect(0, 0, 4, 4)}};
+  GSHSCENE_Glyph glyphs[1] = {{1, 0.0, 0.0, s.rect(2, 2, 12, 12)}};
   GSHSCENE_Glyph_Run run{};
   run.source = GSHSCENE_GLYPHS_FROM_OUTLINES;
   run.glyph_count = 1;
@@ -899,16 +901,20 @@ TEST(RenderStroke, AStrokeOfAGlyphRunIsRefusedByThePlanForItsCenterline) {
   GSHSCENE_List * l = s.open();
   ASSERT_EQ(gshscene_list_stroke(l, r, style, nullptr, &white, 0, 0.0), GSHSCENE_OK);
   ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  GSHSCENE_List * lp = s.open();
+  ASSERT_EQ(gshscene_list_stroke(lp, s.rect(2, 2, 12, 12), style, nullptr, &white, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(lp), GSHSCENE_OK);
   Sink sink;
   Drawn d = render_list(sink.sink, l, 16, 16);
   EXPECT_EQ(d.result, GSHSCENE_OK);
-  ASSERT_EQ(d.entries.size(), 1u);
-  EXPECT_EQ(d.entries[0].reason, GSHSCENE_REASON_STROKE_CENTERLINE);
-  Drawn strict = render_list(sink.sink, l, 16, 16, GSHCPU_FORMAT_RGBA8_STRAIGHT, GSHSCENE_RENDER_STRICT);
-  EXPECT_EQ(strict.result, GSHSCENE_ERR_REFUSED);
-  for (uint8_t a : strict.alpha) {
-    EXPECT_EQ(a, 0) << "refused before the target is touched";
+  EXPECT_EQ(d.entries.size(), 0u);
+  Drawn dp = render_list(sink.sink, lp, 16, 16);
+  EXPECT_EQ(d.hash, dp.hash);
+  bool any = false;
+  for (uint8_t a : d.alpha) {
+    any = any || a != 0;
   }
+  EXPECT_TRUE(any);
 }
 
 /* --- S7, SC11: the work of a stroke is within the declared bound --------------------------------------------------------- */

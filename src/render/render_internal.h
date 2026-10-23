@@ -524,12 +524,26 @@ typedef struct GSHCPU_Stroke_Key {
 /** The parts of an outline, in the order of its accessors. */
 enum { GSHCPU_STROKE_BODY = 0, GSHCPU_STROKE_ALIGNED = 1, GSHCPU_STROKE_CLIP = 2, GSHCPU_STROKE_PARTS = 3 };
 
-/** What is known of an outline without a pass over it: each part's points and the extent of its 26.6 coordinates. */
+/** What became of one glyph of a stroked run that has an entry (ST1, ST8): its index and the note ::gshscene_glyph_run_centerline gave. */
+typedef struct GSHCPU_Run_Note {
+  uint64_t index;
+  uint32_t entry_class;
+  uint32_t reason;
+} GSHCPU_Run_Note;
+
+/**
+ * What is known of an outline without a pass over it: each part's points and the extent of its 26.6 coordinates, and for
+ * a stroke of a run (ST8) what the construction of its centerline said (the glyphs' notes, and the elements of the
+ * centerline: the glyph outlines' elements that went into it), which a hit replays so that it equals a miss in the report.
+ */
 typedef struct GSHCPU_Stroke_Meta {
   int present[GSHCPU_STROKE_PARTS];
   uint64_t points[GSHCPU_STROKE_PARTS];
   int64_t lo_x[GSHCPU_STROKE_PARTS], lo_y[GSHCPU_STROKE_PARTS], hi_x[GSHCPU_STROKE_PARTS], hi_y[GSHCPU_STROKE_PARTS];
   size_t bytes;              /* what the cache accounts for it (stroke_cache.c) */
+  uint64_t run_elements;     /* a run: the elements of its centerline (0 for a path) */
+  size_t note_count;         /* a run: the glyphs that have an entry */
+  const GSHCPU_Run_Note * notes; /* ... and their notes; the cache entry's own, valid while pinned (else the stroke's) */
 } GSHCPU_Stroke_Meta;
 
 /** A receiver of the pixels one row of a sparse sweep covers: `n` coverages from pixel @p x (in the paths' frame). */
@@ -591,11 +605,19 @@ typedef struct GSHCPU_Stroke {
   GSHCPU_Rect box[GSHCPU_STROKE_PARTS]; /* each part's pixels, shifted (empty when absent) */
   int hairline;                    /* a solid device width of 1 (FT-2's detection) */
   int sparse_ok;                   /* the style and paint admit FT-2 (the outline has one part is decided from the parts) */
+  const GSHGEOM_Allocator * alloc; /* the allocator of `notes` */
+  GSHCPU_Run_Note * notes;         /* a run: the glyph notes of its centerline (ST8), the stroke's own copy; NULL for none */
+  size_t note_count;
+  uint64_t run_elements;           /* a run: the elements of its centerline */
 } GSHCPU_Stroke;
 
 /**
  * SC2 to SC7: expand @p item's centerline under @p composed (the chain composed, in pixels) at the canonical
  * translation, from the cache (@p cache not NULL) or made from @p alloc.  @p limits' `max_points` bounds each part.
+ *
+ * A centerline that is a run is ST1's path, made by ::gshscene_glyph_run_centerline on a miss only and cached with its
+ * glyphs' notes under the run's resource id.  The notes are the stroke's own on return (`notes`, even when nothing is
+ * drawn) and ::gshcpu_render_stroke_close frees them, so a caller always closes a stroke that opened.
  *
  * @return ::GSHCPU_OK (a status other than DRAWN leaves `drawn` 0: nothing to draw); ::GSHCPU_ERR_LIMIT (a part past
  *   `max_points`, the depth cap, a shifted coordinate past ::GSHCPU_RENDER_COORD_LIMIT: the sink's resource limit);

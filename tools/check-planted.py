@@ -1018,6 +1018,37 @@ PLANTS += [
 ]
 
 
+# --- strokes story S5 (ST1, ST8 to ST11): stroked text; written with the story, swept in the consolidated pass -----------
+RTX = ["testRender_stroke_text"]
+RTXC = ["testRender_stroke_text", "testRender"]
+
+PLANTS += [
+    # ST8: the notes of the construction, kept with the expansion and replayed by a hit
+    ("st8-notes-uncollected", "src", RSK, "    n += notes[i].entry_class != 0;", "    n += 0;", RTX),
+    ("st8-note-index", "src", RSK, "      records[at].index = i;", "      records[at].index = at;", RTX),
+    ("st8-note-reason", "src", RSK, "      records[at].reason = notes[i].reason;", "      records[at].reason = GSHSCENE_REASON_RESOURCE_LIMIT;", RTX),
+    ("st8-note-class", "src", RSK, "      records[at].entry_class = notes[i].entry_class;", "      records[at].entry_class = GSHSCENE_ENTRY_NOTICE;", RTX),
+    ("st8-notes-not-kept", "src", RSK, "    s.meta.note_count = note_count;\n    s.meta.notes = made;", "    s.meta.note_count = 0;\n    s.meta.notes = NULL;", RTX),
+    ("st8-hit-without-notes", "src", RSK, "    s.notes = copy;\n    s.note_count = s.meta.note_count;", "    alloc->free_fn(alloc->ctx, copy);", RTX),
+    ("st8-run-elements-lost", "src", RSK, "      s.meta.run_elements = gshgeom_path_element_count(built);", "      s.meta.run_elements = 0;", RTX),
+    ("st8-run-elements-not-kept", "src", RSK, "    s.meta.run_elements = run_elements;", "    s.meta.run_elements = 0;", RTX),
+    ("st8-limit-not-the-items", "src", RSK, "return cr == GSHSCENE_ERR_OOM ? GSHCPU_ERR_OOM : cr == GSHSCENE_ERR_LIMIT ? GSHCPU_ERR_LIMIT : GSHCPU_ERR_INTERNAL;", "return cr == GSHSCENE_ERR_OOM ? GSHCPU_ERR_OOM : GSHCPU_ERR_INTERNAL;", RTX),
+    ("st8-centerline-from-the-path", "src", RSK, "      path = built;\n    }", "    }", RTX),
+    ("st8-nothing-drawn-notes-dropped", "src", RS, "  GSHSCENE_Result noted = report_run_notes(run, &s, chain, count);\n  if (noted != GSHSCENE_OK) {", "  GSHSCENE_Result noted = s.drawn ? report_run_notes(run, &s, chain, count) : GSHSCENE_OK;\n  if (noted != GSHSCENE_OK) {", RTX),
+    ("st8-notes-unreported", "src", RS, "  for (size_t i = 0; i < s->note_count; i++) {\n    const GSHCPU_Run_Note * n = &s->notes[i];", "  for (size_t i = 0; 0 && i < s->note_count; i++) {\n    const GSHCPU_Run_Note * n = &s->notes[i];", RTX),
+    ("st8-note-glyph", "src", RS, "(GSHSCENE_Reason)n->reason, chain, count, (size_t)n->index);", "(GSHSCENE_Reason)n->reason, chain, count, 0);", RTX),
+    ("st8-strict-continues", "src", RS, "(run->request->flags & GSHSCENE_RENDER_STRICT)) {\n      memcpy(run->stop, chain, count * sizeof *chain);\n      run->stop_count = count;\n      e = GSHSCENE_ERR_REFUSED;\n    }\n    if (e != GSHSCENE_OK) {\n      return e;", "0) {\n      memcpy(run->stop, chain, count * sizeof *chain);\n      run->stop_count = count;\n      e = GSHSCENE_ERR_REFUSED;\n    }\n    if (e != GSHSCENE_OK) {\n      return e;", RTX),
+    ("st8-notes-not-copied", "src", RSC, "    memcpy(notes, meta->notes, meta->note_count * sizeof *notes);", "    memset(notes, 0, meta->note_count * sizeof *notes);", RTX),
+    ("st8-notes-not-owned-by-the-entry", "src", RSC, "      fresh->meta.notes = notes;", "      fresh->meta.notes = meta->notes;", RTX),
+    # ST8, ST9: the caps, the measure and the work
+    ("st8-caps-no-runs", "src", RS, "  out->flags |= GSHSCENE_CAP_STROKE_RUNS;", "", RTXC),
+    ("st8-measure-skips-runs", "src", RS, "      if (gshscene_stroke_notice(item, maps, count - 1, &target->map)) {\n        continue; /* a stroke that draws nothing */", "      if (!gshscene_resource_path(item->resource) || gshscene_stroke_notice(item, maps, count - 1, &target->map)) {\n        continue; /* a stroke that draws nothing */", RTX),
+    ("st9-work-glyph-elements-dropped", "src", RS, "  return points + elements * (uint64_t)GSHGEOM_STROKE_MAX_DEPTH + (path ? 0u : elements);", "  return points + elements * (uint64_t)GSHGEOM_STROKE_MAX_DEPTH;", RTX),
+    ("st9-work-glyph-elements-for-paths", "src", RS, "  return points + elements * (uint64_t)GSHGEOM_STROKE_MAX_DEPTH + (path ? 0u : elements);", "  return points + elements * (uint64_t)GSHGEOM_STROKE_MAX_DEPTH + elements;", RTX),
+    ("st9-work-run-elements-unclamped", "src", RS, "  uint64_t elements = path ? (uint64_t)gshgeom_path_element_count(path) : s->run_elements;\n  if (elements > run->cs->elements) {", "  uint64_t elements = path ? (uint64_t)gshgeom_path_element_count(path) : s->run_elements;\n  if (0) {", RTX),
+    ("st9-bound-without-glyph-term", "src", RS, "(uint64_t)GSHGEOM_STROKE_MAX_DEPTH + 1u, &expansion)", "(uint64_t)GSHGEOM_STROKE_MAX_DEPTH, &expansion)", ["testRender", "testRender_limits"]),
+]
+
 # --- strokes story S4b (UC1 to UC12): written with the story, swept in the consolidated pass ------------------------------
 RX = "src/render/exact.c"
 UCX = ["testRender_exact"]

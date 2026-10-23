@@ -410,9 +410,8 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
     if (item->kind == GSHSCENE_ITEM_STROKE) {
       /* A stroke that is drawn is expanded once through the arena (no cache under CALLER_MEMORY: SC7); its expansion
        * is what an item's geometry is for a fill, so the caller's memory holds the most any item takes. */
-      if (!gshscene_resource_path(item->resource) ||
-          gshscene_stroke_notice(item, maps, count - 1, &target->map)) {
-        continue; /* a run (the plan refuses it) or a stroke that draws nothing */
+      if (gshscene_stroke_notice(item, maps, count - 1, &target->map)) {
+        continue; /* a stroke that draws nothing */
       }
       GSHGEOM_Map composed;
       maps[count - 1] = item->map;
@@ -422,6 +421,8 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
       GSHCPU_Stroke st;
       gshcpu_render_arena_reset(arena);
       arena->peak = 0;
+      /* A run's centerline, its glyphs' outlines and its notes are allocated here in the order the drawing takes them
+       * (ST8), so the memory asked for is exact. */
       GSHCPU_Result sr = gshcpu_render_stroke_open(NULL, &arena->self, &cs->geometry, item, &composed, &st);
       if (sr == GSHCPU_OK) {
         gshcpu_render_stroke_close(NULL, &st);
@@ -524,12 +525,13 @@ static GSHSCENE_Result scene_result(GSHCPU_Result r) {
 static uint64_t work_bound(const Cpu_Sink * cs) {
   /* The worst unit is an aligned stroke (SC11): the points of its three parts, the deposits of all of them (the one
    * cap), two passes over the pixels (the composition and the paint), and the expansion's own steps, bounded by the
-   * depth cap for every element of the centerline (stroke_work). */
+   * depth cap for every element of the centerline and, for a run, one step more for each element of the glyph
+   * outlines that went into it (expansion_work). */
   uint64_t b;
   uint64_t pixels;
   uint64_t expansion;
   if (!gcu_safe_mul_u64((uint64_t)cs->geometry.max_points, 3u, &b) || !gcu_safe_mul_u64((uint64_t)cs->max_bytes, 2u, &pixels) ||
-      !gcu_safe_mul_u64((uint64_t)cs->elements, (uint64_t)GSHGEOM_STROKE_MAX_DEPTH, &expansion) ||
+      !gcu_safe_mul_u64((uint64_t)cs->elements, (uint64_t)GSHGEOM_STROKE_MAX_DEPTH + 1u, &expansion) ||
       !gcu_safe_add_u64(b, cs->max_cells, &b) || !gcu_safe_add_u64(b, pixels, &b) || !gcu_safe_add_u64(b, expansion, &b)) {
     return UINT64_MAX;
   }
@@ -572,8 +574,11 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   out->flags = GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA | GSHSCENE_CAP_BLEND_SPACES |
       GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT | GSHSCENE_CAP_GRADIENT_SPACES;
   /* SC1: a stroke is never drawn as a stroke (stroke_native is 0) but by expansion, for every style, so no stroke is
-   * refused for its style.  A stroke of a glyph run waits for strokes story S5: no STROKE_RUNS yet. */
+   * refused for its style. */
   out->flags |= GSHSCENE_CAP_STROKE_EXPAND;
+  /* ST8: a stroke whose centerline is a run is drawn too: the run's centerline is one path (ST1), expanded and united as
+   * any path's is. */
+  out->flags |= GSHSCENE_CAP_STROKE_RUNS;
   /* S17: every kind, in its stated interpolation space (story P2). */
   for (uint32_t k = GSHSCENE_GRADIENT_LINEAR; k < GSHSCENE_GRADIENT_KIND_COUNT; k++) {
     out->gradient_kinds |= UINT32_C(1) << k;
@@ -1001,17 +1006,43 @@ static uint64_t exact_work(Run * run) {
   return w;
 }
 
-/** SC11: the expansion's own steps, counted whether the expansion was made or found, so a report does not depend on the cache. */
+/**
+ * SC11, ST9: the expansion's own steps, counted whether the expansion was made or found, so a report does not depend on the
+ * cache or the tier.  A run adds the elements of the glyph outlines that went into its centerline (ST1), once, and its
+ * expansion's steps are those of the centerline's elements, clamped to the resource limit the bound states.
+ */
 static uint64_t expansion_work(const Run * run, const GSHSCENE_Item * item, const GSHCPU_Stroke * s) {
   uint64_t points = 0;
   for (int p = 0; p < GSHCPU_STROKE_PARTS; p++) {
     points += s->meta.points[p];
   }
-  size_t elements = gshgeom_path_element_count(gshscene_resource_path(item->resource));
+  const GSHGEOM_Path * path = gshscene_resource_path(item->resource);
+  uint64_t elements = path ? (uint64_t)gshgeom_path_element_count(path) : s->run_elements;
   if (elements > run->cs->elements) {
     elements = run->cs->elements;
   }
-  return points + (uint64_t)elements * (uint64_t)GSHGEOM_STROKE_MAX_DEPTH;
+  return points + elements * (uint64_t)GSHGEOM_STROKE_MAX_DEPTH + (path ? 0u : elements);
+}
+
+/**
+ * The glyph notes of a stroked run's centerline (ST1, ST8), reported as a fill's are (glyph.h, D7); a glyph refused
+ * under strict stops the render at the item (S6).  @return ::GSHSCENE_OK, or the result to stop with.
+ */
+static GSHSCENE_Result report_run_notes(Run * run, const GSHCPU_Stroke * s, const size_t * chain, size_t count) {
+  for (size_t i = 0; i < s->note_count; i++) {
+    const GSHCPU_Run_Note * n = &s->notes[i];
+    GSHSCENE_Result e = gshscene_job_report_glyph(
+        run->job, (GSHSCENE_Entry_Class)n->entry_class, (GSHSCENE_Reason)n->reason, chain, count, (size_t)n->index);
+    if (e == GSHSCENE_OK && n->entry_class == GSHSCENE_ENTRY_REFUSED && (run->request->flags & GSHSCENE_RENDER_STRICT)) {
+      memcpy(run->stop, chain, count * sizeof *chain);
+      run->stop_count = count;
+      e = GSHSCENE_ERR_REFUSED;
+    }
+    if (e != GSHSCENE_OK) {
+      return e;
+    }
+  }
+  return GSHSCENE_OK;
 }
 
 /**
@@ -1039,8 +1070,14 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
   if (opened != GSHCPU_OK) {
     return scene_result(opened);
   }
+  GSHSCENE_Result noted = report_run_notes(run, &s, chain, count);
+  if (noted != GSHSCENE_OK) {
+    gshcpu_render_stroke_close(cache, &s);
+    return noted;
+  }
   if (!s.drawn) {
-    return GSHSCENE_OK; /* an EMPTY or NOT_INVERTIBLE outline, which the plan's notice should have caught first: nothing */
+    gshcpu_render_stroke_close(cache, &s);
+    return GSHSCENE_OK; /* an EMPTY or NOT_INVERTIBLE outline (a run of no outlines): the notes are reported, nothing is drawn */
   }
   run->work += expansion_work(run, item, &s);
   GSHCPU_Rect reach = reach_of(run, frame->clip_base, run->clip_count);

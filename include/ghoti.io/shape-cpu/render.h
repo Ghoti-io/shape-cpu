@@ -217,9 +217,10 @@
  *   for its style.  `width` and `width_space`, `join`, `miter_limit`, `cap`, `degenerate` and the dash fields are
  *   honored by the expansion; `alignment` and `alignment_rule` by the expansion's three parts and then by this
  *   sink (SC5), the one place it acts on a style field; `width_profile` never reaches it (refused at intern).  Every
- *   paint kind draws.  A centerline that is a glyph run is refused by the planning pass, `STROKE_CENTERLINE`
- *   (this sink does not set `STROKE_RUNS`).  The entries a stroke can receive while drawing are the fill's plus
- *   `RESOURCE_LIMIT` (SC6).
+ *   paint kind draws.  The caps also say `STROKE_RUNS`: a centerline that is a glyph run is drawn as the stroke of
+ *   the path shape-scene's ST1 defines for it (ST8 below), on the general route and never hinted (ST3).  The
+ *   entries a stroke can receive while drawing are the fill's plus `RESOURCE_LIMIT` (SC6), and for a run the notes of
+ *   its glyphs (`GLYPH_UNAVAILABLE`, `RESOURCE_LIMIT`, `second` the glyph's index).
  * - **SC2 The style conversion.**  `gshscene_resource_stroke_geometry` converts the style to `shape-geometry`'s
  *   parameters field by field, each enumeration asserted equal at compile time; `gshgeom_stroke_check` accepts every
  *   style the store interns (a style that passes the store and fails the check is an internal error).
@@ -275,7 +276,25 @@
  * - **SC11 Work and cancel.**  A stroke counts the points of its parts, the cell deposits, two passes over its pixels
  *   when aligned and one otherwise, the expansion's own steps (the centerline's elements times the depth cap,
  *   clamped to the resource limit the bound states), counted whether the expansion was made or found so that a report
- *   does not depend on the cache or the tier, and the exact step's (UC9).
+ *   does not depend on the cache or the tier, and the exact step's (UC9).  A stroke of a run also counts, once, the
+ *   elements of the glyph outlines that went into its centerline (ST9), so the bound's expansion term is the resource
+ *   limit times the depth cap plus one.
+ *
+ * ### Stroked text (strokes story S5, ST8)
+ *
+ * - **ST8 The sink.**  A stroke whose centerline is a run is drawn by the path above exactly, with the path of
+ *   ::gshscene_glyph_run_centerline as the centerline and the **run's resource id** as the centerline id of SC7's key.
+ *   The path is built only on a miss, and the cache entry holds the expansion **and the notes of the construction**
+ *   (the glyphs the provider could not give, and the elements of the path), which a hit replays, so a hit equals a miss in
+ *   the report as well as in the pixels (S12).  Under `CALLER_MEMORY` the cache is neither read nor written, the
+ *   path and the glyph outlines are allocated from the arena in the caller's memory in the order the measure walks them, and
+ *   the memory asked for is exact: one byte less is `ERR_LIMIT`.  A shifted coordinate, a part past `max_points`, cells past
+ *   `max_cells` or the depth cap refuse the **whole item** with `RESOURCE_LIMIT` (SC6): a run is one region and is
+ *   never stroked in part, while a glyph that is left out of the path is a note.  A glyph refused under strict stops
+ *   the render at the item, as a fill's does.
+ * - **ST9, ST10, ST11.**  The expansion lies within SK10's bounds of the glyphs, the test sink's `outline=` for a run is
+ *   the hash of the outline this sink draws for its path, and a stroke of a run and a stroke of its path are bit for bit
+ *   the same in pixels, `outline=` and report.
  *
  * ### Exact union coverage of a stroke (strokes story S4b, UC1 to UC12)
  *

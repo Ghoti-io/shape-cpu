@@ -227,12 +227,22 @@ def scripted():
     out["scripted-blend-modes-float.bin"] = header(target=T64 | 3) + body(blends)
     pdf = [fill(0), bytes([5, 0, 4, 23, 0xA1]), fill(1), POP, bytes([5, 0, 4, 0, 0x81]), fill(0), POP]
     out["scripted-pdf-refused.bin"] = header() + body(pdf)
-    # Strokes stories S1 and S4: a fill whose rule byte has bits 1 and 2 set is a stroke of the shape instead, drawn by
-    # expansion; one of a glyph run is refused for its centerline (S20), and under strict the render is refused before
-    # it starts.
-    run_stroke = [fill(0), stroke(3, first=style())]
-    out["scripted-stroke-run-refused.bin"] = header() + body_with_line(run_stroke)
+    # Strokes stories S1, S4 and S5: a fill whose rule byte has bits 1 and 2 set is a stroke of the shape instead, drawn by
+    # expansion; one of a glyph run is drawn as the stroke of the path its glyphs make (ST1, ST8), unhinted whatever the
+    # run asks, and the harness draws the same list with each such centerline replaced by that path and requires the same
+    # bytes (ST11).  Under strict a render with no refusal is the same render.
+    run_stroke = [fill(0), stroke(3, first=style(width=2, join=1, cap=1))]
+    out["scripted-stroke-run.bin"] = header() + body_with_line(run_stroke)
     out["scripted-stroke-run-strict.bin"] = header(request=STRICT) + body_with_line(run_stroke)
+    # The general run turned, the same run stroked twice (the second from the cache), an aligned stroke of a run, dashes of
+    # both scopes, and a run stroke under a gradient.
+    out["scripted-stroke-run-turned.bin"] = header() + body_with_line([fill(0), stroke(7, ROTATED, first=style(width=6, join=1))])
+    out["scripted-stroke-run-cached.bin"] = header() + body_with_line([stroke(3, first=style(width=2)), stroke(3), stroke(3, ROTATED)])
+    out["scripted-stroke-run-aligned.bin"] = header() + body_with_line([stroke(7, first=style(width=2, alignment=1))])
+    out["scripted-stroke-run-outside.bin"] = header() + body_with_line([stroke(3, first=style(width=6, alignment=2, rule=1))])
+    out["scripted-stroke-run-dashed.bin"] = header() + body_with_line([stroke(7, first=style(width=7, cap=1, dashes=1, scope=1, offset=1))])
+    out["scripted-stroke-run-caller-memory.bin"] = header(request=CALLER_MEMORY) + body_with_line(run_stroke)
+    out["scripted-stroke-run-float.bin"] = header(target=T64 | 3) + body_with_line(run_stroke)
     # A plain stroke of each path under a rotation and a group, a hairline and a plain sparse stroke of the line, each
     # join and cap, dashes of both scopes, every alignment (inside, outside, even-odd) over the closed square and the
     # open line, a gradient stroke, a zero width (a notice), and the same on a float target, damaged, in caller memory.

@@ -39,6 +39,9 @@
  *   Each is covered as a fill is (story 9's accumulation, 8 bits): `b` and `a` under nonzero, `c` under the clip's
  *   rule over the aligned part's rectangle.  The composition is SK5 as amended (E9), `k = k_b + k_a c' - k_b k_a c'`,
  *   in D8's integer arithmetic.
+ * - **A run (ST1, ST8).**  A centerline that is a glyph run is the path ::gshscene_glyph_run_centerline defines, made on
+ *   a miss only, expanded as any path is and cached under the run's resource id with the notes of its glyphs and the
+ *   elements it holds, which a hit replays: a hit equals a miss in the report as well as in the pixels.
  * - **The limits (SC6).**  A part past `max_points`, the depth cap, a coordinate that the shift takes past
  *   ::GSHCPU_RENDER_COORD_LIMIT and deposits past `max_cells` (summed over the parts, counted over what the whole
  *   render draws of the item) are the sink's resource limit.
@@ -49,6 +52,8 @@
 #include "render_internal.h"
 
 #include <ghoti.io/shape-geometry/hash.h>
+#include <ghoti.io/shape-scene/glyph.h>
+#include <ghoti.io/shape-scene/resource.h>
 #include <ghoti.io/shape-scene/stroke.h>
 
 #include <stddef.h>
@@ -114,14 +119,46 @@ static GSHCPU_Rect empty_rect(void) {
   return r;
 }
 
+/** The notes of a run's glyphs that have an entry, in glyph order, as a stroke's own records (NULL and 0 for none). */
+static GSHCPU_Result collect_notes(const GSHGEOM_Allocator * alloc, const GSHSCENE_Glyph_Note * notes, size_t count,
+    GSHCPU_Run_Note ** out, size_t * out_count) {
+  size_t n = 0;
+  for (size_t i = 0; i < count; i++) {
+    n += notes[i].entry_class != 0;
+  }
+  *out = NULL;
+  *out_count = n;
+  if (n == 0) {
+    return GSHCPU_OK;
+  }
+  GSHCPU_Run_Note * records = alloc->malloc_fn(alloc->ctx, n * sizeof *records);
+  if (!records) {
+    return GSHCPU_ERR_OOM;
+  }
+  size_t at = 0;
+  for (size_t i = 0; i < count; i++) {
+    if (notes[i].entry_class) {
+      records[at].index = i;
+      records[at].entry_class = notes[i].entry_class;
+      records[at].reason = notes[i].reason;
+      at++;
+    }
+  }
+  *out = records;
+  return GSHCPU_OK;
+}
+
 GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, const GSHSCENE_Item * item, const GSHGEOM_Map * composed, GSHCPU_Stroke * out) {
   memset(out, 0, sizeof *out);
   /* SC2: the style, converted row by row by shape-scene's one conversion. */
   GSHGEOM_Stroke params;
   const GSHGEOM_Path * path = gshscene_resource_path(item->resource);
-  if (!path || gshscene_resource_stroke_geometry(item->style, &params) != GSHSCENE_OK) {
-    return GSHCPU_ERR_INTERNAL; /* a style the store holds passes the check; a run is refused by the plan */
+  GSHSCENE_Glyph_Run glyphs;
+  memset(&glyphs, 0, sizeof glyphs);
+  int is_run = !path && gshscene_resource_glyph_run(item->resource, &glyphs) == GSHSCENE_OK;
+  if ((!path && !is_run) || gshscene_resource_stroke_geometry(item->style, &params) != GSHSCENE_OK) {
+    return GSHCPU_ERR_INTERNAL; /* a style the store holds passes the check; a run the plan cannot draw is refused by it */
   }
   /* SC3: the canonical map. */
   GSHGEOM_Map canon;
@@ -145,20 +182,65 @@ GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGE
   GSHGEOM_Stroke_Outline * outline = NULL;
   GSHCPU_Stroke s;
   memset(&s, 0, sizeof s);
+  s.alloc = alloc;
+  GSHCPU_Run_Note * made = NULL; /* a miss: the notes of the centerline just made (this stroke's own) */
   if (!cache || !gshcpu_stroke_cache_acquire(cache, &key, &s.pin, &outline, &s.meta)) {
     /* SC7: a miss.  The expansion is made outside every lock, from the allocator given. */
+    GSHGEOM_Path * built = NULL;
+    memset(&s.meta, 0, sizeof s.meta);
+    if (is_run) {
+      /* ST1: the one function that defines a run's centerline; the whole run is one region, so a path past the limits
+       * is the item's resource limit (SC6), while a glyph left out is a note. */
+      GSHSCENE_Glyph_Note * notes = NULL;
+      if (glyphs.glyph_count > 0) {
+        notes = alloc->calloc_fn(alloc->ctx, glyphs.glyph_count, sizeof *notes);
+        if (!notes) {
+          return GSHCPU_ERR_OOM;
+        }
+      }
+      GSHSCENE_Result cr = gshscene_glyph_run_centerline(item->resource, alloc, limits, &built, notes);
+      GSHCPU_Result nr = GSHCPU_OK;
+      if (cr == GSHSCENE_OK) {
+        nr = collect_notes(alloc, notes, glyphs.glyph_count, &made, &s.meta.note_count);
+      }
+      if (notes) {
+        alloc->free_fn(alloc->ctx, notes);
+      }
+      if (cr != GSHSCENE_OK) {
+        return cr == GSHSCENE_ERR_OOM ? GSHCPU_ERR_OOM : cr == GSHSCENE_ERR_LIMIT ? GSHCPU_ERR_LIMIT : GSHCPU_ERR_INTERNAL;
+      }
+      if (nr != GSHCPU_OK) {
+        gshgeom_path_destroy(built);
+        return nr;
+      }
+      s.meta.run_elements = gshgeom_path_element_count(built);
+      s.meta.notes = made;
+      path = built;
+    }
+    uint64_t run_elements = s.meta.run_elements;
+    size_t note_count = s.meta.note_count;
     g = gshgeom_stroke_expand(path, &params, &canon, alloc, limits, &outline);
+    gshgeom_path_destroy(built);
     if (g != GSHGEOM_OK) {
+      if (made) {
+        alloc->free_fn(alloc->ctx, made);
+      }
       return g == GSHGEOM_ERR_OOM ? GSHCPU_ERR_OOM : g == GSHGEOM_ERR_LIMIT ? GSHCPU_ERR_LIMIT : GSHCPU_ERR_INTERNAL;
     }
     meta_of(outline, &s.meta);
+    s.meta.run_elements = run_elements;
+    s.meta.note_count = note_count;
+    s.meta.notes = made;
+    s.meta.bytes += note_count * sizeof(GSHCPU_Run_Note);
     s.owned = outline;
+    s.notes = made;
+    s.note_count = note_count;
     if (cache) {
       void * entry = NULL;
       GSHGEOM_Stroke_Outline * held = NULL;
       int kept = gshcpu_stroke_cache_store(cache, &key, outline, &s.meta, &entry, &held);
       if (kept < 0) {
-        gshcpu_render_stroke_close(cache, &s); /* destroys the outline it still owns */
+        gshcpu_render_stroke_close(cache, &s); /* destroys the outline it still owns, and the notes */
         return GSHCPU_ERR_OOM;
       }
       if (kept == 1) {
@@ -171,7 +253,18 @@ GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGE
         outline = held;
       }
     }
+  } else if (s.meta.note_count > 0) {
+    /* A hit replays the notes of the miss (ST8): the stroke's own copy, so that they outlive the pin. */
+    GSHCPU_Run_Note * copy = alloc->malloc_fn(alloc->ctx, s.meta.note_count * sizeof *copy);
+    if (!copy) {
+      gshcpu_render_stroke_close(cache, &s);
+      return GSHCPU_ERR_OOM;
+    }
+    memcpy(copy, s.meta.notes, s.meta.note_count * sizeof *copy);
+    s.notes = copy;
+    s.note_count = s.meta.note_count;
   }
+  s.run_elements = s.meta.run_elements;
   s.outline = outline;
   s.shift_x = sx;
   s.shift_y = sy;
@@ -205,10 +298,26 @@ GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGE
       s.box[p].y1 = -pixel_floor(-y1);
     }
   }
-  if (r != GSHCPU_OK || status != GSHGEOM_STROKE_DRAWN) {
+  if (r != GSHCPU_OK) {
     gshcpu_render_stroke_close(cache, &s);
     memset(out, 0, sizeof *out);
-    return r; /* a status other than DRAWN draws nothing and is not an error (SC4's defense) */
+    return r;
+  }
+  if (status != GSHGEOM_STROKE_DRAWN) {
+    /* A status other than DRAWN draws nothing and is not an error (SC4's defense); the notes of a run still stand. */
+    s.drawn = 0;
+    if (s.pin) {
+      gshcpu_stroke_cache_release(cache, s.pin);
+    }
+    if (s.owned) {
+      gshgeom_stroke_outline_destroy(s.owned);
+    }
+    s.pin = NULL;
+    s.owned = NULL;
+    s.outline = NULL;
+    memset(&s.meta, 0, sizeof s.meta);
+    *out = s;
+    return GSHCPU_OK;
   }
   s.drawn = 1;
   s.hairline = params.width_space == (uint32_t)GSHGEOM_STROKE_WIDTH_DEVICE && params.width == 1.0;
@@ -223,9 +332,14 @@ void gshcpu_render_stroke_close(GSHCPU_Stroke_Cache * cache, GSHCPU_Stroke * s) 
   if (s->owned) {
     gshgeom_stroke_outline_destroy(s->owned);
   }
+  if (s->notes) {
+    s->alloc->free_fn(s->alloc->ctx, s->notes);
+  }
   s->pin = NULL;
   s->owned = NULL;
   s->outline = NULL;
+  s->notes = NULL;
+  s->note_count = 0;
 }
 
 /* --- SC5: the composition ------------------------------------------------------------------------------- */

@@ -323,6 +323,22 @@ against the current `max_points`, so a hit refuses exactly what a miss would. `C
 not touch the cache, because that mode allocates nothing and its exact workspace may not depend on what an earlier
 render left behind.
 
+**Stroked text (ST8).** A run's stroke is the stroke of its path, and that is all it is: `gshscene_glyph_run_centerline`
+(shape-scene) defines the path from the glyphs' outlines in the run's model space, and `stroke.c` expands it like any other
+centerline, so there is no second stroker and no second union. The run's resource id is the centerline id of the cache
+key, so a reflowed paragraph (new runs) misses where a cache of glyphs would hit; a per-glyph expansion cached by face,
+glyph and style would hit after a reflow, but it is exact only for center alignment (inside and outside clip against the
+whole run's fill region), moves the rounding of every outline and gives two definitions, so it is left as a measured
+optimization to revisit. What the construction said about the glyphs (a glyph the provider could not give is left out and
+has a note) is part of the entry, because a hit that forgot the notes would report less than a miss. The path is built
+only on a miss, from the allocator the render was given: the sink's, or under `CALLER_MEMORY` the arena in the caller's memory, whose
+measure walks the same calls, so the memory asked for is exact. A part, a cell count or a coordinate past a limit refuses the
+whole item. The work of a run's stroke is the path's plus one step for each element of the glyph outlines in it, counted on
+a hit as on a miss; the declared bound's expansion term is therefore the resource limit times the depth cap plus one. A
+stroke never reads the hinted route: the fill of the same run on a grid-aligned map at an integer ppem takes the fast
+tier and is grid-fitted, and the stroke is centered on the unhinted outline, so the two can disagree by up to about half
+a pixel; hint mode `NONE` on the run asks for a registered pair.
+
 **Fast tiers (SC8).** The list of tiers, each with its detection, its counter and the gate that holds it equal to the
 general tier (which can be forced, and is the oracle):
 

@@ -129,5 +129,13 @@ render strokes-thin-aligned rgba8 bb1b793682142121
 render strokes-thin-aligned rgba8-premultiplied 774fe5390bab2f27
 render strokes-thin-aligned rgbaf32 fd2eaae57db999d3
 render strokes-thin-aligned rgbaf32-premultiplied 671a8d3e8cab90e2
-hash 010361d84b54fc4a
-count 128
+render strokes-text rgba8 c1680a658f6f3dbc
+render strokes-text rgba8-premultiplied 4fd6b456674ec51f
+render strokes-text rgbaf32 4252b3645711de46
+render strokes-text rgbaf32-premultiplied 53c07e104fc060d9
+render strokes-text-outlines rgba8 5ea6171efbcd6dd0
+render strokes-text-outlines rgba8-premultiplied 41aa9c426192224f
+render strokes-text-outlines rgbaf32 67814238e0239080
+render strokes-text-outlines rgbaf32-premultiplied cf3df5de24e3eb53
+hash 3a3dc8dd83f3aab5
+count 136
