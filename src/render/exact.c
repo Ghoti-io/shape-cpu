@@ -66,11 +66,12 @@
  * as `floor(2^30 F) = (Q << 30) + ((Rm << 30) / Den)` with `Q = Num / Den <= 2^12` and `Rm = Num % Den`, so
  * `Rm << 30 < 2^63`: low by less than `2^-30` unit squared.  At a slab's end `2^30 F(H) = ((2 a H + dx H^2) << 30) / (2 dy)`
  * from a numerator below `2^20`.  Orders and meetings compare products of lattice quantities below `2^32`.  `acc` is the
- * sum of `2^30` times the area in doubled units, `uint64_t` with defined wrap-around: a partial sum may pass `2^63` but the
- * true total is below `2^54` for `|w| <= 1024`, so the wrapped sum is exact.  A coefficient is at most `6 mu` in magnitude
- * (`|Omega| <= 2 |w| + 2`, differences of at most `6` per unit of winding step) and a term `c F30` is below `2^55`.  The
- * error of a cell of `K` exchanges and `E` slab-end evaluations with largest multiplicity `mu` is below
- * `2^-30 * 6 mu (2 K + E)` doubled units.
+ * sum of `2^30` times the area in doubled units, `uint64_t` with defined wrap-around: the weight is `0` or `2`, a coefficient
+ * `c_f = Omega_left - Omega_right` is `0` or `+-2`, a second difference `d` at most `4`, a term `c F30` is below `2^44`, and
+ * the true total (twice the area, at most `2^13`, times `2^30`) is below `2^43`, so the sum never wraps in fact and the
+ * wrapped sum would be exact if it did.  Each `F30` is low by less than one unit of `2^-30`, a meeting adds two of them
+ * times at most `4` and a slab's end one times at most `2`, so the area is within `8 K + 2 E` such units of the exact one
+ * (`K` the meetings, `E` the evaluations at slab ends), whatever the multiplicity or the depth of the winding.
  */
 
 #include <ghoti.io/shape-cpu/macros.h>
@@ -99,10 +100,10 @@ size_t gshcpu_exact_scratch_bytes(uint64_t max_pieces, int parts) {
     return 0;
   }
   size_t bytes = 0;
-  bytes += m * sizeof(GSHCPU_Piece) + 16u;  /* the cell's pieces, sorted */
   bytes += m * sizeof(Frag) + 16u;
   bytes += m * sizeof(int32_t) + 16u;       /* a */
-  bytes += 4u * (m * sizeof(uint32_t) + 16u); /* ord, ord2, st, sc */
+  bytes += m * sizeof(uint64_t) + 16u;      /* the keys of the pieces */
+  bytes += 5u * (m * sizeof(uint32_t) + 16u); /* byy, ord, ord2, st, sc */
   bytes += (m + 1u) * sizeof(Gap) + 16u;
   bytes += 4u * (m * sizeof(uint32_t) + 16u); /* heap, hpos, evn, evd */
   return bytes;
@@ -120,9 +121,10 @@ void gshcpu_exact_scratch_init(GSHCPU_Exact_Scratch * s, void * memory, uint64_t
   unsigned char * at = memory;
   memset(s, 0, sizeof *s);
   s->capacity = m;
-  s->sorted = (void *)carve(&at, m * sizeof(GSHCPU_Piece));
   s->frag = (void *)carve(&at, m * sizeof(Frag));
   s->a = (void *)carve(&at, m * sizeof(int32_t));
+  s->key = (void *)carve(&at, m * sizeof(uint64_t));
+  s->byy = (void *)carve(&at, m * sizeof(uint32_t));
   s->ord = (void *)carve(&at, m * sizeof(uint32_t));
   s->ord2 = (void *)carve(&at, m * sizeof(uint32_t));
   s->st = (void *)carve(&at, m * sizeof(uint32_t));
@@ -142,14 +144,18 @@ typedef struct Ctx {
   size_t nfrag;
   size_t weighted;        /* pieces left after the seams cancel, equal copies counted: the sum of the multiplicities */
   size_t raw;             /* pieces handed in, all parts */
+  uint64_t mk;            /* bit h (0..63) set: a slab boundary at height h; 0 and 64 always are */
+  uint64_t endmk;         /* bit h set: a fragment ends at height h */
+  uint64_t jm[3];         /* bit h set: the steps of the winding on the left side at height h (jnet[part][h] is valid) */
+  uint8_t j64[3];         /* ... at height 64 */
   int64_t wtop[3];
-  int32_t jnet[3][65];
-  uint8_t mark[65];
   int64_t wind0[3];       /* the winding on the left side at the current slab's top, eps applied */
   /* the order of the previous slab's end, carried */
   uint32_t * ord;
   uint32_t * ord2;
   size_t n_prev;
+  size_t cursor;          /* the next fragment of `byy` to start */
+  int ya_prev;            /* the previous slab's top */
   /* the slab */
   int ya, yb;
   int64_t height;
@@ -165,6 +171,7 @@ typedef struct Ctx {
   uint64_t work;
   uint32_t logn;          /* ceil(log2(fragments)) for the work units */
   int status;
+  int32_t jnet[3][65];    /* last: not cleared with the rest, valid where jm and j64 say */
 } Ctx;
 
 /* --- the pieces of the cell -------------------------------------------------------------------------------------- */
@@ -184,10 +191,18 @@ static uint64_t piece_key(GSHCPU_Piece pc) {
   return a <= b ? ((uint64_t)a << 33) | ((uint64_t)b << 1) | 1u : ((uint64_t)b << 33) | ((uint64_t)a << 1);
 }
 
-/** Sort @p n pieces in place by their keys (a heap sort: no recursion, no allocation, O(n log n)). */
-static void sort_pieces(GSHCPU_Piece * v, size_t n) {
-#define KEY(i) piece_key(v[i])
-  if (n < 2) {
+/** Sort @p v of @p n keys (insertion for a short list, else a heap sort: no recursion, no allocation, O(n log n)). */
+static void sort_keys(uint64_t * v, size_t n) {
+  if (n <= 24) {
+    for (size_t i = 1; i < n; i++) {
+      uint64_t k = v[i];
+      size_t j = i;
+      while (j > 0 && v[j - 1] > k) {
+        v[j] = v[j - 1];
+        j--;
+      }
+      v[j] = k;
+    }
     return;
   }
   for (size_t start = n / 2; start-- > 0;) {
@@ -197,20 +212,20 @@ static void sort_pieces(GSHCPU_Piece * v, size_t n) {
       if (child >= n) {
         break;
       }
-      if (child + 1 < n && KEY(child) < KEY(child + 1)) {
+      if (child + 1 < n && v[child] < v[child + 1]) {
         child++;
       }
-      if (KEY(root) >= KEY(child)) {
+      if (v[root] >= v[child]) {
         break;
       }
-      GSHCPU_Piece t = v[root];
+      uint64_t t = v[root];
       v[root] = v[child];
       v[child] = t;
       root = child;
     }
   }
   for (size_t end = n - 1; end > 0; end--) {
-    GSHCPU_Piece t = v[0];
+    uint64_t t = v[0];
     v[0] = v[end];
     v[end] = t;
     size_t root = 0;
@@ -219,19 +234,18 @@ static void sort_pieces(GSHCPU_Piece * v, size_t n) {
       if (child >= end) {
         break;
       }
-      if (child + 1 < end && KEY(child) < KEY(child + 1)) {
+      if (child + 1 < end && v[child] < v[child + 1]) {
         child++;
       }
-      if (KEY(root) >= KEY(child)) {
+      if (v[root] >= v[child]) {
         break;
       }
-      GSHCPU_Piece u = v[root];
+      uint64_t u = v[root];
       v[root] = v[child];
       v[child] = u;
       root = child;
     }
   }
-#undef KEY
 }
 
 /** ceil(log2(@p n)) for n >= 1. */
@@ -243,11 +257,36 @@ static uint32_t ceil_log2(uint64_t n) {
   return b;
 }
 
+/** The steps of the winding on the left side of part @p p at height @p h: a slot that reads as zero until it is written. */
+static int32_t * jstep(Ctx * c, int p, int h) {
+  if (h == 64) {
+    if (!c->j64[p]) {
+      c->j64[p] = 1;
+      c->jnet[p][64] = 0;
+    }
+  } else if (!((c->jm[p] >> h) & 1u)) {
+    c->jm[p] |= (uint64_t)1 << h;
+    c->jnet[p][h] = 0;
+  }
+  return &c->jnet[p][h];
+}
+
+/** The steps there, zero where none was written. */
+static int32_t jget(const Ctx * c, int p, int h) {
+  if (h == 64) {
+    return c->j64[p] ? c->jnet[p][64] : 0;
+  }
+  return ((c->jm[p] >> h) & 1u) ? c->jnet[p][h] : 0;
+}
+
 /**
- * The cell's pieces to its fragments (UC13).  The pieces of each part are copied, validated, and checked against what the
- * rasterizer summed of them (UC16 ii: when @p verify, exactly, in integers); sorted by segment; and the pieces left over
- * one segment after a piece and its reverse cancel, which are equal copies in one direction, become one fragment of that
- * multiplicity.  Sets `nfrag`, `weighted`, the marks and the steps `jnet` of the winding on the left side.
+ * The cell's pieces to its fragments (UC13).  The pieces of each part are validated and checked against what the rasterizer
+ * summed of them (UC16 ii: when @p verify, exactly, in integers), each turned into its key (its two ends in order, then
+ * which way it goes) and the keys sorted; and the pieces left over one segment after a piece and its reverse cancel, which
+ * are equal copies in one direction, become one fragment of that multiplicity (the key says the piece, so the pieces are not
+ * kept).  Fragments are numbered part by part in the order of their keys, which is what the order of fragments of equal
+ * place rests on.  Sets `nfrag`, `weighted`, the boundaries and the steps `jnet` of the winding on the left side, and
+ * the fragments in the order of their tops.
  *
  * @return ::GSHCPU_EXACT_OK, ::GSHCPU_EXACT_LIMIT (more pieces than the scratch holds) or ::GSHCPU_EXACT_IDENTITY.
  */
@@ -262,15 +301,11 @@ static int collect(Ctx * c, const GSHCPU_Exact_Cell * cell, int verify) {
   if (pieces > s->capacity) {
     return GSHCPU_EXACT_LIMIT; /* the caller counts first: reaching this is a defect, and refuses rather than guesses */
   }
-  c->mark[0] = 1;
-  c->mark[64] = 1;
-  size_t at = 0;
+  c->mk = 1u; /* height 0; height 64 is always a boundary and has no bit */
+  uint64_t * keys = s->key;
   for (int p = 0; p < params->parts; p++) {
-    GSHCPU_Piece * v = s->sorted + at;
-    size_t n = cell->count[p];
-    if (n) {
-      memcpy(v, cell->pieces[p], n * sizeof *v);
-    }
+    const size_t n = cell->count[p];
+    const GSHCPU_Piece * v = cell->pieces[p];
     /* The pieces, as the rasterizer deposited them: the cover is the sum of the heights, the area the sum of height times
      * the two x ends, and what was summed to the left of the cell is the cover of the cells before it. */
     int64_t cover = 0;
@@ -283,63 +318,90 @@ static int collect(Ctx * c, const GSHCPU_Exact_Cell * cell, int verify) {
       int64_t dy = (int64_t)pc.y1 - (int64_t)pc.y0;
       cover += dy;
       area += dy * ((int64_t)pc.x0 + (int64_t)pc.x1);
+      keys[i] = piece_key(pc);
     }
     if (verify && cell->dense[p] != params->eps[p] * (128 * (cell->a_left[p] + cover) - area)) {
       return GSHCPU_EXACT_IDENTITY; /* the pieces are not the ones the rasterizer summed: a piece missed or invented */
     }
     c->work += n;
-    sort_pieces(v, n);
+    sort_keys(keys, n);
     for (size_t i = 0; i < n;) {
-      uint64_t group = piece_key(v[i]) >> 1;
+      const uint64_t group = keys[i] >> 1;
       size_t j = i;
       int64_t net = 0;
-      GSHCPU_Piece forward = v[i];
-      GSHCPU_Piece backward = v[i];
-      while (j < n && (piece_key(v[j]) >> 1) == group) {
-        if (piece_key(v[j]) & 1u) {
-          net++;
-          forward = v[j];
-        } else {
-          net--;
-          backward = v[j];
-        }
+      while (j < n && (keys[j] >> 1) == group) {
+        net += (keys[j] & 1u) ? 1 : -1;
         j++;
       }
+      const uint32_t hi = (uint32_t)(keys[i] >> 33); /* the lesser end's code */
+      const uint32_t lo = (uint32_t)((keys[i] >> 1) & 0xffffffffu);
       i = j;
       if (net == 0) {
         continue;
       }
-      GSHCPU_Piece pc = net > 0 ? forward : backward;
+      /* A forward piece starts at the lesser end, a backward one at the greater. */
+      const uint32_t from = net > 0 ? hi : lo;
+      const uint32_t to = net > 0 ? lo : hi;
+      const int x0 = (int)(from % 65u), y0 = (int)(from / 65u), x1 = (int)(to % 65u), y1 = (int)(to / 65u);
       uint32_t mu = (uint32_t)(net < 0 ? -net : net);
       c->weighted += mu;
-      if (pc.x0 == 0) {
-        c->jnet[p][pc.y0] -= (int32_t)mu;
+      if (x0 == 0) {
+        *jstep(c, p, y0) -= (int32_t)mu;
       }
-      if (pc.x1 == 0) {
-        c->jnet[p][pc.y1] += (int32_t)mu;
+      if (x1 == 0) {
+        *jstep(c, p, y1) += (int32_t)mu;
       }
-      if (pc.y0 != pc.y1) {
+      if (y0 != y1) {
         Frag * f = &s->frag[c->nfrag];
-        int down = pc.y1 > pc.y0;
-        f->px = down ? pc.x0 : pc.x1;
-        f->py = down ? pc.y0 : pc.y1;
-        f->dx = (int16_t)(down ? pc.x1 - pc.x0 : pc.x0 - pc.x1);
-        f->dy = (int16_t)(down ? pc.y1 - pc.y0 : pc.y0 - pc.y1);
+        int down = y1 > y0;
+        f->px = (int16_t)(down ? x0 : x1);
+        f->py = (int16_t)(down ? y0 : y1);
+        f->dx = (int16_t)(down ? x1 - x0 : x0 - x1);
+        f->dy = (int16_t)(down ? y1 - y0 : y0 - y1);
         f->s = down ? 1 : -1;
         f->part = (uint8_t)p;
         f->mu = mu;
-        c->mark[f->py] = 1;
-        c->mark[f->py + f->dy] = 1;
+        c->mk |= (uint64_t)1 << f->py;
+        if (f->py + f->dy < 64) {
+          c->mk |= (uint64_t)1 << (f->py + f->dy);
+          c->endmk |= (uint64_t)1 << (f->py + f->dy);
+        }
         c->nfrag++;
       }
     }
-    at += n;
   }
   for (int p = 0; p < params->parts; p++) {
-    for (int h = 0; h <= 64; h++) {
+    for (uint64_t bits = c->jm[p]; bits != 0; bits &= bits - 1u) {
+      int h = __builtin_ctzll(bits);
       if (c->jnet[p][h] != 0) {
-        c->mark[h] = 1;
+        c->mk |= (uint64_t)1 << h;
       }
+    }
+  }
+  /* The fragments in the order of their tops (stable: equal tops by number), for the slabs to find the ones that start. */
+  uint32_t * byy = s->byy;
+  const size_t nf = c->nfrag;
+  if (nf <= 24) {
+    for (size_t i = 0; i < nf; i++) {
+      uint32_t id = (uint32_t)i;
+      size_t j = i;
+      while (j > 0 && s->frag[byy[j - 1]].py > s->frag[id].py) {
+        byy[j] = byy[j - 1];
+        j--;
+      }
+      byy[j] = id;
+    }
+  } else {
+    uint32_t count[66];
+    memset(count, 0, sizeof count);
+    for (size_t i = 0; i < nf; i++) {
+      count[s->frag[i].py + 1]++;
+    }
+    for (int h = 0; h < 65; h++) {
+      count[h + 1] += count[h];
+    }
+    for (size_t i = 0; i < nf; i++) {
+      byy[count[s->frag[i].py]++] = (uint32_t)i;
     }
   }
   return GSHCPU_EXACT_OK;
@@ -355,7 +417,7 @@ static int collect(Ctx * c, const GSHCPU_Exact_Cell * cell, int verify) {
  * winding and no depth is a reason to refuse a cell (UC20).  The regions of UC8 are twice a predicate: the clip's region by
  * its rule (mode 2), or `{w_b != 0} U ({w_a != 0} & F')` with `F'` the clip's region or its complement (mode 1).
  */
-static int32_t omega_of(const GSHCPU_Exact_Params * p, const int32_t w[3]) {
+static inline int32_t omega_of(const GSHCPU_Exact_Params * p, const int32_t w[3]) {
   if (p->mode == GSHCPU_EXACT_OVERLAP) {
     return w[0] != 0 ? 2 : 0;
   }
@@ -474,58 +536,91 @@ static uint64_t sort_bottom(const GSHCPU_Exact_Scratch * s, uint32_t * v, uint32
   return inversions;
 }
 
+/** Sort @p v of @p n ids by the order at the slab's top: insertion for a short list, else a merge sort through @p tmp. */
+static void sort_top_short(const GSHCPU_Exact_Scratch * s, uint32_t * v, uint32_t * tmp, size_t n) {
+  if (n > 16) {
+    sort_top(s, v, tmp, n);
+    return;
+  }
+  for (size_t i = 1; i < n; i++) {
+    uint32_t id = v[i];
+    size_t j = i;
+    while (j > 0 && cmp_top(s, v[j - 1], id) > 0) {
+      v[j] = v[j - 1];
+      j--;
+    }
+    v[j] = id;
+  }
+}
+
 /**
  * The order of the next slab's fragments, `ya` to `yb` (UC14 a): the list the previous slab ended in without the fragments
- * that end at `ya`, the ones that start at `ya` sorted and merged in, repaired if a pair that met exactly at `ya` is out
- * of order (by sorting the lot again, which costs no more than the repair of a bundle by exchanges would).  Sets `a` for
- * every fragment of the slab, `ord` and `n`.
+ * that end at `ya`, the ones that start at `ya` sorted and merged in, and the result repaired if a pair that met exactly at
+ * `ya` is out of order (by sorting the lot again, which costs no more than the repair of a bundle by exchanges would).  Sets
+ * `a` for every fragment of the slab (the carried ones move by their slope, the starting ones begin at their top), `ord` and
+ * `n`.  The fragments that start at `ya` are the next ones of `byy`, the order of the tops; the ones that end there are
+ * looked for only where one does.
  */
 static void slab_order(Ctx * c) {
   GSHCPU_Exact_Scratch * s = c->s;
   const int ya = c->ya;
-  const int yb = c->yb;
-  size_t k = 0;
-  for (size_t i = 0; i < c->n_prev; i++) {
-    uint32_t id = c->ord[i];
-    if (s->frag[id].py + s->frag[id].dy > ya) {
-      c->ord[k++] = id;
+  size_t k = c->n_prev;
+  if ((c->endmk >> ya) & 1u) {
+    size_t out = 0;
+    for (size_t i = 0; i < k; i++) {
+      uint32_t id = c->ord[i];
+      if (s->frag[id].py + s->frag[id].dy > ya) {
+        c->ord[out++] = id;
+      }
+    }
+    k = out;
+  }
+  const int moved = ya - c->ya_prev;
+  if (moved != 0) {
+    for (size_t i = 0; i < k; i++) {
+      const uint32_t id = c->ord[i];
+      s->a[id] += s->frag[id].dx * moved;
     }
   }
   size_t ns = 0;
-  for (size_t id = 0; id < c->nfrag; id++) {
-    const Frag * f = &s->frag[id];
-    if (f->py <= ya && f->py + f->dy >= yb) {
-      s->a[id] = (int32_t)f->px * f->dy + (int32_t)(ya - f->py) * f->dx;
-      if (f->py == ya) {
-        s->st[ns++] = (uint32_t)id;
-      }
+  while (c->cursor < c->nfrag && s->frag[s->byy[c->cursor]].py == ya) {
+    const uint32_t id = s->byy[c->cursor++];
+    s->a[id] = (int32_t)s->frag[id].px * s->frag[id].dy;
+    s->st[ns++] = id;
+  }
+  c->ya_prev = ya;
+  if (ns == 0) {
+    c->n = k;
+  } else if (k == 0) {
+    sort_top_short(s, s->st, s->sc, ns);
+    memcpy(c->ord, s->st, ns * sizeof *c->ord);
+    c->n = ns;
+    return;
+  } else {
+    sort_top_short(s, s->st, s->sc, ns);
+    size_t i = 0;
+    size_t j = 0;
+    size_t out = 0;
+    while (i < k && j < ns) {
+      c->ord2[out++] = cmp_top(s, c->ord[i], s->st[j]) <= 0 ? c->ord[i++] : s->st[j++];
     }
+    while (i < k) {
+      c->ord2[out++] = c->ord[i++];
+    }
+    while (j < ns) {
+      c->ord2[out++] = s->st[j++];
+    }
+    uint32_t * t = c->ord;
+    c->ord = c->ord2;
+    c->ord2 = t;
+    c->n = out;
   }
-  c->work += c->nfrag;
-  sort_top(s, s->st, s->sc, ns);
-  size_t i = 0;
-  size_t j = 0;
-  size_t out = 0;
-  while (i < k && j < ns) {
-    c->ord2[out++] = cmp_top(s, c->ord[i], s->st[j]) <= 0 ? c->ord[i++] : s->st[j++];
-  }
-  while (i < k) {
-    c->ord2[out++] = c->ord[i++];
-  }
-  while (j < ns) {
-    c->ord2[out++] = s->st[j++];
-  }
-  for (size_t q = 1; q < out; q++) {
-    if (cmp_top(s, c->ord2[q - 1], c->ord2[q]) >= 0) {
-      sort_top(s, c->ord2, s->sc, out); /* a pair that met exactly at the top: the order just after is by slope */
+  for (size_t q = 1; q < c->n; q++) {
+    if (cmp_top(s, c->ord[q - 1], c->ord[q]) >= 0) {
+      sort_top_short(s, c->ord, s->sc, c->n); /* a pair that met exactly at the top: the order just after is by slope */
       break;
     }
   }
-  uint32_t * t = c->ord;
-  c->ord = c->ord2;
-  c->ord2 = t;
-  c->n = out;
-  c->work += out;
 }
 
 /* --- the heap of meetings -------------------------------------------------------------------------------------- */
@@ -665,6 +760,27 @@ static void slab_gaps(Ctx * c) {
   GSHCPU_Exact_Scratch * s = c->s;
   const GSHCPU_Exact_Params * pr = c->pr;
   Gap * g = s->gap;
+  if (pr->parts == 1) {
+    /* One part (the overlap of a stroke part, or the clip's region): one winding, and the weight of one winding. */
+    const int32_t step = pr->eps[0];
+    int32_t w = (int32_t)c->wind0[0];
+    int64_t most = w < 0 ? -(int64_t)w : (int64_t)w;
+    for (size_t i = 0;; i++) {
+      g[i].w[0] = w;
+      g[i].w[1] = 0;
+      g[i].w[2] = 0;
+      g[i].om = pr->mode == GSHCPU_EXACT_OVERLAP ? (w != 0 ? 2 : 0) : ((pr->even_odd ? (w & 1) != 0 : w != 0) ? 2 : 0);
+      if (i == c->n) {
+        break;
+      }
+      const Frag * f = &s->frag[c->ord[i]];
+      w += step * f->s * (int32_t)f->mu;
+      int64_t m = w < 0 ? -(int64_t)w : (int64_t)w;
+      most = m > most ? m : most;
+    }
+    c->wmax = most > c->wmax ? most : c->wmax;
+    return;
+  }
   for (int p = 0; p < 3; p++) {
     g[0].w[p] = (int32_t)c->wind0[p];
   }
@@ -689,6 +805,16 @@ static void sweep_slab(Ctx * c) {
   const int64_t height = c->height;
   const size_t n = c->n;
   c->work += 6u * n + 8u;
+  if (n == 0) {
+    /* No fragment: the one gap is the winding on the left side, across the cell's width. */
+    int32_t w[3] = {(int32_t)c->wind0[0], (int32_t)c->wind0[1], (int32_t)c->wind0[2]};
+    for (int p = 0; p < pr->parts; p++) {
+      int64_t m = w[p] < 0 ? -(int64_t)w[p] : (int64_t)w[p];
+      c->wmax = m > c->wmax ? m : c->wmax;
+    }
+    c->acc += (uint64_t)((int64_t)64 * height * (int64_t)omega_of(pr, w)) << 30;
+    return;
+  }
   slab_gaps(c);
   Gap * g = s->gap;
   c->acc += (uint64_t)((int64_t)64 * height * (int64_t)g[n].om) << 30;
@@ -779,21 +905,15 @@ static int walk_slabs(Ctx * c, int count, uint64_t limit, uint64_t * crossings) 
   c->n_prev = 0;
   c->ord = s->ord;
   c->ord2 = s->ord2;
+  c->cursor = 0;
+  c->ya_prev = 0;
   uint64_t total = 0;
-  for (int h = 0; h <= 64; h++) {
-    if (!c->mark[h]) {
-      continue;
-    }
+  for (int h = 0; h < 64;) {
     for (int p = 0; p < pr->parts; p++) {
-      left[p] += c->jnet[p][h]; /* the steps at this height apply from here down */
+      left[p] += jget(c, p, h); /* the steps at this height apply from here down */
     }
-    int yb = h + 1;
-    while (yb <= 64 && !c->mark[yb]) {
-      yb++;
-    }
-    if (yb > 64) {
-      break;
-    }
+    const uint64_t above = c->mk >> h >> 1; /* the boundaries below h; zero when the next is 64 */
+    const int yb = above ? h + 1 + __builtin_ctzll(above) : 64;
     c->ya = h;
     c->yb = yb;
     c->height = yb - h;
@@ -817,6 +937,7 @@ static int walk_slabs(Ctx * c, int count, uint64_t limit, uint64_t * crossings) 
       }
     }
     c->n_prev = c->n;
+    h = yb;
   }
   *crossings = total;
   return GSHCPU_EXACT_OK;
@@ -826,10 +947,9 @@ static int walk_slabs(Ctx * c, int count, uint64_t limit, uint64_t * crossings) 
 static int tops(Ctx * c, const GSHCPU_Exact_Cell * cell) {
   for (int p = 0; p < c->pr->parts; p++) {
     int64_t sum = 0;
-    for (int h = 0; h <= 64; h++) {
-      if (c->jnet[p][h] != 0) {
-        sum += (int64_t)c->jnet[p][h] * (64 - h);
-      }
+    for (uint64_t bits = c->jm[p]; bits != 0; bits &= bits - 1u) {
+      int h = __builtin_ctzll(bits); /* a step at height 64 is weighted by 64 - 64 */
+      sum += (int64_t)c->jnet[p][h] * (64 - h);
     }
     int64_t rem = cell->a_left[p] - sum;
     if (rem % 64 != 0) {
@@ -893,7 +1013,7 @@ static void note(Ctx * c, uint64_t crossings) {
 }
 
 static void ctx_init(Ctx * c, const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s) {
-  memset(c, 0, sizeof *c);
+  memset(c, 0, offsetof(Ctx, jnet)); /* the steps of the winding are valid only where jm and j64 say */
   c->pr = params;
   c->s = s;
   s->last_wmax = 0;

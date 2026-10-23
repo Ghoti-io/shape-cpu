@@ -253,16 +253,17 @@ typedef struct GSHCPU_Exact_Gap {
 } GSHCPU_Exact_Gap;
 
 /**
- * One cell's working memory, carved from a block of ::gshcpu_exact_scratch_bytes (per piece slot of the cell: the sorted
- * piece, the fragment, its offset in the slab, four lists of ids (the order carried, the order being made, the starters and
- * a sort's second half), a gap, and the heap of meetings with its places and the meeting of each pair).  The totals are
+ * One cell's working memory, carved from a block of ::gshcpu_exact_scratch_bytes (per piece slot of the cell: the piece's key,
+ * the fragment, its offset in the slab, five lists of ids (the fragments by their tops, the order carried, the order being
+ * made, the starters and a sort's second half), a gap, and the heap of meetings with its places and the meeting of each pair).  The totals are
  * what the cells since the memory was set up did, for the tests and the census; the last cell's figures are in `last_*`.
  */
 typedef struct GSHCPU_Exact_Scratch {
   size_t capacity;            /* pieces of the cell, all parts */
-  GSHCPU_Piece * sorted;
   GSHCPU_Exact_Frag * frag;
   int32_t * a;
+  uint64_t * key;
+  uint32_t * byy;
   uint32_t * ord;
   uint32_t * ord2;
   uint32_t * st;

@@ -45,6 +45,7 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <time.h>
 
 typedef int (*Step_Fn)(const GSHCPU_Exact_Params *, GSHCPU_Exact_Scratch *, const GSHCPU_Exact_Cell *, int64_t *, uint64_t *);
 
@@ -53,6 +54,16 @@ static Step_Fn g_real;
 static uint64_t g_cells, g_same, g_differ, g_differ_by_one, g_differ_more, g_differ_dense, g_status_differ;
 static uint64_t g_old_refuses, g_new_refuses, g_logged, g_max_diff;
 static const uint64_t kLogLimit = 20000;
+
+/* The time each step took, in all and by the pieces of the busiest part of the cell: <= 8, 16, 64, 256, 1024, 16384, more. */
+static uint64_t g_ns_now, g_ns_old;
+static uint64_t g_band_cells[7], g_band_now[7], g_band_old[7];
+
+static uint64_t now_ns(void) {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec;
+}
 
 int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s, const GSHCPU_Exact_Cell * cell,
     int64_t * out, uint64_t * work) {
@@ -66,14 +77,25 @@ int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch *
   int64_t now = 0;
   int64_t old = 0;
   uint64_t w_old = 0;
+  uint64_t t0 = now_ns();
   int rn = g_real(params, s, cell, &now, work);
+  uint64_t t1 = now_ns();
   int ro = gshcpu_s4b_exact_cell(params, NULL, cell, &old, &w_old);
+  uint64_t t2 = now_ns();
   size_t most = 0;
   for (int p = 0; p < params->parts; p++) {
     most = cell->count[p] > most ? cell->count[p] : most;
   }
   pthread_mutex_lock(&g_lock);
   g_cells++;
+  {
+    size_t band = most <= 8 ? 0 : most <= 16 ? 1 : most <= 64 ? 2 : most <= 256 ? 3 : most <= 1024 ? 4 : most <= 16384 ? 5 : 6;
+    g_ns_now += t1 - t0;
+    g_ns_old += t2 - t1;
+    g_band_cells[band]++;
+    g_band_now[band] += t1 - t0;
+    g_band_old[band] += t2 - t1;
+  }
   if (rn != ro) {
     g_status_differ++;
     g_old_refuses += ro != GSHCPU_EXACT_OK && rn == GSHCPU_EXACT_OK;
@@ -126,6 +148,15 @@ __attribute__((destructor)) static void dual_exit(void) {
       (unsigned long long)g_cells, (unsigned long long)g_same, (unsigned long long)g_differ, (unsigned long long)g_differ_by_one,
       (unsigned long long)g_differ_more, (unsigned long long)g_max_diff, (unsigned long long)g_differ_dense,
       (unsigned long long)g_status_differ, (unsigned long long)g_old_refuses, (unsigned long long)g_new_refuses);
+  fprintf(f, "exact-dual: the steps' own time: the library's %.3f s, the earlier one's %.3f s; by the pieces of the busiest part:\n",
+      (double)g_ns_now / 1e9, (double)g_ns_old / 1e9);
+  static const char * const names[7] = {"<=8", "<=16", "<=64", "<=256", "<=1024", "<=16384", "more"};
+  for (int b = 0; b < 7; b++) {
+    if (g_band_cells[b]) {
+      fprintf(f, "  %-8s %9llu cells: library %9.1f ns a cell, earlier %9.1f ns a cell\n", names[b], (unsigned long long)g_band_cells[b],
+          (double)g_band_now[b] / (double)g_band_cells[b], (double)g_band_old[b] / (double)g_band_cells[b]);
+    }
+  }
   if (f != stderr) {
     fclose(f);
   }

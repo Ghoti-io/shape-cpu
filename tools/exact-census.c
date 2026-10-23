@@ -301,6 +301,50 @@ static uint64_t now_ns(void) {
   return (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec;
 }
 
+/*
+ * With GSHCPU_CENSUS_DUMP=FILE and GSHCPU_CENSUS_EVERY=N, every N-th cell is also written to FILE, for a benchmark of the step on
+ * the cells of a real drawing (tools/exact-replay.c): a record is the settings (mode, parts, even-odd, complement, the three
+ * signs, the three counts) then the three covers to the left and dense areas, as little-endian 64-bit integers, then the
+ * pieces of each part, four bytes each.
+ */
+static void dump_cell(const GSHCPU_Exact_Params * params, const GSHCPU_Exact_Cell * cell) {
+  static FILE * f;
+  static unsigned long every;
+  static unsigned long seen;
+  if (!f && !every) {
+    const char * path = getenv("GSHCPU_CENSUS_DUMP");
+    const char * n = getenv("GSHCPU_CENSUS_EVERY");
+    every = n && *n ? strtoul(n, NULL, 10) : 100;
+    every = every ? every : 100;
+    f = path && *path ? fopen(path, "wb") : NULL;
+    if (!f) {
+      every = (unsigned long)-1;
+    }
+  }
+  if (!f || (seen++ % every) != 0) {
+    return;
+  }
+  int32_t head[12];
+  head[0] = params->mode;
+  head[1] = params->parts;
+  head[2] = params->even_odd;
+  head[3] = params->complement;
+  for (int p = 0; p < 3; p++) {
+    head[4 + p] = params->eps[p];
+    head[7 + p] = (int32_t)cell->count[p];
+  }
+  head[10] = 0;
+  head[11] = 0;
+  fwrite(head, sizeof head, 1, f);
+  for (int p = 0; p < 3; p++) {
+    int64_t v[2] = {cell->a_left[p], cell->dense[p]};
+    fwrite(v, sizeof v, 1, f);
+  }
+  for (int p = 0; p < params->parts; p++) {
+    fwrite(cell->pieces[p], sizeof(GSHCPU_Piece), cell->count[p], f);
+  }
+}
+
 int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s, const GSHCPU_Exact_Cell * cell,
     int64_t * out, uint64_t * work) {
   if (!g_real) {
@@ -313,6 +357,7 @@ int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch *
   Record r;
   memset(&r, 0, sizeof r);
   measure(params, cell, &r);
+  dump_cell(params, cell);
   uint64_t t0 = now_ns();
   int rc = g_real(params, s, cell, out, work);
   uint64_t t1 = now_ns();
