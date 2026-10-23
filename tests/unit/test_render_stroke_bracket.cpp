@@ -16,6 +16,8 @@
 
 #include "stroke_helpers.h"
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 
 using namespace sh;
 using stroke_gate::Ops;
@@ -39,6 +41,17 @@ Params params(double width = 3.0, uint32_t join = GSHGEOM_STROKE_JOIN_ROUND, uin
   p.s.join = join;
   p.s.cap = cap;
   return p;
+}
+
+/**
+ * True under Valgrind, whose x87 is a double: the union gate's stretches are summed in `long double` (stroke_gate.h) and
+ * its bracket separates pixels that differ by less than a double's rounding in a few cases, so under Valgrind the gate
+ * reports violations the same render does not have natively (the picture it prints shows the library's stroke whole and the
+ * gate's expectation wrong).  The library holds no `long double`; the instrument does.
+ */
+bool under_valgrind() {
+  const char * preload = std::getenv("LD_PRELOAD");
+  return std::getenv("VALGRIND_LAUNCHER") != nullptr || (preload && std::strstr(preload, "vgpreload"));
 }
 
 GSHGEOM_Map frac_map() {
@@ -173,6 +186,9 @@ void print_class(const char * name, const Worst & w) {
 }  // namespace
 
 TEST(RenderStrokeBracket, EveryJoinCapAndWidthSpaceStaysInsideTheBracket) {
+  if (under_valgrind()) {
+    GTEST_SKIP() << "the gate sums in long double, which Valgrind computes as double";
+  }
   std::vector<GateCase> cases;
   const GSHGEOM_Map maps[3] = {frac_map(), affine_map(0.9, -0.4, 0.4, 0.9, 1.3125, 0.6875), affine_map(1.1, 0.0, 0.0, 0.55, 0.25, 2.5)};
   const double widths[3] = {1.0, 3.0, 5.5};
@@ -327,6 +343,9 @@ TEST(RenderStrokeBracket, InsideAndOutsideAlignmentStaysInsideTheBracketAndRepor
 }
 
 TEST(RenderStrokeBracket, TheLensUnderRotationWithEveryJoin) {
+  if (under_valgrind()) {
+    GTEST_SKIP() << "the gate sums in long double, which Valgrind computes as double";
+  }
   const double angles[3][4] = {{1, 0, 0, 1}, {0.9205, -0.3907, 0.3907, 0.9205}, {0.3907, -0.9205, 0.9205, 0.3907}};
   Worst lens;
   for (int a = 0; a < 3; a++) for (uint32_t space = 0; space < 2; space++) for (uint32_t join = 0; join < 5; join++) {
