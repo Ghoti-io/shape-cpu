@@ -1109,6 +1109,18 @@ for _file in [str(ROOT / "tools" / "render-plants.json")] + ([os.environ["PLANT_
         with open(_file) as _f:
             PLANTS += [tuple(x) for x in _json.load(_f)]
 
+# Color-paint story P4: the plane's fill (PL2, PL7).  Written with the story; the sweep is deferred to the consolidated pass.
+PLN = ["testRender_plane", "testRender_conformance"]
+PLANTS += [
+    ("pl7-region-is-extent-only", "src", RS, "  GSHCPU_Rect rect = reach_of(run, frame->clip_base, run->clip_count);\n  GSHCPU_Rect whole = whole_reach_of(run, frame->clip_base, run->clip_count);\n  if (gshcpu_render_rect_empty(rect)) {\n    rect.x1 = rect.x0;", "  GSHCPU_Rect rect = run->layout.region;\n  GSHCPU_Rect whole = whole_reach_of(run, frame->clip_base, run->clip_count);\n  if (gshcpu_render_rect_empty(rect)) {\n    rect.x1 = rect.x0;", PLN),
+    ("pl7-coverage-half", "src", RS, "    memset(run->coverage, 0xFF, (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0));", "    memset(run->coverage, 0x80, (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0));", PLN),
+    ("pl7-coverage-clear", "src", RS, "    memset(run->coverage, 0xFF, (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0));", "    memset(run->coverage, 0x00, (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0));", PLN),
+    ("pl7-plane-as-path", "src", RS, "  if (gshscene_resource_kind(item->resource) == GSHSCENE_RESOURCE_PLANE) {\n    return fill_plane(run, item, chain, count);\n  }", "", PLN),
+    ("pl7-clips-ignored", "src", RS, "  GSHCPU_Rect rect = reach_of(run, frame->clip_base, run->clip_count);\n  GSHCPU_Rect whole = whole_reach_of(run, frame->clip_base, run->clip_count);\n  if (gshcpu_render_rect_empty(rect)) {\n    rect.x1 = rect.x0;", "  GSHCPU_Rect rect = reach_of(run, frame->clip_base, frame->clip_base);\n  GSHCPU_Rect whole = whole_reach_of(run, frame->clip_base, run->clip_count);\n  if (gshcpu_render_rect_empty(rect)) {\n    rect.x1 = rect.x0;", PLN),
+    ("pl7-paint-tail-skipped", "src", RS, "  return paint_coverage(run, item, chain, count, frame, rect, whole, run->coverage);\n}\n\nstatic GSHSCENE_Result fill(", "  return GSHSCENE_OK;\n}\n\nstatic GSHSCENE_Result fill(", PLN),
+]
+
+
 def run(cmd, shell=False, env_extra=None, cwd=None):
     environment = dict(os.environ)
     if env_extra:
