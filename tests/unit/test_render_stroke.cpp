@@ -312,6 +312,8 @@ TEST(RenderStroke, TheCompositionIsTheUnionFormulaInD8sArithmeticAndExactAtBothE
           if (a == 255 && cp == 255) {
             ASSERT_EQ(k, 255u) << "the aligned part wholly in: the union is full";
           }
+          const uint32_t t = (a * cp + 127) / 255;
+          ASSERT_EQ(k, 255u - ((255u - b) * (255u - t) + 127u) / 255u) << "the formula itself, in D8's arithmetic: " << b << " " << a << " " << c;
           double kb = b / 255.0;
           double kat = a / 255.0 * cp / 255.0;
           double exact = (kb + kat - kb * kat) * 255.0;
@@ -328,6 +330,83 @@ TEST(RenderStroke, TheCompositionIsTheUnionFormulaInD8sArithmeticAndExactAtBothE
     EXPECT_LE(gshcpu_render_stroke_compose(40, b, 200, 1), gshcpu_render_stroke_compose(40, b + 1, 200, 1));
     EXPECT_GE(gshcpu_render_stroke_compose(40, 200, b, 1), gshcpu_render_stroke_compose(40, 200, b + 1, 1))
         << "the complement reverses the clip's direction";
+  }
+}
+
+TEST(RenderStroke, AnAlignedStrokeCoversExactlyTheBandItNamesOnPixelAlignedSquares) {
+  // A square of whole pixels, so that every pixel is wholly in or wholly out: width 4 inside is the 4 pixels within the
+  // boundary, width 4 outside the 4 pixels beyond it (the miter joins fill the outer corners); even-odd and nonzero
+  // clips differ inside a hole of a path of two nested squares.
+  const Ops square = {{'M', {8.0, 8.0}}, {'L', {24.0, 8.0}}, {'L', {24.0, 24.0}}, {'L', {8.0, 24.0}}, {'Z', {}}};
+  const uint32_t n = 32;
+  unsigned tiers = GSHCPU_RENDER_TIERS_ALL;
+  auto band = [&](uint32_t alignment, GSHGEOM_Fill_Rule rule, const Ops & ops, double width) {
+    Params p = params(width, GSHGEOM_STROKE_JOIN_MITER, GSHGEOM_STROKE_CAP_BUTT);
+    p.s.alignment = alignment;
+    p.s.alignment_rule = rule;
+    Store st;
+    Sink sink(tiers);
+    Drawn d = render_list(sink.sink, one_stroke(st, ops, p.get(), translation(0.0, 0.0)), n, n);
+    EXPECT_EQ(d.result, GSHSCENE_OK);
+    return d.alpha;
+  };
+  // The union of the pieces (the exact step) and the build without it (F4's sum, the gates' control) draw the same
+  // bands where nothing overlaps.
+  for (unsigned t : {(unsigned)GSHCPU_RENDER_TIERS_ALL, (unsigned)(GSHCPU_RENDER_TIERS_ALL & ~GSHCPU_RENDER_TIER_EXACT)}) {
+    tiers = t;
+    auto at = [&](const std::vector<uint8_t> & a, uint32_t x, uint32_t y) { return (unsigned)a[y * n + x]; };
+    // The edges of a band meet a pixel's edge only to within the expansion's tolerance, so a pixel is judged where it and
+    // its eight neighbors agree on being in the band or out of it: wholly covered (at least 250) or all but clear (at most 8).
+    auto judge = [&](const std::vector<uint8_t> & a, const char * what, auto in_band) {
+      ASSERT_EQ(a.size(), (size_t)n * n);
+      size_t covered = 0;
+      size_t clear = 0;
+      for (uint32_t y = 1; y + 1 < n; y++) {
+        for (uint32_t x = 1; x + 1 < n; x++) {
+          int sum = 0;
+          for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+              sum += in_band(x + dx, y + dy) ? 1 : 0;
+            }
+          }
+          if (sum == 9) {
+            EXPECT_GE(at(a, x, y), 250u) << what << " " << x << " " << y;
+            covered++;
+          } else if (sum == 0) {
+            EXPECT_LE(at(a, x, y), 8u) << what << " " << x << " " << y;
+            clear++;
+          }
+        }
+      }
+      EXPECT_GT(covered, 50u) << what;
+      EXPECT_GT(clear, 100u) << what;
+    };
+    auto in_square = [](uint32_t x, uint32_t y) { return x >= 8 && x < 24 && y >= 8 && y < 24; };
+    judge(band(GSHGEOM_STROKE_ALIGN_INSIDE, GSHGEOM_FILL_NONZERO, square, 4.0), "inside", [&](uint32_t x, uint32_t y) {
+      return in_square(x, y) && (x < 12 || x >= 20 || y < 12 || y >= 20);
+    });
+    judge(band(GSHGEOM_STROKE_ALIGN_OUTSIDE, GSHGEOM_FILL_NONZERO, square, 4.0), "outside", [&](uint32_t x, uint32_t y) {
+      return !in_square(x, y) && x >= 4 && x < 28 && y >= 4 && y < 28;
+    });
+    // An open line beside the square is a centered stroke of the body part, drawn with the aligned ring of the square.
+    const Ops mixed = {{'M', {8.0, 8.0}}, {'L', {24.0, 8.0}}, {'L', {24.0, 24.0}}, {'L', {8.0, 24.0}}, {'Z', {}},
+        {'M', {2.0, 4.0}}, {'L', {2.0, 28.0}}};
+    judge(band(GSHGEOM_STROKE_ALIGN_INSIDE, GSHGEOM_FILL_NONZERO, mixed, 4.0), "mixed", [&](uint32_t x, uint32_t y) {
+      return (in_square(x, y) && (x < 12 || x >= 20 || y < 12 || y >= 20)) || (x < 4 && y >= 4 && y < 28);
+    });
+    // Two nested squares wound the same way: nonzero fills the inner one, even-odd leaves it a hole.
+    const Ops nested = {{'M', {4.0, 4.0}}, {'L', {28.0, 4.0}}, {'L', {28.0, 28.0}}, {'L', {4.0, 28.0}}, {'Z', {}},
+        {'M', {10.0, 10.0}}, {'L', {22.0, 10.0}}, {'L', {22.0, 22.0}}, {'L', {10.0, 22.0}}, {'Z', {}}};
+    std::vector<uint8_t> nonzero = band(GSHGEOM_STROKE_ALIGN_INSIDE, GSHGEOM_FILL_NONZERO, nested, 2.0);
+    std::vector<uint8_t> evenodd = band(GSHGEOM_STROKE_ALIGN_INSIDE, GSHGEOM_FILL_EVEN_ODD, nested, 2.0);
+    EXPECT_EQ(at(nonzero, 11, 16), 255u) << "the pixel just inside the inner square: inside the nonzero fill";
+    EXPECT_EQ(at(evenodd, 11, 16), 0u) << "the same pixel is in the even-odd hole";
+    EXPECT_EQ(at(nonzero, 9, 16), 255u);
+    EXPECT_EQ(at(evenodd, 9, 16), 255u) << "and the pixel just outside the inner square is in both";
+    EXPECT_EQ(at(nonzero, 5, 16), 255u);
+    EXPECT_EQ(at(evenodd, 5, 16), 255u);
+    EXPECT_EQ(at(nonzero, 16, 16), 0u);
+
   }
 }
 
