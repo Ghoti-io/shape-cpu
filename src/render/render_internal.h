@@ -216,7 +216,7 @@ typedef struct GSHCPU_Piece {
 /** What ::gshcpu_exact_cell reports. */
 enum {
   GSHCPU_EXACT_OK = 0,
-  GSHCPU_EXACT_LIMIT,    /* a winding past the internal bound (UC9): the sink's resource limit */
+  GSHCPU_EXACT_LIMIT,    /* the cell's crossings past the budget (UC19) or a winding past the internal limit: the sink's resource limit */
   GSHCPU_EXACT_IDENTITY  /* the cell's pieces do not reproduce what the rasterizer summed: a defect, refused rather than guessed */
 };
 
@@ -226,34 +226,56 @@ enum {
  */
 enum { GSHCPU_EXACT_OVERLAP = 0, GSHCPU_EXACT_UNION3 = 1, GSHCPU_EXACT_REGION = 2 };
 
-/** A fragment oriented top to bottom: its upper end, `dx` to its lower end, its height and sign. */
+/**
+ * The most the winding of a part may be in magnitude at the top of a cell's left side (UC20): the sum of everything left of
+ * the cell, and in a render of at most `GSHCPU_EXACT_FRAGMENTS_CEILING` pieces of a cell a winding is held in an `int32_t`
+ * with room to spare.  No outline measured comes within a thousandth of it; the weight of the sweep depends on whether a
+ * winding is zero (or odd), never on how deep it is, so no depth is a reason to refuse a cell.
+ */
+#define GSHCPU_EXACT_WINDING_LIMIT ((int64_t)1 << 28)
+
+/** The largest ::GSHCPU_Limits.max_exact_crossings the sink accepts: 2^32.  A larger value is refused at sink creation. */
+#define GSHCPU_EXACT_CROSSINGS_CEILING ((uint64_t)1 << 32)
+
+/** A fragment oriented top to bottom: its upper end, `dx` to its lower end, its height, sign and multiplicity (UC13). */
 typedef struct GSHCPU_Exact_Frag {
   int16_t px, py;
   int16_t dx, dy;
   int8_t s;       /* +1 when the contour goes down along it */
   uint8_t part;
-  uint32_t idx;   /* its place in the sorted list: the last tie-break */
+  uint32_t mu;    /* the equal copies of the segment it stands for */
 } GSHCPU_Exact_Frag;
 
-/** A fragment as one slab sees it: `x(u) = (a + dx u) / dy` at depth `u` below the slab's top. */
-typedef struct GSHCPU_Exact_Active {
-  int32_t a;
-  int16_t dx, dy;
-  int8_t s;
-  uint8_t part;
-  uint32_t idx;
-} GSHCPU_Exact_Active;
+/** The winding of the gap before a fragment (the three parts' components) and its weight (UC15), in a slab's order. */
+typedef struct GSHCPU_Exact_Gap {
+  int32_t w[3];
+  int32_t om;
+} GSHCPU_Exact_Gap;
 
-/** One cell's working memory, carved from a block of ::gshcpu_exact_scratch_bytes. */
+/**
+ * One cell's working memory, carved from a block of ::gshcpu_exact_scratch_bytes (per piece slot of the cell: the sorted
+ * piece, the fragment, its offset in the slab, four lists of ids (the order carried, the order being made, the starters and
+ * a sort's second half), a gap, and the heap of meetings with its places and the meeting of each pair).  The totals are
+ * what the cells since the memory was set up did, for the tests and the census; the last cell's figures are in `last_*`.
+ */
 typedef struct GSHCPU_Exact_Scratch {
   size_t capacity;            /* pieces of the cell, all parts */
-  GSHCPU_Exact_Frag * frag;
-  GSHCPU_Exact_Active * act;
-  uint32_t * ord;
-  uint32_t * xa;
-  uint32_t * xb;
   GSHCPU_Piece * sorted;
-  int64_t last_wmax;          /* the largest winding the last cell met in magnitude: read by the measuring tool, nothing else */
+  GSHCPU_Exact_Frag * frag;
+  int32_t * a;
+  uint32_t * ord;
+  uint32_t * ord2;
+  uint32_t * st;
+  uint32_t * sc;
+  GSHCPU_Exact_Gap * gap;     /* capacity + 1 */
+  uint32_t * heap;
+  uint32_t * hpos;
+  uint32_t * evn;
+  uint32_t * evd;
+  int64_t last_wmax;          /* the largest winding the last cell met in magnitude */
+  uint64_t last_pieces, last_distinct, last_slabs, last_crossings, last_events, last_end_evals;
+  uint64_t events, end_evals, crossings; /* totals: exchanges at meetings, evaluations at a slab's end, meetings of the cells made */
+  uint64_t pieces_max, distinct_max, crossings_max, wmax_max; /* the largest cell met */
 } GSHCPU_Exact_Scratch;
 
 /** Bytes of scratch for cells of up to @p max_pieces pieces in each of @p parts parts (1 or 3). */
@@ -269,6 +291,7 @@ typedef struct GSHCPU_Exact_Params {
   int eps[3];                 /* each part's orientation sign: `w = eps W` */
   int even_odd;               /* UNION3: the clip part's rule */
   int complement;             /* UNION3: the region is the clip's complement */
+  uint64_t max_crossings;     /* UC19: a cell with more meetings than this is the limit; 0 is none (the tests' own) */
 } GSHCPU_Exact_Params;
 
 /** One cell as the exact step sees it, per part: its pieces, the cover to its left and the dense area summed there. */
@@ -300,11 +323,31 @@ typedef int (*GSHCPU_Exact_Cell_Fn)(const GSHCPU_Exact_Params * params, GSHCPU_E
 extern GSHCPU_Exact_Cell_Fn gshcpu_exact_hook;
 
 /**
+ * A test switch: when nonzero the step checks itself as it goes (UC16 iii): each slab's order, after its meetings, is sorted
+ * by the order at its end, and the meetings the sweep made equal the meetings the count found (UC19); a violation is
+ * ::GSHCPU_EXACT_IDENTITY.  The library never sets it.
+ */
+extern int gshcpu_exact_check;
+
+/**
+ * The meetings of a cell (UC19), counted without the area: the pieces of every part of @p cell collected as the step
+ * collects them, and the inversions between each slab's order at its top and at its end summed.  @p crossings receives the
+ * count, or a count past `params->max_crossings` at which it stopped, with ::GSHCPU_EXACT_LIMIT.  A cell that cannot pass
+ * the budget (`n' (n' - 1) / 2` within it) is not counted and gives 0.  Reads no cover (`a_left`, `dense` unused).
+ */
+int gshcpu_exact_crossings(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s, const GSHCPU_Exact_Cell * cell,
+    uint64_t * crossings, uint64_t * work);
+
+/** The most work (SC11's units) one cell of @p pieces pieces and @p crossings meetings may cost (UC17): `W_cell`. */
+uint64_t gshcpu_exact_cell_work_bound(uint64_t pieces, uint64_t crossings);
+
+/**
  * The memory and the settings of the exact step inside a cover (cover.c): per accumulator cell the number of pieces,
  * a pool for the pieces of the cells of one window, and the scratch of ::gshcpu_exact_cell.
  */
 struct GSHCPU_Exact {
   uint64_t max_pieces;        /* a cell with more pieces than this is refused (UC9) */
+  uint64_t max_crossings;     /* ... and with more meetings (UC19) */
   int eps;                    /* the orientation sign of the part covered */
   uint32_t * count;           /* GSHCPU_RENDER_BAND_ROWS rows of the walk's width */
   uint32_t * slot;            /* the same: where a cell's pieces are in the pool */
@@ -325,7 +368,8 @@ struct GSHCPU_Exact {
  * have at most @p max_points points and whose raster is at most @p max_dimension wide, with cells of at most
  * @p max_pieces pieces: held at `UINT64_MAX`.
  */
-uint64_t gshcpu_exact_work_bound(uint64_t max_cells, uint64_t max_points, uint64_t max_dimension, uint64_t max_pieces);
+uint64_t gshcpu_exact_work_bound(uint64_t max_cells, uint64_t max_points, uint64_t max_dimension, uint64_t max_pieces,
+    uint64_t max_crossings);
 
 /**
  * The bytes of the arrays of an ::GSHCPU_Exact for walks up to @p width cells wide and @p max_pieces.  @p parts is the
@@ -522,6 +566,13 @@ typedef struct GSHCPU_Render_Counters {
   uint64_t sparse_plain;     /* FT-2 for any other solid stroke */
   uint64_t exact_cells;      /* cells the exact step made exact (UC3), whichever part or parts */
   uint64_t exact_failures;   /* cells whose pieces did not reproduce the rasterizer's sums (UC4): a defect, refused */
+  uint64_t exact_events;     /* exchanges of neighbours at their meetings (UC14), over the cells made exact */
+  uint64_t exact_end_evals;  /* evaluations of a fragment's antiderivative at a slab's end (UC15) */
+  uint64_t exact_crossings;  /* the meetings of the cells made exact (UC19): the sum over the cells of the count of each */
+  uint64_t exact_pieces_max;   /* the most pieces of a part any cell made exact held (the figure UC9's cap bounds) */
+  uint64_t exact_distinct_max; /* the most fragments any cell held once pieces and their reverses cancelled (UC13) */
+  uint64_t exact_crossings_max; /* the most meetings of any cell (the figure UC19's budget bounds) */
+  uint64_t exact_winding_max;   /* the deepest winding any cell met */
 } GSHCPU_Render_Counters;
 
 /** What identifies an expansion in the cache (SC7). */
@@ -605,6 +656,9 @@ void gshcpu_stroke_cache_count(GSHCPU_Stroke_Cache * cache, size_t offset);
 
 /** Add @p amount to one of the counters, by offset. */
 void gshcpu_stroke_cache_add(GSHCPU_Stroke_Cache * cache, size_t offset, uint64_t amount);
+
+/** Raise the counter at @p offset to @p value if it is lower (a maximum, not a sum). */
+void gshcpu_stroke_cache_raise(GSHCPU_Stroke_Cache * cache, size_t offset, uint64_t value);
 
 /** A stroke ready to cover: its outline (pinned in the cache, or owned), the whole-pixel shift and its meta (SC3). */
 typedef struct GSHCPU_Stroke {

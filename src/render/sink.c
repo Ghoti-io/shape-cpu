@@ -543,7 +543,7 @@ static uint64_t work_bound(const Cpu_Sink * cs) {
   if (!gcu_safe_mul_u64((uint64_t)cs->geometry.max_points, 3u, &points3) || !gcu_safe_mul_u64(cs->max_exact, 3u, &cell3)) {
     return UINT64_MAX;
   }
-  uint64_t exact = gshcpu_exact_work_bound((uint64_t)cs->max_cells, points3, (uint64_t)cs->max_dimension, cell3);
+  uint64_t exact = gshcpu_exact_work_bound((uint64_t)cs->max_cells, points3, (uint64_t)cs->max_dimension, cell3, 0);
   if (!gcu_safe_add_u64(b, exact, &b)) {
     return UINT64_MAX;
   }
@@ -1003,6 +1003,22 @@ static uint64_t exact_work(Run * run) {
   }
   gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, exact_cells), cells);
   gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, exact_failures), failures);
+  /* The scratch of the first part's memory is the one the step works in whatever the part (cover.c). */
+  GSHCPU_Exact_Scratch * sc = &run->exact[0].scratch;
+  gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, exact_events), sc->events);
+  gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, exact_end_evals), sc->end_evals);
+  gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, exact_crossings), sc->crossings);
+  gshcpu_stroke_cache_raise(run->cs->cache, offsetof(GSHCPU_Render_Counters, exact_pieces_max), sc->pieces_max);
+  gshcpu_stroke_cache_raise(run->cs->cache, offsetof(GSHCPU_Render_Counters, exact_distinct_max), sc->distinct_max);
+  gshcpu_stroke_cache_raise(run->cs->cache, offsetof(GSHCPU_Render_Counters, exact_crossings_max), sc->crossings_max);
+  gshcpu_stroke_cache_raise(run->cs->cache, offsetof(GSHCPU_Render_Counters, exact_winding_max), sc->wmax_max);
+  sc->events = 0;
+  sc->end_evals = 0;
+  sc->crossings = 0;
+  sc->pieces_max = 0;
+  sc->distinct_max = 0;
+  sc->crossings_max = 0;
+  sc->wmax_max = 0;
   return w;
 }
 

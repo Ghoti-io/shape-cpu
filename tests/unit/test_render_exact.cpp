@@ -627,7 +627,12 @@ TEST(RenderExact, AnExactCellRefusesPiecesThatDoNotReproduceTheRasterizersSumsAn
   EXPECT_EQ(run(-192, 8960, &out), GSHCPU_EXACT_IDENTITY) << "a winding of 3 gives another area";
   EXPECT_EQ(run(-128, 9060, &out), GSHCPU_EXACT_IDENTITY) << "an area the pieces do not make";
   EXPECT_EQ(run(-128, 8860, &out), GSHCPU_EXACT_IDENTITY);
-  EXPECT_EQ(run(-64 * 256, 8960, &out), GSHCPU_EXACT_LIMIT) << "a winding of 256";
+  EXPECT_EQ(run(-64 * 256, 8960, &out), GSHCPU_EXACT_IDENTITY) << "the cover of a winding of 256 is not the area of these pieces";
+  // The cover and the dense area that a winding of 256 at the top of the side gives these pieces: drawn, no winding is a limit (UC20).
+  int64_t deep_left = -64 * 256;
+  int64_t deep_dense = -(128 * (deep_left + 128) - 8960);
+  EXPECT_EQ(run(deep_left, deep_dense, &out), GSHCPU_EXACT_OK) << "a winding of 256";
+  EXPECT_EQ(out, deep_dense - 8192) << "every part of the cell is wound: the union is the cell";
   pieces[1].x1 = 65;
   EXPECT_EQ(run(-128, 8960, &out), GSHCPU_EXACT_IDENTITY) << "a piece that is not in the cell";
   pieces[1].x1 = 40;
@@ -780,20 +785,18 @@ TEST(RenderExact, TheCapIsMetOverWhatTheWalkHoldsAndNotWhatTheWindowDoes) {
   EXPECT_EQ(cover_exact(f, rect_of(0, 0, 6, 1), walk, 16).result, GSHCPU_OK);
 }
 
-TEST(RenderExact, AWindingOf256IsTheLimitAndOf255IsExact) {
-  for (int n : {255, 256}) {
+TEST(RenderExact, NoWindingIsALimitAndACellOfAnyDepthIsExact) {
+  // Coincident rectangles, as deep as stroked text goes and past it: a winding of 255, 256, 475, 1024 and 1025 is exact (UC20;
+  // the step of S4b refused one past 255).
+  for (int n : {255, 256, 475, 1024, 1025}) {
     std::vector<Contour> polys;
     for (int i = 0; i < n; i++) {
       polys.push_back(box(-100, -100, 30, 200));
     }
     Flat f(polys);
-    Covered c = cover_exact(f, rect_of(0, 0, 1, 1), 1024);
-    if (n == 255) {
-      ASSERT_EQ(c.result, GSHCPU_OK);
-      EXPECT_EQ(c.k[0], 120) << "30/64 of 256: the union of coincident rectangles";
-    } else {
-      EXPECT_EQ(c.result, GSHCPU_ERR_LIMIT);
-    }
+    Covered c = cover_exact(f, rect_of(0, 0, 1, 1), 2048);
+    ASSERT_EQ(c.result, GSHCPU_OK) << n;
+    EXPECT_EQ(c.k[0], 120) << "30/64 of 256: the union of coincident rectangles, " << n << " deep";
   }
 }
 

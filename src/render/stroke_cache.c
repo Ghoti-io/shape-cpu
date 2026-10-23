@@ -340,6 +340,18 @@ void gshcpu_stroke_cache_count(GSHCPU_Stroke_Cache * c, size_t offset) {
   gshcpu_stroke_cache_add(c, offset, 1u);
 }
 
+void gshcpu_stroke_cache_raise(GSHCPU_Stroke_Cache * c, size_t offset, uint64_t value) {
+  if (!c->counters || value == 0) {
+    return;
+  }
+  GCU_MUTEX_LOCK(c->lock);
+  uint64_t * at = (uint64_t *)(void *)((unsigned char *)c->counters + offset);
+  if (value > *at) {
+    *at = value;
+  }
+  GCU_MUTEX_UNLOCK(c->lock);
+}
+
 void gshcpu_stroke_cache_add(GSHCPU_Stroke_Cache * c, size_t offset, uint64_t amount) {
   if (!c->counters || amount == 0) {
     return;

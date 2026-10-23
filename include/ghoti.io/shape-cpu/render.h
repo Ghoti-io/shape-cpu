@@ -342,35 +342,27 @@
  * - **UC5 Slabs, order, winding.**  The distinct heights of the fragments' ends and of the steps of `J` cut the cell into
  *   at most 64 slabs of integer height `H`.  In a slab every fragment spans it or misses it; written top to bottom with sign
  *   `s` (+1 if the contour went down along it) a fragment's `x` at depth `u` is `(a + dx u) / dy`, `a = p.x dy + (Ya - p.y)
- *   dx`, `|a| <= 2^13`.  Two fragments meet at `u = N / D`, `|N| < 2^21`, `0 < D <= 2^13`; the earliest meeting of the
- *   neighbours cuts the slab into sub-slabs in which no two fragments cross, so their left-to-right order is one order,
- *   decided exactly at the sub-slab's start by `(a_i D_0 + dx_i N_0) dy_k` against `(a_k D_0 + dx_k N_0) dy_i` (every
- *   operand below `2^34`), ties by slope (the one that moves left faster with depth is left), then by the piece's place
- *   in the cell's sorted list (the pieces are sorted before the walk, so the result does not depend on the order they
- *   were found in; only coincident fragments, of zero width, reach the last tie).  Walking left to right, the winding of
- *   the gap before the first fragment is `eps (W_top + sum_{h <= Ya} J(h))` and each fragment adds `eps s`.
- * - **UC6 The shared area and its arithmetic.**  What the dense sum holds over what the fill covers, in doubled units, is
+ *   dx`, `0 <= a <= 2^12` (a fragment spanning the slab is at `x >= 0` on it).  Their left to right order at a depth is the
+ *   order of `x` there, ties by slope (the one that moves left faster with depth is left, as the depth grows past the tie),
+ *   then by the fragment's place in the cell's sorted list (the pieces are sorted before the walk, so the result does not
+ *   depend on the order they were found in; only coincident fragments, of zero width, reach the last tie).  Two fragments
+ *   meet at most once, at `u = N / D`, `D = dx_p dy_q - dx_q dy_p > 0` for the left one `p` moving right of `q`, `N = a_q dy_p
+ *   - a_p dy_q`, `N < H D`, `D <= 2^13`, `N < 2^19`.  Walking left to right, the winding of the gap before the first
+ *   fragment is `eps (W_top + sum_{h <= Ya} J(h))` and each fragment adds `eps s mu`, `mu` its multiplicity (UC13).
+ * - **UC6 The shared area (restated by UC15).**  What the dense sum holds over what the fill covers, in doubled units, is
  *   `2 O - 4 N`, with `O` the integral of `(|w| - 1)^+` (what is counted more than once) and `N` the integral of `-w` where
- *   `w < 0` (the lattice's slivers, which the sum counts negatively and the fill covers).  Over a sub-slab from `u_a` to
- *   `u_b` the gaps' widths are linear in `u`, so a gap's share is its weight times the mean of its widths at the two ends
- *   times `u_b - u_a`, exactly.  The arithmetic is fixed so that every target gets the same bits: a boundary is rounded to
- *   16 fractional bits, `u_fp = floor(2^16 N / D)`; a fragment's `x` at `u_fp` is held to 20 fractional bits, `X =
- *   floor((a 2^20 + dx u_fp 2^4) / dy)`; a gap's width at either end is taken as 0 if two fragments that meet exactly have
- *   rounded the other way; a gap's term is `(weight (Wa + Wb) (u_fp,b - u_fp,a)) >> 17` in units of `2^-20` unit squared,
- *   `Wa + Wb` below `2^27`, the depth below `2^22` and the weight at most 255 (UC9), so every product is below `2^57` in
- *   `uint64_t`.  An `x` is low by less than `2^-20` unit, a term by less than `2^-20` unit squared, and a boundary off by
- *   less than `2^-16` mis-orders a meeting for a sliver under `2^-25` unit squared: a cell of `m` pieces and `T`
- *   sub-slabs is low by at most `2^-13 (m + 1) W + T 2^-20` unit squared (`W` the largest winding), under 17 at the
- *   default cap and the winding bound and under `0.3` for `m <= 64`, `W <= 32`.  The same walk integrates `w` itself, which
- *   must give back the dense area within that bound: it checks the pieces, the order and `W_top` at once.  No
- *   `long double`, no `__int128`, no libm, no FMA.
+ *   `w < 0` (the lattice's slivers, which the sum counts negatively and the fill covers).  It is also the dense value less
+ *   twice the area of `{w != 0}` (for `w > 0`, `2 w - 2 (w - 1) = 2`; for `w < 0`, `-2 |w| - 2 (|w| - 1) + 4 |w| = 2`), and the
+ *   step computes that area, by UC14 and UC15, so that no weight grows with the winding.  The earlier arithmetic of this rule
+ *   (a boundary rounded to sixteen fractional bits, a per-gap sum of floors, an error growing with the square of the pieces
+ *   of a cell) is retired.
  * - **UC7 The fold.**  The coverage of a cell is `min(255, v' >> 5)` where `v'` is the doubled area of the nonzero fill:
  *   the dense value `v` of the accumulation, less `2 O - 4 N`, at least 0.  A pixel the pieces cover wholly is 255, and one
  *   they cover twice but the fill only in part is the fill's part.  The shift is taken on the magnitude, and an even-odd
  *   clip's parity is reduced before it (a stroke's pieces are wound so that the accumulation is negative, the shared fold's
  *   shift rounds toward negative infinity, and its even-odd ramp back down rounds the other way): the floor of a level
  *   either way round, so `|k - 255 A|` is at most one level for the area `A` the fill covers and a quarter more for the
- *   arithmetic.
+ *   arithmetic.  The step's error is UC15's.
  * - **UC8 Parts that share a pixel.**  For a stroke with an aligned part the three parts are covered together a band at a
  *   time, and in a cell where at least two of them hold a piece (the clip's too) the coverage is the fold of the doubled area
  *   of `P = {w_b != 0} U ({w_a != 0} & F')`, `F'` the clip's region under its rule (`W_c != 0`, or `W_c` odd) or, when the
@@ -389,23 +381,22 @@
  *   fill item: a fill is not changed, and extending the exact step to fills is a separate decision.
  * - **UC9 Limits, refusals, work, memory.**  `GSHCPU_Limits.max_exact_fragments` (a `uint64_t`; 0 is 512, any other value
  *   is used as given up to `2^20`, which a larger value is ::GSHCPU_ERR_INVALID for at sink creation; `UINT64_MAX` is not
- *   "no cap": the step is superlinear in the pieces of a pixel) bounds the pieces of one part in one cell.  A cell with more, or a winding past 255 in
- *   magnitude (anywhere in an exact cell: an internal bound the arithmetic's products depend on), or a cell whose pieces do
- *   not reproduce the rasterizer's sums, is the sink's resource limit: the item's block is skipped (strict stops with the
- *   finished prefix), as the cell cap (SC6).  The pieces are counted over what the whole render draws of the item, so a
- *   damaged render refuses what the whole one does, unless the outline has too few points for any cell to hold that many
- *   (a piece is at most one for each edge, an outline has fewer edges than twice its points); a winding past the bound
- *   is found where the step runs, the pixels drawn.  The step's work counts toward SC11's: a piece is one unit, a pair of
- *   neighbours' meetings, an area and a comparison of the ordering one each, and the declared `cancel_work_bound` adds
- *   the most the step may do in an item: its horizontal pieces on cells' left sides (at most one for each point and each
- *   column of the widest raster) and its fragments (at most `max_cells` of them, which the cap counts) each at the cost of
- *   the largest cell, where a cell of `f` fragments takes at most `64 ((f^2/2 + 1)(3 f + 2) + f^2/2)`: at most 64 slabs,
- *   each with at most `f^2/2 + 1` sub-slabs (two fragments meet once) that cost a pass over the fragments.  The worst case
- *   is cubic in the fragments of one pixel, reached only by an outline whose pieces cross each other pairwise inside it,
- *   and it is finite and very large at the default; lowering `max_exact_fragments` lowers it with the cube.  Memory is a
- *   function of the limits and the region only: a count of pieces and a place in the pool for each cell of a band of the region's width, a pool of pieces (at least 4096, at least
- *   one cell's worth), and the scratch of one cell, counted by `workspace_bytes`, never allocated under `CALLER_MEMORY`; the
- *   cells of a band whose pieces do not fit the pool are made exact a window at a time.
+ *   "no cap": the step is superlinear in the pieces of a pixel) bounds the pieces of one part in one cell (the raw pieces, as
+ *   the rasterizer finds them, whatever UC13 makes of them).  A cell with more, or a cell whose pieces do not reproduce the
+ *   rasterizer's sums, is the sink's resource limit: the item's block is skipped (strict stops with the finished prefix), as
+ *   the cell cap (SC6).  No depth of winding is a limit (UC15, UC20).  The pieces are counted over what the whole render draws
+ *   of the item, so a damaged render refuses what the whole one does, unless the outline has too few points for any cell to
+ *   hold that many (a piece is at most one for each edge, an outline has fewer edges than twice its points).  The step's work
+ *   counts toward SC11's: a piece is one unit, each slab `6 n' + 8` (the carry, the repair, the gaps, the ends), each meeting
+ *   `ceil(log2 n') + 12`, and when the meetings are counted (UC19) `n' (ceil(log2 n') + 1)` more for each slab; the declared
+ *   `cancel_work_bound` adds the most the step may do in an item: its horizontal pieces on cells' left sides (at most one for
+ *   each point and each column of the widest raster) and its fragments (at most `max_cells` of them, which the cap counts)
+ *   each at the cost per fragment of the largest cell, where a cell of `n'` fragments has at most `n' (n' - 1) / 2` meetings.
+ *   That is quadratic in the fragments of a pixel, reached only by an outline whose pieces cross each other pairwise inside
+ *   it.  Memory is a function of the limits and the region only: a count of pieces and a place in the pool for each cell of
+ *   a band of the region's width, a pool of pieces (at least 4096, at least one cell's worth), and the scratch of one cell,
+ *   counted by `workspace_bytes`, never allocated under `CALLER_MEMORY`; the cells of a band whose pieces do not fit the pool
+ *   are made exact a window at a time.
  * - **UC10 Tiers (AD-13).**  The exact step is one function used by every route: the dense sweep and the sparse composite
  *   (FT-2, where a cell the step changes is noted as a deposit is, so that the sweep visits it).  Both are bit-equal to
  *   the general tier by construction and by the gate that holds each to it.  The step is not a tier: the sink with it off
@@ -419,6 +410,49 @@
  *   (the polygon the rasterizer covers) per pixel by a scanline sweep of the whole outline in `long double`, and the
  *   coverage must be within a level and a half of it at every pixel of every case.  It exists because the bracket's
  *   `D(tau)` is a sixteenth of a pixel and hides an error of a few levels on a thin feature.
+ * - **UC13 Weighted fragments.**  After the pieces of one part in a cell are sorted by segment and a piece and its reverse
+ *   cancelled, the pieces left over one segment are `nu` equal copies in one direction: one fragment of multiplicity `mu =
+ *   |nu|` with winding step `eps s mu`.  This is exact (a winding is a sum over edges, and coincident edges enclose no
+ *   width).  `n'`, the distinct fragments, is at most the pieces `m`; the cap of UC9 counts the pieces, the work and the
+ *   memory of the walk are in `n'`.  A partial overlap of unequal collinear opposite pieces is not cancelled: the sweep is
+ *   exact with it.
+ * - **UC14 The sweep of a slab.**  The list of fragments is the order the previous slab ended in, without the fragments that
+ *   end at the slab's top, the ones that start there sorted and merged in, and the result repaired (a pair that met exactly
+ *   at the top is ordered by slope, the order just after the meeting; the repair sorts the list again, which costs no more
+ *   than a bundle's exchanges would).  A fragment has the coefficient `c = Omega_left - Omega_right` of the two gaps beside
+ *   it, `Omega` the weight of UC15.  Two neighbours meet inside the slab iff `D > 0` and `0 < N < H D` (UC5), and the pending
+ *   meetings of neighbours are held in a binary heap by depth, ties by place; with none the slab is crossing-free and no heap
+ *   is built.  At a meeting the neighbours exchange places, only the gap between them changes (every other gap's prefix has the
+ *   same set of steps), the two coefficients change by `+-d`, `d = Omega_0 + Omega_2 - Omega_1 - Omega_1'`, and the pairs on
+ *   either side are new neighbours.  Two fragments meet once, so a slab ends in at most `n' (n' - 1) / 2` meetings and a cell,
+ *   whose slabs share no pair, in at most that many; meetings at equal depth may be taken in any order (the result is the
+ *   same: the exchanges telescope).
+ * - **UC15 The area and its arithmetic.**  In a slab the integral of the weight over a row is `64 Omega_n + sum_f c_f x_f`
+ *   (summation by parts over the fragments), and `c_f` is constant between the meetings that move `f`.  With `F_f(t) = (2 a t
+ *   + dx t^2) / (2 dy)`, the exact antiderivative of `x_f`, and the depths `t_k` at which `c_f` changes, `integral c_f x_f =
+ *   sum_k F_f(t_k) (c_{k-1} - c_k) + c_r F_f(H)`: the area of the cell is the sum over its slabs of `64 H Omega_n`, a term
+ *   `d (F_p - F_q)` at each meeting of `p` and `q`, and `c_f F_f(H)` at each slab's end.  No depth is rounded.  `Omega` is,
+ *   in doubled units, twice the predicate of the region: for a part's own overlap "the winding is not zero" (the shared area
+ *   UC6 is the dense value less this area), for the clip's region its rule (non-zero, or odd), for UC8 the predicate of its
+ *   region.  `2^30 F` at a meeting is `(Q << 30) + ((Rm << 30) / Den)`, `Q = Num / Den`, `Rm = Num % Den`, `Num = 2 a N D +
+ *   dx N^2 < 2^46`, `Den = 2 dy D^2 <= 2^33`, so `Rm << 30 < 2^63` and the value is exactly `floor(2^30 F)`; at the slab's end
+ *   `((2 a H + dx H^2) << 30) / (2 dy)` from a numerator below `2^20`.  Orders and meetings compare products below `2^32`.  A
+ *   coefficient is `0` or `+-2`, a second difference `d` at most `4` in magnitude, and the sum `acc`, `2^30` times the area in
+ *   doubled units, is a `uint64_t` with defined wrap-around that is exact (the area is below `2^13`).  Each `F30` is low by
+ *   less than one unit of `2^-30`, so the sum is within `8 K + 2 E` units of the exact one (`K` the meetings, `E` the
+ *   evaluations at slab ends, `E <= S n'`); that is at most `0.002` of a doubled unit at a hundred thousand meetings and
+ *   `0.0078` at `2^20`.  The area is rounded to a doubled unit with ties up, as the earlier step rounded: the quantity
+ *   rounded is the area of UC8's regions, and for a part's own overlap the shared area, with an offset of that bound added
+ *   so that a cell whose exact value is a tie (lattice geometry makes them common: a thin feature of whole units is a half
+ *   unit of area) rounds up as it exactly does and not either way by the sign of the error.  The coverage differs from the
+ *   rounding of the exact area only where the exact value lies within the bound of a boundary.
+ * - **UC16 Checks.**  (i) The divisibility of UC4 (a remainder is `EXACT_IDENTITY`: a refused render, never a guess).  (ii)
+ *   The doubled areas of the cell's pieces, summed in the rasterizer's own formula (the cover is the sum of the heights, the
+ *   area the sum of the height times the two `x` ends), equal the cell's dense value as integers, with a tolerance of zero: a
+ *   piece missed or invented is found.  Both run on every cell and cost `O(n')`.  (iii) A test switch makes the step check
+ *   that each slab's order after its meetings is sorted by the order at its end, and that the meetings it made are the
+ *   meetings the count found: a missed meeting leaves an inversion.
+ *
  *
 
  * ### Memory (S9)

@@ -542,6 +542,7 @@ static int exact_band(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_t
   params.parts = 1;
   params.mode = GSHCPU_EXACT_OVERLAP;
   params.eps[0] = ex->eps;
+  params.max_crossings = ex->max_crossings;
   int64_t pos = 0;
   while (pos < total) {
     /* The window: as many cells as the pool holds the pieces of. */
@@ -919,12 +920,14 @@ GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHC
   memset(&one_part, 0, sizeof one_part);
   one_part.parts = 1;
   one_part.mode = GSHCPU_EXACT_OVERLAP;
+  one_part.max_crossings = lead->max_crossings;
   GSHCPU_Exact_Params three;
   memset(&three, 0, sizeof three);
   three.parts = 3;
   three.mode = GSHCPU_EXACT_UNION3;
   three.even_odd = in[2].rule == GSHGEOM_FILL_EVEN_ODD;
   three.complement = complement;
+  three.max_crossings = lead->max_crossings;
   for (int64_t band = joint.y0; band < joint.y1; band += GSHCPU_RENDER_BAND_ROWS) {
     int64_t rows = joint.y1 - band < (int64_t)GSHCPU_RENDER_BAND_ROWS ? joint.y1 - band : (int64_t)GSHCPU_RENDER_BAND_ROWS;
     int64_t total = rows * width;
@@ -1043,6 +1046,7 @@ GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHC
             region.mode = GSHCPU_EXACT_REGION;
             region.eps[0] = (int)JOINT_EPS_CLIP;
             region.even_odd = three.even_odd;
+            region.max_crossings = lead->max_crossings;
             GSHCPU_Exact_Cell cell;
             memset(&cell, 0, sizeof cell);
             cell.pieces[0] = ex->pool + (ex->slot[jc.k[2]] - jc.n[2]);

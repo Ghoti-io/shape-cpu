@@ -41,8 +41,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-/** The most the winding may be in magnitude anywhere in a cell (the arithmetic's product bound depends on it). */
+/**
+ * The most the winding may be in magnitude anywhere in a cell (the arithmetic's product bound depends on it).  A tool that
+ * wants to run this step over a drawing deeper than that (tools/exact-dual.c, over stroked text) names a larger one on the
+ * command line, up to 32767, the most that keeps a product in \`uint64_t\`; the tests never do.
+ */
+#ifndef EXACT_WINDING_MAX
 #define EXACT_WINDING_MAX 255
+#endif
 
 /** A fragment oriented top to bottom: its upper end, `dx` to its lower end, its height and sign. */
 typedef struct Frag {

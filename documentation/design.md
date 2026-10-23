@@ -264,23 +264,54 @@ runs that build (`GSHCPU_RENDER_TIER_EXACT` off) as the control it must fail. Th
 pixel, which hides an overlap error of a few levels on a thin feature, so a second instrument, the union gate, holds every
 pixel to a level and a half of an independent scanline sweep of the union of the pieces.
 
-**The exact step (UC1 to UC7).** The dense accumulation is an exact integer sum of the winding over the pixel. The area of
-what the nonzero fill covers differs from it by `2 O - 4 N` in doubled units: `O` what is covered by more than one winding
-(`(|w| - 1)^+`) and `N` what is wound the wrong way (the 26.6 lattice can turn a sliver of a piece inside out; the fill
-covers it, the sum subtracts it). Subtracting that, rather than rebuilding the union, leaves a cell without either as the
-dense value to the bit: fills, cells of one piece, corners and the interior never change. The step works in one cell, from
-its pieces and the cover to its left. A piece is what the rasterizer deposits for an edge in the cell, and a horizontal one
-that touches the cell's left side: the dense pass deposits nothing for it, and it steps the winding along that side. The
-winding at the side's top comes from the dense sum: `A_left`, what the cells to the left accumulated, is the integral of the
-winding along the side, and the winding steps only where a contour crosses the line, which the cell's own pieces show, so
-`64 W_top = A_left - sum J(h) (64 - h)` is one exact integer division whose remainder is a consistency check on every cell
-(a top or bottom side would be crossed by the pieces the dense pass keeps, but then the slabs would run in `x`, where the
-horizontal pieces are the ones that cross and are not kept). Slabs in `y` between the integer heights of the ends and steps
-have pieces that each span them; within a slab, the earliest meeting of two neighbours is the next event, the order is
-decided exactly at each sub-slab's start, and the area is a sum of trapezoids in fixed point (the arithmetic and its
-bounds are UC6 and the file header of `src/render/exact.c`). The same walk integrates the winding itself and must give the
-dense area back, which checks the pieces, `W_top` and the order at once; a cell that fails is refused, never guessed. The
-orientation sign `eps` is -1 (positive winding goes from +x toward +y, so the inside's left edge goes up) and a test pins it.
+**The exact step (UC1 to UC7, UC13 to UC16).** The dense accumulation is an exact integer sum of the winding over the pixel. The
+area of what the nonzero fill covers differs from it by `2 O - 4 N` in doubled units: `O` what is covered by more than one
+winding (`(|w| - 1)^+`) and `N` what is wound the wrong way (the 26.6 lattice can turn a sliver of a piece inside out; the fill
+covers it, the sum subtracts it). That difference is also the dense value less twice the area where the winding is not zero, and
+the step computes that area, so a cell without a second piece is the dense value to the bit: fills, cells of one piece, corners
+and the interior never change, and no weight grows with the depth of the winding. The step works in one cell, from its pieces
+and the cover to its left. A piece is what the rasterizer deposits for an edge in the cell, and a horizontal one that touches
+the cell's left side: the dense pass deposits nothing for it, and it steps the winding along that side. The winding at the
+side's top comes from the dense sum: `A_left`, what the cells to the left accumulated, is the integral of the winding along
+the side, and the winding steps only where a contour crosses the line, which the cell's own pieces show, so `64 W_top = A_left
+- sum J(h) (64 - h)` is one exact integer division whose remainder is a consistency check on every cell (a top or bottom side
+would be crossed by the pieces the dense pass keeps, but then the slabs would run in `x`, where the horizontal pieces are the
+ones that cross and are not kept). The second check is exact too: the pieces' own cover and area, summed as the rasterizer
+summed them, are the cell's dense value as integers, so a piece missed or invented is found. A cell that fails is refused,
+never guessed. The orientation sign `eps` is -1 (positive winding goes from +x toward +y, so the inside's left edge goes up)
+and a test pins it.
+
+The pieces of a cell are sorted by segment (so that the result does not depend on the order they were found in), a piece and
+its reverse cancel (the seam two pieces of an outline share is not a piece of the cell), and the copies left of one segment
+are one fragment of a multiplicity: a winding is a sum over edges, and coincident edges enclose no width. Slabs in `y`
+between the integer heights of the ends and steps have fragments that each span them, so within a slab their left to right
+order is the order of `x`, and two of them meet at most once. The area is not summed gap by gap at every meeting, which is
+cubic in a dense cell, but at the meetings. Summing a row's covered widths by parts over the fragments, `sum_gaps Omega_k
+(x_{k+1} - x_k) = 64 Omega_n + sum_f x_f (Omega_{k-1} - Omega_k)`, where `Omega` is the weight of a gap's winding (twice "the
+winding is not zero" for a part's own overlap, the predicate of UC8's region for the regions) and a fragment's coefficient
+`c_f = Omega_left - Omega_right` is constant between the meetings that move it. Integrated over the slab, with `F_f(t)` the
+exact antiderivative of `x_f`, that is `64 H Omega_n` plus `d (F_p - F_q)` at each meeting of `p` and `q` (`d` the second
+difference of `Omega` there: only the gap between the two changes) plus `c_f F_f(H)` for each fragment at the slab's end. The
+order is carried from slab to slab, repaired where a pair met exactly at the boundary, and kept by exchanging neighbours at
+their meetings, earliest first, from a binary heap indexed by the pair's place; equal depths in any order, since the
+exchanges telescope. A slab with no meeting builds no heap. The cost of a slab is `O(n)` and of a cell `O(64 n' + K log n')`
+for `K <= n' (n' - 1) / 2` meetings: the work counted is `m + S (6 n' + 8) + K (ceil(log2 n') + 12)` (and `n'
+(ceil(log2 n') + 1)` more for a slab when the meetings are counted first).
+
+The arithmetic is integer, with no depth rounded. A meeting is at the exact depth `N / D` (`D <= 2^13`, `N < 2^19`), and `F`
+there is `Num / Den` with `Num = 2 a N D + dx N^2 < 2^46` and `Den = 2 dy D^2 <= 2^33`, taken to `2^-30` as `(Q << 30) + ((Rm <<
+30) / Den)` (`Rm < Den`, so `Rm << 30 < 2^63`): exactly `floor(2^30 F)`. The sum is a `uint64_t` that wraps by definition and
+whose true value is below `2^13` times `2^30`. Each `F` is low by less than one unit of `2^-30`, a meeting adds two of them times
+a second difference of at most `4`, so the area is within `8 K + 2 E` such units of the exact one. The earlier arithmetic, a
+boundary rounded to sixteen bits and a floor in every gap of every sub-slab, was within a bound that grew with the square of
+the pieces of a cell (about a level at 512 pieces) and so could not be run at a larger cap; this one has the error of a
+hundred thousand meetings at under a thousandth of a doubled unit. The area is rounded to a doubled unit with ties up, as before,
+with an offset of that bound so that a cell whose exact area is a tie (lattice geometry makes them common: a thin feature of
+whole units is a half unit of area) rounds up as it exactly does and not either way by the sign of the error; the earlier
+step rounded a tie by the sign of its own error, which is why a few cells of the committed fixtures differ from it by a doubled
+unit and none by a byte. The step is held to an engine that shares none of its working (an area from every pairwise meeting
+in `long double`, the meetings from testing every pair), to the earlier step kept in the tests (the dual render), and to its
+own invariants (each slab's order sorted at its end, the meetings made equal to the meetings counted) in a test build.
 
 **Parts that share a pixel (UC8).** SC5's composition, `k_b + k_a c' - k_b k_a c'`, is exact where at most one of the three
 parts has an edge in the pixel, because the others are then 0 or 1. It is not elsewhere, and S4's bracket could not show it
@@ -508,7 +539,7 @@ point, a contour that touches the left side, a vertical piece on it, a cell of f
 against the instrument; a window equal to the whole render there and the order of the pieces changing nothing; the sparse
 sweep equal to the dense one; three parts together against the instrument, a window equal to the whole, one part's pieces
 alone against SC5's formula with constants, the off-centre strip the formula gets wrong; the cap at 512 and 513 and at small
-values, over the walk and not the window; a winding of 255 and 256; the field `max_exact_fragments` through the sink (validated, defaulted, refused at its bound, damage, strict,
+values, over the walk and not the window; no winding as a limit (255, 256, 475, 1024 and deeper); the field `max_exact_fragments` through the sink (validated, defaulted, refused at its bound, damage, strict,
 caller memory).
 
 The sink's tests: shape-scene's conformance suite, installed by shape-scene as

@@ -694,6 +694,38 @@ static int same_bytes(const GIMG_Raster * a, const GIMG_Raster * b) {
   return memcmp(gimg_raster_pixels_const(a), gimg_raster_pixels_const(b), raster_bytes(a)) == 0;
 }
 
+/**
+ * Whether every sample of @p a is within @p levels of 255 of @p b's: 8-bit samples (four to a pixel of @p bpp = 4) or
+ * 32-bit floats (@p bpp = 16).  The two engines of the dual render differ by a doubled unit of area where the exact area is a
+ * tie, which a coverage of 255 levels shows as at most one level, and a paint scales that by at most its own range.
+ */
+static int near_samples(const GIMG_Raster * a, const GIMG_Raster * b, size_t bpp, int levels) {
+  CHECK(raster_bytes(a) == raster_bytes(b));
+  const uint8_t * pa = (const uint8_t *)gimg_raster_pixels_const(a);
+  const uint8_t * pb = (const uint8_t *)gimg_raster_pixels_const(b);
+  const size_t stride = gimg_raster_stride_bytes(a);
+  const size_t row = (size_t)gimg_raster_width(a) * bpp;
+  for (uint32_t y = 0; y < gimg_raster_height(a); y++) {
+    for (size_t i = 0; i < row; i += bpp == 16 ? 4 : 1) {
+      if (bpp == 16) {
+        float fa, fb;
+        memcpy(&fa, pa + y * stride + i, sizeof fa);
+        memcpy(&fb, pb + y * stride + i, sizeof fb);
+        float d = fa > fb ? fa - fb : fb - fa;
+        if (!(d <= (float)levels / 255.0f)) {
+          return 0;
+        }
+      } else {
+        int d = (int)pa[y * stride + i] - (int)pb[y * stride + i];
+        if ((d < 0 ? -d : d) > levels) {
+          return 0;
+        }
+      }
+    }
+  }
+  return 1;
+}
+
 static GIMG_Raster * copy_of(const GIMG_Raster * src, const GIMG_Pixel_Format * format) {
   GIMG_Raster * out = NULL;
   if (gimg_raster_create(gimg_raster_width(src), gimg_raster_height(src), format, GIMG_RASTER_OWNED, NULL, 0, &out) !=
@@ -1070,8 +1102,10 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
             GSHSCENE_Result r5 = gshscene_sink_render(dual, &request);
             gshcpu_exact_hook = NULL;
             CHECK(r5 == GSHSCENE_OK || r5 == GSHSCENE_ERR_OOM || r5 == GSHSCENE_ERR_LIMIT);
-            if (r5 == GSHSCENE_OK) {
-              CHECK(same_bytes(raster, twin_out));
+            /* Where it is exact enough: no pixel holds more pieces of a part than it was written for and no winding is past its
+             * 255 (the library's own cells are then the exact area, the earlier step's within a unit of it). */
+            if (r5 == GSHSCENE_OK && counters.exact_pieces_max <= 512 && counters.exact_winding_max <= 255) {
+              CHECK(near_samples(raster, twin_out, bpp, 2));
               outcomes[OUT_STROKE_DUAL]++;
             }
             target.surface = again;
