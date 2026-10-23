@@ -26,7 +26,10 @@ and re-running the sweep:
   python3 tools/gen-render-plants.py > candidates.json
   PLANT_EXTRA_JSON=candidates.json PLANT_ONLY='^r[cvgahs]-' make check-planted PREFIX=...
 
-then keep the lines the sweep reports as ok (tools/keep-caught-plants.py).
+then keep the lines the sweep reports as ok (tools/keep-caught-plants.py).  After an edit that moved only some lines,
+``--new`` writes just the candidates that tools/render-plants.json does not already hold (the entries whose mutation is
+still at its line stay, the rest are the ones to sweep), and ``keep-caught-plants.py --merge tools/render-plants.json``
+adds the ones the sweep caught to it.
 """
 import json, re, sys
 from pathlib import Path
@@ -212,6 +215,10 @@ def main():
             if pid in EXCL:
                 continue
             plants.append((pid, "srcl", path, "%d:%s" % (no, frag), new, TESTS_BY_FILE[path]))
+    if "--new" in sys.argv:
+        # Only the candidates that tools/render-plants.json does not hold (the ones to sweep after a source edit).
+        held = {json.dumps(e[:5]) for e in json.load(open(ROOT / "tools" / "render-plants.json"))}
+        plants = [p for p in plants if json.dumps(list(p[:5])) not in held]
     json.dump(plants, sys.stdout)
 
 
