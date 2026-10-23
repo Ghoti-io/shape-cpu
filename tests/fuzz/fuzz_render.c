@@ -102,7 +102,8 @@ enum {
   OUT_WORKSPACE_SHORT, OUT_DAMAGE, OUT_GLYPHS_FAST, OUT_GLYPHS_GENERAL, OUT_FLOAT_TARGET, OUT_NESTED_GROUP,
   OUT_GRADIENT_DRAWN, OUT_GRADIENT_NOTICE, OUT_GRADIENT_LIMIT, OUT_COLOR_LIMIT, OUT_COLOR_AT_BOUND, OUT_BLEND_DRAWN,
   OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_STROKE_RUN_DRAWN, OUT_STROKE_DRAWN, OUT_STROKE_ALIGNED, OUT_STROKE_CACHED,
-  OUT_STROKE_SPARSE, OUT_STROKE_NOTICE, OUT_STROKE_EXACT, OUT_STROKE_RUN_TWIN, OUT_STROKE_DUAL, OUT_COUNT
+  OUT_STROKE_SPARSE, OUT_STROKE_NOTICE, OUT_STROKE_EXACT, OUT_STROKE_RUN_TWIN, OUT_STROKE_DUAL,
+  OUT_BUDGET_REFUSED, OUT_BUDGET_SAME, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -117,7 +118,9 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a render with an aligned stroke drawn (SC5)", "a stroke served from the cache (SC7)",
     "a stroke drawn by the sparse composite (SC8)", "a stroke that draws nothing (a notice)",
     "a stroke with cells made exact (UC3)", "a stroked run equal to the stroke of its path (ST11)",
-    "a stroke drawn the same by the earlier exact step (the dual render)"};
+    "a stroke drawn the same by the earlier exact step (the dual render)",
+    "an item refused by a tightened crossings budget (UC19)",
+    "a render under a tightened budget or piece cap that refused nothing, the same bytes as the default limits"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -776,6 +779,12 @@ static uint64_t entries_hash(const GSHSCENE_Report * report) {
   return h;
 }
 
+/* UC19's budgets the harness draws: small ones that a pixel of a few overlapping pieces passes, and some that it does not. */
+static uint64_t crossings_budget(unsigned index) {
+  static const uint64_t table[12] = {1, 2, 3, 4, 6, 8, 12, 16, 24, 64, 256, 1024};
+  return table[index % 12];
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size);
 
 int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
@@ -820,9 +829,17 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     case 5: /* UC9: the pieces of a stroke part in one pixel */
       limits.max_exact_fragments = 2 + (limit_byte >> 3) % 24;
       break;
+    case 6: /* UC19: the crossings of a stroke part in one pixel, a table from one to a thousand */
+      limits.max_exact_crossings = crossings_budget(limit_byte >> 3);
+      break;
+    case 7: /* both at once: the pieces of a pixel and its crossings */
+      limits.max_exact_fragments = 2 + (limit_byte >> 3) % 24;
+      limits.max_exact_crossings = crossings_budget(cancel_byte >> 3);
+      break;
     default:
       break;
   }
+  const int tightened = (limit_byte & 7) >= 5; /* a limit of the exact step (UC9, UC19) is lowered */
 
   GSHSCENE_Store * store = NULL;
   GSHSCENE_List * list = NULL;
@@ -977,9 +994,11 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   outcomes[OUT_GRADIENT_DRAWN] += world.gradients > 0 && r == GSHSCENE_OK;
   outcomes[OUT_COLOR_AT_BOUND] += world.at_bound > 0 && r == GSHSCENE_OK;
   outcomes[OUT_BLEND_DRAWN] += world.blends > 0 && r == GSHSCENE_OK;
+  unsigned limit_refused = 0; /* items refused for a resource limit of the sink */
   for (size_t i = 0; i < gshscene_report_count(report); i++) {
     GSHSCENE_Report_Entry e;
     CHECK(gshscene_report_entry(report, i, &e) == GSHSCENE_OK);
+    limit_refused += e.reason == GSHSCENE_REASON_RESOURCE_LIMIT;
     if (e.reason == GSHSCENE_REASON_GROUP_ISOLATION || e.reason == GSHSCENE_REASON_GROUP_KNOCKOUT ||
         e.reason == GSHSCENE_REASON_SOFT_MASK) {
       CHECK(e.entry_class == GSHSCENE_ENTRY_REFUSED);
@@ -1051,6 +1070,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   outcomes[OUT_STROKE_ALIGNED] += r == GSHSCENE_OK && counters.strokes > 0 && world.aligned > 0;
   outcomes[OUT_STROKE_SPARSE] += counters.sparse_hairline + counters.sparse_plain > 0;
   outcomes[OUT_STROKE_EXACT] += counters.exact_cells > 0;
+  outcomes[OUT_BUDGET_REFUSED] += (limit_byte & 7) >= 6 && limit_refused > 0;
   /* UC4: the pieces of every cell the exact step made reproduce what the rasterizer summed, whatever the geometry. */
   CHECK(counters.exact_failures == 0);
   const uint64_t first_entries = entries_hash(report);
@@ -1074,6 +1094,26 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
 #endif
         CHECK(same_bytes(raster, again));
         outcomes[OUT_STROKE_CACHED] += counters.cache_hits > 0;
+        /* UC9 and UC19: a render that refused no item for a resource limit is the render the default limits make, whatever
+         * the piece cap and the crossings budget were lowered to (a limit refuses; it never changes what it lets through). */
+        if (tightened && counters.strokes > 0 && limit_refused == 0) {
+          GSHCPU_Limits roomy;
+          gshcpu_limits_default(&roomy);
+          GSHSCENE_Sink * wide = NULL;
+          GIMG_Raster * wide_out = copy_of(backdrop, format);
+          if (wide_out && gshcpu_render_sink_create_tiered(NULL, NULL, &roomy, GSHCPU_RENDER_TIERS_ALL, NULL, NULL, NULL, &wide) == GSHCPU_OK) {
+            target.surface = wide_out;
+            GSHSCENE_Result r6 = gshscene_sink_render(wide, &request);
+            CHECK(r6 == GSHSCENE_OK || r6 == GSHSCENE_ERR_OOM);
+            if (r6 == GSHSCENE_OK) {
+              CHECK(same_bytes(raster, wide_out));
+              outcomes[OUT_BUDGET_SAME] += (limit_byte & 7) >= 6;
+            }
+            target.surface = again;
+          }
+          gshscene_sink_destroy(wide);
+          gimg_raster_destroy(wide_out);
+        }
         /* The general tier is the oracle of the fast ones (SC8): a second sink with them off (the exact step stays: it is the
          * coverage, not a tier) gives the same bytes. */
         if (counters.strokes > 0) {
@@ -1104,7 +1144,10 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
             CHECK(r5 == GSHSCENE_OK || r5 == GSHSCENE_ERR_OOM || r5 == GSHSCENE_ERR_LIMIT);
             /* Where it is exact enough: no pixel holds more pieces of a part than it was written for and no winding is past its
              * 255 (the library's own cells are then the exact area, the earlier step's within a unit of it). */
-            if (r5 == GSHSCENE_OK && counters.exact_pieces_max <= 512 && counters.exact_winding_max <= 255) {
+            /* The earlier step has no crossings budget (the hook replaces the step that counts them), so where the budget
+             * refused an item it drew what the render left out; the engines are compared where nothing was refused. */
+            if (r5 == GSHSCENE_OK && counters.exact_pieces_max <= 512 && counters.exact_winding_max <= 255 &&
+                ((limit_byte & 7) < 6 || limit_refused == 0)) {
               CHECK(near_samples(raster, twin_out, bpp, 2));
               if (getenv("GSHCPU_FUZZ_STRICT_DUAL")) {
                 CHECK(same_bytes(raster, twin_out)); /* the committed seeds draw the same bytes with either engine */

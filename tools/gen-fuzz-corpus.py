@@ -294,6 +294,21 @@ def scripted():
         [stroke(0, first=style(width=3, dashes=2, cap=2)), stroke(1, ROTATED)])
     out["scripted-stroke-exact-cap-strict.bin"] = header(request=STRICT, limit=5) + body_with_line(
         [stroke(0, first=style(width=5, join=0)), stroke(1)])
+    # Strokes story S4c (UC19): the crossings budget of one pixel lowered (limit mode 6, a table of 1 to 1024 selected by the
+    # bits above the mode), and with the piece cap (mode 7, the budget's index in the cancel byte's high bits).  A render that
+    # refuses no item for the sink's limit must draw the bytes the default limits draw (the harness's wide render).
+    out["scripted-stroke-budget-refused.bin"] = header(limit=6) + body_with_line(
+        [stroke(0, first=style(width=5, join=0, cap=1)), stroke(1, ROTATED), stroke(2, ROTATED)])
+    out["scripted-stroke-budget-refused-strict.bin"] = header(request=STRICT, limit=6 | 8) + body_with_line(
+        [stroke(0, first=style(width=3, dashes=2, cap=2, join=1)), stroke(1)])
+    out["scripted-stroke-budget-refused-damage.bin"] = header(request=DAMAGE, limit=6 | 16) + body_with_line(
+        [stroke(0, first=style(width=3, dashes=2, cap=2)), stroke(1, ROTATED)])
+    out["scripted-stroke-budget-same.bin"] = header(limit=6 | (11 << 3)) + body_with_line(
+        [stroke(0, first=style(width=3, dashes=2, cap=2, join=1)), stroke(1, ROTATED), stroke(2)])
+    out["scripted-stroke-budget-same-damage.bin"] = header(request=DAMAGE | CALLER_MEMORY, limit=6 | (9 << 3)) + body_with_line(
+        [fill(0), stroke(0, first=style(width=3, alignment=1, join=2)), stroke(1, ROTATED), stroke(2)])
+    out["scripted-stroke-both-limits.bin"] = header(cancel=9 << 3, limit=7 | (20 << 3)) + body_with_line(
+        [stroke(0, first=style(width=3, dashes=2, cap=2, join=1)), stroke(1, ROTATED), stroke(2)])
     out["scripted-stroke-point-cap.bin"] = header(limit=1) + body_with_line([stroke(1, first=style(width=3))])
     out["scripted-stroke-cell-cap.bin"] = header(limit=2 | 16) + body_with_line(
         [stroke(0, first=style(width=3)), stroke(1)])
