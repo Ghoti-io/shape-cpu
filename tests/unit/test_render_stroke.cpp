@@ -106,8 +106,9 @@ TEST(RenderStroke, AWholePixelTranslationMovesThePixelsBitForBit) {
   dashed.dashes = {3.0, 2.0};
   Case cases[] = {{"round joins", &kClosed, params()}, {"a hairline", &kOpen, hair}, {"inside", &kMixed, inside},
       {"dashes", &kOpen, dashed}};
-  const int dx = 7;
-  const int dy = -3;
+  for (int sign : {1, -1}) {
+  const int dx = 7 * sign;
+  const int dy = -3 * sign;
   for (Case & c : cases) {
     Store s1;
     Store s2;
@@ -133,6 +134,7 @@ TEST(RenderStroke, AWholePixelTranslationMovesThePixelsBitForBit) {
     Store s3;
     Drawn other = render_list(sink.sink, one_stroke(s3, *c.ops, c.p.get(), translation(10.5, 14.625)), 64, 64);
     EXPECT_NE(other.hash, a.hash) << c.what;
+  }
   }
 }
 
@@ -160,6 +162,10 @@ TEST(RenderStroke, ADifferentFractionOrLinearPartIsACacheMissAndAWholePixelShift
   EXPECT_EQ(sink.counters.cache_misses, 3u) << "another linear part";
   render_list(sink.sink, list_at(translation(2.25, 3.5)), 48, 48);
   EXPECT_EQ(sink.counters.cache_hits, 2u);
+  render_list(sink.sink, list_at(translation(2.25, 3.75)), 48, 48);
+  EXPECT_EQ(sink.counters.cache_misses, 4u) << "another fraction in y alone";
+  render_list(sink.sink, list_at(translation(2.25, 3.5)), 48, 48);
+  EXPECT_EQ(sink.counters.cache_hits, 3u);
 }
 
 /* --- SC10: the test sink's outline= is the very outline that is drawn --------------------------------------------- */
@@ -539,6 +545,14 @@ TEST(RenderStrokeLimits, AShiftedCoordinatePastTheRangeAndAnUnformableMapAreTheS
   Drawn far = render_list(sink.sink, one_stroke(s, kClosed, p.get(), translation(33554432.0 + 0.5, 0.25)), 24, 24);
   ASSERT_EQ(far.entries.size(), 1u);
   EXPECT_EQ(far.entries[0].reason, GSHSCENE_REASON_RESOURCE_LIMIT);
+  // and in each of the other three directions: the box of a part is checked on all four sides
+  for (const GSHGEOM_Map & away : {translation(0.5, 33554432.0 + 0.25), translation(-33554432.0 - 0.5, 0.25),
+           translation(0.5, -33554432.0 - 0.25)}) {
+    Store sa;
+    Drawn d = render_list(sink.sink, one_stroke(sa, kClosed, p.get(), away), 24, 24);
+    ASSERT_EQ(d.entries.size(), 1u);
+    EXPECT_EQ(d.entries[0].reason, GSHSCENE_REASON_RESOURCE_LIMIT);
+  }
   // A composed map past the map bound: the product of two maps each at the bound.
   const GSHGEOM_Map huge = affine_map(0x1p99, 0, 0, 0x1p99, 0, 0);
   Store s2;
@@ -844,6 +858,57 @@ uint64_t draw_fixture_twice(GSHSCENE_Sink * sink, size_t index, GSHCPU_Format fo
 }
 
 }  // namespace
+
+TEST(RenderStrokeTiers, OnlyAWidthOfOneInDeviceUnitsIsAHairline) {
+  struct Case {
+    uint32_t space;
+    double width;
+    bool hairline;
+  } cases[] = {{GSHGEOM_STROKE_WIDTH_DEVICE, 1.0, true}, {GSHGEOM_STROKE_WIDTH_LOCAL, 1.0, false},
+      {GSHGEOM_STROKE_WIDTH_DEVICE, 1.25, false}, {GSHGEOM_STROKE_WIDTH_DEVICE, 0.5, false},
+      {GSHGEOM_STROKE_WIDTH_LOCAL, 2.0, false}};
+  for (const Case & c : cases) {
+    Params p = params(c.width, GSHGEOM_STROKE_JOIN_MITER, GSHGEOM_STROKE_CAP_BUTT);
+    p.s.width_space = c.space;
+    Store s;
+    Sink sink;
+    const Ops thin = {{'M', {-50.0, -50.0}}, {'L', {150.0, 150.0}}};   // long and thin: where the sparse composite is taken
+    Drawn d = render_list(sink.sink, one_stroke(s, thin, p.get(), frac_map()), 48, 24);
+    ASSERT_EQ(d.result, GSHSCENE_OK);
+    EXPECT_EQ(sink.counters.sparse_hairline, c.hairline ? 1u : 0u) << c.space << " " << c.width;
+    EXPECT_EQ(sink.counters.sparse_plain, c.hairline ? 0u : 1u) << c.space << " " << c.width;
+  }
+}
+
+TEST(RenderStrokeTiers, AStrokeIsSparseOnlyWhereItsDepositsAreAFifteenthOfItsRectangleAndNeverWhenAligned) {
+  // A diagonal across a small canvas deposits in about every row and column of its rectangle: far more than a sixteenth
+  // of its pixels, though well under a half.
+  {
+    Params p = params(2.0, GSHGEOM_STROKE_JOIN_MITER, GSHGEOM_STROKE_CAP_BUTT);
+    const Ops diagonal = {{'M', {2.0, 2.0}}, {'L', {22.0, 22.0}}};
+    Store s;
+    Sink tiered;
+    Sink general(GSHCPU_RENDER_TIERS_GENERAL);
+    const GSHSCENE_List * l = one_stroke(s, diagonal, p.get(), frac_map());
+    EXPECT_EQ(render_list(tiered.sink, l, 24, 24).hash, render_list(general.sink, l, 24, 24).hash);
+    EXPECT_EQ(tiered.counters.sparse_plain + tiered.counters.sparse_hairline, 0u) << "dense: the general tier draws it";
+  }
+  // A long thin triangle stroked inside, beside a long open line: the body alone would be sparse by its deposits, but a
+  // stroke with an aligned part never is.
+  {
+    Params p = params(0.5, GSHGEOM_STROKE_JOIN_MITER, GSHGEOM_STROKE_CAP_BUTT);
+    p.s.alignment = GSHGEOM_STROKE_ALIGN_INSIDE;
+    // (with a long open line beside it, so that the body part is there for the sparse tier to take)
+    const Ops sliver = {{'M', {-50.0, -60.0}}, {'L', {150.0, 140.0}}, {'M', {-50.0, -50.0}}, {'L', {150.0, 150.0}},
+        {'L', {150.0, 148.0}}, {'Z', {}}};
+    Store s;
+    Sink tiered;
+    Sink general(GSHCPU_RENDER_TIERS_GENERAL);
+    const GSHSCENE_List * l = one_stroke(s, sliver, p.get(), frac_map());
+    EXPECT_EQ(render_list(tiered.sink, l, 48, 24).hash, render_list(general.sink, l, 48, 24).hash);
+    EXPECT_EQ(tiered.counters.sparse_plain + tiered.counters.sparse_hairline, 0u);
+  }
+}
 
 TEST(RenderStrokeTiers, EveryStrokeFixtureIsBitEqualToTheGeneralTierOnEveryFormatAndEachTierIsTakenOverThem) {
   GSHCPU_Format formats[] = {GSHCPU_FORMAT_RGBA8_STRAIGHT, GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, GSHCPU_FORMAT_RGBAF32_STRAIGHT,
