@@ -435,6 +435,9 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
     if (item->kind != GSHSCENE_ITEM_FILL && item->kind != GSHSCENE_ITEM_CLIP_PUSH) {
       continue;
     }
+    if (gshscene_resource_kind(item->resource) == GSHSCENE_RESOURCE_PLANE) {
+      continue; /* a plane has no geometry: it takes nothing from the arena */
+    }
     GSHCPU_Item_Geometry g;
     gshcpu_render_arena_reset(arena);
     arena->peak = 0;
@@ -909,7 +912,28 @@ static GSHSCENE_Result paint_coverage(Run * run, const GSHSCENE_Item * item, con
   return GSHSCENE_OK;
 }
 
+/**
+ * A fill of the plane (shape-scene's PL2, PL7): the region it draws is every pixel the clips in force allow, each weighed
+ * by the clips alone.  There is no outline to rasterize, so the coverage is 255 over the region and the paint's own tail
+ * (a solid, or a gradient at the pixel centers) does the rest; no cell or point is charged.
+ */
+static GSHSCENE_Result fill_plane(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  Frame * frame = &run->frames[run->top];
+  GSHCPU_Rect rect = reach_of(run, frame->clip_base, run->clip_count);
+  GSHCPU_Rect whole = whole_reach_of(run, frame->clip_base, run->clip_count);
+  if (gshcpu_render_rect_empty(rect)) {
+    rect.x1 = rect.x0;
+    rect.y1 = rect.y0;
+  } else {
+    memset(run->coverage, 0xFF, (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0));
+  }
+  return paint_coverage(run, item, chain, count, frame, rect, whole, run->coverage);
+}
+
 static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  if (gshscene_resource_kind(item->resource) == GSHSCENE_RESOURCE_PLANE) {
+    return fill_plane(run, item, chain, count);
+  }
   Frame * frame = &run->frames[run->top];
   GSHCPU_Rect rect;
   GSHCPU_Rect whole;

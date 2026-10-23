@@ -181,6 +181,17 @@ tolerance of `1e-12` (`GSHCPU_RENDER_GRADIENT_TOLERANCE`); all 343 exact cases a
 point the oracle says draws nothing is drawn as nothing. No dithering: the goldens are bit-identical on every
 target.
 
+### The plane (color-paint story P4)
+
+A fill of shape-scene's plane (PL1 to PL10) covers every pixel the clips in force allow. There is no outline to
+rasterize, so the coverage is 255 over the region the render draws (the extent met with the damage, met with the clips'
+rectangles) and the pixel's weight is the clips' alone (D8), which is what a fill of the clips' own region gives pixel
+for pixel: an antialiased clip edge is weighed once. The paint is the fill's own tail, a solid or a gradient sampled at
+the pixel centers under the same chain, so a gradient plane under an item map moves only the paint. No cell, point or
+fragment is charged to the limits; the work is the pixels of the region, which `max_dimension` bounds. The conformance
+suite's plane case runs on this sink and on the test sink's configurations, and `tests/unit/test_render_plane.cpp`
+holds the pixel equalities with the filled region.
+
 ### Blend modes (color-paint story P3)
 
 A group of a blend mode composites at its pop by `apply` with shape-scene's `op_X` (B2), in the enclosing layer's
