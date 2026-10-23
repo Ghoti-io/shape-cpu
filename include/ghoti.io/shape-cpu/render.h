@@ -379,7 +379,7 @@
  *   in a cell and they overlap, its coverage is the area of its region by its rule, exactly (the nonzero or the odd
  *   windings), since the area of `F` is what the formula's constants stand for.  This is the clip part of a stroke, not a
  *   fill item: a fill is not changed, and extending the exact step to fills is a separate decision.
- * - **UC9 Limits, refusals, work, memory.**  `GSHCPU_Limits.max_exact_fragments` (a `uint64_t`; 0 is 16384, any other value
+ * - **UC9 Limits, refusals, work, memory.**  `GSHCPU_Limits.max_exact_fragments` (a `uint64_t`; 0 is 32768, any other value
  *   is used as given up to `2^20`, which a larger value is ::GSHCPU_ERR_INVALID for at sink creation; `UINT64_MAX` is not
  *   "no cap": the step is superlinear in the pieces of a pixel) bounds the pieces of one part in one cell (the raw pieces, as
  *   the rasterizer finds them, whatever UC13 makes of them).  A cell with more, or a cell whose pieces do not reproduce the
@@ -452,9 +452,11 @@
  *   that each slab's order after its meetings is sorted by the order at its end, and that the meetings it made are the
  *   meetings the count found: a missed meeting leaves an inversion.
  *
- * - **UC17 The default and the cost of a cell (amends UC9).**  `GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS` is 16384.  The
- *   densest pixel measured over every drawing the suite keeps holds 13363 raw pieces of a part (a line of text stroked 22 units
- *   wide with round joins and caps, the three words measured) and 4294 in the benchmark's stroke scenes.  The cost of a cell is
+ * - **UC17 The default and the cost of a cell (amends UC9).**  `GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS` is 32768, at
+ *   least twice the densest pixel measured over every drawing the suite keeps: 13363 raw pieces of a part (a line of text
+ *   stroked 22 units wide with round joins and caps, the three words measured), and 4294 in the benchmark's stroke scenes.  A
+ *   cell at the cap and the default budget costs at most 74.4 million units of `W_cell` (about 0.2 s at the measured 3 ns a
+ *   unit), and the scratch of one part is 2.4 MB (72 bytes a fragment).  The cost of a cell is
  *   `W_cell(m, n', K) <= m + S (6 n' + 8) + S n' (ceil(log2 n') + 1) + K (ceil(log2 n') + 12)` in SC11's units, `K <= n' (n' -
  *   1) / 2`, which is quadratic in the pixel's fragments and is cut by UC19's budget to a number of meetings that does not
  *   depend on the pieces.
@@ -475,6 +477,12 @@
  *   winding's magnitude, so the step has no bound on it: a winding is held in an `int32_t`, a cell's gaps are at most its
  *   pieces and the winding at the top of its left side at most `2^28` (an outline of a library-bounded size never has more),
  *   and a cell past that is the resource limit.
+ * - **UC21 The rounding at exact ties.**  The step returns the exact area of a part (or, for UC8, of the clip) rounded to
+ *   the nearest value of the lattice's coverage, and an area that lies exactly half way rounds up.  The lattice makes such
+ *   ties common (a feature of whole units is a half unit of area), and the earlier step rounded them by the sign of its own
+ *   error, which was neither a rule nor the same for equal inputs; a drawing that held a tie can differ from the earlier step
+ *   by one level of coverage, and by nothing elsewhere.  The earlier step is kept in the tests as the oracle of the dual
+ *   render, which allows a difference of one level at an exact tie and none anywhere else.
  *
 
  * ### Memory (S9)

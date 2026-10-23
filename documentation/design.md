@@ -314,7 +314,7 @@ in `long double`, the meetings from testing every pair), to the earlier step kep
 own invariants (each slab's order sorted at its end, the meetings made equal to the meetings counted) in a test build.
 
 **What a pixel may cost (UC9, UC17, UC19, UC20).** Two limits bound the step, both decided over what the whole render draws of
-an item, so a damaged render refuses what the whole one does. `max_exact_fragments` (default 16384) bounds the raw pieces of a
+an item, so a damaged render refuses what the whole one does. `max_exact_fragments` (default 32768, at least twice the densest pixel measured) bounds the raw pieces of a
 part in a pixel: the pieces are what the rasterizer finds, and the step's memory and its first pass are linear in them. The
 densest pixel measured over every drawing the suite keeps holds 13363 (a line of DejaVu Sans stroked 22 units wide with round
 joins and caps, three words), the benchmark's stroke scenes 4294 and the gallery 2359. `max_exact_crossings` (default `2^20`)
@@ -331,6 +331,12 @@ stroke's three parts together, so the refusal is the same however the render is 
 limit is "no cap" at `UINT64_MAX`; a host that draws outlines it did not author lowers them, which is what they are for. No
 winding is a limit (the weight is whether the winding is zero, not how deep it is), where the earlier step refused one past 255
 and a line of stroked text reaches 494.
+
+**Rounding at exact ties (UC21).** The exact step rounds the exact area of a pixel to the nearest coverage level, and an area
+exactly half way rounds up. The lattice makes such ties common (a feature of whole units is half a unit of area), so a rule
+is needed and this is it. The step the sweep replaced rounded a tie by the sign of its own error, which depended on how its
+roundings fell and was not the same for equal inputs; it is kept in the tests as the second engine of the dual render, which
+allows one level of difference at an exact tie and none anywhere else.
 
 **Parts that share a pixel (UC8).** SC5's composition, `k_b + k_a c' - k_b k_a c'`, is exact where at most one of the three
 parts has an edge in the pixel, because the others are then 0 or 1. It is not elsewhere, and S4's bracket could not show it

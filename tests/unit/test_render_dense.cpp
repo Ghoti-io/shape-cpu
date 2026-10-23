@@ -246,12 +246,12 @@ TEST(RenderDense, TheThresholdIsTheLeastNumberOfFragmentsThatCanPassABudgetAndTh
   }
   EXPECT_EQ(gshcpu_exact_cross_threshold(1u << 20), 1449u) << "the default budget";
   uint64_t last = 0;
-  for (uint64_t m : {1ull, 2ull, 10ull, 100ull, 4096ull, 16384ull}) {
+  for (uint64_t m : {1ull, 2ull, 10ull, 100ull, 4096ull, 16384ull, 32768ull}) {
     uint64_t now = gshcpu_exact_cell_work_bound(m, 1u << 20);
     EXPECT_GE(now, last) << "more pieces never cost less";
     last = now;
   }
-  EXPECT_LE(gshcpu_exact_cell_work_bound(16384, 1u << 20), 1u << 30) << "a cell of the cap at the default budget stays under a billion units";
+  EXPECT_LE(gshcpu_exact_cell_work_bound(32768, 1u << 20), 1u << 27) << "a cell of the cap at the default budget stays under 134 million units (74.4 million)";
 }
 
 TEST(RenderDense, TheCommittedVectorsAreTheExactAnswersInRationalArithmetic) {

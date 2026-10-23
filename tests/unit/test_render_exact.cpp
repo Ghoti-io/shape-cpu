@@ -871,7 +871,7 @@ TEST(RenderExactSink, TheFieldIsValidatedDefaultedAndTheLeastValueThatDrawsIsThe
   };
   Drawn def = draw(0);
   ASSERT_TRUE(def.entries.empty()) << "the default draws it";
-  EXPECT_EQ(draw(GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS).alpha, def.alpha) << "zero is the default, 16384";
+  EXPECT_EQ(draw(GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS).alpha, def.alpha) << "zero is the default, 32768";
   // the least field that draws: binary search (a cell's pieces: no more and no less)
   uint64_t lo = 1;
   uint64_t hi = 512;

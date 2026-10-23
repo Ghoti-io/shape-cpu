@@ -85,11 +85,11 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
 #define GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES ((uint64_t)16 * 1024 * 1024)
 
 /**
- * Default ::GSHCPU_Limits.max_exact_fragments: 16384 pieces of one stroke part in one pixel (render.h, UC9, UC17).  The largest
+ * Default ::GSHCPU_Limits.max_exact_fragments: 32768 pieces of one stroke part in one pixel (render.h, UC9, UC17).  The largest
  * pixel measured over stroked lines of real text (the densest everyday input: round joins and caps, 84 pixels, widths up to
  * 22 units) holds 13363, the benchmark's stroke scenes 4294.
  */
-#define GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS ((uint64_t)16384)
+#define GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS ((uint64_t)32768)
 
 /** The largest ::GSHCPU_Limits.max_exact_fragments the sink accepts: 2^20.  A larger value is refused at sink creation. */
 #define GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS ((uint64_t)1 << 20)
@@ -136,7 +136,7 @@ typedef struct GSHCPU_Limits {
   /**
    * The most pieces of one stroke part (render.h, UC9) the exact union coverage of a stroke handles in one pixel: edges of
    * the part's outline that cross it, and horizontal ones that touch its left side.  0 is
-   * ::GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS (16384), any other value is used as given up to
+   * ::GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS (32768), any other value is used as given up to
    * ::GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS (2^20; a larger one is ::GSHCPU_ERR_INVALID at sink creation).  The step is
    * superlinear in the pieces of a pixel, so `UINT64_MAX` is not "no cap" here.  A pixel past it is the sink's resource
    * limit, ::GSHSCENE_REASON_RESOURCE_LIMIT, for the item, decided over what the whole render draws of it as the cell cap
