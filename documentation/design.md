@@ -313,6 +313,25 @@ unit and none by a byte. The step is held to an engine that shares none of its w
 in `long double`, the meetings from testing every pair), to the earlier step kept in the tests (the dual render), and to its
 own invariants (each slab's order sorted at its end, the meetings made equal to the meetings counted) in a test build.
 
+**What a pixel may cost (UC9, UC17, UC19, UC20).** Two limits bound the step, both decided over what the whole render draws of
+an item, so a damaged render refuses what the whole one does. `max_exact_fragments` (default 16384) bounds the raw pieces of a
+part in a pixel: the pieces are what the rasterizer finds, and the step's memory and its first pass are linear in them. The
+densest pixel measured over every drawing the suite keeps holds 13363 (a line of DejaVu Sans stroked 22 units wide with round
+joins and caps, three words), the benchmark's stroke scenes 4294 and the gallery 2359. `max_exact_crossings` (default `2^20`)
+bounds the crossings of a pixel, which is what its time grows with and which the pieces do not bound (two pieces cross once, so
+`n` fragments make up to `n (n - 1) / 2`): the most any pixel measured makes is 333496, and the time of a pixel built to exactly
+`2^20` crossings, the densest cell the lattice allows at the default (a chord grid of 2098 segments), is measured by the dense
+tests, which print it. The count is known without sweeping: two fragments meet inside a slab iff their order at its top
+differs strictly from their order at its end, so the crossings of a slab are the inversions between the two, a merge count in
+`O(n log n)` that also gives the order the next slab starts from. It runs only for a pixel that can pass the budget
+(`n (n - 1) / 2` above it, which is a pixel of over 1449 fragments at the default) and stops when it has, so a refused pixel costs
+its count and not the budget, and the sweep then makes exactly that many exchanges (a test build asserts it). The pixels of the
+walk outside the drawn rectangle whose pieces could pass the budget are collected as the drawn ones are and counted, an aligned
+stroke's three parts together, so the refusal is the same however the render is damaged and never depends on the cache. Neither
+limit is "no cap" at `UINT64_MAX`; a host that draws outlines it did not author lowers them, which is what they are for. No
+winding is a limit (the weight is whether the winding is zero, not how deep it is), where the earlier step refused one past 255
+and a line of stroked text reaches 494.
+
 **Parts that share a pixel (UC8).** SC5's composition, `k_b + k_a c' - k_b k_a c'`, is exact where at most one of the three
 parts has an edge in the pixel, because the others are then 0 or 1. It is not elsewhere, and S4's bracket could not show it
 (its width, a sixteenth of a pixel, is wider than the error): for a thin aligned stroke the band and the fill's edge lie in

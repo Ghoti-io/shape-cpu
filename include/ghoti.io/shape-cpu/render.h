@@ -379,7 +379,7 @@
  *   in a cell and they overlap, its coverage is the area of its region by its rule, exactly (the nonzero or the odd
  *   windings), since the area of `F` is what the formula's constants stand for.  This is the clip part of a stroke, not a
  *   fill item: a fill is not changed, and extending the exact step to fills is a separate decision.
- * - **UC9 Limits, refusals, work, memory.**  `GSHCPU_Limits.max_exact_fragments` (a `uint64_t`; 0 is 512, any other value
+ * - **UC9 Limits, refusals, work, memory.**  `GSHCPU_Limits.max_exact_fragments` (a `uint64_t`; 0 is 16384, any other value
  *   is used as given up to `2^20`, which a larger value is ::GSHCPU_ERR_INVALID for at sink creation; `UINT64_MAX` is not
  *   "no cap": the step is superlinear in the pieces of a pixel) bounds the pieces of one part in one cell (the raw pieces, as
  *   the rasterizer finds them, whatever UC13 makes of them).  A cell with more, or a cell whose pieces do not reproduce the
@@ -391,12 +391,11 @@
  *   `ceil(log2 n') + 12`, and when the meetings are counted (UC19) `n' (ceil(log2 n') + 1)` more for each slab; the declared
  *   `cancel_work_bound` adds the most the step may do in an item: its horizontal pieces on cells' left sides (at most one for
  *   each point and each column of the widest raster) and its fragments (at most `max_cells` of them, which the cap counts)
- *   each at the cost per fragment of the largest cell, where a cell of `n'` fragments has at most `n' (n' - 1) / 2` meetings.
- *   That is quadratic in the fragments of a pixel, reached only by an outline whose pieces cross each other pairwise inside
- *   it.  Memory is a function of the limits and the region only: a count of pieces and a place in the pool for each cell of
- *   a band of the region's width, a pool of pieces (at least 4096, at least one cell's worth), and the scratch of one cell,
- *   counted by `workspace_bytes`, never allocated under `CALLER_MEMORY`; the cells of a band whose pieces do not fit the pool
- *   are made exact a window at a time.
+ *   each at the cost per fragment of the largest cell, whose meetings are at most `n' (n' - 1) / 2` and at most the crossings
+ *   budget of UC19.  Memory is a function of the limits and the region only: a count of pieces and a place in the pool for
+ *   each cell of a band of the region's width, a pool of pieces (at least 4096, at least one cell's worth), and the scratch of
+ *   one cell, counted by `workspace_bytes`, never allocated under `CALLER_MEMORY`; the cells of a band whose pieces do not
+ *   fit the pool are made exact a window at a time.
  * - **UC10 Tiers (AD-13).**  The exact step is one function used by every route: the dense sweep and the sparse composite
  *   (FT-2, where a cell the step changes is noted as a deposit is, so that the sweep visits it).  Both are bit-equal to
  *   the general tier by construction and by the gate that holds each to it.  The step is not a tier: the sink with it off
@@ -453,6 +452,29 @@
  *   that each slab's order after its meetings is sorted by the order at its end, and that the meetings it made are the
  *   meetings the count found: a missed meeting leaves an inversion.
  *
+ * - **UC17 The default and the cost of a cell (amends UC9).**  `GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS` is 16384.  The
+ *   densest pixel measured over every drawing the suite keeps holds 13363 raw pieces of a part (a line of text stroked 22 units
+ *   wide with round joins and caps, the three words measured) and 4294 in the benchmark's stroke scenes.  The cost of a cell is
+ *   `W_cell(m, n', K) <= m + S (6 n' + 8) + S n' (ceil(log2 n') + 1) + K (ceil(log2 n') + 12)` in SC11's units, `K <= n' (n' -
+ *   1) / 2`, which is quadratic in the pixel's fragments and is cut by UC19's budget to a number of meetings that does not
+ *   depend on the pieces.
+ * - **UC19 The crossings budget.**  `GSHCPU_Limits.max_exact_crossings` (a `uint64_t`; 0 is `2^20`, any other value is used
+ *   as given up to `2^32`, which a larger value, `UINT64_MAX` included, is ::GSHCPU_ERR_INVALID for at sink creation) bounds
+ *   the crossings of one cell, the pairs of its fragments that meet strictly inside a slab, summed over its slabs.  A cell
+ *   with more is the sink's resource limit, as UC9's, decided over what the whole render draws of the item.  The count is
+ *   known without the sweep: a pair meets inside a slab iff its order at the slab's top differs strictly from its order at the
+ *   slab's end, so `K` is the sum over the slabs of the inversions between the two orders, a merge count of `O(n' log n')` for
+ *   each slab, and the sweep then makes exactly `K` exchanges.  The count runs before the sweep and only for a cell that can
+ *   pass (`n' (n' - 1) / 2` above the budget), stopping once it has: a refused cell costs the count and not the budget.  The
+ *   cells of the walk outside the drawn rectangle (damage) whose pieces could pass the budget are collected as the drawn
+ *   cells' are and counted too, the three parts of an aligned stroke together as UC8 makes them exact, so that a damaged render
+ *   refuses what the whole render refuses, and the refusal never depends on cache state.  The default `2^20` is more than three
+ *   times the most any pixel measured makes (333496), and a cell at the budget takes about a tenth of a second.
+ * - **UC20 The winding is no limit.**  The earlier step refused a winding past 255 in magnitude anywhere in a cell, and a line
+ *   of stroked text reaches 494 (475 for one word).  The weight of UC15 is the indicator of the region, not a function of the
+ *   winding's magnitude, so the step has no bound on it: a winding is held in an `int32_t`, a cell's gaps are at most its
+ *   pieces and the winding at the top of its left side at most `2^28` (an outline of a library-bounded size never has more),
+ *   and a cell past that is the resource limit.
  *
 
  * ### Memory (S9)

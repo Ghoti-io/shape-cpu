@@ -871,7 +871,7 @@ TEST(RenderExactSink, TheFieldIsValidatedDefaultedAndTheLeastValueThatDrawsIsThe
   };
   Drawn def = draw(0);
   ASSERT_TRUE(def.entries.empty()) << "the default draws it";
-  EXPECT_EQ(draw(512).alpha, def.alpha) << "zero is 512";
+  EXPECT_EQ(draw(GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS).alpha, def.alpha) << "zero is the default, 16384";
   // the least field that draws: binary search (a cell's pieces: no more and no less)
   uint64_t lo = 1;
   uint64_t hi = 512;
@@ -909,6 +909,109 @@ TEST(RenderExactSink, TheFieldIsValidatedDefaultedAndTheLeastValueThatDrawsIsThe
   }
   // 2^20 and beyond the default draw the same
   EXPECT_EQ(draw(GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS).alpha, def.alpha);
+}
+
+TEST(RenderExactSink, TheCrossingsBudgetIsValidatedDefaultedAndTheLeastValueThatDrawsIsTheCellsMeetings) {
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  GSHSCENE_Sink * bad = nullptr;
+  for (uint64_t v : {GSHCPU_LIMITS_MAX_EXACT_CROSSINGS + 1, GSHCPU_LIMITS_MAX_EXACT_CROSSINGS * 2, (uint64_t)UINT64_MAX}) {
+    limits.max_exact_crossings = v;
+    EXPECT_EQ(gshcpu_sink_create(nullptr, nullptr, &limits, &bad), GSHCPU_ERR_INVALID) << v << ": past 2^32 is refused at creation";
+    EXPECT_EQ(bad, nullptr);
+  }
+  limits.max_exact_crossings = GSHCPU_LIMITS_MAX_EXACT_CROSSINGS;
+  GSHSCENE_Sink * top = nullptr;
+  ASSERT_EQ(gshcpu_sink_create(nullptr, nullptr, &limits, &top), GSHCPU_OK) << "2^32 is accepted";
+  EXPECT_EQ(gshscene_sink_destroy(top), GSHSCENE_OK);
+
+  Ops teeth = comb(10);
+  Params p = comb_style();
+  Store s;
+  const GSHSCENE_List * l = one_stroke(s, teeth, p.get(), translation(0.0, 0.0));
+  GSHCPU_Render_Counters seen{};
+  auto draw = [&](uint64_t budget, const GSHSCENE_Rect * damage = nullptr, uint32_t flags = 0) {
+    GSHCPU_Limits lim;
+    gshcpu_limits_default(&lim);
+    lim.max_exact_crossings = budget;
+    Sink sink(GSHCPU_RENDER_TIERS_ALL, &lim);
+    Drawn d = render_list(sink.sink, l, 6, 6, GSHCPU_FORMAT_RGBA8_STRAIGHT, flags, nullptr, damage);
+    seen = sink.counters;
+    return d;
+  };
+  Drawn def = draw(0);
+  ASSERT_TRUE(def.entries.empty()) << "the default draws it";
+  uint64_t most = seen.exact_crossings_max;
+  ASSERT_GT(most, 3u) << "the stroke's densest pixel makes crossings";
+  EXPECT_EQ(draw(GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS).alpha, def.alpha) << "zero is 2^20";
+  Drawn at = draw(most);
+  EXPECT_TRUE(at.entries.empty()) << "a pixel with exactly the budget's crossings draws";
+  EXPECT_EQ(at.alpha, def.alpha);
+  Drawn under = draw(most - 1);
+  ASSERT_EQ(under.entries.size(), 1u) << "one more is refused";
+  EXPECT_EQ(under.entries[0].entry_class, GSHSCENE_ENTRY_REFUSED);
+  EXPECT_EQ(under.entries[0].reason, GSHSCENE_REASON_RESOURCE_LIMIT);
+  for (uint8_t a : under.alpha) {
+    EXPECT_EQ(a, 0) << "the block is skipped";
+  }
+  EXPECT_EQ(draw(1).entries.size(), 1u) << "a budget of 1";
+  EXPECT_EQ(draw(2).entries.size(), 1u);
+  EXPECT_EQ(draw(most - 1, nullptr, GSHSCENE_RENDER_STRICT).result, GSHSCENE_ERR_REFUSED) << "strict stops with the prefix";
+  // The refusal is the whole render's: a damage that does not hold the pixel refuses what the whole render refuses (the pixel
+  // is counted though it is not drawn), and one that holds it draws exactly what the whole render draws.
+  GSHSCENE_Rect away = {0, 4, 6, 6};
+  Drawn damaged = draw(most - 1, &away);
+  ASSERT_EQ(damaged.entries.size(), 1u);
+  EXPECT_EQ(damaged.entries[0].reason, GSHSCENE_REASON_RESOURCE_LIMIT);
+  EXPECT_TRUE(draw(most, &away).entries.empty());
+  GSHSCENE_Rect left_of_it = {0, 0, 2, 6};
+  EXPECT_EQ(draw(most - 1, &left_of_it).entries.size(), 1u) << "a damage left of the pixel";
+  GSHSCENE_Rect right_of_it = {3, 0, 6, 6};
+  EXPECT_EQ(draw(most - 1, &right_of_it).entries.size(), 1u) << "a damage right of it";
+  GSHSCENE_Rect around = {1, 1, 4, 4};
+  Drawn inside = draw(most, &around);
+  for (int y = 1; y < 4; y++) {
+    for (int x = 1; x < 4; x++) {
+      EXPECT_EQ(inside.alpha[(size_t)(y * 6 + x)], def.alpha[(size_t)(y * 6 + x)]) << x << "," << y;
+    }
+  }
+}
+
+TEST(RenderExactSink, TheBudgetCountsAnAlignedStrokesPixelsTogetherOutsideTheDamageToo) {
+  // An inside stroke of a closed comb: the body, the aligned part and the clip share the pixels of the teeth, so UC8 makes them
+  // exact from the three parts' pieces together, and the crossings of such a pixel are those of all three.
+  Ops teeth = comb(10);
+  teeth.push_back({'Z', {}});
+  Params p = comb_style();
+  p.s.alignment = GSHGEOM_STROKE_ALIGN_INSIDE;
+  p.s.width = 0.2;
+  Store s;
+  const GSHSCENE_List * l = one_stroke(s, teeth, p.get(), translation(0.0, 0.0));
+  GSHCPU_Render_Counters seen{};
+  auto draw = [&](uint64_t budget, const GSHSCENE_Rect * damage = nullptr) {
+    GSHCPU_Limits lim;
+    gshcpu_limits_default(&lim);
+    lim.max_exact_crossings = budget;
+    Sink sink(GSHCPU_RENDER_TIERS_ALL, &lim);
+    Drawn d = render_list(sink.sink, l, 6, 6, GSHCPU_FORMAT_RGBA8_STRAIGHT, 0, nullptr, damage);
+    seen = sink.counters;
+    return d;
+  };
+  Drawn def = draw(0);
+  ASSERT_TRUE(def.entries.empty()) << "the default draws it";
+  uint64_t most = seen.exact_crossings_max;
+  ASSERT_GT(most, 3u);
+  EXPECT_EQ(draw(most).alpha, def.alpha);
+  ASSERT_EQ(draw(most - 1).entries.size(), 1u) << "one more is refused";
+  GSHSCENE_Rect away = {0, 4, 6, 6};
+  Drawn damaged = draw(most - 1, &away);
+  ASSERT_EQ(damaged.entries.size(), 1u) << "and a damage away from the pixel refuses it too";
+  EXPECT_EQ(damaged.entries[0].reason, GSHSCENE_REASON_RESOURCE_LIMIT);
+  EXPECT_TRUE(draw(most, &away).entries.empty());
+  GSHSCENE_Rect left_of_it = {0, 0, 2, 6};
+  EXPECT_EQ(draw(most - 1, &left_of_it).entries.size(), 1u);
+  GSHSCENE_Rect right_of_it = {3, 0, 6, 6};
+  EXPECT_EQ(draw(most - 1, &right_of_it).entries.size(), 1u);
 }
 
 TEST(RenderExactSink, CallerMemoryHoldsTheExactStepsMemoryAndAllocatesNothing) {

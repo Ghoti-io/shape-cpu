@@ -51,11 +51,16 @@ TEST(CoverageLimits, TheDefaultsAreWhatTheHeaderSays) {
   EXPECT_EQ(l.max_cache_bytes, 0u) << "zero is the default, 16 MiB, for the sink's stroke cache";
   EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES, (uint64_t)16 << 20);
   EXPECT_EQ(GSHCPU_LIMITS_CACHE_OFF, 1u);
-  EXPECT_EQ(l.max_exact_fragments, 0u) << "zero is the default, 512, for the exact union coverage of a stroke (UC9)";
-  EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS, 512u);
+  EXPECT_EQ(l.max_exact_fragments, 0u) << "zero is the default, 16384, for the exact union coverage of a stroke (UC9, UC17)";
+  EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS, 16384u);
   EXPECT_EQ(GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS, (uint64_t)1 << 20);
-  // The same layout on every target: four sizes and two 64-bit fields, none of it padding the sizes would not.
-  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 2 * sizeof(uint64_t));
+  EXPECT_EQ(l.max_exact_crossings, 0u) << "zero is the default, 2^20, for the crossings of one pixel (UC19)";
+  EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS, (uint64_t)1 << 20);
+  EXPECT_EQ(GSHCPU_LIMITS_MAX_EXACT_CROSSINGS, (uint64_t)1 << 32);
+  // The same layout on every target: four sizes and three 64-bit fields, none of it padding the sizes would not.
+  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 3 * sizeof(uint64_t));
+  EXPECT_EQ(offsetof(GSHCPU_Limits, max_exact_crossings), offsetof(GSHCPU_Limits, max_exact_fragments) + sizeof(uint64_t))
+      << "appended after max_exact_fragments";
   gshcpu_limits_default(nullptr);   // ignored
   EXPECT_LT((size_t)GSHCPU_MAX_DIMENSION_CEILING * 64, (size_t)INT32_MAX);
 }

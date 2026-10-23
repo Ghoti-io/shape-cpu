@@ -142,6 +142,8 @@ typedef struct Cover {
   int rev;              /* the edge being cut goes up and is cut from its lower end's partner: its pieces are handed on reversed */
   int64_t cstride;      /* the columns of ex's count and slot arrays: the walk's width */
   int store;            /* the second pass over the band: keep the pieces of the cells in the window, change nothing */
+  int store_walk;       /* ... of the cells the slots name anywhere in the walk (UC19, outside the drawn rectangle) */
+  int budget_deferred;  /* an aligned stroke's part: the crossings of the cells outside are counted with the parts together */
   int64_t win0, win1;   /* the window: cells of the drawn rectangle, row by row from the band's first, [win0, win1) */
 } Cover;
 
@@ -202,12 +204,18 @@ static void count_piece(Cover * c, int64_t ex, int64_t ey) {
 
 /** The exact step's second pass: keep the piece if its cell is one the step makes exact in this window. */
 static void store_piece(Cover * c, int64_t ex, int64_t ey, Point a, Point b) {
-  if (ex < c->rect.x0 || ex >= c->rect.x1 || piece_kind(ex, a, b) == 0) {
-    return;
-  }
-  int64_t at = (ey - c->band) * (c->rect.x1 - c->rect.x0) + (ex - c->rect.x0);
-  if (at < c->win0 || at >= c->win1) {
-    return;
+  if (c->store_walk) {
+    if (ex < c->walk.x0 || ex >= c->walk.x1 || piece_kind(ex, a, b) == 0) {
+      return; /* the cells chosen are the ones with a slot; the rest have none */
+    }
+  } else {
+    if (ex < c->rect.x0 || ex >= c->rect.x1 || piece_kind(ex, a, b) == 0) {
+      return;
+    }
+    int64_t at = (ey - c->band) * (c->rect.x1 - c->rect.x0) + (ex - c->rect.x0);
+    if (at < c->win0 || at >= c->win1) {
+      return;
+    }
   }
   size_t k = exact_cell_index(c, ex, ey);
   if (c->ex->slot[k] == GSHCPU_EXACT_NO_SLOT) {
@@ -494,6 +502,163 @@ GSHCPU_Result gshcpu_render_cover(const GSHGEOM_Flat_Path * const * paths, size_
   return gshcpu_render_cover_counted(paths, count, rule, rect, rect, out, acc, max_cells, cells);
 }
 
+/* --- the crossings budget outside the drawn rectangle (UC19) ---------------------------------------------------------- */
+
+/** One part of a cover whose cells outside the drawn rectangle are checked against the budget. */
+typedef struct Outside_Part {
+  Cover * c;                                  /* the part's cover; NULL for an absent part */
+  const GSHGEOM_Flat_Path * const * paths;
+  size_t count;
+} Outside_Part;
+
+#define OUTSIDE_WINDOW 16u
+
+/** The cells of one window: where each is and how many pieces each part has in it. */
+typedef struct Outside_Window {
+  int64_t x[OUTSIDE_WINDOW];
+  int64_t y[OUTSIDE_WINDOW];
+  uint32_t n[OUTSIDE_WINDOW][3];
+  size_t cells;
+  uint64_t kept[3];
+} Outside_Window;
+
+/** Collect the pieces of the window's cells and count their crossings; 1 if one passes the budget. */
+static int outside_flush(Outside_Part * parts, int n, const GSHCPU_Exact_Params * params, Outside_Window * w, GSHCPU_Exact * lead) {
+  int refused = 0;
+  if (w->cells) {
+    for (int p = 0; p < n; p++) {
+      if (!parts[p].c || w->kept[p] == 0) {
+        continue;
+      }
+      Cover * c = parts[p].c;
+      c->store = 1;
+      c->store_walk = 1;
+      for (size_t i = 0; i < parts[p].count; i++) {
+        if (parts[p].paths[i]) {
+          path_edges(c, parts[p].paths[i]);
+        }
+      }
+      c->store = 0;
+      c->store_walk = 0;
+    }
+    for (size_t i = 0; i < w->cells && !refused; i++) {
+      GSHCPU_Exact_Cell cell;
+      memset(&cell, 0, sizeof cell);
+      for (int p = 0; p < n; p++) {
+        if (parts[p].c && w->n[i][p]) {
+          size_t k = exact_cell_index(parts[p].c, w->x[i], w->y[i]);
+          cell.pieces[p] = parts[p].c->ex->pool + (parts[p].c->ex->slot[k] - w->n[i][p]);
+          cell.count[p] = w->n[i][p];
+        }
+      }
+      uint64_t crossings = 0;
+      int status = gshcpu_exact_crossings(params, &lead->scratch, &cell, &crossings, &lead->work);
+      refused = status != GSHCPU_EXACT_OK;
+    }
+    for (size_t i = 0; i < w->cells; i++) {
+      for (int p = 0; p < n; p++) {
+        if (parts[p].c && w->n[i][p]) {
+          parts[p].c->ex->slot[exact_cell_index(parts[p].c, w->x[i], w->y[i])] = GSHCPU_EXACT_NO_SLOT;
+        }
+      }
+    }
+  }
+  w->cells = 0;
+  w->kept[0] = w->kept[1] = w->kept[2] = 0;
+  return refused;
+}
+
+/**
+ * UC19: the cells of the band just counted that lie in the walk and outside the drawn rectangle @p drawn, and whose pieces could
+ * make more crossings than the budget (`params->max_crossings`) allows, have their pieces collected as the drawn cells' are and
+ * their crossings counted (in the scratch of @p holder, the memory that has one), so that a damaged render refuses what the whole
+ * render refuses.  A cell with fewer pieces than can pass (all parts together) is never looked at.  @return 1 if a cell passes
+ * the budget.
+ */
+static int budget_outside(Outside_Part * parts, int n, GSHCPU_Rect drawn, const GSHCPU_Exact_Params * params, GSHCPU_Exact * holder) {
+  uint64_t threshold = gshcpu_exact_cross_threshold(params->max_crossings);
+  if (threshold == UINT64_MAX) {
+    return 0;
+  }
+  /* A cell holds at most one piece for each edge of the parts' outlines, and an outline has fewer edges than twice its points. */
+  uint64_t reachable = 0;
+  for (int p = 0; p < n; p++) {
+    for (size_t i = 0; parts[p].c && i < parts[p].count; i++) {
+      reachable += parts[p].paths[i] ? 2u * (uint64_t)gshgeom_flat_path_point_count(parts[p].paths[i]) : 0u;
+    }
+  }
+  if (reachable < threshold) {
+    return 0;
+  }
+  Cover * lead = NULL;
+  int64_t x0 = INT64_MAX;
+  int64_t x1 = INT64_MIN;
+  for (int p = 0; p < n; p++) {
+    if (!parts[p].c) {
+      continue;
+    }
+    lead = lead ? lead : parts[p].c;
+    x0 = parts[p].c->walk.x0 < x0 ? parts[p].c->walk.x0 : x0;
+    x1 = parts[p].c->walk.x1 > x1 ? parts[p].c->walk.x1 : x1;
+  }
+  if (!lead || x0 >= x1) {
+    return 0;
+  }
+  Outside_Window w;
+  memset(&w, 0, sizeof w);
+  for (int64_t r = 0; r < lead->rows; r++) {
+    int64_t y = lead->band + r;
+    int in_rows = y >= drawn.y0 && y < drawn.y1;
+    for (int64_t x = x0; x < x1; x++) {
+      if (in_rows && x >= drawn.x0 && x < drawn.x1) {
+        x = drawn.x1 - 1;
+        continue; /* a drawn cell: the step counts its crossings where it makes the cell exact */
+      }
+      uint32_t cnt[3] = {0, 0, 0};
+      uint64_t total = 0;
+      for (int p = 0; p < n; p++) {
+        Cover * c = parts[p].c;
+        if (c && x >= c->walk.x0 && x < c->walk.x1 && y >= c->band && y < c->band + c->rows) {
+          cnt[p] = c->ex->count[exact_cell_index(c, x, y)];
+          total += cnt[p];
+        }
+      }
+      if (total < threshold) {
+        continue;
+      }
+      int fits = 1;
+      for (int p = 0; p < n; p++) {
+        fits = fits && (!cnt[p] || w.kept[p] + cnt[p] <= parts[p].c->ex->pool_cap);
+      }
+      if (w.cells == OUTSIDE_WINDOW || !fits) {
+        if (outside_flush(parts, n, params, &w, holder)) {
+          return 1;
+        }
+      }
+      w.x[w.cells] = x;
+      w.y[w.cells] = y;
+      for (int p = 0; p < n; p++) {
+        w.n[w.cells][p] = cnt[p];
+        if (cnt[p]) {
+          parts[p].c->ex->slot[exact_cell_index(parts[p].c, x, y)] = (uint32_t)w.kept[p];
+          w.kept[p] += cnt[p];
+        }
+      }
+      w.cells++;
+    }
+  }
+  return outside_flush(parts, n, params, &w, holder);
+}
+
+/** The step's settings for one part counted alone (the outside cells of a plain cover). */
+static void one_part_params(const GSHCPU_Exact * ex, GSHCPU_Exact_Params * params) {
+  memset(params, 0, sizeof *params);
+  params->parts = 1;
+  params->mode = GSHCPU_EXACT_OVERLAP;
+  params->eps[0] = ex->eps;
+  params->max_crossings = ex->max_crossings;
+}
+
 /** Clear the exact step's count array for the band's rows. */
 static void exact_clear(Cover * c) {
   size_t cells = (size_t)c->rows * (size_t)c->cstride;
@@ -522,6 +687,12 @@ static void count_rows(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_
       if (paths[i]) {
         path_edges(c, paths[i]);
       }
+    }
+    if (c->ex && !c->over && !c->budget_deferred && c->ex->max_crossings) {
+      GSHCPU_Exact_Params params;
+      one_part_params(c->ex, &params);
+      Outside_Part part = {c, paths, count};
+      c->over = budget_outside(&part, 1, c->rect, &params, c->ex);
     }
   }
 }
@@ -665,6 +836,13 @@ GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths,
       if (paths[i]) {
         path_edges(&c, paths[i]);
       }
+    }
+    if (ex && !c.over && ex->max_crossings) {
+      /* UC19: the cells of the walk outside the drawn rectangle, which this band holds when the walk is wider (damage). */
+      GSHCPU_Exact_Params params;
+      one_part_params(ex, &params);
+      Outside_Part part = {&c, paths, count};
+      c.over = budget_outside(&part, 1, c.rect, &params, ex);
     }
     if (c.over || (ex && exact_band(&c, paths, count))) {
       *cells = c.cells;
@@ -832,6 +1010,13 @@ GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths
         path_edges(&c, paths[i]);
       }
     }
+    if (ex && !c.over && ex->max_crossings) {
+      /* UC19: the cells of the walk outside the drawn rectangle, which this band holds when the walk is wider (damage). */
+      GSHCPU_Exact_Params params;
+      one_part_params(ex, &params);
+      Outside_Part part = {&c, paths, count};
+      c.over = budget_outside(&part, 1, c.rect, &params, ex);
+    }
     if (c.over || (ex && exact_band(&c, paths, count))) {
       /* Leave the accumulator clean, as it was found: clear what the deposits made before the limit wrote. */
       for (int64_t r = 0; r < c.rows; r++) {
@@ -879,6 +1064,69 @@ static void joint_cell(const Cover c[3], const GSHCPU_Aligned_Input in[3], int64
   }
 }
 
+/**
+ * UC19 for the rows of the walks above and below the joint rectangle: the three parts counted together a band at a time (the
+ * counts the prelude made are gone), so that a cell UC8 would make exact from several parts is counted as one.  The cell cap has
+ * been met already by the prelude; this pass counts nothing against it.  @return 1 if a cell passes the budget.
+ */
+static int aligned_outside_rows(Cover c[3], const GSHCPU_Aligned_Input in[3], GSHCPU_Rect joint, const GSHCPU_Exact_Params * three,
+    GSHCPU_Exact * holder) {
+  int64_t y0 = INT64_MAX;
+  int64_t y1 = INT64_MIN;
+  uint64_t reachable = 0;
+  for (int p = 0; p < 3; p++) {
+    if (!in[p].path || gshcpu_render_rect_empty(in[p].walk)) {
+      continue;
+    }
+    y0 = in[p].walk.y0 < y0 ? in[p].walk.y0 : y0;
+    y1 = in[p].walk.y1 > y1 ? in[p].walk.y1 : y1;
+    reachable += 2u * (uint64_t)gshgeom_flat_path_point_count(in[p].path);
+  }
+  if (y0 >= y1 || reachable < gshcpu_exact_cross_threshold(three->max_crossings)) {
+    return 0;
+  }
+  const GSHGEOM_Flat_Path * ones[3] = {in[0].path, in[1].path, in[2].path};
+  Outside_Part parts[3];
+  uint64_t cells[3];
+  uint64_t cap[3];
+  for (int p = 0; p < 3; p++) {
+    parts[p].c = in[p].path ? &c[p] : NULL;
+    parts[p].paths = &ones[p];
+    parts[p].count = 1;
+    cells[p] = c[p].cells;
+    cap[p] = c[p].max_cells;
+    c[p].max_cells = UINT64_MAX;
+    c[p].cover = NULL;
+    c[p].area = NULL;
+  }
+  int refused = 0;
+  int64_t above_end = gshcpu_render_rect_empty(joint) ? y1 : (joint.y0 < y1 ? joint.y0 : y1);
+  int64_t below_start = gshcpu_render_rect_empty(joint) ? y1 : (joint.y1 > y0 ? joint.y1 : y0);
+  for (int pass = 0; pass < 2 && !refused; pass++) {
+    int64_t from = pass == 0 ? y0 : below_start;
+    int64_t to = pass == 0 ? above_end : y1;
+    for (int64_t b = from; b < to && !refused; b += GSHCPU_RENDER_BAND_ROWS) {
+      int64_t rows = to - b < (int64_t)GSHCPU_RENDER_BAND_ROWS ? to - b : (int64_t)GSHCPU_RENDER_BAND_ROWS;
+      for (int p = 0; p < 3; p++) {
+        if (!in[p].path) {
+          continue;
+        }
+        c[p].band = b;
+        c[p].rows = rows;
+        exact_clear(&c[p]);
+        path_edges(&c[p], in[p].path);
+      }
+      refused = budget_outside(parts, 3, joint, three, holder);
+    }
+  }
+  for (int p = 0; p < 3; p++) {
+    c[p].cells = cells[p];
+    c[p].max_cells = cap[p];
+    c[p].over = 0;
+  }
+  return refused;
+}
+
 GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHCPU_Rect joint, int complement,
     uint8_t * result, uint64_t max_cells, uint64_t * cells) {
   Cover c[3];
@@ -894,6 +1142,7 @@ GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHC
     c[p].ex = in[p].ex;
     c[p].cstride = in[p].walk.x1 - in[p].walk.x0;
     c[p].stride = width + 1;
+    c[p].budget_deferred = 1;
   }
 #define OTHERS(p) ((c[0].cells + c[1].cells + c[2].cells) - c[p].cells)
 #define TOTAL() (c[0].cells + c[1].cells + c[2].cells)
@@ -928,6 +1177,10 @@ GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHC
   three.even_odd = in[2].rule == GSHGEOM_FILL_EVEN_ODD;
   three.complement = complement;
   three.max_crossings = lead->max_crossings;
+  if (lead->max_crossings && aligned_outside_rows(c, in, joint, &three, lead)) {
+    *cells = TOTAL();
+    return GSHCPU_ERR_LIMIT;
+  }
   for (int64_t band = joint.y0; band < joint.y1; band += GSHCPU_RENDER_BAND_ROWS) {
     int64_t rows = joint.y1 - band < (int64_t)GSHCPU_RENDER_BAND_ROWS ? joint.y1 - band : (int64_t)GSHCPU_RENDER_BAND_ROWS;
     int64_t total = rows * width;
@@ -949,6 +1202,20 @@ GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHC
       c[p].max_cells = max_cells - OTHERS(p);
       path_edges(&c[p], in[p].path);
       if (c[p].over) {
+        *cells = TOTAL();
+        return GSHCPU_ERR_LIMIT;
+      }
+    }
+    if (lead->max_crossings) {
+      /* UC19: the cells of the walks outside the joint rectangle, the three parts' pieces together as UC8 counts them. */
+      const GSHGEOM_Flat_Path * ones[3] = {in[0].path, in[1].path, in[2].path};
+      Outside_Part parts[3];
+      for (int p = 0; p < 3; p++) {
+        parts[p].c = in[p].path ? &c[p] : NULL;
+        parts[p].paths = &ones[p];
+        parts[p].count = 1;
+      }
+      if (budget_outside(parts, 3, joint, &three, lead)) {
         *cells = TOTAL();
         return GSHCPU_ERR_LIMIT;
       }

@@ -338,6 +338,12 @@ extern int gshcpu_exact_check;
 int gshcpu_exact_crossings(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s, const GSHCPU_Exact_Cell * cell,
     uint64_t * crossings, uint64_t * work);
 
+/**
+ * The fewest fragments a cell must hold to be able to pass a crossings budget (UC19): the least `n` with `n (n - 1) / 2 >
+ * budget`, since two fragments meet once.  `UINT64_MAX` for no budget (0).  A cell with fewer pieces than this is never counted.
+ */
+uint64_t gshcpu_exact_cross_threshold(uint64_t budget);
+
 /** The most work (SC11's units) one cell of @p pieces pieces and @p crossings meetings may cost (UC17): `W_cell`. */
 uint64_t gshcpu_exact_cell_work_bound(uint64_t pieces, uint64_t crossings);
 

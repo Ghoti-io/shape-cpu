@@ -395,11 +395,23 @@ static Part part_rects(const GSHCPU_Stroke * s, int p, GSHCPU_Rect reach, GSHCPU
 /**
  * Whether a cell of part @p p could hold more pieces than @p ex allows: an edge has at most one piece in a cell, and an
  * outline has fewer edges than twice its points (one for each point and one closing line for each subpath), so one of
- * at most half that many points cannot.  A function of the outline alone, so that whether a stroke is refused does not
- * depend on the damage.
+ * at most half that many points cannot; nor can it pass the crossings budget with fewer pieces than the budget needs
+ * (UC19).  A function of the outline alone, so that whether a stroke is refused does not depend on the damage.
  */
 static int may_exceed(const GSHCPU_Stroke * s, int p, const GSHCPU_Exact * ex) {
-  return ex && s->meta.points[p] + s->meta.points[p] > ex->max_pieces;
+  if (!ex) {
+    return 0;
+  }
+  uint64_t edges = (uint64_t)s->meta.points[p] + (uint64_t)s->meta.points[p];
+  if (edges > ex->max_pieces) {
+    return 1;
+  }
+  /* ... and the crossings (UC19): the pieces of a cell, all parts' together where they share the pixel, could pass the budget. */
+  uint64_t all = 0;
+  for (int q = 0; q < GSHCPU_STROKE_PARTS; q++) {
+    all += 2u * (uint64_t)s->meta.points[q];
+  }
+  return all >= gshcpu_exact_cross_threshold(ex->max_crossings);
 }
 
 /**
@@ -440,8 +452,9 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
   GSHCPU_Rect walks[3];
   for (int p = 0; p < 3; p++) {
     walks[p] = parts[p].walk;
-    GSHCPU_Exact * exact = p == GSHCPU_STROKE_CLIP ? NULL : ex;
-    if (!same_rect(parts[p].rect, walks[p]) && !whole_count && !may_exceed(s, p, p == GSHCPU_STROKE_CLIP ? NULL : exact)) {
+    int clip_counted = p == GSHCPU_STROKE_CLIP && aligned.path && ex && joint_tier; /* UC8 counts the clip's pieces too */
+    GSHCPU_Exact * exact = p == GSHCPU_STROKE_CLIP && !clip_counted ? NULL : ex;
+    if (!same_rect(parts[p].rect, walks[p]) && !whole_count && !may_exceed(s, p, exact)) {
       walks[p] = parts[p].rect; /* the caps cannot be met anywhere: count where it is drawn */
     }
   }

@@ -29,7 +29,8 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   dash, width space and alignment), the expansion cached by resource id and the map's linear part and fractional
   translation, so that a whole-pixel translation of a stroke reuses it (`GSHCPU_Limits.max_cache_bytes`).
   A stroke's coverage is the area of the union of its pieces, computed exactly in integers at the pixels where
-  pieces overlap, not the sum of their areas (`GSHCPU_Limits.max_exact_fragments` bounds the pieces of one pixel).
+  pieces overlap, not the sum of their areas (`GSHCPU_Limits.max_exact_fragments` bounds the pieces of one pixel and
+  `max_exact_crossings` the crossings among them, which is what the time of a pixel grows with; no depth of overlap is a limit).
   A stroke of a glyph run is the stroke of the path that run defines (its glyphs' outlines in the run's space),
   united across the run, unhinted, and cached with the notes of the glyphs it could not draw.
   `gshcpu_render_hash` and `gshcpu_render_dump` spell a render; the

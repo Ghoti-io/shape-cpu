@@ -843,6 +843,23 @@ static int tops(Ctx * c, const GSHCPU_Exact_Cell * cell) {
   return GSHCPU_EXACT_OK;
 }
 
+uint64_t gshcpu_exact_cross_threshold(uint64_t budget) {
+  if (budget == 0) {
+    return UINT64_MAX;
+  }
+  uint64_t lo = 2;
+  uint64_t hi = (uint64_t)1 << 20; /* 2^20 fragments are 5.5e11 pairs, past the largest budget (2^32) */
+  while (lo < hi) { /* the least n with n (n - 1) / 2 > budget: a binary search, no square root */
+    uint64_t mid = lo + (hi - lo) / 2u;
+    if ((mid * (mid - 1u)) / 2u > budget) {
+      hi = mid;
+    } else {
+      lo = mid + 1u;
+    }
+  }
+  return lo;
+}
+
 /** Whether a cell of @p n fragments could have more meetings than @p budget: `n (n - 1) / 2 > budget`. */
 static int may_pass(uint64_t n, uint64_t budget) {
   return budget != 0 && n >= 2 && (n * (n - 1)) / 2 > budget;

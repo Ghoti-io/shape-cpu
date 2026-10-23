@@ -50,6 +50,7 @@ typedef struct Cpu_Sink {
   size_t max_bytes;
   uint64_t max_cells;
   uint64_t max_exact;        /* the most pieces of a stroke part in one pixel (UC9) */
+  uint64_t max_crossings;    /* the most crossings of those pieces in one pixel (UC19) */
   GSHGEOM_Limits geometry;   /* max_points for the flattener */
   GSHCPU_Render_Observer observer;
   void * observer_ctx;
@@ -543,7 +544,7 @@ static uint64_t work_bound(const Cpu_Sink * cs) {
   if (!gcu_safe_mul_u64((uint64_t)cs->geometry.max_points, 3u, &points3) || !gcu_safe_mul_u64(cs->max_exact, 3u, &cell3)) {
     return UINT64_MAX;
   }
-  uint64_t exact = gshcpu_exact_work_bound((uint64_t)cs->max_cells, points3, (uint64_t)cs->max_dimension, cell3, 0);
+  uint64_t exact = gshcpu_exact_work_bound((uint64_t)cs->max_cells, points3, (uint64_t)cs->max_dimension, cell3, cs->max_crossings);
   if (!gcu_safe_add_u64(b, exact, &b)) {
     return UINT64_MAX;
   }
@@ -1381,11 +1382,14 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
     size_t width = (size_t)(L.whole.x1 - L.whole.x0);
     gshcpu_exact_init(&run->exact[0], base + L.at_exact, width, cs->max_exact, L.aligned ? 3 : 1);
     run->exact[0].eps = GSHCPU_RENDER_EXACT_EPS;
+    run->exact[0].max_crossings = cs->max_crossings;
     if (L.aligned) {
       gshcpu_exact_init(&run->exact[1], base + L.at_exact + L.exact_second, width, cs->max_exact, 0);
       gshcpu_exact_init(&run->exact[2], base + L.at_exact + L.exact_third, width, cs->max_exact, 0);
       run->exact[1].eps = GSHCPU_RENDER_EXACT_EPS;
       run->exact[2].eps = GSHCPU_RENDER_EXACT_EPS;
+      run->exact[1].max_crossings = cs->max_crossings;
+      run->exact[2].max_crossings = cs->max_crossings;
     }
   }
   run->acc_dirty = 1; /* the caller's memory is not zeroed: the sparse sweep clears the accumulator before its first use */
@@ -1494,6 +1498,9 @@ GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, c
   if (limits && limits->max_exact_fragments > GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS) {
     return GSHCPU_ERR_INVALID; /* UC9: the step is quadratic in a pixel's pieces: a value past the ceiling is refused, not clamped */
   }
+  if (limits && limits->max_exact_crossings > GSHCPU_LIMITS_MAX_EXACT_CROSSINGS) {
+    return GSHCPU_ERR_INVALID; /* UC19: and in its crossings, which the budget bounds: past the ceiling is refused, not clamped */
+  }
   if (!alloc) {
     alloc = gshgeom_allocator_default();
   }
@@ -1517,6 +1524,8 @@ GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, c
   cs->max_cells = limits && limits->max_cells ? limits->max_cells : GSHCPU_LIMITS_DEFAULT_MAX_CELLS;
   cs->max_exact = limits && limits->max_exact_fragments ? limits->max_exact_fragments
                                                         : GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS;
+  cs->max_crossings = limits && limits->max_exact_crossings ? limits->max_exact_crossings
+                                                            : GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS;
   gshgeom_limits_default(&cs->geometry);
   if (limits && limits->max_points) {
     cs->geometry.max_points = limits->max_points;

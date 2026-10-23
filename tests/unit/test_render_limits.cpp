@@ -451,7 +451,8 @@ TEST(RenderLimits, AHostileMaximalItemDoesItsWorkWithinTheDeclaredBound) {
   // the expansion's steps for every element a resource may hold.
   EXPECT_EQ(caps.cancel_work_bound, 3 * points + cells + 2 * RF_WIDTH * RF_HEIGHT +
       (uint64_t)GSHSCENE_LIMITS_DEFAULT_MAX_RESOURCE_ELEMENTS * (GSHGEOM_STROKE_MAX_DEPTH + 1) +
-      gshcpu_exact_work_bound(cells, 3 * points, GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION, 3 * GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS, 0));
+      gshcpu_exact_work_bound(cells, 3 * points, GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION, 3 * GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS,
+      GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS));
   Outcome run = render(sink.sink, l, r.raster);
   ASSERT_EQ(run.result, GSHSCENE_OK);
   EXPECT_TRUE(run.entries.empty());

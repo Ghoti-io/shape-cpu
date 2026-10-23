@@ -85,13 +85,23 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
 #define GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES ((uint64_t)16 * 1024 * 1024)
 
 /**
- * Default ::GSHCPU_Limits.max_exact_fragments: 512 pieces of one stroke part in one pixel (render.h, UC9).  The worst
- * pixel measured in the stroke tests holds a few tens.
+ * Default ::GSHCPU_Limits.max_exact_fragments: 16384 pieces of one stroke part in one pixel (render.h, UC9, UC17).  The largest
+ * pixel measured over stroked lines of real text (the densest everyday input: round joins and caps, 84 pixels, widths up to
+ * 22 units) holds 13363, the benchmark's stroke scenes 4294.
  */
-#define GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS ((uint64_t)512)
+#define GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS ((uint64_t)16384)
 
 /** The largest ::GSHCPU_Limits.max_exact_fragments the sink accepts: 2^20.  A larger value is refused at sink creation. */
 #define GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS ((uint64_t)1 << 20)
+
+/**
+ * Default ::GSHCPU_Limits.max_exact_crossings: 2^20 pairs of outline pieces that cross inside one pixel (render.h, UC19).  The
+ * most any pixel measured holds is 333496, the cost of a pixel at the default is bounded by the time of that many exchanges.
+ */
+#define GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS ((uint64_t)1 << 20)
+
+/** The largest ::GSHCPU_Limits.max_exact_crossings the sink accepts: 2^32.  A larger value is refused at sink creation. */
+#define GSHCPU_LIMITS_MAX_EXACT_CROSSINGS ((uint64_t)1 << 32)
 
 /** ::GSHCPU_Limits.max_cache_bytes of 1: no stroke expansion is kept (every entry is larger). */
 #define GSHCPU_LIMITS_CACHE_OFF ((uint64_t)1)
@@ -126,7 +136,7 @@ typedef struct GSHCPU_Limits {
   /**
    * The most pieces of one stroke part (render.h, UC9) the exact union coverage of a stroke handles in one pixel: edges of
    * the part's outline that cross it, and horizontal ones that touch its left side.  0 is
-   * ::GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS (512), any other value is used as given up to
+   * ::GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS (16384), any other value is used as given up to
    * ::GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS (2^20; a larger one is ::GSHCPU_ERR_INVALID at sink creation).  The step is
    * superlinear in the pieces of a pixel, so `UINT64_MAX` is not "no cap" here.  A pixel past it is the sink's resource
    * limit, ::GSHSCENE_REASON_RESOURCE_LIMIT, for the item, decided over what the whole render draws of it as the cell cap
@@ -134,6 +144,17 @@ typedef struct GSHCPU_Limits {
    * coverage functions ignore it.
    */
   uint64_t max_exact_fragments;
+  /**
+   * The most crossings the exact union coverage of a stroke makes in one pixel (render.h, UC19): the pairs of the part's
+   * outline pieces that cross inside it, which is what the time of the pixel grows with (a pixel takes about a microsecond
+   * for every three of them).  0 is ::GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS (2^20), any other value is used as given up to
+   * ::GSHCPU_LIMITS_MAX_EXACT_CROSSINGS (2^32; a larger one is ::GSHCPU_ERR_INVALID at sink creation, and `UINT64_MAX` is
+   * not "no cap").  A pixel past it is the sink's resource limit, ::GSHSCENE_REASON_RESOURCE_LIMIT, for the item, decided over
+   * what the whole render draws of it as the cell cap and the pieces are, so that no pixel can cost more than the budget
+   * whatever its pieces.  A `uint64_t` whatever the target, so that the structure has the same layout on every one.  Read by
+   * the sink; the coverage functions ignore it.
+   */
+  uint64_t max_exact_crossings;
 } GSHCPU_Limits;
 
 /**

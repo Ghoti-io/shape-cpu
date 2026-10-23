@@ -1106,6 +1106,9 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
              * 255 (the library's own cells are then the exact area, the earlier step's within a unit of it). */
             if (r5 == GSHSCENE_OK && counters.exact_pieces_max <= 512 && counters.exact_winding_max <= 255) {
               CHECK(near_samples(raster, twin_out, bpp, 2));
+              if (getenv("GSHCPU_FUZZ_STRICT_DUAL")) {
+                CHECK(same_bytes(raster, twin_out)); /* the committed seeds draw the same bytes with either engine */
+              }
               outcomes[OUT_STROKE_DUAL]++;
             }
             target.surface = again;
