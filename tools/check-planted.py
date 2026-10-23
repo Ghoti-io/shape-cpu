@@ -285,6 +285,29 @@ changes no result, cannot be seen by any test:
     same numbers) and the ``!path`` test in ``gshcpu_coverage_fill`` (the
     flattener refuses a NULL path with the same result)
 
+The sweep of the whole tree after the strokes and color-paint stories, in ghoti-build:gcc16 (``PLANT_ALL_TESTS=1`` tries a
+plant against every test and the probe before it is called a survivor; the generated candidates name every test).  Of the
+hand-written plants 14 that did not compile were rewritten and 28 of the stroke, exact-step and text plants were not seen;
+the tests added with the sweep see the aligned bands pixel by pixel on the union of the pieces and on the build without it,
+the union formula in D8's arithmetic, the boxes of a stroke on every side, the cache key's y fraction, which widths are
+hairlines, and when a stroke is the sparse composite's.  Of the 2891 generated candidates not held, 644 do not compile
+(dropped), 1633 are caught (now held) and 614 survive, by kind:
+
+  - 288 comparisons flipped at a tie or a loop bound (the minimum of two equal numbers, a sort's equal keys, a loop one past
+    an array whose next element is unread), and 100 logic operators and negations where an earlier check decides alike
+  - 219 statements deleted: a store over zeroed memory, a ``memset`` over a record that is then written, a ``free`` or
+    ``destroy`` (a leak, seen by a sanitizer), the terms of a workspace size
+  - 12 status codes swapped where the caller compares only against ``OK``, and one message
+
+Not seen and not shown equivalent, each needing a case built for it: the cells of the parts of an aligned stroke summed
+against the cap (``sc6-cells-not-summed``), the pinning of a cache entry while a render uses it and its eviction while pinned
+(``sc7-cache-not-pinned``, ``sc7-evict-pinned``, ``sc7-evicted-served``: lifetimes that a sanitizer sees), a hit past the
+sink's point cap (``sc7-hit-limit-unchecked``: a part past the cap is refused before it is cached), the run's centerline
+limit and its notes when nothing is drawn (``st8-limit-not-the-items``, ``st8-nothing-drawn-notes-dropped``,
+``st9-work-run-elements-unclamped``: refusals an earlier gate makes first), and three arithmetic details of the exact step
+(``uc15-meeting-depth-rounded``, ``uc4-remainder-unchecked``, ``uc7-even-odd-period``) and ``r-caps-kinds-grown``,
+``rv-383-gt``.
+
 Run by ``make check-planted`` from the library directory, with the build's
 flags in the PLANT_* environment variables.
 """
@@ -982,7 +1005,7 @@ PLANTS += [
     ("sc7-key-linear", "src", RSK, "    key.linear[i] = gshgeom_f64_bits(canon.m[i / 2][i % 2]);", "    key.linear[i] = 0;", RST),
     ("sc7-key-fraction-x", "src", RSK, "  key.fraction[0] = gshgeom_f64_bits(canon.t[0]);", "  key.fraction[0] = 0;", RST),
     ("sc7-key-fraction-y", "src", RSK, "  key.fraction[1] = gshgeom_f64_bits(canon.t[1]);", "  key.fraction[1] = 0;", RST),
-    ("sc7-key-revision", "src", RSK, "  key.revision = GSHGEOM_STROKE_REVISION;", "  key.revision = 0;", RST),
+    # Removed, sc7-key-revision: equivalent: the revision in a cache key is a build constant, and a key is compared only with keys of the same process, so zero in its place separates nothing.
     ("sc7-hit-limit-unchecked", "src", RSK, "    if (s.meta.present[p] && limits && s.meta.points[p] > (uint64_t)limits->max_points && limits->max_points != 0) {", "    if (0) {", RST),
     ("sc7-cache-not-pinned", "src", RSC, "      e->refs++;\n      /* To the head of the recency list. */", "      /* To the head of the recency list. */", RST),
     ("sc7-evict-pinned", "src", RSC, "      if (e->refs == 0) {\n        unlink_entry(c, e);", "      if (1) {\n        unlink_entry(c, e);", RST),
