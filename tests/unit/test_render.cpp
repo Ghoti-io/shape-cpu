@@ -79,21 +79,31 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
   }
 }
 
-TEST(RenderCaps, AKindPastTheSevenItDrawsIsRefused) {
-  // Every kind after the stroke: the one predicate of the planning pass refuses each, ITEM_KIND, so the sink never
-  // meets one it has no drawing for.
+TEST(RenderCaps, AKindPastTheEightItKnowsIsRefused) {
+  // Every kind after the placeholder: the one predicate of the planning pass refuses each, ITEM_KIND, so the sink never
+  // meets one it has no drawing for.  The placeholder (8) is not a kind it draws and is not refused for it: the plan
+  // reports it whatever the caps claim (PH3), as its own reason.
   SinkRef sink;
   RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 4, 4));
   ASSERT_NE(r.raster, nullptr);
   GSHSCENE_Sink_Caps caps = caps_for(sink.sink, r.raster);
   const GSHSCENE_Color_Space srgb = {GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_SRGB, 0.0};
-  for (uint32_t k = 8; k < 40; k++) {
+  for (uint32_t k = 9; k < 40; k++) {
     GSHSCENE_Item item{};
     item.kind = (GSHSCENE_Item_Kind)k;
     GSHSCENE_Disposition d = gshscene_caps_disposition(&caps, &item, nullptr, 0, nullptr, &srgb, nullptr);
     EXPECT_EQ(d.entry_class, GSHSCENE_ENTRY_REFUSED) << k;
     EXPECT_EQ(d.reason, GSHSCENE_REASON_ITEM_KIND) << k;
   }
+  EXPECT_EQ(caps.item_kinds & (1u << GSHSCENE_ITEM_PLACEHOLDER), 0u) << "no sink claims the placeholder";
+  GSHSCENE_Item placeholder{};
+  placeholder.kind = GSHSCENE_ITEM_PLACEHOLDER;
+  placeholder.placeholder.source = GSHSCENE_PLACEHOLDER_SOURCE_COLR;
+  placeholder.placeholder.code = GSHSCENE_PLACEHOLDER_COLR_UNBOUNDED;
+  GSHSCENE_Disposition d = gshscene_caps_disposition(&caps, &placeholder, nullptr, 0, nullptr, &srgb, nullptr);
+  EXPECT_EQ(d.entry_class, GSHSCENE_ENTRY_REFUSED);
+  EXPECT_EQ(d.reason, GSHSCENE_REASON_PLACEHOLDER);
+  EXPECT_EQ(d.detail, (uint64_t)((GSHSCENE_PLACEHOLDER_SOURCE_COLR << 16) | GSHSCENE_PLACEHOLDER_COLR_UNBOUNDED));
 }
 
 TEST(RenderCaps, TheWorkBoundIsTheWorstUnitsSumOfTheLimits) {

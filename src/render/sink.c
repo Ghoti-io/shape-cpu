@@ -1211,6 +1211,8 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
     case GSHSCENE_ITEM_INSTANCE:
       run->maps[count - 1] = item->map;
       return GSHSCENE_OK;
+    case GSHSCENE_ITEM_PLACEHOLDER:
+      return GSHSCENE_OK; /* PH6: nothing is drawn; the planning pass reported it, refused or approximated */
     default:
       return GSHSCENE_ERR_INTERNAL;
   }

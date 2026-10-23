@@ -1120,6 +1120,14 @@ PLANTS += [
     ("pl7-paint-tail-skipped", "src", RS, "  return paint_coverage(run, item, chain, count, frame, rect, whole, run->coverage);\n}\n\nstatic GSHSCENE_Result fill(", "  return GSHSCENE_OK;\n}\n\nstatic GSHSCENE_Result fill(", PLN),
 ]
 
+# Color-paint story P5: the placeholder is gone through and never drawn (PH6).  Written with the story; the sweep is
+# deferred to the consolidated pass.  The entry itself is the planning pass's (shape-scene's check-planted.py).
+PHL = ["testRender_placeholder", "testRender_conformance"]
+PLANTS += [
+    ("ph6-placeholder-unknown", "src", RS, "    case GSHSCENE_ITEM_PLACEHOLDER:\n      return GSHSCENE_OK; /* PH6: nothing is drawn; the planning pass reported it, refused or approximated */", "    case GSHSCENE_ITEM_PLACEHOLDER:\n      return GSHSCENE_ERR_INTERNAL;", PHL),
+    ("ph6-placeholder-claimed", "src", RS, "      (UINT32_C(1) << GSHSCENE_ITEM_STROKE);", "      (UINT32_C(1) << GSHSCENE_ITEM_STROKE) | (UINT32_C(1) << GSHSCENE_ITEM_PLACEHOLDER);", ["testRender"]),
+]
+
 
 def run(cmd, shell=False, env_extra=None, cwd=None):
     environment = dict(os.environ)

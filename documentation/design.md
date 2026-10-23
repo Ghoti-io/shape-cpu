@@ -181,6 +181,15 @@ tolerance of `1e-12` (`GSHCPU_RENDER_GRADIENT_TOLERANCE`); all 343 exact cases a
 point the oracle says draws nothing is drawn as nothing. No dithering: the goldens are bit-identical on every
 target.
 
+### Placeholders (color-paint story P5)
+
+Nothing draws a placeholder (shape-scene's list.h, PH1) and the planning pass reports it (PH3), so the sink has no code
+for it but to go through the unit: it claims no `item_kinds` bit for it, the plan writes the entry whatever the caps
+claim, a refused one under strict fails before the sink is called, and an approximated one is gone through as the item
+that draws nothing. It adds no cell, point or pixel to the work a unit counts, no scratch memory to size and no static
+bytes. The conformance suite's placeholder cases run on this sink and on the test sink's configurations, and
+`tests/unit/test_render_placeholder.cpp` holds the pixels and the exact scratch need.
+
 ### The plane (color-paint story P4)
 
 A fill of shape-scene's plane (PL1 to PL10) covers every pixel the clips in force allow. There is no outline to
