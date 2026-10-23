@@ -71,8 +71,14 @@
 
 #include <string.h>
 
-/** The most the winding may be in magnitude anywhere in a cell (the arithmetic's product bound depends on it). */
+/**
+ * The most the winding may be in magnitude anywhere in a cell (the arithmetic's product bound depends on it).  A build
+ * that only measures (tools/exact-census.c) may name a larger one on the command line to see how deep the windings of a
+ * drawing go; no larger value than 32767 keeps a product in `uint64_t`.
+ */
+#ifndef EXACT_WINDING_MAX
 #define EXACT_WINDING_MAX 255
+#endif
 
 typedef GSHCPU_Exact_Frag Frag;
 typedef GSHCPU_Exact_Active Active;
@@ -442,6 +448,7 @@ int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch *
   w.status = GSHCPU_EXACT_OK;
   w.mark[0] = 1;
   w.mark[64] = 1;
+  s->last_wmax = 0;
   /* The pieces of every part: sorted, and the steps of the winding on the left side. */
   size_t nfrag = 0;
   size_t pieces = 0;
@@ -569,10 +576,12 @@ int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch *
     slab_events(&w);
     if (w.status != GSHCPU_EXACT_OK) {
       *work += w.work;
+      s->last_wmax = w.wmax;
       return w.status;
     }
   }
   *work += w.work;
+  s->last_wmax = w.wmax;
   /* The check: the windings' own integrals must give back the dense areas the rasterizer summed. */
   for (int p = 0; p < params->parts; p++) {
     int64_t pos = (int64_t)((2u * w.integral_pos[p] + ((uint64_t)1 << 19)) >> 20);

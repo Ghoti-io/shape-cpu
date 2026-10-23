@@ -253,6 +253,7 @@ typedef struct GSHCPU_Exact_Scratch {
   uint32_t * xa;
   uint32_t * xb;
   GSHCPU_Piece * sorted;
+  int64_t last_wmax;          /* the largest winding the last cell met in magnitude: read by the measuring tool, nothing else */
 } GSHCPU_Exact_Scratch;
 
 /** Bytes of scratch for cells of up to @p max_pieces pieces in each of @p parts parts (1 or 3). */
