@@ -13,6 +13,7 @@
  */
 
 #include "../dense_cells.h"
+#include "../dense_vectors.h"
 
 #include "../support/exact_s4b.h"
 
@@ -98,6 +99,7 @@ TEST(RenderDense, RandomCellsOfOnePartAreTheExactAreaAndTheirMeetingsAreCounted)
     size_t distinct = 0;
     uint64_t k = reference_crossings(c, &distinct);
     EXPECT_EQ(r.events, k) << "seed " << seed << ": the meetings the sweep made";
+    EXPECT_LE(r.work, gshcpu_exact_cell_work_bound(c.total(), k)) << "seed " << seed << ": the work is within W_cell (UC17)";
     EXPECT_EQ(r.distinct, distinct) << "seed " << seed << ": the fragments left once the seams cancel";
     cells++;
     with_crossings += k > 0;
@@ -134,11 +136,11 @@ TEST(RenderDense, ChordsFansAndNestedCopiesAreTheExactAreaWithTheMeetingsOfEvery
   cases.push_back({"chords 200", chords(200, 3)});
   cases.push_back({"nested copies 3", chords(60, 4, 3)});
   cases.push_back({"nested copies 19", chords(14, 5, 19)});
-  cases.push_back({"fan through a vertex", fan(32, 32, 1, false)});
-  cases.push_back({"fan through a vertex, alternating", fan(32, 32, 1, true)});
-  cases.push_back({"fan through a half", fan(32, 63, 2, true)});
-  cases.push_back({"fan through a quarter point", fan(16, 129, 4, true)});
-  cases.push_back({"fan, off the lattice", fan(21, 100, 3, true)});
+  cases.push_back({"fan through a vertex", fan(32, 1, 32, 1, false)});
+  cases.push_back({"fan through a vertex, alternating", fan(32, 1, 32, 1, true)});
+  cases.push_back({"fan through a half", fan(32, 1, 63, 2, true)});
+  cases.push_back({"fan through a quarter point", fan(16, 1, 129, 4, true)});
+  cases.push_back({"fan, off the lattice", fan(64, 3, 100, 3, true)});
   cases.push_back({"collinear overlap", collinear(7)});
   cases.push_back({"collinear overlap again", collinear(8)});
   for (Case & k : cases) {
@@ -147,12 +149,13 @@ TEST(RenderDense, ChordsFansAndNestedCopiesAreTheExactAreaWithTheMeetingsOfEvery
     EXPECT_EQ(r.events, reference_crossings(k.cell)) << k.name << ": the meetings";
   }
   EXPECT_GE(cases[5].cell.parts[0].size(), 60u) << "the fan holds many fragments through one point";
+  EXPECT_GE(cases[9].cell.parts[0].size(), 20u) << "and so does the fan through a point off the lattice";
 }
 
 TEST(RenderDense, ABundleThroughOnePointIsSortedBySlopeAndItsMeetingsAreEveryPair) {
   // Every chord through (32, 32): all meet at one depth in one slab, so the heap holds events of equal depth that are
   // processed in the order of their places, and each pair exchanges once.
-  Cell c = fan(32, 32, 1, true);
+  Cell c = fan(32, 1, 32, 1, true);
   size_t n = c.parts[0].size();
   ASSERT_GE(n, 60u);
   Step step(n + 4, 1);
@@ -232,6 +235,60 @@ TEST(RenderDense, TheResultDoesNotDependOnTheOrderOfThePiecesOrOnTheScratch) {
     EXPECT_EQ(got.events, want.events);
     EXPECT_EQ(got.work, want.work);
   }
+}
+
+TEST(RenderDense, TheThresholdIsTheLeastNumberOfFragmentsThatCanPassABudgetAndTheWorkBoundIsMonotone) {
+  EXPECT_EQ(gshcpu_exact_cross_threshold(0), UINT64_MAX) << "no budget";
+  for (uint64_t budget : {1ull, 2ull, 3ull, 100ull, 1ull << 20, (1ull << 32) - 1, 1ull << 32}) {
+    uint64_t t = gshcpu_exact_cross_threshold(budget);
+    EXPECT_GT(t * (t - 1) / 2, budget) << budget;
+    EXPECT_LE((t - 1) * (t - 2) / 2, budget) << budget << ": one fewer fragment cannot pass";
+  }
+  EXPECT_EQ(gshcpu_exact_cross_threshold(1u << 20), 1449u) << "the default budget";
+  uint64_t last = 0;
+  for (uint64_t m : {1ull, 2ull, 10ull, 100ull, 4096ull, 16384ull}) {
+    uint64_t now = gshcpu_exact_cell_work_bound(m, 1u << 20);
+    EXPECT_GE(now, last) << "more pieces never cost less";
+    last = now;
+  }
+  EXPECT_LE(gshcpu_exact_cell_work_bound(16384, 1u << 20), 1u << 30) << "a cell of the cap at the default budget stays under a billion units";
+}
+
+TEST(RenderDense, TheCommittedVectorsAreTheExactAnswersInRationalArithmetic) {
+  // tests/dense_vectors.h is written by tools/gen-dense-cells.py, which shares no code with the library: for each cell the
+  // exact doubled area as a fraction, rounded half up (for a part's own overlap the dense value less it), the meetings by
+  // testing every pair, and the fragments left once the seams cancel.
+  Step step(400, 3);
+  size_t ties = 0;
+  ASSERT_GE(DV_COUNT, 30u);
+  for (size_t i = 0; i < DV_COUNT; i++) {
+    const DV_Vec & v = DV_VECTORS[i];
+    Cell c;
+    c.params.parts = v.parts;
+    c.params.mode = v.mode;
+    c.params.even_odd = v.even_odd;
+    c.params.complement = v.complement;
+    if (v.mode == GSHCPU_EXACT_UNION3) {
+      c.params.eps[0] = c.params.eps[1] = -1;
+      c.params.eps[2] = 1;
+    } else if (v.mode == GSHCPU_EXACT_REGION) {
+      c.params.eps[0] = 1;
+    }
+    for (int p = 0; p < v.parts; p++) {
+      for (int k = 0; k < v.count[p]; k++) {
+        c.parts[p].push_back(piece(v.pieces[p][4 * k], v.pieces[p][4 * k + 1], v.pieces[p][4 * k + 2], v.pieces[p][4 * k + 3]));
+      }
+      c.wtop[p] = v.wtop[p];
+    }
+    c.finish();
+    Step::Result r = step.run(c);
+    ASSERT_EQ(r.status, GSHCPU_EXACT_OK) << v.name;
+    EXPECT_EQ(r.out, v.out) << v.name << ": the exact value is " << v.exact;
+    EXPECT_EQ(r.events, v.crossings) << v.name << ": the meetings";
+    EXPECT_EQ(r.distinct, v.distinct) << v.name << ": the fragments";
+    ties += v.tie != 0;
+  }
+  EXPECT_GE(ties, 1u) << "the vectors hold exact ties, which round up";
 }
 
 TEST(RenderDense, ACellIsRefusedForPiecesThatAreNotTheRasterizersAndNeverGuessed) {
@@ -318,6 +375,7 @@ TEST(RenderDense, AChordGridBuiltToAnyNumberOfMeetingsMakesExactlyThatManyAndThe
     clock_gettime(CLOCK_MONOTONIC, &t1);
     ASSERT_EQ(r.status, GSHCPU_EXACT_OK) << "a cell with exactly the budget's crossings draws";
     EXPECT_EQ(r.events, target);
+    EXPECT_LE(r.work, gshcpu_exact_cell_work_bound(c.parts[0].size(), target)) << "the work is within W_cell (UC17)";
     if (target > 1) {
       EXPECT_EQ(step.run(c, target - 1).status, GSHCPU_EXACT_LIMIT) << "and one more is the limit";
     }

@@ -512,17 +512,18 @@ check-no-x87: $(APP_DIR)/$(STATIC_TARGET) ## Fail if an x86 object holds an x87 
 # archive as the examples are.
 HASH_PROBE := $(APP_DIR)/corpus-hash$(EXE_EXTENSION)
 
-$(HASH_PROBE): tools/corpus-hash.c tests/render_fixtures.h $(APP_DIR)/$(STATIC_TARGET) \
+$(HASH_PROBE): tools/corpus-hash.c tests/render_fixtures.h tests/dense_vectors.h $(APP_DIR)/$(STATIC_TARGET) \
 		$(FLAGS_STAMP) | $(APP_DIR)/$(TARGET) $(LIBVER_GEN)
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) $(INCLUDE) -o $@ $< $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
 
 check-corpus-hash: $(HASH_PROBE) ## Fail unless the probe prints the committed cross-target hash (CAP-13)
-	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash tests/corpus/render.hash
+	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash tests/corpus/render.hash tests/corpus/dense.hash
 
 check-vectors: ## Fail if tests/known_answers.h or tests/render_vectors.h is not what its independent generator writes
 	@python3 tools/gen-coverage-vectors.py --check
 	@python3 tools/gen-render-vectors.py --check
+	@python3 tools/gen-dense-cells.py --check
 
 # Each planted defect in tools/check-planted.py is built into a copy of the
 # sources and must fail a test (or the probe's hash); the unplanted copy is the

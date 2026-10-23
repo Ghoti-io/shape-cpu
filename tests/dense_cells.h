@@ -517,18 +517,19 @@ inline Cell chords_to(uint64_t target, uint32_t seed, uint64_t * reached) {
 }
 
 /**
- * A fan: every chord from the top side to the bottom side that passes through the point (@p px / @p den, @p py), the pieces
- * going down or up alternately when @p alternate: the most fragments through one point the lattice allows.
+ * A fan: every chord from the top side to the bottom side that passes through the point (@p px_num / @p px_den, @p py_num /
+ * @p py_den), the pieces going down or up alternately when @p alternate: the most fragments through one point the lattice
+ * allows.
  */
-inline Cell fan(int py, int px_num, int px_den, bool alternate, uint32_t seed = 1) {
+inline Cell fan(int py_num, int py_den, int px_num, int px_den, bool alternate, uint32_t seed = 1) {
   Cell c;
   std::mt19937 rng(seed);
   int count = 0;
   for (int xa = 0; xa <= 64; xa++) {
     for (int xb = 0; xb <= 64; xb++) {
       // x at height py along (xa, 0) -> (xb, 64): xa + (xb - xa) py / 64 = px_num / px_den
-      int64_t lhs = ((int64_t)xa * 64 + (int64_t)(xb - xa) * py) * px_den;
-      int64_t rhs = (int64_t)px_num * 64;
+      int64_t lhs = ((int64_t)xa * 64 * py_den + (int64_t)(xb - xa) * py_num) * px_den;
+      int64_t rhs = (int64_t)px_num * 64 * py_den;
       if (lhs == rhs) {
         bool up = alternate && ((count++ & 1) != 0);
         if (!alternate && (rng() & 7u) == 0) {

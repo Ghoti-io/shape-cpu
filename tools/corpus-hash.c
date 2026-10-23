@@ -57,6 +57,9 @@
 
 #include "../tests/render_fixtures.h"
 
+#include "../src/render/render_internal.h"
+#include "../tests/dense_vectors.h"
+
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -270,5 +273,87 @@ int main(void) {
   }
   printf("shape-cpu.render-hash %016" PRIx64 "\n", gshgeom_hash_value(&renders));
   printf("shape-cpu.render-count %lu\n", render_count);
+
+  /* Strokes story S4c: the dense cells of tests/dense_vectors.h through the exact step, each vector's result and the counters
+   * (its meetings, the evaluations at the slabs' ends, its fragments) folded in order.  Every one is an integer: the sweep
+   * has no floating point, so a target that prints another value has a defect and not a rounding. */
+  GSHGEOM_Hash dense;
+  gshgeom_hash_init(&dense);
+  unsigned long dense_count = 0;
+  for (size_t i = 0; i < DV_COUNT; i++) {
+    const DV_Vec * v = &DV_VECTORS[i];
+    GSHCPU_Piece pieces[3][400];
+    GSHCPU_Exact_Params params;
+    GSHCPU_Exact_Cell cell;
+    memset(&params, 0, sizeof params);
+    memset(&cell, 0, sizeof cell);
+    params.parts = v->parts;
+    params.mode = v->mode;
+    params.even_odd = v->even_odd;
+    params.complement = v->complement;
+    params.eps[0] = params.eps[1] = GSHCPU_RENDER_EXACT_EPS;
+    params.eps[2] = 1;
+    if (v->mode == GSHCPU_EXACT_REGION) {
+      params.eps[0] = 1;
+    }
+    for (int p = 0; p < v->parts; p++) {
+      int64_t jnet[65];
+      int64_t cover = 0;
+      int64_t area = 0;
+      int64_t sum = 0;
+      memset(jnet, 0, sizeof jnet);
+      if (v->count[p] > 400) {
+        fail("a dense vector has more pieces than the probe holds");
+      }
+      for (int k = 0; k < v->count[p]; k++) {
+        const int8_t * q = v->pieces[p] + 4 * k;
+        pieces[p][k].x0 = (uint8_t)q[0];
+        pieces[p][k].y0 = (uint8_t)q[1];
+        pieces[p][k].x1 = (uint8_t)q[2];
+        pieces[p][k].y1 = (uint8_t)q[3];
+        jnet[q[1]] -= q[0] == 0;
+        jnet[q[3]] += q[2] == 0;
+        cover += (int64_t)q[3] - q[1];
+        area += ((int64_t)q[3] - q[1]) * ((int64_t)q[0] + q[2]);
+      }
+      for (int h = 0; h <= 64; h++) {
+        sum += jnet[h] * (64 - h);
+      }
+      cell.pieces[p] = pieces[p];
+      cell.count[p] = (size_t)v->count[p];
+      cell.a_left[p] = sum + 64 * (int64_t)v->wtop[p];
+      cell.dense[p] = params.eps[p] * (128 * (cell.a_left[p] + cover) - area);
+    }
+    size_t bytes = gshcpu_exact_scratch_bytes(400, 3);
+    void * memory = malloc(bytes + 16);
+    GSHCPU_Exact_Scratch scratch;
+    if (!memory) {
+      fail("out of memory");
+    }
+    gshcpu_exact_scratch_init(&scratch, (void *)(((uintptr_t)memory + 15u) & ~(uintptr_t)15u), 400, 3);
+    int64_t out = 0;
+    uint64_t work = 0;
+    if (gshcpu_exact_cell(&params, &scratch, &cell, &out, &work) != GSHCPU_EXACT_OK) {
+      fail("a dense vector was refused");
+    }
+    free(memory);
+    uint64_t values[4] = {(uint64_t)out, scratch.last_events, scratch.last_end_evals, scratch.last_distinct};
+    for (int k = 0; k < 4; k++) {
+      uint64_t value = values[k];
+#ifdef SHAPE_CPU_PLANT_BIT
+      if (dense_count == 3 && k == 0) {
+        value ^= 1u;
+      }
+#endif
+#ifdef SHAPE_CPU_CONTROL_NATIVE_ORDER
+      gshgeom_hash_bytes(&dense, &value, sizeof value);
+#else
+      gshgeom_hash_u64(&dense, value);
+#endif
+    }
+    dense_count++;
+  }
+  printf("shape-cpu.dense-hash %016" PRIx64 "\n", gshgeom_hash_value(&dense));
+  printf("shape-cpu.dense-count %lu\n", dense_count);
   return 0;
 }

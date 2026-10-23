@@ -1,0 +1,4 @@
+# The committed dense cells of the exact union step (tests/dense_vectors.h, strokes story S4c) through the step: each vector's
+# result and counters folded in order.  tools/corpus-hash.c must print the fold and the count on every target (make check-corpus-hash).
+hash 6fcd676171efb9a7
+count 42
