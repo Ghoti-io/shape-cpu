@@ -1211,7 +1211,10 @@ def compile_all(destdir, srcs, extra=(), pre=()):
 
 
 def link_test(test, objs, out):
-    cmd = "%s -o %s %s %s %s" % (CXX, out, test_object(test), " ".join(objs), LDFLAGS)
+    # The test-only C support objects (tests/support/*.c: the earlier exact step the dense tests compare against) are
+    # built by the Makefile beside the test objects and link into every test.
+    support = " ".join(sorted(str(o) for o in (OBJ_DIR / "tests" / "support").glob("*.o")))
+    cmd = "%s -o %s %s %s %s %s" % (CXX, out, test_object(test), support, " ".join(objs), LDFLAGS)
     r = run(cmd, shell=True)
     if r.returncode != 0:
         raise RuntimeError("cannot link %s:\n%s" % (test, r.stderr))
