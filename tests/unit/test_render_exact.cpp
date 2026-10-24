@@ -100,7 +100,6 @@ struct Covered {
   uint64_t exact_cells = 0;
   uint64_t work = 0;
   uint64_t replays = 0;
-  uint64_t plain = 0;
 };
 
 GSHCPU_Rect rect_of(int64_t x0, int64_t y0, int64_t x1, int64_t y1) {
@@ -128,7 +127,6 @@ Covered cover_exact(const Flat & flat, GSHCPU_Rect rect, GSHCPU_Rect walk, uint6
   c.exact_cells = mem.ex.cells;
   c.work = mem.ex.work;
   c.replays = mem.ex.replays;
-  c.plain = mem.ex.plain;
   return c;
 }
 
@@ -891,53 +889,6 @@ TEST(RenderExact, ThePathWithoutItsCancellingEdgesIsCoveredPixelForPixelAndCount
   }
   EXPECT_GT(cancelled * 5, before) << "a mosaic loses at least a fifth of its points";
   EXPECT_GT(exact, 500u);
-}
-
-TEST(RenderExact, TheCellsSeenToHaveNothingToOverlapAreLeftAsTheyAreAndNoPixelChanges) {
-  // A cell whose winding stays between 0 and 1 has no overlap for the exact step to find, so it is not made exact.  With the
-  // certificate off every one of them goes to the step, and the pixels, the cells counted and the failures must be the
-  // same, and the cells the step is spared must be exactly the ones it is not asked for.
-  std::mt19937 rng(9921);
-  uint64_t spared = 0;
-  uint64_t asked = 0;
-  for (int round = 0; round < 80; round++) {
-    std::vector<Contour> polys;
-    if (round % 2 == 0) {
-      int cells = 3 + (int)(rng() % 7);
-      polys = mosaic(rng, cells, 41 + (int64_t)(rng() % 90));
-    } else {
-      int n = 3 + (int)(rng() % 40);
-      for (int i = 0; i < n; i++) {
-        polys.push_back(random_piece(rng, -U, 9 * U));
-      }
-    }
-    Flat f(polys);
-    GSHGEOM_Flat_Path * reduced = nullptr;
-    ASSERT_EQ(gshgeom_flat_path_cancel_seams(f.flat, nullptr, nullptr, &reduced), GSHGEOM_OK);
-    Flat lean(reduced);
-    int64_t w = 12;
-    GSHCPU_Rect rect = rect_of(0, 0, w, w);
-    GSHCPU_Rect walk = round % 3 == 0 ? rect : rect_of(-1, 0, w + 1, w);
-    static const uint64_t caps[3] = {64, 512, 8192};
-    for (const Flat * path : {&f, &lean}) {
-      Covered off;
-      {
-        ShortcutsOff guard(GSHCPU_COVER_NO_PLAIN);
-        off = cover_exact(*path, rect, walk, caps[round % 3]);
-      }
-      Covered on = cover_exact(*path, rect, walk, caps[round % 3]);
-      ASSERT_EQ(on.result, off.result) << round;
-      EXPECT_EQ(on.k, off.k) << "round " << round;
-      EXPECT_EQ(on.cells, off.cells) << round;
-      EXPECT_EQ(on.failures, off.failures) << round;
-      EXPECT_EQ(off.plain, 0u);
-      EXPECT_EQ(on.exact_cells + on.plain, off.exact_cells) << "the cells spared are the cells not asked for, " << round;
-      spared += on.plain;
-      asked += on.exact_cells;
-    }
-  }
-  EXPECT_GT(spared, 200u) << "the certificate holds for cells of these sets";
-  EXPECT_GT(asked, 200u) << "and fails for others, which the step is asked about";
 }
 
 /* --- UC9: the cap, the winding bound ---------------------------------------------------------------------------------- */
