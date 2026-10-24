@@ -87,8 +87,8 @@ TEST(CoverageLimits, TheDefaultsAreWhatTheHeaderSays) {
   EXPECT_EQ(l.max_exact_crossings, 0u) << "zero is the default, 2^20, for the crossings of one pixel (UC19)";
   EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS, (uint64_t)1 << 20);
   EXPECT_EQ(GSHCPU_LIMITS_MAX_EXACT_CROSSINGS, (uint64_t)1 << 32);
-  EXPECT_EQ(l.max_deposits, 0u) << "zero is the default, 4 Mi, for the sink's crossings counted over one item (SC6)";
-  EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS, (uint64_t)1 << 22);
+  EXPECT_EQ(l.max_deposits, 0u) << "zero is the default, 32 Mi, for the sink's crossings counted over one item (SC6)";
+  EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS, (uint64_t)1 << 25);
   // The same layout on every target: four sizes and four 64-bit fields, none of it padding the sizes would not.
   EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 4 * sizeof(uint64_t));
   EXPECT_EQ(offsetof(GSHCPU_Limits, max_exact_crossings), offsetof(GSHCPU_Limits, max_exact_fragments) + sizeof(uint64_t))

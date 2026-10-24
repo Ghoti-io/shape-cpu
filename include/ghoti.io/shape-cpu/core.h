@@ -82,11 +82,12 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
 #define GSHCPU_LIMITS_DEFAULT_MAX_CELLS ((size_t)1 << 22)
 
 /**
- * Default ::GSHCPU_Limits.max_deposits: 4 Mi crossings counted over one item of the sink.  The count is work, not memory:
+ * Default ::GSHCPU_Limits.max_deposits: 32 Mi crossings counted over one item of the sink.  The count is work, not memory:
  * the sink adds each crossing straight into a dense accumulator for a band of rows, so its memory does not depend on it
- * (render.h, SC6).
+ * (render.h, SC6).  A page of stroked text at poster size makes between 8 and 16 Mi; a caller who draws more states a larger
+ * bound, and one who wants less states a smaller.
  */
-#define GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS ((uint64_t)1 << 22)
+#define GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS ((uint64_t)1 << 25)
 
 /** Default ::GSHCPU_Limits.max_cache_bytes: 16 MiB of stroke expansions held across renders. */
 #define GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES ((uint64_t)16 * 1024 * 1024)
