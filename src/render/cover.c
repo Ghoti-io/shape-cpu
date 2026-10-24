@@ -133,8 +133,8 @@ typedef struct Cover {
   int64_t * cover;      /* rows * stride; NULL for rows counted only */
   int64_t * area;       /* rows * stride */
   uint64_t cells;
-  uint64_t max_cells;
-  int over;             /* a deposit would have passed max_cells */
+  uint64_t max_deposits;
+  int over;             /* a deposit would have passed max_deposits */
   int track;            /* the sparse sweep: note the first and last column each row of the band deposited in */
   int64_t lo[GSHCPU_RENDER_BAND_ROWS]; /* per row of the band; > hi when the row has none */
   int64_t hi[GSHCPU_RENDER_BAND_ROWS];
@@ -230,7 +230,7 @@ static void fold_deposit(Cover * c, int64_t ey, int64_t dy) {
   if (dy == 0 || c->over || c->store) {
     return;
   }
-  if (c->cells >= c->max_cells) {
+  if (c->cells >= c->max_deposits) {
     c->over = 1;
     return;
   }
@@ -267,7 +267,7 @@ static void piece(Cover * c, int64_t ex, int64_t ey, Point a, Point b) {
     }
     return;
   }
-  if (c->cells >= c->max_cells) {
+  if (c->cells >= c->max_deposits) {
     c->over = 1;
     return;
   }
@@ -498,8 +498,8 @@ static void path_edges(Cover * c, const GSHGEOM_Flat_Path * path) {
 }
 
 GSHCPU_Result gshcpu_render_cover(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
-    GSHCPU_Rect rect, uint8_t * out, int64_t * acc, uint64_t max_cells, uint64_t * cells) {
-  return gshcpu_render_cover_counted(paths, count, rule, rect, rect, out, acc, max_cells, cells);
+    GSHCPU_Rect rect, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells) {
+  return gshcpu_render_cover_counted(paths, count, rule, rect, rect, out, acc, max_deposits, cells);
 }
 
 /* --- the crossings budget outside the drawn rectangle (UC19) ---------------------------------------------------------- */
@@ -795,12 +795,12 @@ static int exact_band(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_t
 }
 
 GSHCPU_Result gshcpu_render_cover_counted(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
-    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_cells, uint64_t * cells) {
-  return gshcpu_render_cover_exact(paths, count, rule, rect, walk, out, acc, max_cells, cells, NULL);
+    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells) {
+  return gshcpu_render_cover_exact(paths, count, rule, rect, walk, out, acc, max_deposits, cells, NULL);
 }
 
 GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
-    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_cells, uint64_t * cells,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells,
     GSHCPU_Exact * ex) {
   Cover c;
   memset(&c, 0, sizeof c);
@@ -809,7 +809,7 @@ GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths,
   c.ex = ex;
   c.cstride = walk.x1 - walk.x0;
   c.stride = rect.x1 - rect.x0 + 1;
-  c.max_cells = max_cells;
+  c.max_deposits = max_deposits;
   int64_t width = rect.x1 - rect.x0;
   /* The rows counted and not drawn first: above the rectangle drawn and below it (all of the walk's when it is empty). */
   if (gshcpu_render_rect_empty(rect)) {
@@ -970,7 +970,7 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
 }
 
 GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
-    GSHCPU_Rect rect, GSHCPU_Rect walk, int64_t * acc, uint8_t * line, uint64_t max_cells, uint64_t * cells,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, int64_t * acc, uint8_t * line, uint64_t max_deposits, uint64_t * cells,
     GSHCPU_Span_Fn fn, void * ctx, GSHCPU_Exact * ex) {
   Cover c;
   memset(&c, 0, sizeof c);
@@ -979,7 +979,7 @@ GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths
   c.ex = ex;
   c.cstride = walk.x1 - walk.x0;
   c.stride = rect.x1 - rect.x0 + 1;
-  c.max_cells = max_cells;
+  c.max_deposits = max_deposits;
   int64_t width = rect.x1 - rect.x0;
   if (gshcpu_render_rect_empty(rect)) {
     count_rows(&c, paths, count, walk.y0, walk.y1);
@@ -1094,8 +1094,8 @@ static int aligned_outside_rows(Cover c[3], const GSHCPU_Aligned_Input in[3], GS
     parts[p].paths = &ones[p];
     parts[p].count = 1;
     cells[p] = c[p].cells;
-    cap[p] = c[p].max_cells;
-    c[p].max_cells = UINT64_MAX;
+    cap[p] = c[p].max_deposits;
+    c[p].max_deposits = UINT64_MAX;
     c[p].cover = NULL;
     c[p].area = NULL;
   }
@@ -1121,14 +1121,14 @@ static int aligned_outside_rows(Cover c[3], const GSHCPU_Aligned_Input in[3], GS
   }
   for (int p = 0; p < 3; p++) {
     c[p].cells = cells[p];
-    c[p].max_cells = cap[p];
+    c[p].max_deposits = cap[p];
     c[p].over = 0;
   }
   return refused;
 }
 
 GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHCPU_Rect joint, int complement,
-    uint8_t * result, uint64_t max_cells, uint64_t * cells) {
+    uint8_t * result, uint64_t max_deposits, uint64_t * cells) {
   Cover c[3];
   int64_t width = joint.x1 - joint.x0;
   memset(c, 0, sizeof c);
@@ -1152,7 +1152,7 @@ GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHC
       continue;
     }
     const GSHGEOM_Flat_Path * one[1] = {in[p].path};
-    c[p].max_cells = max_cells - OTHERS(p);
+    c[p].max_deposits = max_deposits - OTHERS(p);
     if (gshcpu_render_rect_empty(joint)) {
       count_rows(&c[p], one, 1, in[p].walk.y0, in[p].walk.y1);
     } else {
@@ -1199,7 +1199,7 @@ GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHC
       c[p].area = in[p].acc + n;
       memset(in[p].acc, 0, 2 * n * sizeof *in[p].acc);
       exact_clear(&c[p]);
-      c[p].max_cells = max_cells - OTHERS(p);
+      c[p].max_deposits = max_deposits - OTHERS(p);
       path_edges(&c[p], in[p].path);
       if (c[p].over) {
         *cells = TOTAL();

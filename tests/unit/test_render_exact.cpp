@@ -111,7 +111,7 @@ GSHCPU_Rect rect_of(int64_t x0, int64_t y0, int64_t x1, int64_t y1) {
 
 /** The exact coverage of @p flat over @p rect, the cells counted over @p walk, at most @p cap pieces to a cell. */
 Covered cover_exact(const Flat & flat, GSHCPU_Rect rect, GSHCPU_Rect walk, uint64_t cap = 512,
-    uint64_t max_cells = UINT64_MAX) {
+    uint64_t max_deposits = UINT64_MAX) {
   Covered c;
   size_t w = (size_t)(rect.x1 - rect.x0);
   size_t h = (size_t)(rect.y1 - rect.y0);
@@ -119,7 +119,7 @@ Covered cover_exact(const Flat & flat, GSHCPU_Rect rect, GSHCPU_Rect walk, uint6
   std::vector<int64_t> acc(2 * (w + 1) * GSHCPU_RENDER_BAND_ROWS, 77);
   ExactMem mem((size_t)(walk.x1 - walk.x0), cap);
   const GSHGEOM_Flat_Path * paths[1] = {flat.flat};
-  c.result = gshcpu_render_cover_exact(paths, 1, GSHGEOM_FILL_NONZERO, rect, walk, c.k.data(), acc.data(), max_cells, &c.cells,
+  c.result = gshcpu_render_cover_exact(paths, 1, GSHGEOM_FILL_NONZERO, rect, walk, c.k.data(), acc.data(), max_deposits, &c.cells,
       &mem.ex);
   c.failures = mem.ex.failures;
   c.exact_cells = mem.ex.cells;

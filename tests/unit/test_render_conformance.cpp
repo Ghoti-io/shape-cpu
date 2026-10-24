@@ -27,7 +27,7 @@ GSHSCENE_Sink * make_cpu(const GSHSCENE_Allocator * alloc, const GSHSCENE_Limits
 GSHSCENE_Sink * make_cpu_limited(const GSHSCENE_Allocator * alloc, unsigned level) {
   GSHCPU_Limits limits;
   gshcpu_limits_default(&limits);
-  limits.max_cells = level;
+  limits.max_deposits = level;
   GSHSCENE_Sink * sink = nullptr;
   if (gshcpu_sink_create(alloc, nullptr, &limits, &sink) != GSHCPU_OK) {
     return nullptr;

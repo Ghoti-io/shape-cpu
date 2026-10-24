@@ -290,7 +290,7 @@ TEST(RenderLimits, CellsAndPointsPassAtTheirBoundAndAreRefusedOnePast) {
       GSHCPU_Limits limits;
       gshcpu_limits_default(&limits);
       if (which == 0) {
-        limits.max_cells = (size_t)(cells - less);
+        limits.max_deposits = (size_t)(cells - less);
       } else {
         limits.max_points = points - (size_t)less;
       }
@@ -440,7 +440,7 @@ TEST(RenderLimits, AHostileMaximalItemDoesItsWorkWithinTheDeclaredBound) {
   GSHCPU_Limits limits;
   gshcpu_limits_default(&limits);
   limits.max_points = points;
-  limits.max_cells = (size_t)cells;
+  limits.max_deposits = (size_t)cells;
   limits.max_bytes = RF_WIDTH * RF_HEIGHT;
   SinkRef sink(&limits);
   RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
@@ -459,6 +459,43 @@ TEST(RenderLimits, AHostileMaximalItemDoesItsWorkWithinTheDeclaredBound) {
   EXPECT_LE(run.summary.work_max, caps.cancel_work_bound);
   EXPECT_GE(run.summary.work_max, points + cells) << "the item's points and cells are counted";
   EXPECT_EQ(run.summary.work_max, points + cells + RF_WIDTH * RF_HEIGHT) << "and every pixel of its box, the raster here";
+}
+
+TEST(RenderLimits, TheSinksMemoryDoesNotDependOnTheCapOfDeposits) {
+  // max_deposits counts work: the sink adds each crossing straight into a dense accumulator for a band of rows and stores no
+  // cell, so the memory it asks for is the same whatever the cap is, and a render that makes more deposits than a small
+  // cap would allow is refused by the cap and not by the memory.
+  Store s;
+  GSHSCENE_List * l = s.open();
+  GSHSCENE_Paint blue = solid(0, 0, 1, 0.5);
+  ASSERT_EQ(gshscene_list_fill(l, zigzag(s, 4096, 48.0, 40.0), nullptr, GSHGEOM_FILL_EVEN_ODD, &blue, 0, 0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  uint64_t cells = 0;
+  size_t points = 0;
+  measure(l, 0, RF_WIDTH, RF_HEIGHT, &cells, &points);
+  ASSERT_GT(cells, 1000u) << "the list makes many deposits";
+  size_t need[3] = {0, 0, 0};
+  const uint64_t caps[3] = {1, GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS, UINT64_MAX};
+  for (int i = 0; i < 3; i++) {
+    GSHCPU_Limits limits;
+    gshcpu_limits_default(&limits);
+    limits.max_deposits = caps[i];
+    SinkRef sink(&limits);
+    RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+    ReportRef report;
+    GSHSCENE_Target t = target_of(r.raster);
+    GSHSCENE_Render_Request req = request_of(l, &t, report.report);
+    req.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+    ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &req, &need[i]), GSHSCENE_OK);
+  }
+  EXPECT_EQ(need[0], need[1]);
+  EXPECT_EQ(need[1], need[2]);
+  GSHCPU_Limits one;
+  gshcpu_limits_default(&one);
+  one.max_deposits = 1;
+  SinkRef sink(&one);
+  RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+  EXPECT_FALSE(render(sink.sink, l, r.raster).entries.empty()) << "a cap of one deposit refuses the item";
 }
 
 TEST(RenderLimits, ARefusedBlockSkipsItsNestedBlocksAndEndsAtItsOwnPop) {
@@ -637,7 +674,7 @@ TEST(RenderLimits, ACellCapRefusesTheSameItemsWithAndWithoutTheDamage) {
   for (uint64_t cap : {outside - 1, outside, inside, (across + inside) / 2, across - 1, across}) {
     GSHCPU_Limits limits;
     gshcpu_limits_default(&limits);
-    limits.max_cells = (size_t)cap;
+    limits.max_deposits = (size_t)cap;
     SinkRef sink(&limits);
     for (uint32_t flags : {0u, (uint32_t)GSHSCENE_RENDER_STRICT}) {
       RasterRef whole(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
@@ -678,7 +715,7 @@ TEST(RenderLimits, ACellCapRefusesTheSameItemsWithAndWithoutTheDamage) {
   for (uint64_t cap : {outside, outside - 1}) {
     GSHCPU_Limits limits;
     gshcpu_limits_default(&limits);
-    limits.max_cells = (size_t)cap;
+    limits.max_deposits = (size_t)cap;
     SinkRef sink(&limits);
     RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
     Refusals o = render_damaged(sink.sink, one, r.raster, &damage);
@@ -723,7 +760,7 @@ TEST(RenderLimits, ADamageCountsOnlyTheCellsItDrawsWhereTheCapCannotBeMet) {
     for (uint64_t cap : {f.bound, f.bound - 1}) {
       GSHCPU_Limits limits;
       gshcpu_limits_default(&limits);
-      limits.max_cells = (size_t)cap;
+      limits.max_deposits = (size_t)cap;
       SinkRef sink(&limits);
       RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
       Refusals o = render_damaged(sink.sink, l, r.raster, &damage);
@@ -756,7 +793,7 @@ TEST(RenderLimits, AnItemUnderAClipMeetsTheCapOverTheClipsReach) {
   for (uint64_t cap : {under, under - 1}) {
     GSHCPU_Limits limits;
     gshcpu_limits_default(&limits);
-    limits.max_cells = (size_t)cap;
+    limits.max_deposits = (size_t)cap;
     SinkRef sink(&limits);
     RasterRef whole(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
     RasterRef part(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));

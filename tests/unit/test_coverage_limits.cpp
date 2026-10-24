@@ -53,6 +53,7 @@ TEST(CoverageLimits, AMemoryBudgetSetsTheCellsAndTheCacheAndNothingElse) {
   EXPECT_EQ(l.max_points, d.max_points);
   EXPECT_EQ(l.max_exact_fragments, d.max_exact_fragments);
   EXPECT_EQ(l.max_exact_crossings, d.max_exact_crossings);
+  EXPECT_EQ(l.max_deposits, d.max_deposits) << "a memory budget says nothing about the sink's work bound";
   // The budget is a function of its argument alone: the same budget is the same limits, and a larger one gives more.
   GSHCPU_Limits again, bigger;
   ASSERT_EQ(gshcpu_limits_for_memory(&again, (uint64_t)768 << 20), GSHCPU_OK);
@@ -86,8 +87,10 @@ TEST(CoverageLimits, TheDefaultsAreWhatTheHeaderSays) {
   EXPECT_EQ(l.max_exact_crossings, 0u) << "zero is the default, 2^20, for the crossings of one pixel (UC19)";
   EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS, (uint64_t)1 << 20);
   EXPECT_EQ(GSHCPU_LIMITS_MAX_EXACT_CROSSINGS, (uint64_t)1 << 32);
-  // The same layout on every target: four sizes and three 64-bit fields, none of it padding the sizes would not.
-  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 3 * sizeof(uint64_t));
+  EXPECT_EQ(l.max_deposits, 0u) << "zero is the default, 4 Mi, for the sink's crossings counted over one item (SC6)";
+  EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS, (uint64_t)1 << 22);
+  // The same layout on every target: four sizes and four 64-bit fields, none of it padding the sizes would not.
+  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 4 * sizeof(uint64_t));
   EXPECT_EQ(offsetof(GSHCPU_Limits, max_exact_crossings), offsetof(GSHCPU_Limits, max_exact_fragments) + sizeof(uint64_t))
       << "appended after max_exact_fragments";
   gshcpu_limits_default(nullptr);   // ignored

@@ -78,8 +78,15 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
 /** Default ::GSHCPU_Limits.max_bytes: 256 MiB. */
 #define GSHCPU_LIMITS_DEFAULT_MAX_BYTES ((size_t)256 * 1024 * 1024)
 
-/** Default ::GSHCPU_Limits.max_cells: 4 Mi cells (24 bytes each). */
+/** Default ::GSHCPU_Limits.max_cells, for the standalone coverage functions only: 4 Mi stored cells (24 bytes each, 96 MiB). */
 #define GSHCPU_LIMITS_DEFAULT_MAX_CELLS ((size_t)1 << 22)
+
+/**
+ * Default ::GSHCPU_Limits.max_deposits: 4 Mi crossings counted over one item of the sink.  The count is work, not memory:
+ * the sink adds each crossing straight into a dense accumulator for a band of rows, so its memory does not depend on it
+ * (render.h, SC6).
+ */
+#define GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS ((uint64_t)1 << 22)
 
 /** Default ::GSHCPU_Limits.max_cache_bytes: 16 MiB of stroke expansions held across renders. */
 #define GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES ((uint64_t)16 * 1024 * 1024)
@@ -124,8 +131,23 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
 typedef struct GSHCPU_Limits {
   size_t max_dimension; ///< Widest and tallest working bitmap, in pixels (including the one-pixel margin ::gshcpu_coverage_from_path adds). At most ::GSHCPU_MAX_DIMENSION_CEILING whatever is asked.
   size_t max_bytes;     ///< Bytes of the working bitmap (width times height).
-  size_t max_cells;     ///< Cells the accumulator may hold.
+  /**
+   * The standalone coverage functions (`gshcpu_coverage_*`) only: the cells they store, 24 bytes each, so a memory
+   * bound.  Two deposits of one pixel merge only when consecutive; any others are separate cells until the sort.  The
+   * sink never reads it (it stores no cells): see `max_deposits`.
+   */
+  size_t max_cells;
   size_t max_points;    ///< Points of the flattened path (handed to `shape-geometry`).
+  /**
+   * The sink only: the most crossings of an edge with a cell (deposits) it counts over what the whole render draws of one
+   * item, summed over the parts of a stroke.  A render past it refuses the item as ::GSHSCENE_REASON_RESOURCE_LIMIT.  It
+   * bounds work, about half a microsecond a deposit on the machine it was measured on, and not memory: the sink's memory
+   * is a function of the other limits and the region only.  0 is ::GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS, `UINT64_MAX` is no
+   * cap.  Where the time a caller can wait is what matters, a deadline through the render's cancel token is the better
+   * control; this is the bound that holds without one.  A `uint64_t` whatever the target.  Not read by the coverage
+   * functions.
+   */
+  uint64_t max_deposits;
   /**
    * The sink's cache of stroke expansions (render.h, SC7), in the bytes it accounts for them: 0 is
    * ::GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES, ::GSHCPU_LIMITS_CACHE_OFF (1) keeps nothing, `UINT64_MAX` has no cap.
@@ -171,17 +193,17 @@ GSHCPU_API void gshcpu_limits_default(GSHCPU_Limits * limits);
  * @brief Fill @p limits from a memory budget instead of from the fixed defaults.
  *
  * Every field is the default of ::gshcpu_limits_default except the two that hold memory the size of the drawing:
- * `max_cells` (24 bytes a cell) is set so that the accumulator may use up to half of @p bytes, and `max_cache_bytes` an
- * eighth of it.  A drawing that needs more than the cap is refused as ever; the budget is the caller's, so that the same
- * scene is refused or drawn the same way wherever it runs, and a caller on a large machine is not held to a default
- * chosen for a small one.  The budget does not cover the target, the working bitmaps (`max_bytes` bounds those) or the
- * exact union's per-pixel scratch (`max_exact_fragments` bounds that).
+ * `max_cells` (the standalone functions' stored cells, 24 bytes each) is set so that they may use up to half of @p bytes,
+ * and `max_cache_bytes` (the sink's stroke cache) an eighth of it.  It sets no work bound: `max_deposits` holds no
+ * memory, so a memory budget says nothing about it.  A drawing that needs more than a cap is refused as ever; the budget
+ * is the caller's, so that the same scene is refused or drawn the same way wherever it runs.  The budget does not cover
+ * the target, the working bitmaps (`max_bytes` bounds those) or the exact union's scratch (`max_exact_fragments`).
  *
  * The library does not ask the system how much memory is free: the answer would depend on the machine and the moment,
  * and a render's refusals are part of its result.  A caller that wants it reads it and passes what it will spend.
  *
  * @param limits The structure to fill.
- * @param bytes  The memory to give the accumulator and the cache together, at least ::GSHCPU_LIMITS_MIN_MEMORY.
+ * @param bytes  The memory to give the cells and the cache together, at least ::GSHCPU_LIMITS_MIN_MEMORY.
  * @return ::GSHCPU_OK; ::GSHCPU_ERR_INVALID for NULL @p limits or a budget under the minimum (nothing written).
  */
 GSHCPU_API GSHCPU_Result gshcpu_limits_for_memory(GSHCPU_Limits * limits, uint64_t bytes);

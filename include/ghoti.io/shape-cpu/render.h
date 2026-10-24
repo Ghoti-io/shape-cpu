@@ -52,7 +52,7 @@
  * `PREPARE`.  Cancel is `BETWEEN_UNITS` (each unit
  * of the list's expansion); the work between two checks is counted in
  * `"cells+points+pixels"` and its bound (SC11) is, for an aligned stroke,
- * `3 max_points + max_cells + 2 max_bytes + elements * GSHGEOM_STROKE_MAX_DEPTH` of the sink's ::GSHCPU_Limits (each
+ * `3 max_points + max_deposits + 2 max_bytes + elements * GSHGEOM_STROKE_MAX_DEPTH` of the sink's ::GSHCPU_Limits (each
  * at its default when zero; `max_points` defaults to `shape-geometry`'s; `elements` is the most path elements a
  * resource may hold, shape-scene's `max_resource_elements` of the limits the sink was created with).
  *
@@ -70,7 +70,7 @@
  * the edge's own end points, wherever the drawing starts.  An outline glyph run
  * is one shape: its glyphs' windings add.  A point more than 2^24 pixels from the
  * device origin, a map or a device path `shape-geometry` refuses, a flattened
- * path past `max_points` and more than `max_cells` cell deposits are the sink's
+ * path past `max_points` and more than `max_deposits` cell deposits are the sink's
  * resource limits: the item is refused while drawing (S6).  The cells are counted
  * over what the whole render draws of the item (its pixels meet the extent and
  * its clips' reach there), whatever the damage, so a damage-limited render
@@ -251,7 +251,7 @@
  *   as much as the overlap.)  Where the aligned part's boundary crosses the fill region's at an angle `alpha` the
  *   composed error may reach `tau / sin(alpha / 2)`.
  * - **SC6 Limits.**  A map or device path the geometry refuses, the expansion's `ERR_LIMIT` (a part past `max_points`,
- *   the depth cap, the arithmetic bound), a shifted coordinate past the range, or cell deposits past `max_cells` (summed
+ *   the depth cap, the arithmetic bound), a shifted coordinate past the range, or cell deposits past `max_deposits` (summed
  *   over the item's parts and counted over what the whole render draws of the item, never only the damage) are the
  *   sink's resource limit: the item is refused while drawing, strict stops with the finished prefix.  A refusal never
  *   depends on the cache.  `ERR_OOM` is `ERR_OOM`.
@@ -266,7 +266,7 @@
  * - **SC8 Fast tiers.**  Each tier is bit-equal to the general tier, which is the oracle and can be forced.  *FT-1* is
  *   the cached expansion.  *FT-2* is the sparse composite: for a stroke with a solid paint and one part (centered, or no
  *   closed subpath aligned) whose cell deposits are bounded, from its edges alone, by a sixteenth of the pixels of its
- *   own rectangle (and by `max_cells`), the sweep hands over a row at a time only the pixels that can be nonzero.  It
+ *   own rectangle (and by `max_deposits`), the sweep hands over a row at a time only the pixels that can be nonzero.  It
  *   is detected as a *solid hairline* (device width 1) or a *plain solid stroke* (any other width), each counted.
  * - **SC9 Groups and order.**  A stroke is one unit of its sequence.  In an isolated group it composites `SRC_OVER`
  *   into the group's layer and the group's blend mode acts at its pop.  A non-isolated, knockout or soft-masked group is
@@ -289,7 +289,7 @@
  *   the report as well as in the pixels (S12).  Under `CALLER_MEMORY` the cache is neither read nor written, the
  *   path and the glyph outlines are allocated from the arena in the caller's memory in the order the measure walks them, and
  *   the memory asked for is exact: one byte less is `ERR_LIMIT`.  A shifted coordinate, a part past `max_points`, cells past
- *   `max_cells` or the depth cap refuse the **whole item** with `RESOURCE_LIMIT` (SC6): a run is one region and is
+ *   `max_deposits` or the depth cap refuse the **whole item** with `RESOURCE_LIMIT` (SC6): a run is one region and is
  *   never stroked in part, while a glyph that is left out of the path is a note.  A glyph refused under strict stops
  *   the render at the item, as a fill's does.
  * - **ST9, ST10, ST11.**  The expansion lies within SK10's bounds of the glyphs, the test sink's `outline=` for a run is
@@ -390,7 +390,7 @@
  *   counts toward SC11's: a piece is one unit, each slab `6 n' + 8` (the carry, the repair, the gaps, the ends), each meeting
  *   `ceil(log2 n') + 12`, and when the meetings are counted (UC19) `n' (ceil(log2 n') + 1)` more for each slab; the declared
  *   `cancel_work_bound` adds the most the step may do in an item: its horizontal pieces on cells' left sides (at most one for
- *   each point and each column of the widest raster) and its fragments (at most `max_cells` of them, which the cap counts)
+ *   each point and each column of the widest raster) and its fragments (at most `max_deposits` of them, which the cap counts)
  *   each at the cost per fragment of the largest cell, whose meetings are at most `n' (n' - 1) / 2` and at most the crossings
  *   budget of UC19.  Memory is a function of the limits and the region only: a count of pieces and a place in the pool for
  *   each cell of a band of the region's width, a pool of pieces (at least 4096, at least one cell's worth), and the scratch of

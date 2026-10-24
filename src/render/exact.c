@@ -1205,10 +1205,10 @@ uint64_t gshcpu_exact_cell_work_bound(uint64_t pieces, uint64_t crossings) {
   return sat_add(sat_add(m, sat_mul(64u, per_slab)), sat_mul(k, l + 12u));
 }
 
-uint64_t gshcpu_exact_work_bound(uint64_t max_cells, uint64_t max_points, uint64_t max_dimension, uint64_t max_pieces,
+uint64_t gshcpu_exact_work_bound(uint64_t max_deposits, uint64_t max_points, uint64_t max_dimension, uint64_t max_pieces,
     uint64_t max_crossings) {
   /* The cost of a cell of `m` pieces is at most W_cell(m, K), and every piece but a horizontal one on a cell's left side is a
-   * deposit, which the cell cap counts: at most `max_cells` of them in the whole item, however they fall in cells.  A cell of
+   * deposit, which the cell cap counts: at most `max_deposits` of them in the whole item, however they fall in cells.  A cell of
    * `n'` fragments costs per fragment at most `1 + 64 (6 + L + 1) + 8 * 64 / n'` and its meetings `K / n' (L + 12)`, with
    * `K / n' <= (n' - 1) / 2` and `K / n' <= budget / n'`, so the worst fragment is that of a cell with about `sqrt(2 budget)`
    * fragments or, with fewer pieces than that, of one at the cap.  The horizontal pieces cost a visit and a collection each. */
@@ -1223,6 +1223,6 @@ uint64_t gshcpu_exact_work_bound(uint64_t max_cells, uint64_t max_points, uint64
     }
   }
   per_fragment = sat_add(per_fragment, sat_mul(reach, l + 12u));
-  uint64_t pieces = sat_add(max_cells, sat_mul(max_points, max_dimension));
-  return sat_add(pieces, sat_mul(max_cells, per_fragment));
+  uint64_t pieces = sat_add(max_deposits, sat_mul(max_points, max_dimension));
+  return sat_add(pieces, sat_mul(max_deposits, per_fragment));
 }

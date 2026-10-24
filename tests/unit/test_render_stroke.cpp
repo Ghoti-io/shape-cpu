@@ -493,7 +493,7 @@ TEST(RenderStrokeLimits, APartPastMaxPointsIsTheSinksResourceLimit) {
 TEST(RenderStrokeLimits, CellsPastMaxCellsAreTheSinksLimitWholeOrDamaged) {
   GSHCPU_Limits limits;
   gshcpu_limits_default(&limits);
-  limits.max_cells = 6;
+  limits.max_deposits = 6;
   Store s;
   Params p = params(3.0, GSHGEOM_STROKE_JOIN_ROUND, GSHGEOM_STROKE_CAP_ROUND);
   p.s.alignment = GSHGEOM_STROKE_ALIGN_INSIDE;
@@ -509,29 +509,29 @@ TEST(RenderStrokeLimits, CellsPastMaxCellsAreTheSinksLimitWholeOrDamaged) {
   EXPECT_EQ(part.entries[0].reason, GSHSCENE_REASON_RESOURCE_LIMIT);
   // The cap met exactly by the sum over the parts: with it raised by the parts' total it passes, one less it does not.
   GSHCPU_Limits roomy = limits;
-  roomy.max_cells = GSHCPU_LIMITS_DEFAULT_MAX_CELLS;
+  roomy.max_deposits = GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS;
   Sink big(GSHCPU_RENDER_TIERS_ALL, &roomy);
   Drawn ok = render_list(big.sink, l, 24, 24);
   EXPECT_TRUE(ok.entries.empty());
   uint64_t used = ok.summary.work_max; // an upper bound of the cells
   (void)used;
   size_t lo = 1;
-  size_t hi = GSHCPU_LIMITS_DEFAULT_MAX_CELLS;
+  size_t hi = GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS;
   while (lo < hi) { // the least cap that draws: the sum over the three parts, no more and no less
     size_t mid = lo + (hi - lo) / 2;
     GSHCPU_Limits probe = limits;
-    probe.max_cells = mid;
+    probe.max_deposits = mid;
     Sink s2(GSHCPU_RENDER_TIERS_ALL, &probe);
     Drawn d = render_list(s2.sink, l, 24, 24);
     (d.entries.empty() ? hi : lo) = d.entries.empty() ? mid : mid + 1;
   }
   GSHCPU_Limits at = limits;
-  at.max_cells = lo;
+  at.max_deposits = lo;
   Sink exact(GSHCPU_RENDER_TIERS_ALL, &at);
   Drawn at_cap = render_list(exact.sink, l, 24, 24);
   EXPECT_TRUE(at_cap.entries.empty());
   EXPECT_EQ(at_cap.alpha, ok.alpha);
-  at.max_cells = lo - 1;
+  at.max_deposits = lo - 1;
   Sink under(GSHCPU_RENDER_TIERS_ALL, &at);
   EXPECT_FALSE(render_list(under.sink, l, 24, 24).entries.empty());
   EXPECT_GT(lo, 3u) << "the cells of three parts, not of one";

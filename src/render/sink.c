@@ -48,7 +48,7 @@ typedef struct Cpu_Sink {
   GSHGEOM_Allocator alloc;
   size_t max_dimension;      /* the effective limits */
   size_t max_bytes;
-  uint64_t max_cells;
+  uint64_t max_deposits;
   uint64_t max_exact;        /* the most pieces of a stroke part in one pixel (UC9) */
   uint64_t max_crossings;    /* the most crossings of those pieces in one pixel (UC19) */
   GSHGEOM_Limits geometry;   /* max_points for the flattener */
@@ -533,7 +533,7 @@ static uint64_t work_bound(const Cpu_Sink * cs) {
   uint64_t expansion;
   if (!gcu_safe_mul_u64((uint64_t)cs->geometry.max_points, 3u, &b) || !gcu_safe_mul_u64((uint64_t)cs->max_bytes, 2u, &pixels) ||
       !gcu_safe_mul_u64((uint64_t)cs->elements, (uint64_t)GSHGEOM_STROKE_MAX_DEPTH + 1u, &expansion) ||
-      !gcu_safe_add_u64(b, cs->max_cells, &b) || !gcu_safe_add_u64(b, pixels, &b) || !gcu_safe_add_u64(b, expansion, &b)) {
+      !gcu_safe_add_u64(b, cs->max_deposits, &b) || !gcu_safe_add_u64(b, pixels, &b) || !gcu_safe_add_u64(b, expansion, &b)) {
     return UINT64_MAX;
   }
   /* UC9: and the exact step's, over the pieces of the item's three parts (its deposits, which the cap counts, and the
@@ -544,7 +544,7 @@ static uint64_t work_bound(const Cpu_Sink * cs) {
   if (!gcu_safe_mul_u64((uint64_t)cs->geometry.max_points, 3u, &points3) || !gcu_safe_mul_u64(cs->max_exact, 3u, &cell3)) {
     return UINT64_MAX;
   }
-  uint64_t exact = gshcpu_exact_work_bound((uint64_t)cs->max_cells, points3, (uint64_t)cs->max_dimension, cell3, cs->max_crossings);
+  uint64_t exact = gshcpu_exact_work_bound((uint64_t)cs->max_deposits, points3, (uint64_t)cs->max_dimension, cell3, cs->max_crossings);
   if (!gcu_safe_add_u64(b, exact, &b)) {
     return UINT64_MAX;
   }
@@ -729,10 +729,10 @@ static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t
       /* Drawn in part (a damage): unless the bound says the cap cannot be met over the whole, count only where it
        * is drawn; else count the whole while drawing the part. */
       if ((rect->x0 != walk.x0 || rect->y0 != walk.y0 || rect->x1 != walk.x1 || rect->y1 != walk.y1) &&
-          gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_cells) <= run->cs->max_cells) {
+          gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_deposits) <= run->cs->max_deposits) {
         walk = *rect;
       }
-      r = gshcpu_render_cover_counted(paths, g.count, item->fill_rule, *rect, walk, out, run->acc, run->cs->max_cells,
+      r = gshcpu_render_cover_counted(paths, g.count, item->fill_rule, *rect, walk, out, run->acc, run->cs->max_deposits,
           &cells);
       run->acc_dirty = 1; /* the dense sweep writes the accumulator band by band and leaves it so */
       run->work += cells;
@@ -1106,7 +1106,7 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
   uint8_t * cov = run->coverage;
   GSHCPU_Exact * exact = cs->tiers & GSHCPU_RENDER_TIER_EXACT ? run->exact : NULL; /* UC1 to UC11 (off only as a gate's control) */
   int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT;
-  if (solid && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_cells)) {
+  if (solid && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits)) {
     /* FT-2 (SC8): the sweep gives only the pixels that can be nonzero; the rest the general loop would skip. */
     if (run->acc_dirty) {
       memset(run->acc, 0, 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc);
@@ -1119,7 +1119,7 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
     Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
     GSHCPU_Rect drawn;
     GSHCPU_Rect counted;
-    r = gshcpu_render_stroke_cover_sparse(&s, reach, wreach, cs->max_cells, run->acc, exact, run->coverage, sparse_span,
+    r = gshcpu_render_stroke_cover_sparse(&s, reach, wreach, cs->max_deposits, run->acc, exact, run->coverage, sparse_span,
         &sp, &drawn, &counted, &cells);
     run->work += exact_work(run);
     /* Never refused for its cells (the cap was bounded by the detection), but the arithmetic is shown to hold. */
@@ -1133,7 +1133,7 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
     return r == GSHCPU_OK ? GSHSCENE_OK : r == GSHCPU_ERR_LIMIT ? refuse(run, item, chain, count) : scene_result(r);
   }
   GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result};
-  r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_cells, run->acc,
+  r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_deposits, run->acc,
       2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS, exact, (cs->tiers & GSHCPU_RENDER_TIER_JOINT) != 0, &buffers, &cov, &rect, &whole, &cells);
   run->acc_dirty = 1;
   run->work += cells + exact_work(run);
@@ -1521,7 +1521,7 @@ GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, c
     cs->max_dimension = GSHCPU_MAX_DIMENSION_CEILING;
   }
   cs->max_bytes = limits && limits->max_bytes ? limits->max_bytes : GSHCPU_LIMITS_DEFAULT_MAX_BYTES;
-  cs->max_cells = limits && limits->max_cells ? limits->max_cells : GSHCPU_LIMITS_DEFAULT_MAX_CELLS;
+  cs->max_deposits = limits && limits->max_deposits ? limits->max_deposits : GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS;
   cs->max_exact = limits && limits->max_exact_fragments ? limits->max_exact_fragments
                                                         : GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS;
   cs->max_crossings = limits && limits->max_exact_crossings ? limits->max_exact_crossings

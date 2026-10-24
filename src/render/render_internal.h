@@ -151,21 +151,21 @@ GSHCPU_Rect gshcpu_render_rect_join(GSHCPU_Rect a, GSHCPU_Rect b);
  *
  * @param out `width * height` bytes of @p rect, row by row; written in full.
  * @param acc The cell accumulator: `2 * (width + 1) * GSHCPU_RENDER_BAND_ROWS` `int64_t`.
- * @param max_cells The most cell deposits (a crossing of one cell with a nonzero height) allowed.
+ * @param max_deposits The most cell deposits (a crossing of one cell with a nonzero height) allowed.
  * @param cells The deposits made, counted until the limit.
- * @return ::GSHCPU_OK; ::GSHCPU_ERR_LIMIT when a deposit would pass @p max_cells (@p out is then not complete).
+ * @return ::GSHCPU_OK; ::GSHCPU_ERR_LIMIT when a deposit would pass @p max_deposits (@p out is then not complete).
  */
 GSHCPU_Result gshcpu_render_cover(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
-    GSHCPU_Rect rect, uint8_t * out, int64_t * acc, uint64_t max_cells, uint64_t * cells);
+    GSHCPU_Rect rect, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells);
 
 /**
- * ::gshcpu_render_cover over @p rect, with the cell deposits counted (and @p max_cells met) over @p walk, which holds
+ * ::gshcpu_render_cover over @p rect, with the cell deposits counted (and @p max_deposits met) over @p walk, which holds
  * @p rect (S4: the rectangle the whole render would draw of the item, so that the item's refusal does not depend on
  * the damage).  @p out is what ::gshcpu_render_cover over @p rect writes; @p cells is what it counts over @p walk.
  * @p rect may be empty (nothing is drawn, and @p walk is counted).
  */
 GSHCPU_Result gshcpu_render_cover_counted(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
-    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_cells, uint64_t * cells);
+    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells);
 
 /** The memory and settings of the exact step (below). */
 typedef struct GSHCPU_Exact GSHCPU_Exact;
@@ -178,7 +178,7 @@ typedef struct GSHCPU_Exact GSHCPU_Exact;
  * ::GSHCPU_ERR_LIMIT.
  */
 GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
-    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_cells, uint64_t * cells,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells,
     GSHCPU_Exact * ex);
 
 /**
@@ -371,11 +371,11 @@ struct GSHCPU_Exact {
 };
 
 /**
- * The most work (SC11's units) the exact step may do in one item whose cells are capped at @p max_cells, whose outlines
+ * The most work (SC11's units) the exact step may do in one item whose cells are capped at @p max_deposits, whose outlines
  * have at most @p max_points points and whose raster is at most @p max_dimension wide, with cells of at most
  * @p max_pieces pieces: held at `UINT64_MAX`.
  */
-uint64_t gshcpu_exact_work_bound(uint64_t max_cells, uint64_t max_points, uint64_t max_dimension, uint64_t max_pieces,
+uint64_t gshcpu_exact_work_bound(uint64_t max_deposits, uint64_t max_points, uint64_t max_dimension, uint64_t max_pieces,
     uint64_t max_crossings);
 
 /**
@@ -407,12 +407,12 @@ typedef struct GSHCPU_Aligned_Input {
  * @p result: in a cell where two of them have pieces the area of `{w_b != 0} U ({w_a != 0} & F')` with `F'` the clip's
  * region (or its complement when @p complement), exactly; in every other the three coverages composed as SC5 does
  * (::gshcpu_render_stroke_compose), each part's own overlap made exact.  The parts' own coverages are left in
- * their `out`.  The cells are counted over each part's walk and met against @p max_cells together.
+ * their `out`.  The cells are counted over each part's walk and met against @p max_deposits together.
  *
  * @return ::GSHCPU_OK or ::GSHCPU_ERR_LIMIT (the cell cap, the pieces of a cell, a winding, the identity).
  */
 GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHCPU_Rect joint, int complement,
-    uint8_t * result, uint64_t max_cells, uint64_t * cells);
+    uint8_t * result, uint64_t max_deposits, uint64_t * cells);
 
 /* --- the workspace arena (arena.c) ------------------------------------------------- */
 
@@ -720,18 +720,18 @@ typedef struct GSHCPU_Stroke_Buffers {
  * @param k Receives the array holding the composed coverage (`body`, or `result` for an aligned stroke), row by row over @p rect.
  * @param rect Receives the pixels `k` is for (reach meet the parts' boxes); @p whole_rect the rectangle of the whole render.
  * @param cells Receives the cell deposits counted, over what the whole render draws of the item.
- * @return ::GSHCPU_OK; ::GSHCPU_ERR_LIMIT when the deposits of all its parts pass @p max_cells.
+ * @return ::GSHCPU_OK; ::GSHCPU_ERR_LIMIT when the deposits of all its parts pass @p max_deposits.
  */
 GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
-    uint64_t max_cells, int64_t * acc, size_t acc_stride, GSHCPU_Exact * ex, int joint, const GSHCPU_Stroke_Buffers * buffers,
+    uint64_t max_deposits, int64_t * acc, size_t acc_stride, GSHCPU_Exact * ex, int joint, const GSHCPU_Stroke_Buffers * buffers,
     uint8_t ** k, GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells);
 
 /**
  * FT-2 (SC8): whether @p s qualifies for the sparse composite: a single part, and `cells_bound` of its rectangle at
- * most a sixteenth of that rectangle's pixels and at most @p max_cells (so the cap cannot be met and the stroke cannot
+ * most a sixteenth of that rectangle's pixels and at most @p max_deposits (so the cap cannot be met and the stroke cannot
  * be refused for its cells).  A function of the outline, the shift and the cap only, never of the damage or the clips.
  */
-int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_cells);
+int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_deposits);
 
 /** The pixels ::gshcpu_render_stroke_cover would cover (@p rect) and the whole render's (@p whole_rect), without covering. */
 void gshcpu_render_stroke_rects(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole, GSHCPU_Rect * rect,
@@ -742,7 +742,7 @@ void gshcpu_render_stroke_rects(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHC
  * frame) instead of building `k`.  @p acc must be all zero and is left so; @p line is `rect`'s width bytes.
  */
 GSHCPU_Result gshcpu_render_stroke_cover_sparse(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
-    uint64_t max_cells, int64_t * acc, GSHCPU_Exact * ex, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx,
+    uint64_t max_deposits, int64_t * acc, GSHCPU_Exact * ex, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx,
     GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells);
 
 /**
@@ -757,7 +757,7 @@ uint32_t gshcpu_render_stroke_compose(uint32_t b, uint32_t a, uint32_t c, int co
  * `rect`'s width bytes.  @return as ::gshcpu_render_cover_counted.
  */
 GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
-    GSHCPU_Rect rect, GSHCPU_Rect walk, int64_t * acc, uint8_t * line, uint64_t max_cells, uint64_t * cells,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, int64_t * acc, uint8_t * line, uint64_t max_deposits, uint64_t * cells,
     GSHCPU_Span_Fn fn, void * ctx, GSHCPU_Exact * ex);
 
 /* --- the sink (sink.c) ---------------------------------------------------------------- */

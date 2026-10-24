@@ -69,6 +69,7 @@ void gshcpu_limits_default(GSHCPU_Limits * limits) {
   /* Zero: shape-geometry's own default for a flattened path. */
   limits->max_points = 0;
   limits->max_cache_bytes = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES */
+  limits->max_deposits = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS */
   limits->max_exact_fragments = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS */
   limits->max_exact_crossings = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS */
 }

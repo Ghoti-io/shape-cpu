@@ -70,10 +70,10 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
         (1u << GSHSCENE_GRADIENT_SWEEP)) << "every gradient kind (color-paint story P2)";
     EXPECT_EQ(caps.cancel_unit, (uint32_t)GSHSCENE_CANCEL_BETWEEN_UNITS);
     EXPECT_STREQ(caps.work_measure, "cells+points+pixels");
-    EXPECT_EQ(caps.cancel_work_bound, 3 * (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS + GSHCPU_LIMITS_DEFAULT_MAX_CELLS +
+    EXPECT_EQ(caps.cancel_work_bound, 3 * (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS + GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS +
         2 * (uint64_t)GSHCPU_LIMITS_DEFAULT_MAX_BYTES +
         (uint64_t)GSHSCENE_LIMITS_DEFAULT_MAX_RESOURCE_ELEMENTS * (GSHGEOM_STROKE_MAX_DEPTH + 1) +
-        gshcpu_exact_work_bound(GSHCPU_LIMITS_DEFAULT_MAX_CELLS, 3 * (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS,
+        gshcpu_exact_work_bound(GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS, 3 * (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS,
             GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION, 3 * GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS,
             GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS))
         << "SC11: an aligned stroke's three parts, its cells, two passes over the pixels, the expansion's steps and the exact step's (UC9)";
@@ -111,7 +111,7 @@ TEST(RenderCaps, TheWorkBoundIsTheWorstUnitsSumOfTheLimits) {
   GSHCPU_Limits limits;
   gshcpu_limits_default(&limits);
   limits.max_points = 100;
-  limits.max_cells = 200;
+  limits.max_deposits = 200;
   limits.max_bytes = 300;
   SinkRef sink(&limits);
   RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 4, 4));
@@ -125,7 +125,7 @@ TEST(RenderCaps, TheWorkBoundIsTheWorstUnitsSumOfTheLimits) {
       gshcpu_exact_work_bound(200u, 300u, GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION, 3 * GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS,
             GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS));
   EXPECT_EQ(gshscene_sink_destroy(small), GSHSCENE_OK);
-  limits.max_cells = SIZE_MAX;
+  limits.max_deposits = SIZE_MAX;
   limits.max_points = SIZE_MAX;
   SinkRef wide(&limits);
   EXPECT_EQ(caps_for(wide.sink, r.raster).cancel_work_bound, UINT64_MAX) << "saturates";

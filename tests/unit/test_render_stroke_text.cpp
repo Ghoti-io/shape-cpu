@@ -605,7 +605,7 @@ TEST(RenderStrokeText, ALimitOfTheRunRefusesTheWholeItemAndNeverStrokesPartOfIt)
   }
   {
     GSHCPU_Limits limits{};
-    limits.max_cells = 30; // cells past the cap
+    limits.max_deposits = 30; // cells past the cap
     Sink sink(GSHCPU_RENDER_TIERS_ALL, &limits);
     Drawn d = render_list(sink.sink, l, 30, 24);
     ASSERT_EQ(d.entries.size(), 1u);

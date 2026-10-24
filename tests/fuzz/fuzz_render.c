@@ -818,7 +818,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
       limits.max_points = 2 + (limit_byte >> 3) % 16;
       break;
     case 2:
-      limits.max_cells = 1 + (limit_byte >> 3) % 16;
+      limits.max_deposits = 1 + (limit_byte >> 3) % 16;
       break;
     case 3:
       limits.max_dimension = 1 + (limit_byte >> 3) % 16;
