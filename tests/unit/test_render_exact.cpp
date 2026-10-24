@@ -98,6 +98,7 @@ struct Covered {
   uint64_t failures = 0;
   uint64_t exact_cells = 0;
   uint64_t work = 0;
+  uint64_t replays = 0;
 };
 
 GSHCPU_Rect rect_of(int64_t x0, int64_t y0, int64_t x1, int64_t y1) {
@@ -124,6 +125,7 @@ Covered cover_exact(const Flat & flat, GSHCPU_Rect rect, GSHCPU_Rect walk, uint6
   c.failures = mem.ex.failures;
   c.exact_cells = mem.ex.cells;
   c.work = mem.ex.work;
+  c.replays = mem.ex.replays;
   return c;
 }
 
@@ -158,6 +160,9 @@ Covered cover_sparse(const Flat & flat, GSHCPU_Rect rect, uint64_t cap = 512) {
   c.result = gshcpu_render_cover_sparse(paths, 1, GSHGEOM_FILL_NONZERO, rect, rect, acc.data(), line.data(), UINT64_MAX, &c.cells,
       span_into, &ctx, &mem.ex);
   c.failures = mem.ex.failures;
+  c.exact_cells = mem.ex.cells;
+  c.work = mem.ex.work;
+  c.replays = mem.ex.replays;
   return c;
 }
 
@@ -714,6 +719,75 @@ TEST(RenderExact, TheCellsOfABandNeedMoreThanOneWindowOfThePoolAndThePoolsSizeCh
   EXPECT_GT(small.exact_cells, 100u);
   std::vector<double> ref = reference(polys, 48, 14);
   EXPECT_LE(worst_off(small, ref), 1.5);
+}
+
+namespace {
+
+/** Sets the test switch that turns off the cover's shortcuts (@p mask, render_internal.h), and puts it back. */
+struct ShortcutsOff {
+  explicit ShortcutsOff(unsigned mask) { gshcpu_cover_shortcuts_off = mask; }
+  ~ShortcutsOff() { gshcpu_cover_shortcuts_off = 0; }
+};
+
+}  // namespace
+
+TEST(RenderExact, TheWindowsKeepThePiecesTheFirstPassWroteDownAndChangeNoPixelNoCountAndNoWorkFigure) {
+  // The windows read the pieces the first pass wrote down (the second pass's pieces in the second pass's order): every result,
+  // count and work figure must be the one with the second pass cutting the edges again.  Random sets
+  // over rectangles of one band or several, walks as wide as the rectangle and wider, cells capped small enough that the log
+  // overflows (the windows then cut the edges) and large enough that it does not.
+  std::mt19937 rng(8801);
+  uint64_t replayed = 0;
+  uint64_t cut_again = 0;
+  uint64_t exact = 0;
+  for (int round = 0; round < 90; round++) {
+    std::vector<Contour> polys;
+    int n = 3 + (int)(rng() % 40);
+    int64_t w = 6 + (int64_t)(rng() % 26);
+    int64_t h = 3 + (int64_t)(rng() % 40);
+    for (int i = 0; i < n; i++) {
+      polys.push_back(random_piece(rng, -U, w * U));
+    }
+    Flat f(polys);
+    GSHCPU_Rect rect = rect_of(0, 0, w, h);
+    GSHCPU_Rect walk = round % 3 == 0 ? rect : rect_of(-(int64_t)(rng() % 3), 0, w + (int64_t)(rng() % 4), h);
+    static const uint64_t caps[4] = {24, 64, 512, 8192};
+    uint64_t cap = caps[round % 4];
+    for (int sparse = 0; sparse < 2; sparse++) {
+      Covered off;
+      {
+        ShortcutsOff guard(GSHCPU_COVER_NO_REPLAY);
+        off = sparse ? cover_sparse(f, rect, cap) : cover_exact(f, rect, walk, cap);
+      }
+      EXPECT_EQ(off.replays, 0u) << "the switch turns the log off";
+      for (unsigned mask = 0; mask < 2; mask++) {
+        Covered on;
+        {
+          ShortcutsOff guard(mask);
+          on = sparse ? cover_sparse(f, rect, cap) : cover_exact(f, rect, walk, cap);
+        }
+        ASSERT_EQ(on.result, off.result) << round << " mask " << mask;
+        EXPECT_EQ(on.cells, off.cells) << round << " mask " << mask;
+        EXPECT_EQ(on.failures, off.failures) << round << " mask " << mask;
+        EXPECT_EQ(on.exact_cells, off.exact_cells) << round << " mask " << mask;
+        EXPECT_EQ(on.work, off.work) << round << " mask " << mask;
+        if (on.result == GSHCPU_OK) {
+          EXPECT_EQ(on.k, off.k) << "round " << round << (sparse ? " sparse" : " dense") << " mask " << mask;
+          EXPECT_EQ(on.failures, 0u);
+        }
+        if (mask == 0) {
+          replayed += on.replays;
+          cut_again += on.replays == 0 && on.exact_cells > 0;
+          exact += on.exact_cells;
+        } else if (mask & GSHCPU_COVER_NO_REPLAY) {
+          EXPECT_EQ(on.replays, 0u);
+        }
+      }
+    }
+  }
+  EXPECT_GT(replayed, 50u) << "the log is used";
+  EXPECT_GT(cut_again, 0u) << "and a band with more pieces than the scratch holds is not";
+  EXPECT_GT(exact, 500u);
 }
 
 /* --- UC9: the cap, the winding bound ---------------------------------------------------------------------------------- */

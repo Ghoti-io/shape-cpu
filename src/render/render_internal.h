@@ -331,6 +331,14 @@ extern GSHCPU_Exact_Cell_Fn gshcpu_exact_hook;
 extern int gshcpu_exact_check;
 
 /**
+ * A test switch for cover.c's shortcuts: each bit set turns one off, and the coverage is the same either way.  The library never
+ * sets it.  ::GSHCPU_COVER_NO_REPLAY: the exact step's windows cut the edges again to keep the pieces of their cells, as they
+ * did before the first pass wrote them down.
+ */
+extern unsigned gshcpu_cover_shortcuts_off;
+#define GSHCPU_COVER_NO_REPLAY 1u
+
+/**
  * The meetings of a cell (UC19), counted without the area: the pieces of every part of @p cell collected as the step
  * collects them, and the inversions between each slab's order at its top and at its end summed.  @p crossings receives the
  * count, or a count past `params->max_crossings` at which it stopped, with ::GSHCPU_EXACT_LIMIT.  A cell that cannot pass
@@ -368,6 +376,7 @@ struct GSHCPU_Exact {
   uint64_t work;              /* SC11's units */
   uint64_t cells;             /* cells made exact */
   uint64_t failures;          /* IDENTITY results (a defect: the cover then refuses) */
+  uint64_t replays;           /* windows whose pieces came from the first pass's log and not from cutting the edges again */
 };
 
 /**

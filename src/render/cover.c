@@ -145,6 +145,14 @@ typedef struct Cover {
   int store_walk;       /* ... of the cells the slots name anywhere in the walk (UC19, outside the drawn rectangle) */
   int budget_deferred;  /* an aligned stroke's part: the crossings of the cells outside are counted with the parts together */
   int64_t win0, win1;   /* the window: cells of the drawn rectangle, row by row from the band's first, [win0, win1) */
+  /* The pieces the second pass would keep, written down by the first (the exact step's windows read them back instead of cutting
+   * the edges again).  They live in the step's scratch, which nothing else touches until the first cell is made exact. */
+  uint64_t * log_key;   /* the cell's index in the walk's arrays in the high word, the piece (x0, y0, x1, y1 bytes) in the low */
+  uint32_t * log_at;    /* the cell's place in the rectangle drawn, the window's measure */
+  size_t log_cap;
+  size_t log_n;
+  int log_on;           /* the first pass appends to the log */
+  int log_valid;        /* the log holds every piece the second pass would keep, and the scratch has not been used since */
 } Cover;
 
 /** The index of cell (@p ex, @p ey) in the exact step's count and slot arrays (the walk's columns). */
@@ -176,6 +184,75 @@ static GSHCPU_Piece local_piece(int64_t ex, int64_t ey, Point a, Point b) {
   p.x1 = (uint8_t)(b.x - ex * ONE_PIXEL);
   p.y1 = (uint8_t)(b.y - ey * ONE_PIXEL);
   return p;
+}
+
+/** A test switch: the shortcuts of this file that are turned off (render_internal.h). */
+unsigned gshcpu_cover_shortcuts_off = 0;
+
+/**
+ * Start the log for the band @p c is about to deposit, if it can hold one: the step's scratch is as long as a cell may be,
+ * which is also the most pieces a window can keep, and nothing in it is read between the first pass and the first cell made
+ * exact.  A band with more pieces than it holds, or one whose rectangle drawn is not inside the walk, goes by the second pass.
+ */
+static void log_begin(Cover * c) {
+  const GSHCPU_Exact * ex = c->ex;
+  c->log_n = 0;
+  c->log_on = 0;
+  c->log_valid = 0;
+  if (!ex || (gshcpu_cover_shortcuts_off & GSHCPU_COVER_NO_REPLAY) || ex->scratch.capacity == 0 || !ex->scratch.key || !ex->scratch.byy ||
+      c->rect.x0 < c->walk.x0 || c->rect.x1 > c->walk.x1 || c->rows <= 0) {
+    return;
+  }
+  uint64_t width = (uint64_t)(c->cstride > c->rect.x1 - c->rect.x0 ? c->cstride : c->rect.x1 - c->rect.x0);
+  if (width > UINT32_MAX / (uint64_t)c->rows) {
+    return;
+  }
+  c->log_key = ex->scratch.key;
+  c->log_at = ex->scratch.byy;
+  c->log_cap = ex->scratch.capacity;
+  c->log_on = 1;
+  c->log_valid = 1;
+}
+
+/** Write down a piece the second pass would keep if its cell is in the window: `store_piece`'s tests, but for the window's. */
+static void log_piece(Cover * c, int64_t ex, int64_t ey, Point a, Point b) {
+  if (ex < c->rect.x0 || ex >= c->rect.x1) {
+    return;
+  }
+  if (c->log_n == c->log_cap) {
+    c->log_on = 0; /* more than the scratch holds: the windows cut the edges again */
+    c->log_valid = 0;
+    return;
+  }
+  GSHCPU_Piece p = local_piece(ex, ey, a, b);
+  uint32_t packed = (uint32_t)p.x0 | ((uint32_t)p.y0 << 8) | ((uint32_t)p.x1 << 16) | ((uint32_t)p.y1 << 24);
+  c->log_key[c->log_n] = ((uint64_t)exact_cell_index(c, ex, ey) << 32) | packed;
+  c->log_at[c->log_n] = (uint32_t)((ey - c->band) * (c->rect.x1 - c->rect.x0) + (ex - c->rect.x0));
+  c->log_n++;
+}
+
+/** The second pass for the window from the log: what `store_piece` keeps of the same pieces in the same order. */
+static void log_replay(Cover * c) {
+  GSHCPU_Exact * ex = c->ex;
+  ex->replays++;
+  for (size_t i = 0; i < c->log_n; i++) {
+    int64_t at = c->log_at[i];
+    if (at < c->win0 || at >= c->win1) {
+      continue;
+    }
+    uint64_t key = c->log_key[i];
+    size_t k = (size_t)(key >> 32);
+    if (ex->slot[k] == GSHCPU_EXACT_NO_SLOT) {
+      continue; /* a cell none of whose pieces the step keeps, or one of another window */
+    }
+    GSHCPU_Piece p;
+    p.x0 = (uint8_t)key;
+    p.y0 = (uint8_t)(key >> 8);
+    p.x1 = (uint8_t)(key >> 16);
+    p.y1 = (uint8_t)(key >> 24);
+    ex->pool[ex->slot[k]++] = p;
+    ex->work++;
+  }
 }
 
 /** The exact step's first pass: one more piece in the cell; a cell past the cap is the limit. */
@@ -264,6 +341,9 @@ static void piece(Cover * c, int64_t ex, int64_t ey, Point a, Point b) {
   if (dy == 0) {
     if (c->ex && piece_kind(ex, a, b) == 2) {
       count_piece(c, ex, ey);
+      if (c->log_on) {
+        log_piece(c, ex, ey, a, b);
+      }
     }
     return;
   }
@@ -276,6 +356,9 @@ static void piece(Cover * c, int64_t ex, int64_t ey, Point a, Point b) {
     count_piece(c, ex, ey);
     if (c->over) {
       return;
+    }
+    if (c->log_on) {
+      log_piece(c, ex, ey, a, b);
     }
   }
   if (!c->cover || ex >= c->rect.x1) {
@@ -527,6 +610,11 @@ static int outside_flush(Outside_Part * parts, int n, const GSHCPU_Exact_Params 
   int refused = 0;
   if (w->cells) {
     for (int p = 0; p < n; p++) {
+      if (parts[p].c) {
+        parts[p].c->log_valid = 0; /* the crossings of the cells below use the scratch a log is in */
+      }
+    }
+    for (int p = 0; p < n; p++) {
       if (!parts[p].c || w->kept[p] == 0) {
         continue;
       }
@@ -739,13 +827,18 @@ static int exact_band(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_t
     }
     c->win0 = pos;
     c->win1 = idx;
-    c->store = 1;
-    for (size_t i = 0; i < count; i++) {
-      if (paths[i]) {
-        path_edges(c, paths[i]);
+    if (c->log_valid) {
+      log_replay(c); /* the pieces the first pass cut, in the order it cut them: the second pass's, without cutting them again */
+    } else {
+      c->store = 1;
+      for (size_t i = 0; i < count; i++) {
+        if (paths[i]) {
+          path_edges(c, paths[i]);
+        }
       }
+      c->store = 0;
     }
-    c->store = 0;
+    c->log_valid = 0; /* the cells below use the scratch the log is in */
     /* The cells of the window: the cover to the left of each from the row's running sum. */
     int64_t row0 = pos / width;
     int64_t row1 = (idx - 1) / width;
@@ -832,6 +925,7 @@ GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths,
     if (ex) {
       exact_clear(&c);
     }
+    log_begin(&c);
     for (size_t i = 0; i < count && !c.over; i++) {
       if (paths[i]) {
         path_edges(&c, paths[i]);
@@ -1005,6 +1099,7 @@ GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths
     if (ex) {
       exact_clear(&c);
     }
+    log_begin(&c);
     for (size_t i = 0; i < count && !c.over; i++) {
       if (paths[i]) {
         path_edges(&c, paths[i]);
