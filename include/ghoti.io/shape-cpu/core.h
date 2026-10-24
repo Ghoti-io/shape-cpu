@@ -164,6 +164,28 @@ typedef struct GSHCPU_Limits {
  */
 GSHCPU_API void gshcpu_limits_default(GSHCPU_Limits * limits);
 
+/** The smallest memory budget ::gshcpu_limits_for_memory accepts: 1 MiB. */
+#define GSHCPU_LIMITS_MIN_MEMORY ((uint64_t)1 << 20)
+
+/**
+ * @brief Fill @p limits from a memory budget instead of from the fixed defaults.
+ *
+ * Every field is the default of ::gshcpu_limits_default except the two that hold memory the size of the drawing:
+ * `max_cells` (24 bytes a cell) is set so that the accumulator may use up to half of @p bytes, and `max_cache_bytes` an
+ * eighth of it.  A drawing that needs more than the cap is refused as ever; the budget is the caller's, so that the same
+ * scene is refused or drawn the same way wherever it runs, and a caller on a large machine is not held to a default
+ * chosen for a small one.  The budget does not cover the target, the working bitmaps (`max_bytes` bounds those) or the
+ * exact union's per-pixel scratch (`max_exact_fragments` bounds that).
+ *
+ * The library does not ask the system how much memory is free: the answer would depend on the machine and the moment,
+ * and a render's refusals are part of its result.  A caller that wants it reads it and passes what it will spend.
+ *
+ * @param limits The structure to fill.
+ * @param bytes  The memory to give the accumulator and the cache together, at least ::GSHCPU_LIMITS_MIN_MEMORY.
+ * @return ::GSHCPU_OK; ::GSHCPU_ERR_INVALID for NULL @p limits or a budget under the minimum (nothing written).
+ */
+GSHCPU_API GSHCPU_Result gshcpu_limits_for_memory(GSHCPU_Limits * limits, uint64_t bytes);
+
 /**
  * @brief This build's version, as the string the Makefile generated.
  *

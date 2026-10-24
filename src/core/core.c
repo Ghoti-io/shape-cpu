@@ -73,6 +73,17 @@ void gshcpu_limits_default(GSHCPU_Limits * limits) {
   limits->max_exact_crossings = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS */
 }
 
+GSHCPU_Result gshcpu_limits_for_memory(GSHCPU_Limits * limits, uint64_t bytes) {
+  if (!limits || bytes < GSHCPU_LIMITS_MIN_MEMORY) {
+    return GSHCPU_ERR_INVALID;
+  }
+  gshcpu_limits_default(limits);
+  uint64_t cells = (bytes / 2) / 24;
+  limits->max_cells = cells > (uint64_t)SIZE_MAX ? SIZE_MAX : (size_t)cells;
+  limits->max_cache_bytes = bytes / 8;
+  return GSHCPU_OK;
+}
+
 const char * gshcpu_version_string(void) {
   return GSHCPU_VERSION_STRING;
 }

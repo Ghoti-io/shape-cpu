@@ -14,6 +14,7 @@
 #include "known_answers.h"
 
 #include <climits>
+#include <cstring>
 #include <cstdint>
 
 using namespace cov;
@@ -40,6 +41,34 @@ Contour diamond(int32_t cx, int32_t cy, int32_t r) {
 }
 
 }  // namespace
+
+TEST(CoverageLimits, AMemoryBudgetSetsTheCellsAndTheCacheAndNothingElse) {
+  GSHCPU_Limits d, l;
+  gshcpu_limits_default(&d);
+  ASSERT_EQ(gshcpu_limits_for_memory(&l, (uint64_t)768 << 20), GSHCPU_OK);
+  EXPECT_EQ(l.max_cells, (size_t)(((uint64_t)768 << 20) / 2 / 24)) << "half the budget, 24 bytes a cell";
+  EXPECT_EQ(l.max_cache_bytes, (uint64_t)96 << 20) << "an eighth";
+  EXPECT_EQ(l.max_dimension, d.max_dimension);
+  EXPECT_EQ(l.max_bytes, d.max_bytes);
+  EXPECT_EQ(l.max_points, d.max_points);
+  EXPECT_EQ(l.max_exact_fragments, d.max_exact_fragments);
+  EXPECT_EQ(l.max_exact_crossings, d.max_exact_crossings);
+  // The budget is a function of its argument alone: the same budget is the same limits, and a larger one gives more.
+  GSHCPU_Limits again, bigger;
+  ASSERT_EQ(gshcpu_limits_for_memory(&again, (uint64_t)768 << 20), GSHCPU_OK);
+  EXPECT_EQ(memcmp(&l, &again, sizeof l), 0);
+  ASSERT_EQ(gshcpu_limits_for_memory(&bigger, (uint64_t)1536 << 20), GSHCPU_OK);
+  EXPECT_EQ(bigger.max_cells, l.max_cells * 2);
+  // The smallest budget is accepted; one byte less, a NULL structure and a huge budget behave as stated.
+  EXPECT_EQ(gshcpu_limits_for_memory(&l, GSHCPU_LIMITS_MIN_MEMORY), GSHCPU_OK);
+  EXPECT_GE(l.max_cells, 1u);
+  GSHCPU_Limits untouched = l;
+  EXPECT_EQ(gshcpu_limits_for_memory(&l, GSHCPU_LIMITS_MIN_MEMORY - 1), GSHCPU_ERR_INVALID);
+  EXPECT_EQ(memcmp(&l, &untouched, sizeof l), 0) << "nothing written on a refusal";
+  EXPECT_EQ(gshcpu_limits_for_memory(nullptr, (uint64_t)1 << 30), GSHCPU_ERR_INVALID);
+  EXPECT_EQ(gshcpu_limits_for_memory(&l, UINT64_MAX), GSHCPU_OK);
+  EXPECT_LE((uint64_t)l.max_cells, (uint64_t)SIZE_MAX);
+}
 
 TEST(CoverageLimits, TheDefaultsAreWhatTheHeaderSays) {
   GSHCPU_Limits l;

@@ -47,6 +47,7 @@
 #define GSHCPU_Coverage GHOTIIO_SHAPE_CPU(GSHCPU_Coverage)
 #define gshcpu_result_string GHOTIIO_SHAPE_CPU(gshcpu_result_string)
 #define gshcpu_limits_default GHOTIIO_SHAPE_CPU(gshcpu_limits_default)
+#define gshcpu_limits_for_memory GHOTIIO_SHAPE_CPU(gshcpu_limits_for_memory)
 #define gshcpu_coverage_fill GHOTIIO_SHAPE_CPU(gshcpu_coverage_fill)
 #define gshcpu_coverage_from_path GHOTIIO_SHAPE_CPU(gshcpu_coverage_from_path)
 #define gshcpu_coverage_trim GHOTIIO_SHAPE_CPU(gshcpu_coverage_trim)
