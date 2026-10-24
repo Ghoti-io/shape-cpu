@@ -731,9 +731,9 @@ struct ShortcutsOff {
 
 }  // namespace
 
-TEST(RenderExact, TheWindowsKeepThePiecesTheFirstPassWroteDownAndChangeNoPixelNoCountAndNoWorkFigure) {
-  // The windows read the pieces the first pass wrote down (the second pass's pieces in the second pass's order): every result,
-  // count and work figure must be the one with the second pass cutting the edges again.  Random sets
+TEST(RenderExact, TheShortcutsOfTheCoverChangeNoPixelNoCountAndNoWorkFigure) {
+  // The windows read the pieces the first pass wrote down (the second pass's pieces in the second pass's order), and a band
+  // passes the subpaths clear of it: every result, count and work figure must be the one with both shortcuts off.  Random sets
   // over rectangles of one band or several, walks as wide as the rectangle and wider, cells capped small enough that the log
   // overflows (the windows then cut the edges) and large enough that it does not.
   std::mt19937 rng(8801);
@@ -756,11 +756,11 @@ TEST(RenderExact, TheWindowsKeepThePiecesTheFirstPassWroteDownAndChangeNoPixelNo
     for (int sparse = 0; sparse < 2; sparse++) {
       Covered off;
       {
-        ShortcutsOff guard(GSHCPU_COVER_NO_REPLAY);
+        ShortcutsOff guard(GSHCPU_COVER_NO_REPLAY | GSHCPU_COVER_NO_RANGES);
         off = sparse ? cover_sparse(f, rect, cap) : cover_exact(f, rect, walk, cap);
       }
       EXPECT_EQ(off.replays, 0u) << "the switch turns the log off";
-      for (unsigned mask = 0; mask < 2; mask++) {
+      for (unsigned mask = 0; mask < 3; mask++) {
         Covered on;
         {
           ShortcutsOff guard(mask);
@@ -784,6 +784,24 @@ TEST(RenderExact, TheWindowsKeepThePiecesTheFirstPassWroteDownAndChangeNoPixelNo
         }
       }
     }
+    // The plain cover (no exact step) goes through the same subpath skip.
+    size_t pixels = (size_t)(w * h);
+    std::vector<uint8_t> plain_on(pixels, 0x55), plain_off(pixels, 0x55);
+    std::vector<int64_t> acc(2 * (size_t)(w + 1) * GSHCPU_RENDER_BAND_ROWS, 0);
+    const GSHGEOM_Flat_Path * paths[1] = {f.flat};
+    uint64_t cells_on = 0, cells_off = 0;
+    GSHCPU_Result r_on, r_off;
+    {
+      ShortcutsOff guard(0);
+      r_on = gshcpu_render_cover(paths, 1, GSHGEOM_FILL_NONZERO, rect, plain_on.data(), acc.data(), UINT64_MAX, &cells_on);
+    }
+    {
+      ShortcutsOff guard(GSHCPU_COVER_NO_REPLAY | GSHCPU_COVER_NO_RANGES);
+      r_off = gshcpu_render_cover(paths, 1, GSHGEOM_FILL_NONZERO, rect, plain_off.data(), acc.data(), UINT64_MAX, &cells_off);
+    }
+    ASSERT_EQ(r_on, r_off);
+    EXPECT_EQ(plain_on, plain_off) << round;
+    EXPECT_EQ(cells_on, cells_off) << round;
   }
   EXPECT_GT(replayed, 50u) << "the log is used";
   EXPECT_GT(cut_again, 0u) << "and a band with more pieces than the scratch holds is not";

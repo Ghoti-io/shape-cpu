@@ -124,6 +124,21 @@ typedef struct Point {
   int64_t y;
 } Point;
 
+/** The most subpaths of a path whose rows are noted (below); the rest are always walked. */
+#define RANGE_SUBPATHS 1024u
+
+/**
+ * The rows each of a path's first subpaths lies in, noted once for a cover of several bands: an outline that is the union of
+ * many small rings (a stroke's) has most of them clear of any one band, and a ring wholly above or below it adds nothing
+ * (path_edges skips it without visiting its edges).
+ */
+typedef struct Ranges {
+  const GSHGEOM_Flat_Path * path;
+  size_t count;                   /* the subpaths noted: the path's first RANGE_SUBPATHS at most */
+  int32_t lo[RANGE_SUBPATHS];     /* the least y of the subpath's points (INT32_MAX for one with none) */
+  int32_t hi[RANGE_SUBPATHS];     /* the greatest (INT32_MIN for one with none) */
+} Ranges;
+
 typedef struct Cover {
   GSHCPU_Rect rect;     /* the rectangle drawn */
   GSHCPU_Rect walk;     /* the rectangle counted: rect, or one that holds it */
@@ -153,6 +168,7 @@ typedef struct Cover {
   size_t log_n;
   int log_on;           /* the first pass appends to the log */
   int log_valid;        /* the log holds every piece the second pass would keep, and the scratch has not been used since */
+  const Ranges * ranges; /* the rows of the subpaths of one path, or NULL */
 } Cover;
 
 /** The index of cell (@p ex, @p ey) in the exact step's count and slot arrays (the walk's columns). */
@@ -563,11 +579,49 @@ static Point point_of(GSHGEOM_Device_Point p) {
   return q;
 }
 
+/**
+ * Note the rows of the first subpaths of @p path in @p r and have @p c skip the ones clear of a band.  Worth it for a cover of
+ * several bands over a path of several subpaths, which is what a stroke's outline is.
+ */
+static void ranges_begin(Cover * c, Ranges * r, const GSHGEOM_Flat_Path * path) {
+  c->ranges = NULL;
+  size_t subpaths = gshgeom_flat_path_subpath_count(path);
+  if ((gshcpu_cover_shortcuts_off & GSHCPU_COVER_NO_RANGES) || subpaths < 4u || c->rect.y1 - c->rect.y0 <= (int64_t)GSHCPU_RENDER_BAND_ROWS) {
+    return;
+  }
+  const GSHGEOM_Device_Point * points = gshgeom_flat_path_points(path);
+  r->path = path;
+  r->count = subpaths < RANGE_SUBPATHS ? subpaths : RANGE_SUBPATHS;
+  for (size_t s = 0; s < r->count; s++) {
+    GSHGEOM_Flat_Subpath sub;
+    int32_t lo = INT32_MAX;
+    int32_t hi = INT32_MIN;
+    if (gshgeom_flat_path_subpath(path, s, &sub) == GSHGEOM_OK) {
+      for (size_t k = 0; k < sub.count; k++) {
+        int32_t y = points[sub.first + k].y;
+        lo = y < lo ? y : lo;
+        hi = y > hi ? y : hi;
+      }
+    }
+    r->lo[s] = lo;
+    r->hi[s] = hi;
+  }
+  c->ranges = r;
+}
+
 /** Every edge of @p path, the closing line of each subpath included. */
 static void path_edges(Cover * c, const GSHGEOM_Flat_Path * path) {
   const GSHGEOM_Device_Point * points = gshgeom_flat_path_points(path);
   size_t subpaths = gshgeom_flat_path_subpath_count(path);
+  /* A subpath wholly above the band (its greatest y short of the band's top, so that even a flat edge on the top is not in it)
+   * or wholly below it has no edge that edge() does not return from at once. */
+  const Ranges * noted = c->ranges && c->ranges->path == path ? c->ranges : NULL;
+  int64_t top = c->band * ONE_PIXEL;
+  int64_t bottom = (c->band + c->rows) * ONE_PIXEL;
   for (size_t s = 0; s < subpaths && !c->over; s++) {
+    if (noted && s < noted->count && (noted->hi[s] < top || noted->lo[s] >= bottom)) {
+      continue;
+    }
     GSHGEOM_Flat_Subpath sub;
     if (gshgeom_flat_path_subpath(path, s, &sub) != GSHGEOM_OK || sub.count == 0) {
       continue;
@@ -904,6 +958,10 @@ GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths,
   c.stride = rect.x1 - rect.x0 + 1;
   c.max_deposits = max_deposits;
   int64_t width = rect.x1 - rect.x0;
+  Ranges ranges;
+  if (count == 1 && paths[0]) {
+    ranges_begin(&c, &ranges, paths[0]);
+  }
   /* The rows counted and not drawn first: above the rectangle drawn and below it (all of the walk's when it is empty). */
   if (gshcpu_render_rect_empty(rect)) {
     count_rows(&c, paths, count, walk.y0, walk.y1);
@@ -1075,6 +1133,10 @@ GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths
   c.stride = rect.x1 - rect.x0 + 1;
   c.max_deposits = max_deposits;
   int64_t width = rect.x1 - rect.x0;
+  Ranges ranges;
+  if (count == 1 && paths[0]) {
+    ranges_begin(&c, &ranges, paths[0]);
+  }
   if (gshcpu_render_rect_empty(rect)) {
     count_rows(&c, paths, count, walk.y0, walk.y1);
   } else {
