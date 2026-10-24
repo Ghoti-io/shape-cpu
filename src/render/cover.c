@@ -1178,6 +1178,15 @@ static void batch_add(Batch * b, int64_t y, int64_t x, size_t len, const uint8_t
   }
 }
 
+/** Whether the eight cover entries at @p cv and the eight area entries at @p ar are all zero. */
+static int zero8(const int64_t * cv, const int64_t * ar) {
+  int64_t o = 0;
+  for (int t = 0; t < 8; t++) {
+    o |= cv[t] | ar[t];
+  }
+  return o == 0;
+}
+
 /**
  * Sweep the band's rows that deposited something and hand each one's coverages to @p fn, then clear what was
  * written.  A column before a row's first deposit has an accumulated cover of zero and no area, so its coverage is
@@ -1203,6 +1212,10 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
     int64_t j0 = lo > 1 ? lo : 1;
     int64_t end = hi < width ? hi : width; /* the last column that holds a deposit */
     int64_t accumulated = cv[0] * (ONE_PIXEL * 2);
+    if (lo == 0) {
+      cv[0] = 0; /* the fold column is a deposit too, and the cleared state is kept as the row is read: the columns not read are zero */
+      ar[0] = 0;
+    }
     /* The row is cut into the runs of nonzero coverage, each handed to @p fn: a column with a deposit has a coverage of its
      * own, and the columns between two deposits have the accumulated cover and no area, so one coverage (the zero of an empty
      * stretch is not looked at again column by column).  The pixels are the same as the whole row's in one call, which would
@@ -1212,6 +1225,8 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
     while (j <= end) {
       accumulated += cv[j] * (ONE_PIXEL * 2);
       uint8_t v = fold(accumulated - ar[j], rule, magnitude);
+      cv[j] = 0;
+      ar[j] = 0;
       if (v != 0) {
         if (from < 0) {
           from = j;
@@ -1224,6 +1239,9 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
       j++;
       /* the columns up to the next deposit: none is changed, so the accumulated cover is, and so is the coverage */
       int64_t k = j;
+      while (k + 7 <= end && zero8(cv + k, ar + k)) {
+        k += 8;
+      }
       while (k <= end && cv[k] == 0 && ar[k] == 0) {
         k++;
       }
@@ -1252,10 +1270,6 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
     }
     if (from >= 0) {
       batch_add(&batch, c->band + r, c->rect.x0 + (from - 1), (size_t)(end - from + 1), line + (from - j0));
-    }
-    for (int64_t t = lo; t <= hi && t <= width; t++) {
-      cv[t] = 0;
-      ar[t] = 0;
     }
   }
   batch_flush(&batch);
