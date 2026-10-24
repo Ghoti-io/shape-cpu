@@ -889,8 +889,28 @@ static GSHSCENE_Result fill_gradient(Run * run, const GSHSCENE_Item * item, cons
 static void composite_solid(Run * run, Frame * frame, const double src[4], GSHCPU_Rect rect, const uint8_t * cov) {
   size_t w = (size_t)(rect.x1 - rect.x0);
   for (int64_t y = rect.y0; y < rect.y1; y++) {
+    const uint8_t * row = cov + (size_t)(y - rect.y0) * w;
     for (int64_t x = rect.x0; x < rect.x1; x++) {
-      uint32_t m8 = cov[(size_t)(y - rect.y0) * w + (size_t)(x - rect.x0)];
+      size_t i = (size_t)(x - rect.x0);
+      if (row[i] == 0) {
+        /* A pixel of coverage 0 weighs 0 under any clips and is not touched (below): pass a run of them eight at a time. */
+        while (i + 8u <= w) {
+          uint64_t eight;
+          memcpy(&eight, row + i, sizeof eight);
+          if (eight != 0) {
+            break;
+          }
+          i += 8u;
+        }
+        while (i < w && row[i] == 0) {
+          i++;
+        }
+        if (i == w) {
+          break;
+        }
+        x = rect.x0 + (int64_t)i;
+      }
+      uint32_t m8 = row[i];
       m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);
       if (m8 == 0) {
         continue;
