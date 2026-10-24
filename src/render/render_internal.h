@@ -633,6 +633,17 @@ typedef struct GSHCPU_Stroke_Meta {
 /** A receiver of the pixels one row of a sparse sweep covers: `n` coverages from pixel @p x (in the paths' frame). */
 typedef void (*GSHCPU_Span_Fn)(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8);
 
+/**
+ * Where a sparse sweep's pixels will be composed, so that the cover can ask for them early: the pixel at (x, y) of the cover's
+ * frame is at `base + y * row + x * pixel`.  It is a hint, read by nothing but a prefetch: a pixel it names that is not there
+ * is harmless, and the pixels drawn are the same without it.
+ */
+typedef struct GSHCPU_Prefetch {
+  char * base;
+  int64_t row;
+  int64_t pixel;
+} GSHCPU_Prefetch;
+
 /** The cache of stroke expansions (SC7). */
 typedef struct GSHCPU_Stroke_Cache GSHCPU_Stroke_Cache;
 
@@ -757,7 +768,7 @@ void gshcpu_render_stroke_rects(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHC
  */
 GSHCPU_Result gshcpu_render_stroke_cover_sparse(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
     uint64_t max_deposits, int64_t * acc, GSHCPU_Exact * ex, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx,
-    GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells);
+    GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells, const GSHCPU_Prefetch * pf);
 
 /**
  * SC5's composition of three coverages, one pixel: `t = (a * c' + 127) / 255` with `c'` the clip's coverage or
@@ -772,7 +783,7 @@ uint32_t gshcpu_render_stroke_compose(uint32_t b, uint32_t a, uint32_t c, int co
  */
 GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
     GSHCPU_Rect rect, GSHCPU_Rect walk, int64_t * acc, uint8_t * line, uint64_t max_deposits, uint64_t * cells,
-    GSHCPU_Span_Fn fn, void * ctx, GSHCPU_Exact * ex);
+    GSHCPU_Span_Fn fn, void * ctx, GSHCPU_Exact * ex, const GSHCPU_Prefetch * pf);
 
 /* --- the sink (sink.c) ---------------------------------------------------------------- */
 

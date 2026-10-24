@@ -650,7 +650,7 @@ void gshcpu_render_stroke_rects(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHC
 
 GSHCPU_Result gshcpu_render_stroke_cover_sparse(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
     uint64_t max_deposits, int64_t * acc, GSHCPU_Exact * ex, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx,
-    GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells) {
+    GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells, const GSHCPU_Prefetch * pf) {
   Part body = part_rects(s, GSHCPU_STROKE_BODY, reach, whole);
   *rect = body.rect;
   *whole_rect = body.walk;
@@ -663,5 +663,5 @@ GSHCPU_Result gshcpu_render_stroke_cover_sparse(const GSHCPU_Stroke * s, GSHCPU_
     walk = body.rect;
   }
   return gshcpu_render_cover_sparse(&body.cover, 1, GSHGEOM_FILL_NONZERO, moved(body.rect, s->shift_x, s->shift_y),
-      moved(walk, s->shift_x, s->shift_y), acc, line, max_deposits, cells, fn, ctx, ex);
+      moved(walk, s->shift_x, s->shift_y), acc, line, max_deposits, cells, fn, ctx, ex, pf);
 }

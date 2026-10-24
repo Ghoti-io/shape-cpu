@@ -159,7 +159,7 @@ Covered cover_sparse(const Flat & flat, GSHCPU_Rect rect, uint64_t cap = 512) {
   SpanCtx ctx = {rect, &c.k};
   const GSHGEOM_Flat_Path * paths[1] = {flat.flat};
   c.result = gshcpu_render_cover_sparse(paths, 1, GSHGEOM_FILL_NONZERO, rect, rect, acc.data(), line.data(), UINT64_MAX, &c.cells,
-      span_into, &ctx, &mem.ex);
+      span_into, &ctx, &mem.ex, nullptr);
   c.failures = mem.ex.failures;
   c.exact_cells = mem.ex.cells;
   c.work = mem.ex.work;

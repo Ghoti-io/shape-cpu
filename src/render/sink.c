@@ -1155,8 +1155,14 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
     Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
     GSHCPU_Rect drawn;
     GSHCPU_Rect counted;
+    /* a deposit's pixel is composed when the band is swept, a while after: ask for it now (its place in the layer, from the
+     * cover's frame, which is the region's moved by the stroke's shift) */
+    GSHCPU_Prefetch pf = {
+        (char *)frame->layer + (intptr_t)sizeof(double) * 4 *
+            (((intptr_t)(sp.dy - run->layout.region.y0)) * (intptr_t)run->layout.width + (intptr_t)(sp.dx - run->layout.region.x0)),
+        (int64_t)run->layout.width * (int64_t)(4 * sizeof(double)), (int64_t)(4 * sizeof(double))};
     r = gshcpu_render_stroke_cover_sparse(&s, reach, wreach, cs->max_deposits, run->acc, exact, run->coverage, sparse_span,
-        &sp, &drawn, &counted, &cells);
+        &sp, &drawn, &counted, &cells, &pf);
     run->work += exact_work(run);
     /* Never refused for its cells (the cap was bounded by the detection), but the arithmetic is shown to hold. */
     if (r == GSHCPU_OK) {

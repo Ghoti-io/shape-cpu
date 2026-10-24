@@ -151,6 +151,7 @@ typedef struct Cover {
   uint64_t max_deposits;
   int over;             /* a deposit would have passed max_deposits */
   int track;            /* the sparse sweep: note the first and last column each row of the band deposited in */
+  const GSHCPU_Prefetch * pf; /* the sparse sweep: where the pixels of a deposit will be composed, to ask for them early */
   int64_t lo[GSHCPU_RENDER_BAND_ROWS]; /* per row of the band; > hi when the row has none */
   int64_t hi[GSHCPU_RENDER_BAND_ROWS];
   GSHCPU_Exact * ex;    /* the exact step (UC1 to UC7), or NULL: then nothing below is touched */
@@ -386,6 +387,9 @@ static void piece(Cover * c, int64_t ex, int64_t ey, Point a, Point b) {
   size_t at = (size_t)((ey - c->band) * c->stride + column);
   c->cover[at] += dy;
   c->area[at] += dy * (fx1 + fx2);
+  if (c->pf && ex >= c->rect.x0) {
+    __builtin_prefetch(c->pf->base + ey * c->pf->row + ex * c->pf->pixel, 1, 3);
+  }
   if (c->track) {
     size_t row = (size_t)(ey - c->band);
     if (column < c->lo[row]) {
@@ -1108,6 +1112,7 @@ uint64_t gshcpu_render_cells_bound(const GSHGEOM_Flat_Path * const * paths, size
  * constant, which is the dense sweep's value there too (the fold column is a deposit at column 0).
  */
 static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx) {
+  const int magnitude = c->ex != NULL;
   for (int64_t r = 0; r < c->rows; r++) {
     if (c->hi[r] < c->lo[r]) {
       continue; /* no deposit: the row is zero */
@@ -1117,22 +1122,57 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
     int64_t lo = c->lo[r];
     int64_t hi = c->hi[r];
     int64_t j0 = lo > 1 ? lo : 1;
+    int64_t end = hi < width ? hi : width; /* the last column that holds a deposit */
     int64_t accumulated = cv[0] * (ONE_PIXEL * 2);
+    /* The row is cut into the runs of nonzero coverage, each handed to @p fn: a column with a deposit has a coverage of its
+     * own, and the columns between two deposits have the accumulated cover and no area, so one coverage (the zero of an empty
+     * stretch is not looked at again column by column).  The pixels are the same as the whole row's in one call, which would
+     * hand the zeros too. */
+    int64_t from = -1; /* the first column of the run open, or -1 */
     int64_t j = j0;
-    for (; j <= hi && j <= width; j++) {
+    while (j <= end) {
       accumulated += cv[j] * (ONE_PIXEL * 2);
-      line[j - j0] = fold(accumulated - ar[j], rule, c->ex != NULL);
-    }
-    int64_t last = j - 1; /* the last column given a value; j0 - 1 when none */
-    uint8_t tail = fold(accumulated, rule, c->ex != NULL);
-    if (tail != 0 && last < width) {
-      for (int64_t t = last + 1; t <= width; t++) {
-        line[t - j0] = tail;
+      uint8_t v = fold(accumulated - ar[j], rule, magnitude);
+      if (v != 0) {
+        if (from < 0) {
+          from = j;
+        }
+        line[j - j0] = v;
+      } else if (from >= 0) {
+        fn(ctx, c->band + r, c->rect.x0 + (from - 1), (size_t)(j - from), line + (from - j0));
+        from = -1;
       }
-      last = width;
+      j++;
+      /* the columns up to the next deposit: none is changed, so the accumulated cover is, and so is the coverage */
+      int64_t k = j;
+      while (k <= end && cv[k] == 0 && ar[k] == 0) {
+        k++;
+      }
+      if (k > j) {
+        uint8_t q = fold(accumulated, rule, magnitude);
+        if (q != 0) {
+          if (from < 0) {
+            from = j;
+          }
+          memset(line + (j - j0), q, (size_t)(k - j));
+        } else if (from >= 0) {
+          fn(ctx, c->band + r, c->rect.x0 + (from - 1), (size_t)(j - from), line + (from - j0));
+          from = -1;
+        }
+        j = k;
+      }
     }
-    if (last >= j0) {
-      fn(ctx, c->band + r, c->rect.x0 + (j0 - 1), (size_t)(last - j0 + 1), line);
+    /* after the last deposit the accumulated cover is the coverage, to the end of the row */
+    uint8_t tail = fold(accumulated, rule, magnitude);
+    if (tail != 0 && end < width) {
+      if (from < 0) {
+        from = end + 1;
+      }
+      memset(line + (end + 1 - j0), tail, (size_t)(width - end));
+      end = width;
+    }
+    if (from >= 0) {
+      fn(ctx, c->band + r, c->rect.x0 + (from - 1), (size_t)(end - from + 1), line + (from - j0));
     }
     for (int64_t t = lo; t <= hi && t <= width; t++) {
       cv[t] = 0;
@@ -1143,9 +1183,10 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
 
 GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
     GSHCPU_Rect rect, GSHCPU_Rect walk, int64_t * acc, uint8_t * line, uint64_t max_deposits, uint64_t * cells,
-    GSHCPU_Span_Fn fn, void * ctx, GSHCPU_Exact * ex) {
+    GSHCPU_Span_Fn fn, void * ctx, GSHCPU_Exact * ex, const GSHCPU_Prefetch * pf) {
   Cover c;
   memset(&c, 0, sizeof c);
+  c.pf = pf;
   c.rect = rect;
   c.walk = walk;
   c.ex = ex;
