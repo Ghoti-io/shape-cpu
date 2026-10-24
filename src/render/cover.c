@@ -843,6 +843,13 @@ static void count_rows(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_
   }
 }
 
+/** Whether any of the eight counts at @p p is two or more (a cell the step makes exact): four words, not eight tests. */
+static int any_multi8(const uint32_t * p) {
+  uint64_t w[4];
+  memcpy(w, p, sizeof w);
+  return ((w[0] | w[1] | w[2] | w[3]) & 0xfffffffefffffffeULL) != 0;
+}
+
 /**
  * The exact step over the band just deposited (UC3 to UC7): every cell of the drawn rectangle that holds two or more
  * pieces has its area made the union's, by changing its entry in the area array so that the sweep, whichever it is, folds
@@ -877,7 +884,11 @@ static int exact_band(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_t
         x = x < xlo ? xlo : x;
       }
       size_t base = (size_t)(r * c->cstride + (c->rect.x0 - c->walk.x0));
-      for (; x <= xe; x++) {
+      while (x <= xe) {
+        if (x + 7 <= xe && !any_multi8(&ex->count[base + (size_t)x])) {
+          x += 8; /* eight cells that need nothing: most of a row between its edges */
+          continue;
+        }
         uint32_t n = ex->count[base + (size_t)x];
         if (n >= 2) {
           if (kept + n > ex->pool_cap) {
@@ -887,6 +898,7 @@ static int exact_band(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_t
           ex->slot[base + (size_t)x] = (uint32_t)kept;
           kept += n;
         }
+        x++;
       }
       if (full) {
         break; /* r and x are the cell that did not fit */
@@ -924,7 +936,15 @@ static int exact_band(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_t
         j0 = c->lo[r] > 1 ? c->lo[r] : 1; /* nothing is deposited left of the first column, so the sum there is cv[0] */
         j1 = c->hi[r] < width ? c->hi[r] : width;
       }
+      size_t cbase = (size_t)(r * c->cstride + (c->rect.x0 - c->walk.x0));
       for (int64_t j = j0; j <= j1; j++) {
+        if (j + 7 <= j1 && !any_multi8(&ex->count[cbase + (size_t)(j - 1)])) {
+          for (int t = 0; t < 8; t++) {
+            sum += cv[j + t]; /* no cell of the eight changes: only the running sum moves */
+          }
+          j += 7;
+          continue;
+        }
         int64_t left = sum;
         sum += cv[j];
         int64_t at = r * width + (j - 1);
