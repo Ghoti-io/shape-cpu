@@ -75,6 +75,7 @@ struct Flat {
     gshgeom_flat_path_destroy(flat);
     gshgeom_device_path_destroy(path);
   }
+  explicit Flat(GSHGEOM_Flat_Path * adopted) : flat(adopted) {}
   Flat(const Flat &) = delete;
   Flat & operator=(const Flat &) = delete;
 };
@@ -805,6 +806,88 @@ TEST(RenderExact, TheShortcutsOfTheCoverChangeNoPixelNoCountAndNoWorkFigure) {
   }
   EXPECT_GT(replayed, 50u) << "the log is used";
   EXPECT_GT(cut_again, 0u) << "and a band with more pieces than the scratch holds is not";
+  EXPECT_GT(exact, 500u);
+}
+
+namespace {
+
+/** A mosaic of triangles that share their sides in opposite directions (the way an outline's pieces do), with a few
+ * overlapping pieces over it, on a lattice that is not the pixel's. */
+std::vector<Contour> mosaic(std::mt19937 & rng, int cells, int64_t side) {
+  std::vector<Contour> polys;
+  for (int cy = 0; cy < cells; cy++) {
+    for (int cx = 0; cx < cells; cx++) {
+      if (rng() % 10 < 3) {
+        continue;
+      }
+      int64_t x0 = cx * side + 3, y0 = cy * side + 5, x1 = x0 + side, y1 = y0 + side;
+      if (rng() % 2) {
+        polys.push_back(positive({pt(x0, y0), pt(x1, y0), pt(x1, y1)}));
+        polys.push_back(positive({pt(x0, y0), pt(x1, y1), pt(x0, y1)}));
+      } else {
+        polys.push_back(positive({pt(x0, y0), pt(x1, y0), pt(x0, y1)}));
+        polys.push_back(positive({pt(x1, y0), pt(x1, y1), pt(x0, y1)}));
+      }
+    }
+  }
+  for (int i = 0; i < 4; i++) {
+    polys.push_back(random_piece(rng, 0, cells * side));
+  }
+  return polys;
+}
+
+}  // namespace
+
+TEST(RenderExact, ThePathWithoutItsCancellingEdgesIsCoveredPixelForPixelAndCountsNoMore) {
+  // Cancelling an edge against its reverse before the cover cuts either is what the cover's pieces do after: both are cut
+  // from the upper end at the same points, so they deposit and step the winding by the same amounts, opposite in sign.  The
+  // pixels must be the same whatever the cap (the cells counted only go down), for the plain cover, the exact step and the
+  // sparse sweep.
+  std::mt19937 rng(4417);
+  uint64_t cancelled = 0;
+  uint64_t before = 0;
+  uint64_t exact = 0;
+  for (int round = 0; round < 60; round++) {
+    int cells = 3 + (int)(rng() % 7);
+    int64_t side = 41 + (int64_t)(rng() % 90);
+    std::vector<Contour> polys = mosaic(rng, cells, side);
+    Flat whole(polys);
+    GSHGEOM_Flat_Path * reduced = nullptr;
+    ASSERT_EQ(gshgeom_flat_path_cancel_seams(whole.flat, nullptr, nullptr, &reduced), GSHGEOM_OK);
+    Flat lean(reduced);
+    cancelled += gshgeom_flat_path_point_count(whole.flat) - gshgeom_flat_path_point_count(lean.flat);
+    before += gshgeom_flat_path_point_count(whole.flat);
+    int64_t w = (cells * side) / U + 3;
+    GSHCPU_Rect rect = rect_of(0, 0, w, w);
+    GSHCPU_Rect walk = round % 3 == 0 ? rect : rect_of(-1, 0, w + 2, w);
+    static const uint64_t caps[3] = {64, 512, 8192};
+    uint64_t cap = caps[round % 3];
+    Covered a = cover_exact(whole, rect, walk, cap);
+    Covered b = cover_exact(lean, rect, walk, cap);
+    ASSERT_EQ(a.result, GSHCPU_OK) << round;
+    ASSERT_EQ(b.result, GSHCPU_OK) << round;
+    EXPECT_EQ(a.k, b.k) << "round " << round;
+    EXPECT_EQ(b.failures, 0u);
+    EXPECT_LE(b.cells, a.cells);
+    EXPECT_LE(b.exact_cells, a.exact_cells);
+    exact += a.exact_cells;
+    Covered sa = cover_sparse(whole, rect, cap);
+    Covered sb = cover_sparse(lean, rect, cap);
+    ASSERT_EQ(sa.result, GSHCPU_OK);
+    ASSERT_EQ(sb.result, GSHCPU_OK);
+    EXPECT_EQ(sa.k, sb.k) << "round " << round << " sparse";
+    size_t pixels = (size_t)(w * w);
+    std::vector<uint8_t> pa(pixels, 0x55), pb(pixels, 0x55);
+    std::vector<int64_t> acc(2 * (size_t)(w + 1) * GSHCPU_RENDER_BAND_ROWS, 0);
+    const GSHGEOM_Flat_Path * pw[1] = {whole.flat};
+    const GSHGEOM_Flat_Path * pl[1] = {lean.flat};
+    uint64_t ca = 0, cb = 0;
+    ASSERT_EQ(gshcpu_render_cover(pw, 1, GSHGEOM_FILL_NONZERO, rect, pa.data(), acc.data(), UINT64_MAX, &ca), GSHCPU_OK);
+    ASSERT_EQ(gshcpu_render_cover(pl, 1, GSHGEOM_FILL_NONZERO, rect, pb.data(), acc.data(), UINT64_MAX, &cb), GSHCPU_OK);
+    EXPECT_EQ(pa, pb) << "round " << round << " plain";
+    EXPECT_LE(cb, ca);
+  }
+  EXPECT_GT(cancelled * 5, before) << "a mosaic loses at least a fifth of its points";
   EXPECT_GT(exact, 500u);
 }
 

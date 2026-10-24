@@ -79,6 +79,23 @@ static const GSHGEOM_Flat_Path * part_of(const GSHGEOM_Stroke_Outline * o, int p
   }
 }
 
+/** Part @p part without the edges that cancel (shape-geometry's reduced form), or the part itself when it has none. */
+static const GSHGEOM_Flat_Path * cover_of(const GSHGEOM_Stroke_Outline * o, int part) {
+  const GSHGEOM_Flat_Path * reduced;
+  switch (part) {
+    case GSHCPU_STROKE_BODY:
+      reduced = gshgeom_stroke_outline_body_reduced(o);
+      break;
+    case GSHCPU_STROKE_ALIGNED:
+      reduced = gshgeom_stroke_outline_aligned_reduced(o);
+      break;
+    default:
+      reduced = gshgeom_stroke_outline_clip_reduced(o);
+      break;
+  }
+  return reduced ? reduced : part_of(o, part);
+}
+
 /** What is known of @p o: each part's points and the extent of its 26.6 coordinates, and what a cache holds for it. */
 static void meta_of(const GSHGEOM_Stroke_Outline * o, GSHCPU_Stroke_Meta * m) {
   memset(m, 0, sizeof *m);
@@ -109,6 +126,11 @@ static void meta_of(const GSHGEOM_Stroke_Outline * o, GSHCPU_Stroke_Meta * m) {
       }
     }
     bytes += PART_OVERHEAD + n * sizeof(GSHGEOM_Device_Point) + gshgeom_flat_path_subpath_count(path) * sizeof(GSHGEOM_Flat_Subpath);
+    const GSHGEOM_Flat_Path * cover = cover_of(o, p);
+    if (cover != path) { /* the reduced form is held beside the part */
+      bytes += gshgeom_flat_path_point_count(cover) * sizeof(GSHGEOM_Device_Point) +
+          gshgeom_flat_path_subpath_count(cover) * sizeof(GSHGEOM_Flat_Subpath);
+    }
   }
   m->bytes = bytes;
 }
@@ -221,6 +243,20 @@ GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGE
     size_t note_count = s.meta.note_count;
     g = gshgeom_stroke_expand(path, &params, &canon, alloc, limits, &outline);
     gshgeom_path_destroy(built);
+    if (g == GSHGEOM_OK && !gshgeom_stroke_outline_aligned(outline)) {
+      /* The reduced form is made once, here, before another thread can see the outline; a failure that is not memory leaves
+       * the outline as it was, covered whole.  A stroke with an aligned part is covered whole in any case: its three parts
+       * are covered together (UC8), a cell that holds pieces of two of them is made exact and one that holds pieces of one
+       * is not, and a part whose pieces cancel in a cell would move the cell from the first to the second, which rounds a
+       * unit differently in rare pixels (the fixture strokes-align has four). */
+      g = gshgeom_stroke_outline_reduce(outline, limits);
+      if (g != GSHGEOM_OK && g != GSHGEOM_ERR_OOM) {
+        g = GSHGEOM_OK;
+      }
+      if (g != GSHGEOM_OK) {
+        gshgeom_stroke_outline_destroy(outline);
+      }
+    }
     if (g != GSHGEOM_OK) {
       if (made) {
         alloc->free_fn(alloc->ctx, made);
@@ -374,7 +410,8 @@ static int same_rect(GSHCPU_Rect a, GSHCPU_Rect b) {
 
 /** One part's pixels: the drawn rectangle and the one the whole render draws. */
 typedef struct Part {
-  const GSHGEOM_Flat_Path * path;
+  const GSHGEOM_Flat_Path * path;  /* the part: its bounds and its cap are decided over it */
+  const GSHGEOM_Flat_Path * cover; /* what is covered: the same winding without the edges that cancel, or the part */
   GSHCPU_Rect rect;
   GSHCPU_Rect walk;
 } Part;
@@ -382,10 +419,12 @@ typedef struct Part {
 static Part part_rects(const GSHCPU_Stroke * s, int p, GSHCPU_Rect reach, GSHCPU_Rect whole) {
   Part part;
   part.path = part_of(s->outline, p);
+  part.cover = cover_of(s->outline, p);
   part.rect = reach_of(s->box[p], reach);
   part.walk = gshcpu_render_rect_meet(s->box[p], whole);
   if (!part.path || gshcpu_render_rect_empty(s->box[p])) {
     part.path = NULL;
+    part.cover = NULL;
     part.rect = empty_rect();
     part.walk = empty_rect();
   }
@@ -470,7 +509,7 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
     GSHCPU_Rect moved_joint = moved(joint, s->shift_x, s->shift_y);
     GSHCPU_Aligned_Input in[3];
     for (int p = 0; p < 3; p++) {
-      in[p].path = parts[p].path && !gshcpu_render_rect_empty(parts[p].walk) ? parts[p].path : NULL;
+      in[p].path = parts[p].path && !gshcpu_render_rect_empty(parts[p].walk) ? parts[p].cover : NULL;
       in[p].walk = gshcpu_render_rect_join(moved(walks[p], s->shift_x, s->shift_y), moved_joint);
       if (gshcpu_render_rect_empty(moved_joint)) {
         in[p].walk = moved(walks[p], s->shift_x, s->shift_y);
@@ -494,7 +533,7 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
     uint8_t * out = p == 0 ? buffers->body : p == 1 ? buffers->aligned : buffers->clip;
     GSHGEOM_Fill_Rule rule = p == 2 ? gshgeom_stroke_outline_clip_rule(s->outline) : GSHGEOM_FILL_NONZERO;
     uint64_t used = 0;
-    GSHCPU_Result r = gshcpu_render_cover_exact(&part->path, 1, rule, moved(part->rect, s->shift_x, s->shift_y),
+    GSHCPU_Result r = gshcpu_render_cover_exact(&part->cover, 1, rule, moved(part->rect, s->shift_x, s->shift_y),
         moved(walks[p], s->shift_x, s->shift_y), out, acc, max_deposits - total, &used, p == GSHCPU_STROKE_CLIP ? NULL : ex);
     total += used;
     if (r != GSHCPU_OK) {
@@ -590,6 +629,6 @@ GSHCPU_Result gshcpu_render_stroke_cover_sparse(const GSHCPU_Stroke * s, GSHCPU_
   if (!same_rect(body.rect, walk) && !count_whole(&body, 1, max_deposits) && !may_exceed(s, GSHCPU_STROKE_BODY, ex)) {
     walk = body.rect;
   }
-  return gshcpu_render_cover_sparse(&body.path, 1, GSHGEOM_FILL_NONZERO, moved(body.rect, s->shift_x, s->shift_y),
+  return gshcpu_render_cover_sparse(&body.cover, 1, GSHGEOM_FILL_NONZERO, moved(body.rect, s->shift_x, s->shift_y),
       moved(walk, s->shift_x, s->shift_y), acc, line, max_deposits, cells, fn, ctx, ex);
 }
