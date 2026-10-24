@@ -333,11 +333,12 @@ extern int gshcpu_exact_check;
 /**
  * A test switch for cover.c's shortcuts: each bit set turns one off, and the coverage is the same either way.  The library never
  * sets it.  ::GSHCPU_COVER_NO_REPLAY: the exact step's windows cut the edges again to keep the pieces of their cells, as they
- * did before the first pass wrote them down; ::GSHCPU_COVER_NO_RANGES: a band visits every subpath of the outline.
+ * did before the first pass wrote them down; ::GSHCPU_COVER_NO_RANGES: a band visits every subpath of the outline; ::GSHCPU_COVER_NO_PLAIN: every cell with two pieces is made exact.
  */
 extern unsigned gshcpu_cover_shortcuts_off;
 #define GSHCPU_COVER_NO_REPLAY 1u
 #define GSHCPU_COVER_NO_RANGES 2u
+#define GSHCPU_COVER_NO_PLAIN 4u
 
 /**
  * The meetings of a cell (UC19), counted without the area: the pieces of every part of @p cell collected as the step
@@ -378,6 +379,7 @@ struct GSHCPU_Exact {
   uint64_t cells;             /* cells made exact */
   uint64_t failures;          /* IDENTITY results (a defect: the cover then refuses) */
   uint64_t replays;           /* windows whose pieces came from the first pass's log and not from cutting the edges again */
+  uint64_t plain;             /* cells whose pieces were seen to leave the winding between 0 and 1, so that nothing of them overlaps */
 };
 
 /**
