@@ -1,4 +1,6 @@
 # The committed dense cells of the exact union step (tests/dense_vectors.h, strokes story S4c) through the step: each vector's
-# result and counters folded in order.  tools/corpus-hash.c must print the fold and the count on every target (make check-corpus-hash).
-hash 6fcd676171efb9a7
+# result and counters folded in order.  tools/corpus-hash.c must print the fold and the count on every target (make check-corpus-hash).  The counters are those of the steps taken: a cell of at most two fragments whose windings are 0 and 1 and
+# which do not cross is accepted without a sweep, and has no meetings and no evaluations at the slabs' ends (the fold moved from 6fcd676171efb9a7
+# for that alone: the results of the cells, which the tests hold against the reference, did not).
+hash 86ef43818d861ffd
 count 42

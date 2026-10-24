@@ -1025,6 +1025,67 @@ static void ctx_init(Ctx * c, const GSHCPU_Exact_Params * params, GSHCPU_Exact_S
   s->last_end_evals = 0;
 }
 
+/**
+ * Whether the windings of a cell of at most two fragments are all 0 or 1 and its fragments do not cross, which is the cell
+ * whose nonzero fill is what the dense sum measures: the overlap to take off it is nothing.  The slabs are the sweep's, the
+ * winding on the left side at the top of each is the sweep's, and in each the fragments are taken left to right in the order
+ * they have at the slab's top, which the order at its bottom must keep (touching there is not crossing).  Everything is an
+ * integer comparison of products; no area is formed, which is what the sweep spends its time on.  A cell it does not accept
+ * goes to the sweep.
+ */
+static int certify_simple(const Ctx * c) {
+  const GSHCPU_Exact_Scratch * s = c->s;
+  const int32_t step = c->pr->eps[0];
+  int64_t left = c->wtop[0];
+  const size_t nf = c->nfrag;
+  for (int h = 0; h < 64;) {
+    left += jget(c, 0, h);
+    const uint64_t above = c->mk >> h >> 1;
+    const int yb = above ? h + 1 + __builtin_ctzll(above) : 64;
+    const int64_t w0 = (int64_t)step * left;
+    if (w0 < 0 || w0 > 1) {
+      return 0;
+    }
+    const Frag * f[2];
+    size_t np = 0;
+    for (size_t i = 0; i < nf; i++) {
+      const Frag * q = &s->frag[i];
+      if (q->py <= h && h < q->py + q->dy) {
+        f[np++] = q;
+      }
+    }
+    if (np == 1) {
+      const int64_t w1 = w0 + (int64_t)step * f[0]->s * (int64_t)f[0]->mu;
+      if (w1 < 0 || w1 > 1) {
+        return 0;
+      }
+    } else if (np == 2) {
+      const Frag * a = f[0];
+      const Frag * b = f[1];
+      /* x of each, times its height, at the slab's top and bottom: cross-multiplied, the order of the two */
+      const int64_t at = (int64_t)a->px * a->dy + (int64_t)a->dx * (h - a->py);
+      const int64_t bt = (int64_t)b->px * b->dy + (int64_t)b->dx * (h - b->py);
+      const int64_t ab = (int64_t)a->px * a->dy + (int64_t)a->dx * (yb - a->py);
+      const int64_t bb = (int64_t)b->px * b->dy + (int64_t)b->dx * (yb - b->py);
+      const int64_t top = at * b->dy - bt * a->dy;
+      const int64_t bot = ab * b->dy - bb * a->dy;
+      if ((top < 0 && bot > 0) || (top > 0 && bot < 0) || (top == 0 && bot == 0)) {
+        return 0; /* they cross inside the slab, or lie along each other */
+      }
+      const int a_first = top < 0 || (top == 0 && bot < 0);
+      const Frag * first = a_first ? a : b;
+      const Frag * second = a_first ? b : a;
+      const int64_t w1 = w0 + (int64_t)step * first->s * (int64_t)first->mu;
+      const int64_t w2 = w1 + (int64_t)step * second->s * (int64_t)second->mu;
+      if (w1 < 0 || w1 > 1 || w2 < 0 || w2 > 1) {
+        return 0;
+      }
+    }
+    h = yb;
+  }
+  return 1;
+}
+
 int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s, const GSHCPU_Exact_Cell * cell,
     int64_t * out, uint64_t * work) {
   if (gshcpu_exact_hook) {
@@ -1051,6 +1112,14 @@ int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch *
   if (status != GSHCPU_EXACT_OK) {
     *work += c.work;
     return status;
+  }
+  const int simple = params->parts == 1 && params->mode == GSHCPU_EXACT_OVERLAP && c.nfrag <= 2 && certify_simple(&c);
+  if (simple && !gshcpu_exact_check) {
+    /* Windings of 0 and 1 and nothing crossing: the dense sum is the area of the nonzero fill, and the overlap is nothing. */
+    *work += c.work;
+    *out = 0;
+    note(&c, 0);
+    return GSHCPU_EXACT_OK;
   }
   uint64_t crossings = 0;
   int counted = 0;
@@ -1085,6 +1154,9 @@ int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch *
     int64_t t = v - ((int64_t)1 << 29) - (int64_t)beta;
     int64_t up = t >= 0 ? ((t + (((int64_t)1 << 30) - 1)) >> 30) : -((-t) >> 30);
     *out = cell->dense[0] - up;
+    if (simple && *out != 0) {
+      return GSHCPU_EXACT_IDENTITY; /* the test switch: the certificate and the sweep disagree */
+    }
   } else {
     int64_t q = v + ((int64_t)1 << 29) + (int64_t)beta;
     *out = q >= 0 ? (q >> 30) : -(((-q) + (((int64_t)1 << 30) - 1)) >> 30);
