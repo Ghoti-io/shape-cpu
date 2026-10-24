@@ -623,13 +623,10 @@ int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_deposit
   }
   /* The rectangle is the outline's own, the pixels its points touch, never the damage or the clips: whether a stroke
    * takes the tier is a function of the stroke alone.  The bound is over that whole rectangle, so it is never below
-   * the deposits any render counts, and a stroke whose bound is within the cap cannot be refused for its cells. */
-  uint64_t pixels = (uint64_t)(box.x1 - box.x0) * (uint64_t)(box.y1 - box.y0);
-  uint64_t limit = pixels / 16u;
-  if (limit > max_deposits) {
-    limit = max_deposits;
-  }
-  return gshcpu_render_cells_bound(&path, 1, moved(box, s->shift_x, s->shift_y), limit) <= limit;
+   * the deposits any render counts, and a stroke whose bound is within the cap cannot be refused for its cells.  There is no
+   * other condition: the sweep gives the pixels that can be nonzero and the dense one gives them all, so it is never the
+   * slower of the two (a share of the rectangle's pixels was once required, and seven of ten strokes of the benchmark failed it). */
+  return gshcpu_render_cells_bound(&path, 1, moved(box, s->shift_x, s->shift_y), max_deposits) <= max_deposits;
 }
 
 void gshcpu_render_stroke_rects(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole, GSHCPU_Rect * rect,

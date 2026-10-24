@@ -753,8 +753,7 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
 
 /**
  * FT-2 (SC8): whether @p s qualifies for the sparse composite: a single part, and `cells_bound` of its rectangle at
- * most a sixteenth of that rectangle's pixels and at most @p max_deposits (so the cap cannot be met and the stroke cannot
- * be refused for its cells).  A function of the outline, the shift and the cap only, never of the damage or the clips.
+ * most @p max_deposits (so the cap cannot be met and the stroke cannot be refused for its cells).  A function of the outline, the shift and the cap only, never of the damage or the clips.
  */
 int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_deposits);
 

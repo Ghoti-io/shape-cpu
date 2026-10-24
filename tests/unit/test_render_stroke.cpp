@@ -898,8 +898,9 @@ TEST(RenderStrokeTiers, EachTierIsTakenAndBitEqualToTheGeneralTier) {
       }
     }
   }
-  // A stroke that is not sparse (a ring, whose rectangle is mostly its own deposits) takes the dense path, and so does
-  // a near-horizontal curve, whose every column deposits; a gradient or an aligned stroke is never sparse.
+  // A ring, whose rectangle is mostly its own deposits, and a near-horizontal curve, whose every column deposits, take the
+  // sparse path too (the sweep gives the pixels that can be nonzero, however many that is); a gradient or an aligned stroke
+  // is never sparse.
   Store s;
   Params ring = params(2.0, GSHGEOM_STROKE_JOIN_ROUND);
   Sink tiered;
@@ -910,7 +911,7 @@ TEST(RenderStrokeTiers, EachTierIsTakenAndBitEqualToTheGeneralTier) {
   aligned.s.alignment = GSHGEOM_STROKE_ALIGN_INSIDE;
   const Ops big_ring = {{'M', {-50.0, -50.0}}, {'L', {150.0, 150.0}}, {'L', {150.0, -50.0}}, {'Z', {}}};
   render_list(tiered.sink, one_stroke(s, big_ring, aligned.get(), translation(0.0, 0.0)), 48, 24);
-  EXPECT_EQ(tiered.counters.sparse_plain + tiered.counters.sparse_hairline, 0u);
+  EXPECT_EQ(tiered.counters.sparse_plain + tiered.counters.sparse_hairline, 2u);
   EXPECT_EQ(tiered.counters.strokes, 3u);
 }
 
@@ -957,9 +958,9 @@ TEST(RenderStrokeTiers, OnlyAWidthOfOneInDeviceUnitsIsAHairline) {
   }
 }
 
-TEST(RenderStrokeTiers, AStrokeIsSparseOnlyWhereItsDepositsAreAFifteenthOfItsRectangleAndNeverWhenAligned) {
+TEST(RenderStrokeTiers, AStrokeIsSparseWhereverItsDepositsFitTheCapAndNeverWhenAligned) {
   // A diagonal across a small canvas deposits in about every row and column of its rectangle: far more than a sixteenth
-  // of its pixels, though well under a half.
+  // of its pixels, though well under a half, and the sweep draws it as the dense one does.
   {
     Params p = params(2.0, GSHGEOM_STROKE_JOIN_MITER, GSHGEOM_STROKE_CAP_BUTT);
     const Ops diagonal = {{'M', {2.0, 2.0}}, {'L', {22.0, 22.0}}};
@@ -968,7 +969,7 @@ TEST(RenderStrokeTiers, AStrokeIsSparseOnlyWhereItsDepositsAreAFifteenthOfItsRec
     Sink general(GSHCPU_RENDER_TIERS_GENERAL);
     const GSHSCENE_List * l = one_stroke(s, diagonal, p.get(), frac_map());
     EXPECT_EQ(render_list(tiered.sink, l, 24, 24).hash, render_list(general.sink, l, 24, 24).hash);
-    EXPECT_EQ(tiered.counters.sparse_plain + tiered.counters.sparse_hairline, 0u) << "dense: the general tier draws it";
+    EXPECT_EQ(tiered.counters.sparse_plain + tiered.counters.sparse_hairline, 1u) << "sparse: the tier takes it";
   }
   // A long thin triangle stroked inside, beside a long open line: the body alone would be sparse by its deposits, but a
   // stroke with an aligned part never is.
