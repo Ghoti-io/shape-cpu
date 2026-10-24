@@ -858,23 +858,37 @@ static int exact_band(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_t
   params.max_crossings = ex->max_crossings;
   int64_t pos = 0;
   while (pos < total) {
-    /* The window: as many cells as the pool holds the pieces of. */
-    int64_t idx = pos;
+    /* The window: as many cells as the pool holds the pieces of.  The cells are met row by row, without dividing the index: in the
+     * sparse sweep a row holds none left of the first column it deposited in (or holds an exact cell in) and none right of
+     * the last, so those are not looked at. */
     uint64_t kept = 0;
-    while (idx < total) {
-      int64_t ey = c->band + idx / width;
-      int64_t exx = c->rect.x0 + idx % width;
-      size_t k = exact_cell_index(c, exx, ey);
-      uint32_t n = ex->count[k];
-      if (n >= 2) {
-        if (kept + n > ex->pool_cap) {
-          break;
-        }
-        ex->slot[k] = (uint32_t)kept;
-        kept += n;
+    int64_t r = pos / width;
+    int64_t x = pos % width;
+    int full = 0;
+    for (; r < c->rows && !full; r++, x = 0) {
+      int64_t xe = width - 1;
+      if (c->track) {
+        int64_t xlo = c->lo[r] > 1 ? c->lo[r] - 1 : 0;
+        xe = c->hi[r] - 1 < xe ? c->hi[r] - 1 : xe;
+        x = x < xlo ? xlo : x;
       }
-      idx++;
+      size_t base = (size_t)(r * c->cstride + (c->rect.x0 - c->walk.x0));
+      for (; x <= xe; x++) {
+        uint32_t n = ex->count[base + (size_t)x];
+        if (n >= 2) {
+          if (kept + n > ex->pool_cap) {
+            full = 1;
+            break;
+          }
+          ex->slot[base + (size_t)x] = (uint32_t)kept;
+          kept += n;
+        }
+      }
+      if (full) {
+        break; /* r and x are the cell that did not fit */
+      }
     }
+    int64_t idx = full ? r * width + x : total;
     if (kept == 0) {
       pos = idx;
       continue;
@@ -900,7 +914,13 @@ static int exact_band(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_t
       const int64_t * cv = c->cover + r * c->stride;
       int64_t * ar = c->area + r * c->stride;
       int64_t sum = cv[0];
-      for (int64_t j = 1; j <= width; j++) {
+      int64_t j0 = 1;
+      int64_t j1 = width;
+      if (c->track) {
+        j0 = c->lo[r] > 1 ? c->lo[r] : 1; /* nothing is deposited left of the first column, so the sum there is cv[0] */
+        j1 = c->hi[r] < width ? c->hi[r] : width;
+      }
+      for (int64_t j = j0; j <= j1; j++) {
         int64_t left = sum;
         sum += cv[j];
         int64_t at = r * width + (j - 1);
