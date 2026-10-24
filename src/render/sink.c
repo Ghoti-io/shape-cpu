@@ -611,6 +611,22 @@ static GSHSCENE_Result refuse(Run * run, const GSHSCENE_Item * item, const size_
   return GSHSCENE_OK;
 }
 
+/**
+ * gshcpu_render_apply for source-over, which every fill and stroke is composed with, written out: the same operations in the
+ * same order (factors 1 and 1 - source alpha, then the mix of the pixel with the coverage, then the saturation), so the same
+ * doubles, without the dispatch on the operator or the call.
+ */
+static inline void apply_src_over(double d[4], const double s[4], double m) {
+  const double fb = 1.0 - s[3];
+  const double keep = 1.0 - m;
+  for (int i = 0; i < 4; i++) {
+    const double o = 1.0 * s[i] + fb * d[i];
+    const double x = keep * d[i] + m * o;
+    d[i] = x > GSHSCENE_COLOR_SATURATION ? GSHSCENE_COLOR_SATURATION
+        : x < -GSHSCENE_COLOR_SATURATION ? -GSHSCENE_COLOR_SATURATION : x;
+  }
+}
+
 /** The pixel (x, y) of a region-sized buffer. */
 static size_t at(const Run * run, int64_t x, int64_t y) {
   return (size_t)(y - run->layout.region.y0) * run->layout.width + (size_t)(x - run->layout.region.x0);
@@ -872,7 +888,7 @@ static GSHSCENE_Result fill_gradient(Run * run, const GSHSCENE_Item * item, cons
       gshcpu_render_convert_straight(&c, color, color);
       double s[4] = {color[0] * color[3], color[1] * color[3], color[2] * color[3], color[3]};
       size_t p = at(run, x, y);
-      gshcpu_render_apply(&frame->layer[4u * p], s, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);
+      apply_src_over(&frame->layer[4u * p], s, (double)m8 / 255.0);
       if (run->top == 0) {
         run->touched[p] = 1;
       }
@@ -916,7 +932,7 @@ static void composite_solid(Run * run, Frame * frame, const double src[4], GSHCP
         continue;
       }
       size_t p = at(run, x, y);
-      gshcpu_render_apply(&frame->layer[4u * p], src, (double)m8 / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);
+      apply_src_over(&frame->layer[4u * p], src, (double)m8 / 255.0);
       if (run->top == 0) {
         run->touched[p] = 1;
       }
@@ -999,7 +1015,7 @@ static void sparse_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_
       continue;
     }
     size_t p = at(run, px, py);
-    gshcpu_render_apply(&frame->layer[4u * p], sp->src, (double)m / 255.0, GSHSCENE_COMPOSITE_SRC_OVER);
+    apply_src_over(&frame->layer[4u * p], sp->src, (double)m / 255.0);
     if (run->top == 0) {
       run->touched[p] = 1;
     }
