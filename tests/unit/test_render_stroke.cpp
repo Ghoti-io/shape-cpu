@@ -546,11 +546,13 @@ TEST(RenderStrokeLimits, ADamageRefusesWhatTheWholeRenderRefusesWhereverTheStrok
   // shifted stroke, and let the damage count only its own cells.
   Params p = params(3.0, GSHGEOM_STROKE_JOIN_ROUND, GSHGEOM_STROKE_CAP_ROUND);
   auto placed = [](double shift) { return affine_map(6.0, 0.0, 0.0, 6.0, shift + 0.375, shift / 2 + 0.625); };
-  size_t lo = 1;
-  size_t hi = GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS;
-  {
+  // the cap is the least that draws the whole stroke where it is: a half-pixel phase (an odd shift) puts the pieces on other
+  // cells, and so it needs a few deposits fewer
+  auto least = [&](double shift) {
+    size_t lo = 1;
+    size_t hi = GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS;
     Store s;
-    const GSHSCENE_List * l = one_stroke(s, kClosed, p.get(), placed(0.0));
+    const GSHSCENE_List * l = one_stroke(s, kClosed, p.get(), placed(shift));
     while (lo < hi) {
       size_t mid = lo + (hi - lo) / 2;
       GSHCPU_Limits probe;
@@ -560,12 +562,13 @@ TEST(RenderStrokeLimits, ADamageRefusesWhatTheWholeRenderRefusesWhereverTheStrok
       Drawn d = render_list(sink.sink, l, 600, 600);
       (d.entries.empty() ? hi : lo) = d.entries.empty() ? mid : mid + 1;
     }
-  }
-  ASSERT_GT(lo, 200u);
+    return lo;
+  };
+  ASSERT_GT(least(0.0), 200u);
   GSHCPU_Limits limits;
   gshcpu_limits_default(&limits);
-  limits.max_deposits = lo - 1;
   for (double shift : {0.0, 7.0, 40.0, 130.0}) {
+    limits.max_deposits = least(shift) - 1;
     Store s;
     const GSHSCENE_List * l = one_stroke(s, kClosed, p.get(), placed(shift));
     Sink sink(GSHCPU_RENDER_TIERS_ALL, &limits);
