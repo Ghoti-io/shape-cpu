@@ -1126,6 +1126,59 @@ uint64_t gshcpu_render_cells_bound(const GSHGEOM_Flat_Path * const * paths, size
 /* --- the sparse sweep (FT-2, strokes story S4) ---------------------------------------------------------------- */
 
 /**
+ * The runs of one band, kept until the band is swept and then handed to the sink in the order they were found: a run's pixels
+ * in the layer are asked for when it is found, so that the first read of each is a hit by the time the sink gets to it
+ * (the interior of a stroke is not a deposit, and its pixels are as cold as the edge's).
+ */
+#define BATCH_RUNS 256
+#define BATCH_BYTES 8192
+typedef struct Batch {
+  const Cover * c;
+  GSHCPU_Span_Fn fn;
+  void * ctx;
+  size_t n;
+  size_t used;
+  struct {
+    int64_t y, x;
+    size_t len, off;
+  } run[BATCH_RUNS];
+  uint8_t bytes[BATCH_BYTES];
+} Batch;
+
+static void batch_flush(Batch * b) {
+  for (size_t i = 0; i < b->n; i++) {
+    b->fn(b->ctx, b->run[i].y, b->run[i].x, b->run[i].len, b->bytes + b->run[i].off);
+  }
+  b->n = 0;
+  b->used = 0;
+}
+
+/** A run of @p len coverages from column @p x of row @p y: handed on in its turn, with its pixels asked for now. */
+static void batch_add(Batch * b, int64_t y, int64_t x, size_t len, const uint8_t * m8) {
+  const GSHCPU_Prefetch * pf = b->c->pf;
+  if (!pf || len > BATCH_BYTES) {
+    batch_flush(b);
+    b->fn(b->ctx, y, x, len, m8);
+    return;
+  }
+  if (b->n == BATCH_RUNS || b->used + len > BATCH_BYTES) {
+    batch_flush(b);
+  }
+  memcpy(b->bytes + b->used, m8, len);
+  b->run[b->n].y = y;
+  b->run[b->n].x = x;
+  b->run[b->n].len = len;
+  b->run[b->n].off = b->used;
+  b->n++;
+  b->used += len;
+  const char * first = pf->base + y * pf->row + x * pf->pixel;
+  const char * last = first + (int64_t)(len - 1) * pf->pixel + pf->pixel - 1;
+  for (uintptr_t q = (uintptr_t)first & ~(uintptr_t)63; q <= (uintptr_t)last; q += 64) {
+    __builtin_prefetch((const void *)q, 1, 3);
+  }
+}
+
+/**
  * Sweep the band's rows that deposited something and hand each one's coverages to @p fn, then clear what was
  * written.  A column before a row's first deposit has an accumulated cover of zero and no area, so its coverage is
  * zero; the columns after its last have the accumulated cover and no area of their own, so their coverage is one
@@ -1133,6 +1186,12 @@ uint64_t gshcpu_render_cells_bound(const GSHGEOM_Flat_Path * const * paths, size
  */
 static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx) {
   const int magnitude = c->ex != NULL;
+  Batch batch;
+  batch.c = c;
+  batch.fn = fn;
+  batch.ctx = ctx;
+  batch.n = 0;
+  batch.used = 0;
   for (int64_t r = 0; r < c->rows; r++) {
     if (c->hi[r] < c->lo[r]) {
       continue; /* no deposit: the row is zero */
@@ -1159,7 +1218,7 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
         }
         line[j - j0] = v;
       } else if (from >= 0) {
-        fn(ctx, c->band + r, c->rect.x0 + (from - 1), (size_t)(j - from), line + (from - j0));
+        batch_add(&batch, c->band + r, c->rect.x0 + (from - 1), (size_t)(j - from), line + (from - j0));
         from = -1;
       }
       j++;
@@ -1176,7 +1235,7 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
           }
           memset(line + (j - j0), q, (size_t)(k - j));
         } else if (from >= 0) {
-          fn(ctx, c->band + r, c->rect.x0 + (from - 1), (size_t)(j - from), line + (from - j0));
+          batch_add(&batch, c->band + r, c->rect.x0 + (from - 1), (size_t)(j - from), line + (from - j0));
           from = -1;
         }
         j = k;
@@ -1192,13 +1251,14 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
       end = width;
     }
     if (from >= 0) {
-      fn(ctx, c->band + r, c->rect.x0 + (from - 1), (size_t)(end - from + 1), line + (from - j0));
+      batch_add(&batch, c->band + r, c->rect.x0 + (from - 1), (size_t)(end - from + 1), line + (from - j0));
     }
     for (int64_t t = lo; t <= hi && t <= width; t++) {
       cv[t] = 0;
       ar[t] = 0;
     }
   }
+  batch_flush(&batch);
 }
 
 GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
