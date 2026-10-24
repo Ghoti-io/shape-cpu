@@ -537,6 +537,80 @@ TEST(RenderStrokeLimits, CellsPastMaxCellsAreTheSinksLimitWholeOrDamaged) {
   EXPECT_GT(lo, 3u) << "the cells of three parts, not of one";
 }
 
+TEST(RenderStrokeLimits, ADamageRefusesWhatTheWholeRenderRefusesWhereverTheStrokeIs) {
+  // The same stroke at the origin and moved by whole pixels: a damage over a corner of it must still be refused when the whole
+  // render is, because the cap is decided over the cells of the whole stroke and not over the cells the damage holds.  The cap
+  // is the least that draws the whole stroke, less one, so that the damage's own cells are far below it.  The decision reads
+  // the stroke's outline, which is in the canonical frame, and so must read the rectangle in that frame, which is the device's
+  // moved back by the whole pixels the stroke was shifted: it once read it unmoved, found no cell of the outline in it for a
+  // shifted stroke, and let the damage count only its own cells.
+  Params p = params(3.0, GSHGEOM_STROKE_JOIN_ROUND, GSHGEOM_STROKE_CAP_ROUND);
+  auto placed = [](double shift) { return affine_map(6.0, 0.0, 0.0, 6.0, shift + 0.375, shift / 2 + 0.625); };
+  size_t lo = 1;
+  size_t hi = GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS;
+  {
+    Store s;
+    const GSHSCENE_List * l = one_stroke(s, kClosed, p.get(), placed(0.0));
+    while (lo < hi) {
+      size_t mid = lo + (hi - lo) / 2;
+      GSHCPU_Limits probe;
+      gshcpu_limits_default(&probe);
+      probe.max_deposits = mid;
+      Sink sink(GSHCPU_RENDER_TIERS_ALL, &probe);
+      Drawn d = render_list(sink.sink, l, 600, 600);
+      (d.entries.empty() ? hi : lo) = d.entries.empty() ? mid : mid + 1;
+    }
+  }
+  ASSERT_GT(lo, 200u);
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  limits.max_deposits = lo - 1;
+  for (double shift : {0.0, 7.0, 40.0, 130.0}) {
+    Store s;
+    const GSHSCENE_List * l = one_stroke(s, kClosed, p.get(), placed(shift));
+    Sink sink(GSHCPU_RENDER_TIERS_ALL, &limits);
+    Drawn whole = render_list(sink.sink, l, 600, 600);
+    ASSERT_EQ(whole.entries.size(), 1u) << shift;
+    EXPECT_EQ(whole.entries[0].reason, GSHSCENE_REASON_RESOURCE_LIMIT);
+    int64_t x = (int64_t)shift + 60;
+    int64_t y = (int64_t)(shift / 2) + 70;
+    GSHSCENE_Rect damage = {x, y, x + 3, y + 3};
+    Drawn part = render_list(sink.sink, l, 600, 600, GSHCPU_FORMAT_RGBA8_STRAIGHT, 0, nullptr, &damage);
+    ASSERT_EQ(part.entries.size(), 1u) << "shift " << shift;
+    EXPECT_EQ(part.entries[0].reason, GSHSCENE_REASON_RESOURCE_LIMIT) << "shift " << shift;
+  }
+}
+
+TEST(RenderStrokeLimits, TheBoundOfADrawnStrokeReadFromTheCacheIsTheOneMeasuredAgain) {
+  // The bound of the cells of a part over its own box is made once, when the outline is; a render whose walk is that box reads it.
+  // With the check on, every such read is compared with a bound measured afresh, whatever the shift, the damage and the cap.
+  Params p = params(3.0, GSHGEOM_STROKE_JOIN_ROUND, GSHGEOM_STROKE_CAP_ROUND);
+  gshcpu_exact_check = 1;
+  unsigned long cached = gshcpu_bound_cached;
+  unsigned long wrong = gshcpu_bound_mismatches;
+  for (double shift : {0.0, 7.0, 130.0}) {
+    for (uint64_t cap : {(uint64_t)40, (uint64_t)3000, (uint64_t)1 << 20}) {
+      for (int aligned = 0; aligned < 2; aligned++) {
+        Params q = p;
+        q.s.alignment = aligned ? GSHGEOM_STROKE_ALIGN_INSIDE : GSHGEOM_STROKE_ALIGN_CENTER;
+        GSHCPU_Limits limits;
+        gshcpu_limits_default(&limits);
+        limits.max_deposits = cap;
+        Store s;
+        const GSHSCENE_List * l = one_stroke(s, kClosed, q.get(), translation(shift + 0.375, shift / 2 + 0.625));
+        Sink sink(GSHCPU_RENDER_TIERS_ALL, &limits);
+        render_list(sink.sink, l, 200, 200);
+        render_list(sink.sink, l, 200, 200); // a hit
+        GSHSCENE_Rect damage = {(int64_t)shift + 8, (int64_t)(shift / 2) + 8, (int64_t)shift + 16, (int64_t)(shift / 2) + 16};
+        render_list(sink.sink, l, 200, 200, GSHCPU_FORMAT_RGBA8_STRAIGHT, 0, nullptr, &damage);
+      }
+    }
+  }
+  gshcpu_exact_check = 0;
+  EXPECT_GT(gshcpu_bound_cached, cached) << "the cached bound is read";
+  EXPECT_EQ(gshcpu_bound_mismatches, wrong) << "and is the one measured again";
+}
+
 TEST(RenderStrokeLimits, AShiftedCoordinatePastTheRangeAndAnUnformableMapAreTheSinksLimit) {
   Store s;
   Params p = params();

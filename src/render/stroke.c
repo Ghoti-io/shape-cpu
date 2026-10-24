@@ -141,6 +141,18 @@ static GSHCPU_Rect empty_rect(void) {
   return r;
 }
 
+/** The pixels part @p p's points touch, in the outline's own (canonical) frame: the box before it is shifted. */
+static GSHCPU_Rect canonical_box(const GSHCPU_Stroke_Meta * m, int p) {
+  GSHCPU_Rect r = empty_rect();
+  if (m->present[p] && m->points[p] != 0) {
+    r.x0 = pixel_floor(m->lo_x[p]);
+    r.y0 = pixel_floor(m->lo_y[p]);
+    r.x1 = -pixel_floor(-m->hi_x[p]);
+    r.y1 = -pixel_floor(-m->hi_y[p]);
+  }
+  return r;
+}
+
 /** The notes of a run's glyphs that have an entry, in glyph order, as a stroke's own records (NULL and 0 for none). */
 static GSHCPU_Result collect_notes(const GSHGEOM_Allocator * alloc, const GSHSCENE_Glyph_Note * notes, size_t count,
     GSHCPU_Run_Note ** out, size_t * out_count) {
@@ -264,6 +276,11 @@ GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGE
       return g == GSHGEOM_ERR_OOM ? GSHCPU_ERR_OOM : g == GSHGEOM_ERR_LIMIT ? GSHCPU_ERR_LIMIT : GSHCPU_ERR_INTERNAL;
     }
     meta_of(outline, &s.meta);
+    for (int p = 0; p < GSHCPU_STROKE_PARTS; p++) {
+      GSHCPU_Rect box = canonical_box(&s.meta, p);
+      const GSHGEOM_Flat_Path * whole = part_of(outline, p);
+      s.meta.bound[p] = whole && !gshcpu_render_rect_empty(box) ? gshcpu_render_cells_bound(&whole, 1, box, UINT64_MAX) : 0;
+    }
     s.meta.run_elements = run_elements;
     s.meta.note_count = note_count;
     s.meta.notes = made;
@@ -404,6 +421,9 @@ static GSHCPU_Rect moved(GSHCPU_Rect r, int64_t dx, int64_t dy) {
   return r;
 }
 
+unsigned long gshcpu_bound_cached = 0;
+unsigned long gshcpu_bound_mismatches = 0;
+
 static int same_rect(GSHCPU_Rect a, GSHCPU_Rect b) {
   return a.x0 == b.x0 && a.y0 == b.y0 && a.x1 == b.x1 && a.y1 == b.y1;
 }
@@ -456,15 +476,28 @@ static int may_exceed(const GSHCPU_Stroke * s, int p, const GSHCPU_Exact * ex) {
 /**
  * The cap decided over what the whole render draws (S4), as sink.c's `shape` decides it for a fill: when the edges
  * alone bound the deposits of every part by the cap, count only where it is drawn; else count the whole while drawing
- * the part.
+ * the part.  The outline is in the canonical
+ * frame and the walks are the device's, so the walk is moved back by the shift before the edges are measured against it.
  */
-static int count_whole(const Part * parts, size_t n, uint64_t max_deposits) {
+static int count_whole(const GSHCPU_Stroke * s, const Part * parts, size_t n, uint64_t max_deposits) {
   uint64_t bound = 0;
   for (size_t i = 0; i < n; i++) {
     if (!parts[i].path || gshcpu_render_rect_empty(parts[i].walk)) {
       continue;
     }
-    bound += gshcpu_render_cells_bound(&parts[i].path, 1, parts[i].walk, max_deposits);
+    GSHCPU_Rect walk = moved(parts[i].walk, s->shift_x, s->shift_y);
+    if (same_rect(walk, canonical_box(&s->meta, (int)i))) {
+      /* The walk is the part's own box: the bound is the one made when the outline was (a stop at the cap changes nothing
+       * below, which compares the sum with it). */
+      bound += s->meta.bound[i];
+      gshcpu_bound_cached++;
+      if (gshcpu_exact_check &&
+          s->meta.bound[i] != gshcpu_render_cells_bound(&parts[i].path, 1, walk, UINT64_MAX)) {
+        gshcpu_bound_mismatches++;
+      }
+    } else {
+      bound += gshcpu_render_cells_bound(&parts[i].path, 1, walk, max_deposits);
+    }
     if (bound > max_deposits) {
       return 1;
     }
@@ -484,7 +517,7 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
     clip.path = NULL;
   }
   Part parts[3] = {body, aligned, clip};
-  int whole_count = count_whole(parts, 3, max_deposits);
+  int whole_count = count_whole(s, parts, 3, max_deposits);
   *whole_rect = gshcpu_render_rect_join(body.walk, aligned.walk);
   /* The walk of each part: the whole render's, unless the caps cannot be met anywhere (the cells' by the edges alone, the
    * pieces of a cell by the outline's points) and then only where it is drawn. */
@@ -626,7 +659,7 @@ GSHCPU_Result gshcpu_render_stroke_cover_sparse(const GSHCPU_Stroke * s, GSHCPU_
     return GSHCPU_OK;
   }
   GSHCPU_Rect walk = body.walk;
-  if (!same_rect(body.rect, walk) && !count_whole(&body, 1, max_deposits) && !may_exceed(s, GSHCPU_STROKE_BODY, ex)) {
+  if (!same_rect(body.rect, walk) && !count_whole(s, &body, 1, max_deposits) && !may_exceed(s, GSHCPU_STROKE_BODY, ex)) {
     walk = body.rect;
   }
   return gshcpu_render_cover_sparse(&body.cover, 1, GSHGEOM_FILL_NONZERO, moved(body.rect, s->shift_x, s->shift_y),

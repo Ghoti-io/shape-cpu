@@ -329,6 +329,9 @@ extern GSHCPU_Exact_Cell_Fn gshcpu_exact_hook;
  * ::GSHCPU_EXACT_IDENTITY.  The library never sets it.
  */
 extern int gshcpu_exact_check;
+/** Test counters of the stroke sink: the bounds read from the cache, and the ones the check found different from a fresh one. */
+extern unsigned long gshcpu_bound_cached;
+extern unsigned long gshcpu_bound_mismatches;
 
 /**
  * A test switch for cover.c's shortcuts: each bit set turns one off, and the coverage is the same either way.  The library never
@@ -620,6 +623,7 @@ typedef struct GSHCPU_Stroke_Meta {
   int present[GSHCPU_STROKE_PARTS];
   uint64_t points[GSHCPU_STROKE_PARTS];
   int64_t lo_x[GSHCPU_STROKE_PARTS], lo_y[GSHCPU_STROKE_PARTS], hi_x[GSHCPU_STROKE_PARTS], hi_y[GSHCPU_STROKE_PARTS];
+  uint64_t bound[GSHCPU_STROKE_PARTS]; /* each part's bound of deposits (gshcpu_render_cells_bound) over its own box in the canonical frame */
   size_t bytes;              /* what the cache accounts for it (stroke_cache.c) */
   uint64_t run_elements;     /* a run: the elements of its centerline (0 for a path) */
   size_t note_count;         /* a run: the glyphs that have an entry */
