@@ -188,7 +188,23 @@ typedef struct GSHCPU_Limits {
    * ignore it.
    */
   uint64_t stroke_coverage;
+  /**
+   * How the sink makes the coverage of a fill or a clip (render.h): ::GSHCPU_FILL_COVERAGE_EXACT (0, the default) makes it
+   * the exact area of the region the rule selects, to the unit of the lattice; ::GSHCPU_FILL_COVERAGE_FAST sums the area and
+   * cover each edge leaves in the cells it crosses, in integers, and holds the magnitude at one (nonzero) or folds it
+   * (even-odd), which is what the rasterizers it is compared with do, and costs a fraction of the time.  It differs from the
+   * exact coverage only where pieces of the outline overlap and in the rounding of a fraction of a level.  Another value is
+   * ::GSHCPU_ERR_INVALID at sink creation.  A `uint64_t` whatever the target.  Read by the sink; the coverage functions
+   * ignore it.
+   */
+  uint64_t fill_coverage;
 } GSHCPU_Limits;
+
+/** ::GSHCPU_Limits.fill_coverage: the exact area of a fill (the default). */
+#define GSHCPU_FILL_COVERAGE_EXACT ((uint64_t)0)
+
+/** ::GSHCPU_Limits.fill_coverage: the area and cover of the edges summed in cells, overlaps held at one or folded. */
+#define GSHCPU_FILL_COVERAGE_FAST ((uint64_t)1)
 
 /** ::GSHCPU_Limits.stroke_coverage: the union of a stroke's pieces made exact (the default). */
 #define GSHCPU_STROKE_COVERAGE_EXACT ((uint64_t)0)

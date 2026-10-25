@@ -59,6 +59,7 @@ typedef struct Cpu_Sink {
   GSHCPU_Render_Counters own;       /* the counters, unless a test gave a place for them */
   GSHCPU_Render_Counters * counters;
   int fast;                         /* GSHCPU_Limits.stroke_coverage is FAST */
+  int fast_fill;                    /* GSHCPU_Limits.fill_coverage is FAST */
   GSHCPU_Executor executor;         /* the caller's, or none (run NULL) */
   unsigned tiers;                   /* GSHCPU_RENDER_TIER_*: the tiers that are on */
   size_t elements;                  /* the most path elements a stored resource may hold: SC11's term */
@@ -757,10 +758,23 @@ static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t
           gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_deposits) <= run->cs->max_deposits) {
         walk = *rect;
       }
-      r = gshcpu_render_cover_counted(paths, g.count, item->fill_rule, *rect, walk, out, run->acc, run->cs->max_deposits,
-          &cells);
-      run->acc_dirty = 1; /* the dense sweep writes the accumulator band by band and leaves it so */
-      run->work += cells;
+      if (run->cs->fast_fill && (run->cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && !gshcpu_render_rect_empty(*rect) &&
+          rect->x1 - rect->x0 <= 65000 &&
+          gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_deposits) <= run->cs->max_deposits) {
+        /* The fast fill coverage: the lean cover of every path at once, into the coverage of the rectangle. */
+        if (run->acc_dirty) {
+          memset(run->acc, 0, 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc);
+          run->acc_dirty = 0;
+        }
+        const size_t scratch = 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc;
+        r = gshcpu_render_lean_fill(paths, g.count, item->fill_rule == GSHGEOM_FILL_EVEN_ODD, 0, 0, *rect, run->acc, scratch, out);
+        run->work += (uint64_t)(rect->x1 - rect->x0) * (uint64_t)(rect->y1 - rect->y0);
+      } else {
+        r = gshcpu_render_cover_counted(paths, g.count, item->fill_rule, *rect, walk, out, run->acc, run->cs->max_deposits,
+            &cells);
+        run->acc_dirty = 1; /* the dense sweep writes the accumulator band by band and leaves it so */
+        run->work += cells;
+      }
     }
   }
   gshcpu_render_geometry_release(&g, run->item_alloc);
@@ -1204,6 +1218,39 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
     }
     gshcpu_render_stroke_close(cache, &s);
     return r == GSHCPU_OK ? GSHSCENE_OK : scene_result(r);
+  }
+  if (!solid && cs->fast_fill && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits)) {
+    /* A stroke of a gradient with the fast coverage: the lean cover of its outline into the coverage of the rectangle, which the
+     * gradient is then painted through as through a fill's. */
+    if (run->batch) {
+      GSHCPU_Result fr = gshcpu_batch_flush(run->batch);
+      if (fr != GSHCPU_OK) {
+        gshcpu_render_stroke_close(cache, &s);
+        return scene_result(fr);
+      }
+    }
+    if (run->acc_dirty) {
+      memset(run->acc, 0, 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc);
+      run->acc_dirty = 0;
+    }
+    gshcpu_render_stroke_rects(&s, reach, wreach, &rect, &whole);
+    if (gshcpu_render_rect_empty(rect)) {
+      rect.x1 = rect.x0;
+      rect.y1 = rect.y0;
+    }
+    const GSHGEOM_Flat_Path * body = gshcpu_render_stroke_cover_path(&s);
+    const size_t scratch = 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc;
+    r = gshcpu_render_lean_fill(&body, 1, 0, s.shift_x, s.shift_y, rect, run->acc, scratch, run->coverage);
+    run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
+    GSHSCENE_Result result;
+    if (r != GSHCPU_OK) {
+      result = scene_result(r);
+    } else {
+      gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, strokes));
+      result = paint_coverage(run, item, chain, count, frame, rect, whole, run->coverage);
+    }
+    gshcpu_render_stroke_close(cache, &s);
+    return result;
   }
   if (run->batch) {
     /* a stroke that is not queued reads the target through the layer: the ones queued before it come first */
@@ -1650,6 +1697,9 @@ static GSHCPU_Result sink_make(const GSHCPU_Allocator * alloc, const GSHSCENE_Li
   if (limits && limits->stroke_coverage > GSHCPU_STROKE_COVERAGE_FAST) {
     return GSHCPU_ERR_INVALID;
   }
+  if (limits && limits->fill_coverage > GSHCPU_FILL_COVERAGE_FAST) {
+    return GSHCPU_ERR_INVALID;
+  }
   if (!alloc) {
     alloc = gshgeom_allocator_default();
   }
@@ -1662,6 +1712,7 @@ static GSHCPU_Result sink_make(const GSHCPU_Allocator * alloc, const GSHSCENE_Li
   cs->observer_ctx = observer_ctx;
   cs->tiers = tiers;
   cs->fast = limits && limits->stroke_coverage == GSHCPU_STROKE_COVERAGE_FAST;
+  cs->fast_fill = limits && limits->fill_coverage == GSHCPU_FILL_COVERAGE_FAST;
   if (executor && executor->start && executor->wait && executor->threads > 1u) {
     cs->executor = *executor;
   }

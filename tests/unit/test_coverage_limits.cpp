@@ -92,7 +92,7 @@ TEST(CoverageLimits, TheDefaultsAreWhatTheHeaderSays) {
   EXPECT_EQ(l.stroke_coverage, GSHCPU_STROKE_COVERAGE_EXACT) << "the exact union is the default; the fast coverage is asked for";
   EXPECT_EQ(GSHCPU_STROKE_COVERAGE_FAST, (uint64_t)1);
   // The same layout on every target: four sizes and five 64-bit fields, none of it padding the sizes would not.
-  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 5 * sizeof(uint64_t));
+  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 6 * sizeof(uint64_t));
   EXPECT_EQ(offsetof(GSHCPU_Limits, max_exact_crossings), offsetof(GSHCPU_Limits, max_exact_fragments) + sizeof(uint64_t))
       << "appended after max_exact_fragments";
   EXPECT_EQ(offsetof(GSHCPU_Limits, stroke_coverage), offsetof(GSHCPU_Limits, max_exact_crossings) + sizeof(uint64_t))

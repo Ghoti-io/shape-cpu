@@ -49,6 +49,7 @@ typedef struct Lean_Band {
   uint64_t * bit; /* which cells of a row are noted, a bit each: words per row */
   size_t stride;  /* width + 2 */
   size_t words;   /* the 64-bit words of the bits of a row */
+  int even_odd;   /* the magnitude of a sum is folded, not held at one */
 } Lean_Band;
 
 /** The most rows a band of the lean cover holds. */
@@ -64,6 +65,7 @@ static void lean_band(Lean_Band * b, void * memory, size_t width, size_t rows) {
   unsigned char * p = (unsigned char *)memory;
   b->stride = width + 2u;
   b->words = (b->stride + 63u) / 64u;
+  b->even_odd = 0;
   b->n = (uint32_t *)(void *)p;
   p += (rows * 4u + 7u) & ~(size_t)7u;
   b->a = (int32_t *)(void *)p;
@@ -260,9 +262,14 @@ static void lean_edge(Lean_Band * b, int top, int rows, int width, int64_t x0, i
 }
 
 /** The coverage of an accumulated sum, 0 to 255. */
-static inline __attribute__((always_inline)) uint8_t lean_level(int32_t acc) {
+static inline __attribute__((always_inline)) uint8_t lean_level(int32_t acc, int even_odd) {
   int32_t c = acc < 0 ? -acc : acc;
-  if (c > 8192) {
+  if (even_odd) {
+    c &= 16383; /* a pixel covered twice is not covered: the magnitude goes up to one and back down to zero */
+    if (c > 8192) {
+      c = 16384 - c;
+    }
+  } else if (c > 8192) {
     c = 8192;
   }
   return (uint8_t)((c * 255 + 4096) >> 13);
@@ -332,7 +339,7 @@ static void lean_sweep(Lean_Band * b, int rows, int width, int64_t x0, int64_t y
         a[x] = 0;
         if (x < width) {
           cell = x;
-          level = lean_level(acc);
+          level = lean_level(acc, b->even_odd);
         } else {
           cell = -1;
         }
@@ -424,4 +431,68 @@ GSHCPU_Result gshcpu_render_lean_cover_points(const GSHGEOM_Device_Point * point
     return GSHCPU_OK;
   }
   return lean_cover(NULL, points, subpaths, subpath_count, shift_x, shift_y, rect, scratch, scratch_bytes, line, fn, ctx);
+}
+
+/** The receiver of the fill: a run of coverages copied into the coverage of the rectangle. */
+typedef struct Lean_Out {
+  uint8_t * out;
+  int64_t x0, y0;
+  size_t width;
+} Lean_Out;
+
+static void lean_out_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8) {
+  Lean_Out * o = ctx;
+  memcpy(o->out + (size_t)(y - o->y0) * o->width + (size_t)(x - o->x0), m8, n);
+}
+
+GSHCPU_Result gshcpu_render_lean_fill(const GSHGEOM_Flat_Path * const * paths, size_t count, int even_odd, int64_t shift_x,
+    int64_t shift_y, GSHCPU_Rect rect, void * scratch, size_t scratch_bytes, uint8_t * out) {
+  const int64_t width = rect.x1 - rect.x0;
+  const int64_t height = rect.y1 - rect.y0;
+  if (width <= 0 || height <= 0 || width > 65000) {
+    return GSHCPU_OK;
+  }
+  memset(out, 0, (size_t)width * (size_t)height);
+  /* the row of coverages the sweep makes lies at the end of the scratch, past the band */
+  const size_t line_bytes = ((size_t)width + 63u) & ~(size_t)63u;
+  if (scratch_bytes < line_bytes + gshcpu_lean_bytes((size_t)width, (size_t)GSHCPU_RENDER_BAND_ROWS)) {
+    return GSHCPU_ERR_INTERNAL;
+  }
+  scratch_bytes = (scratch_bytes - line_bytes) & ~(size_t)63u;
+  uint8_t * line = (uint8_t *)scratch + scratch_bytes;
+  size_t rows_max = (size_t)height < LEAN_BAND_MAX ? (size_t)height : LEAN_BAND_MAX;
+  while (rows_max > (size_t)GSHCPU_RENDER_BAND_ROWS && gshcpu_lean_bytes((size_t)width, rows_max) > scratch_bytes) {
+    rows_max /= 2u;
+  }
+  Lean_Band b;
+  lean_band(&b, scratch, (size_t)width, rows_max);
+  b.even_odd = even_odd;
+  Lean_Out o = {out, rect.x0, rect.y0, (size_t)width};
+  const int64_t ox = (int64_t)(int32_t)(shift_x - rect.x0) * 64;
+  const int64_t oy = (int64_t)(int32_t)(shift_y - rect.y0) * 64;
+  for (int64_t top = 0; top < height; top += (int64_t)rows_max) {
+    const int rows = (int)(height - top < (int64_t)rows_max ? height - top : (int64_t)rows_max);
+    for (size_t i = 0; i < count; i++) {
+      if (!paths[i]) {
+        continue;
+      }
+      const GSHGEOM_Device_Point * pt = gshgeom_flat_path_points(paths[i]);
+      const size_t subpaths = gshgeom_flat_path_subpath_count(paths[i]);
+      for (size_t s = 0; s < subpaths; s++) {
+        GSHGEOM_Flat_Subpath sub;
+        if (gshgeom_flat_path_subpath(paths[i], s, &sub) != GSHGEOM_OK) {
+          memset(line, 0, line_bytes);
+          return GSHCPU_ERR_INTERNAL;
+        }
+        for (size_t k = 0; k < sub.count; k++) {
+          const GSHGEOM_Device_Point p = pt[sub.first + k];
+          const GSHGEOM_Device_Point q = pt[sub.first + (k + 1 == sub.count ? 0 : k + 1)];
+          lean_edge(&b, (int)top, rows, (int)width, (int64_t)p.x + ox, (int64_t)p.y + oy, (int64_t)q.x + ox, (int64_t)q.y + oy);
+        }
+      }
+    }
+    lean_sweep(&b, rows, (int)width, rect.x0, rect.y0 + top, line, lean_out_span, &o);
+  }
+  memset(line, 0, line_bytes);
+  return GSHCPU_OK;
 }

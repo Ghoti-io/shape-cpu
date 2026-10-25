@@ -791,6 +791,15 @@ GSHCPU_Result gshcpu_render_lean_cover(const GSHGEOM_Flat_Path * path, int64_t s
     void * scratch, size_t scratch_bytes, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx);
 
 /**
+ * The coverage of a fill, by the lean cover: every one of the @p count @p paths under the rule (nonzero, or even-odd when
+ * @p even_odd), moved by (@p shift_x, @p shift_y) whole pixels, into @p out (the cells of @p rect, a row after the other, all written).  @p scratch is the accumulator as for
+ * ::gshcpu_render_lean_cover (the last row's width of it is the row of coverages the sweep makes, and is left zero).  Overlaps are summed and held at one (folded, for
+ * even-odd), not made exact.
+ */
+GSHCPU_Result gshcpu_render_lean_fill(const GSHGEOM_Flat_Path * const * paths, size_t count, int even_odd, int64_t shift_x,
+    int64_t shift_y, GSHCPU_Rect rect, void * scratch, size_t scratch_bytes, uint8_t * out);
+
+/**
  * ::gshcpu_render_lean_cover for an outline given as its points and subpaths, so that a copy of them (a queued stroke's) can be
  * drawn after the stroke is closed.  The pieces are the same; @p subpaths index @p points.
  */

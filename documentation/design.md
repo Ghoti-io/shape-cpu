@@ -331,6 +331,14 @@ coverage is a copy, and a render with anything else keeps the double layer. On t
 132 ms against 267 ms for the exact coverage, and its dashed scene 43 ms against 101 ms; against the pictures of Blend2D and
 Skia the two tiers differ from them by the same mean (0.7 and 0.9 of 255 against Blend2D, 1.9 against Skia).
 
+**The fast fill coverage.** `GSHCPU_Limits.fill_coverage` is `GSHCPU_FILL_COVERAGE_EXACT` (0) by default, or
+`GSHCPU_FILL_COVERAGE_FAST` (1): the coverage of a fill, a clip, and a stroke painted with a gradient made by the same lean cover
+as a fast stroke's, every path of an item at once, with the magnitude held at one (nonzero) or folded (even-odd). It is taken by
+every item whose bound of deposits is within the cap and by no other. On the benchmark's two showcase pictures (2400 by 1500,
+glyph outlines, gradients, clips and groups, one thread) it takes a frame from 2.9 s to 0.6 s (typography) and from 1.6 s to
+0.6 s (geometry) together with the fast stroke coverage, and the pictures differ from the exact ones by a mean of 0.01 and
+0.07 of 255 a byte, where the references differ from them by 1.0 to 1.2.
+
 The fast coverage is an integer area and cover per cell, in 8192ths of a pixel, with the cells a row notes kept in a bitset swept
 in order, in bands of up to 1,024 rows. The points are already 64ths of a pixel, so an edge steps the quotient and remainder of a
 row's share and its x at a row boundary is the nearest 64th of the line's, found from the edge's origin, so the cover does not

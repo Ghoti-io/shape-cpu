@@ -16,6 +16,7 @@ using stroke_gate::Ops;
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <atomic>
 #include <thread>
 #include <vector>
@@ -189,6 +190,109 @@ TEST(RenderLean, MoreRowsThanABandAndAnEmptyRectangle) {
   Flat f(tall);
   std::vector<int64_t> scratch(64, 0);
   EXPECT_EQ(gshcpu_render_lean_cover(f.flat, 0, 0, rect_of(5, 5, 5, 9), scratch.data(), 64 * 8, nullptr, collect, nullptr), GSHCPU_OK);
+}
+
+namespace {
+
+/** The lean fill of @p polys (one path each) over @p rect, shifted, against the exact coverage of the same paths under @p rule. */
+Worst compare_fill(const std::vector<std::vector<Poly>> & paths_of, GSHGEOM_Fill_Rule rule, GSHCPU_Rect rect, int64_t sx, int64_t sy) {
+  std::vector<std::unique_ptr<Flat>> flats;
+  std::vector<const GSHGEOM_Flat_Path *> paths;
+  for (const auto & polys : paths_of) {
+    flats.push_back(std::make_unique<Flat>(polys));
+    paths.push_back(flats.back()->flat);
+  }
+  const int64_t w = rect.x1 - rect.x0, h = rect.y1 - rect.y0;
+  GSHCPU_Rect back = rect;
+  back.x0 -= sx;
+  back.x1 -= sx;
+  back.y0 -= sy;
+  back.y1 -= sy;
+  std::vector<uint8_t> want((size_t)(w * h), 0);
+  {
+    std::vector<int64_t> acc(2 * (size_t)(w + 1) * GSHCPU_RENDER_BAND_ROWS, 0);
+    uint64_t cells = 0;
+    EXPECT_EQ(gshcpu_render_cover_counted(paths.data(), paths.size(), rule, back, back, want.data(), acc.data(), UINT64_MAX, &cells),
+        GSHCPU_OK);
+  }
+  const size_t bytes = 2 * (size_t)(w + 1) * GSHCPU_RENDER_BAND_ROWS * sizeof(int64_t);
+  std::vector<int64_t> scratch(bytes / sizeof(int64_t), 0);
+  std::vector<uint8_t> got((size_t)(w * h), 0xAB); // every byte is written, so the old content must go
+  // the paths are in their own frame and the shift is added by the cover, as the stroke's is
+  EXPECT_EQ(gshcpu_render_lean_fill(paths.data(), paths.size(), rule == GSHGEOM_FILL_EVEN_ODD, sx, sy, rect, scratch.data(), bytes,
+                got.data()),
+      GSHCPU_OK);
+  for (int64_t v : scratch) {
+    EXPECT_EQ(v, 0) << "the scratch is left all zero";
+    if (v != 0) {
+      break;
+    }
+  }
+  Worst worst;
+  for (size_t i = 0; i < want.size(); i++) {
+    int d = std::abs((int)got[i] - (int)want[i]);
+    worst.max = std::max(worst.max, d);
+    if (d > 3) {
+      worst.over++;
+    }
+  }
+  return worst;
+}
+
+/** The pentagram, one outline whose pieces cross: nonzero fills its middle, even-odd leaves it out. */
+Poly pentagram(double cx, double cy, double r) {
+  Poly p;
+  for (int i = 0; i < 5; i++) {
+    double a = -M_PI / 2 + 4.0 * M_PI * i / 5;
+    p.push_back({(int32_t)std::lround((cx + r * std::cos(a)) * 64.0), (int32_t)std::lround((cy + r * std::sin(a)) * 64.0)});
+  }
+  return p;
+}
+
+}  // namespace
+
+TEST(RenderLeanFill, AgreesWithTheExactCoverageUnderBothRules) {
+  const std::vector<std::vector<std::vector<Poly>>> shapes = {
+      {{star(5, 30.3, 20.7, 18.1, 7.3)}},
+      {{regular(37, 28.2, 19.6, 17.4, 0.3)}},
+      {{pentagram(32.4, 25.1, 21.7)}},
+  };
+  for (size_t k = 0; k < shapes.size(); k++) {
+    for (GSHGEOM_Fill_Rule rule : {GSHGEOM_FILL_NONZERO, GSHGEOM_FILL_EVEN_ODD}) {
+      Worst w = compare_fill(shapes[k], rule, rect_of(0, 0, 64, 48), 0, 0);
+      EXPECT_LE(w.max, 3) << "shape " << k << " rule " << rule;
+      EXPECT_EQ(w.over, 0u) << "shape " << k << " rule " << rule;
+    }
+  }
+}
+
+TEST(RenderLeanFill, SeveralPathsAWindowThatCutsThemAndAShift) {
+  // two glyph-like paths that do not touch, one with a hole (the inner outline runs the other way)
+  Poly outer = {{8 * 64 + 5, 6 * 64 + 9}, {44 * 64 + 1, 7 * 64}, {45 * 64 + 40, 38 * 64 + 7}, {9 * 64 + 22, 37 * 64}};
+  Poly hole = {{20 * 64, 15 * 64 + 3}, {20 * 64 + 9, 28 * 64}, {34 * 64 + 20, 27 * 64 + 8}, {33 * 64, 14 * 64 + 40}};
+  const std::vector<std::vector<Poly>> shapes = {{outer, hole}, {{regular(9, 55.5, 22.25, 8.3, 0.2)}}};
+  const GSHCPU_Rect windows[] = {rect_of(0, 0, 70, 48), rect_of(10, 8, 40, 36), rect_of(-5, -5, 20, 20), rect_of(25, 15, 80, 60)};
+  const int64_t shifts[][2] = {{0, 0}, {3, -2}, {-6, 5}};
+  for (const GSHCPU_Rect & r : windows) {
+    for (const auto & sh : shifts) {
+      for (GSHGEOM_Fill_Rule rule : {GSHGEOM_FILL_NONZERO, GSHGEOM_FILL_EVEN_ODD}) {
+        Worst w = compare_fill(shapes, rule, rect_of(r.x0 + sh[0], r.y0 + sh[1], r.x1 + sh[0], r.y1 + sh[1]), sh[0], sh[1]);
+        EXPECT_LE(w.max, 3) << "window " << r.x0 << "," << r.y0 << " shift " << sh[0] << "," << sh[1] << " rule " << rule;
+      }
+    }
+  }
+}
+
+TEST(RenderLeanFill, MoreRowsThanABandAndAnEmptyRectangle) {
+  const std::vector<std::vector<Poly>> tall = {{{{10 * 64, 2 * 64 + 9}, {40 * 64 + 5, 3 * 64}, {35 * 64, 190 * 64 + 40}, {12 * 64 + 20, 188 * 64}}}};
+  Worst w = compare_fill(tall, GSHGEOM_FILL_NONZERO, rect_of(0, 0, 50, 200), 0, 0);
+  EXPECT_LE(w.max, 3);
+  Flat f(tall[0]);
+  const GSHGEOM_Flat_Path * one[1] = {f.flat};
+  std::vector<int64_t> scratch(64, 0);
+  uint8_t keep = 7;
+  EXPECT_EQ(gshcpu_render_lean_fill(one, 1, 0, 0, 0, rect_of(5, 5, 5, 9), scratch.data(), 64 * 8, &keep), GSHCPU_OK);
+  EXPECT_EQ(keep, 7);
 }
 
 namespace {
