@@ -337,12 +337,13 @@ or a stripe begins. The compositor blends four pixels at a time with SSE2 where 
 scalar word). The frame of 2,500 strokes takes 74 ms on one thread.
 
 A sink created with `gshcpu_sink_create_with_executor` draws those strokes over 32-row stripes on threads the caller owns.
-The library starts none: it hands the executor a count and a task, which the executor runs on as many threads as it has
-(the calling thread may run one); a stripe is drawn by one task, its strokes in order, so the picture is byte-identical for
-any count, and an executor that refuses or runs fewer tasks leaves the rest to the caller. The strokes are queued with their
-points copied and drawn when the batch fills, before any stroke that is not queued, and at the end of the render. A sink
-with `CALLER_MEMORY` does not queue, since each task needs memory of its own. At 1, 2, 4 and 8 tasks a frame takes 74, 59,
-36 and 30 ms, the dashed scene 26, 20, 14 and 14 ms; what remains serial is the opening of each stroke.
+The library starts none: it asks the executor to start a count of tasks, which return at once, and later to wait for them. The
+calling thread queues the next batch of strokes into a second buffer while the tasks draw the first, and takes a share of the
+stripes itself when it must wait; a task the executor did not start is drawn by the calling thread. A stripe is drawn by
+one task, its strokes in order, and a batch is waited for before the next is started, so the picture is byte-identical for any
+count. The strokes are queued with their points copied and handed over when the batch fills, before any stroke that is not
+queued, and at the end of the render. A sink with `CALLER_MEMORY` does not queue, since each task needs memory of its own. At 1, 2, 4 and 8 threads a frame takes 78, 47,
+27 and 21 ms, the dashed scene 26, 17, 10 and 8.5 ms; what remains serial is the opening of each stroke.
 
 **What a pixel may cost (UC9, UC17, UC19, UC20).** Two limits bound the step, both decided over what the whole render draws of
 an item, so a damaged render refuses what the whole one does. `max_exact_fragments` (default 32768, at least twice the densest pixel measured) bounds the raw pieces of a

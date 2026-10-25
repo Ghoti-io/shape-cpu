@@ -1530,7 +1530,7 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   }
   run->direct8 = cs->fast && run->format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED && !cs->observer && L.groups == 0 && L.clips == 0 &&
       !L.aligned && !L.other && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) != 0;
-  if (run->direct8 && cs->executor.run && !caller) {
+  if (run->direct8 && cs->executor.start && !caller) {
     /* Several threads: the strokes are queued and drawn over stripes.  Nothing is queued without the batch (out of memory), and
      * the render goes on as one thread does. */
     run->batch = gshcpu_batch_create(&cs->alloc, &cs->executor, (size_t)(L.region.x1 - L.region.x0), run->pixels, run->stride);
@@ -1662,7 +1662,7 @@ static GSHCPU_Result sink_make(const GSHCPU_Allocator * alloc, const GSHSCENE_Li
   cs->observer_ctx = observer_ctx;
   cs->tiers = tiers;
   cs->fast = limits && limits->stroke_coverage == GSHCPU_STROKE_COVERAGE_FAST;
-  if (executor && executor->run && executor->threads > 1u) {
+  if (executor && executor->start && executor->wait && executor->threads > 1u) {
     cs->executor = *executor;
   }
   cs->counters = counters ? counters : &cs->own;

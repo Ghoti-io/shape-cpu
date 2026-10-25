@@ -589,36 +589,44 @@ GSHCPU_API GSHCPU_Result gshcpu_sink_create(const GSHCPU_Allocator * alloc, cons
     const GSHCPU_Limits * limits, GSHSCENE_Sink ** out);
 
 /**
- * @brief One task of a parallel step: @p index is in `[0, count)` of the ::GSHCPU_Executor_Fn call that ran it.
+ * @brief One task of a parallel step: @p index is in `[0, count)` of the ::GSHCPU_Executor_Start_Fn call that started it.
  */
 typedef void (*GSHCPU_Task_Fn)(void * ctx, size_t index);
 
 /**
- * @brief The caller's way to run tasks on its own threads.
+ * @brief The caller's way to start tasks on its own threads, and to wait for them.
  *
- * Call `task(ctx, i)` exactly once for every `i` in `[0, count)`, on any threads (all on the calling one is allowed), and return
- * only when every call has returned.  Two calls with different indexes may run at the same time; the sink gives each index its
- * own memory.  It may be called by several renders at once, so it must be safe for that.  @return 0 on success; a task not
- * run (a nonzero return) is drawn by the calling thread, so a refusal costs time and never the picture.
+ * `start` begins calling `task(ctx, i)` for the indexes in `[0, count)` on threads other than the calling one and returns at
+ * once, without waiting for any of them; it may begin only some of them, or none (a refusal).  `wait` returns when every call
+ * `start` began has returned.  The sink calls `start` at most once before each `wait`, from one thread at a time, and does
+ * not touch what the tasks use between the two; the strokes a task did not draw are drawn by the calling thread, so a
+ * refusal costs time and never the picture.  Two calls with different indexes may run at the same time; the sink gives each
+ * its own memory.  Several sinks may share one executor, so a `wait` may also wait for the others' tasks.
+ * @return 0 on success; nonzero when nothing was started.
  */
-typedef int (*GSHCPU_Executor_Fn)(void * user, size_t count, GSHCPU_Task_Fn task, void * ctx);
+typedef int (*GSHCPU_Executor_Start_Fn)(void * user, size_t count, GSHCPU_Task_Fn task, void * ctx);
+
+/** @brief Wait for the tasks the matching ::GSHCPU_Executor_Start_Fn began (see there). */
+typedef void (*GSHCPU_Executor_Wait_Fn)(void * user);
 
 /** @brief ::GSHCPU_Executor.threads past this is ::GSHCPU_ERR_INVALID. */
 #define GSHCPU_EXECUTOR_MAX_THREADS ((size_t)256)
 
 /**
- * @brief Threads for a sink to draw with, which the sink does not make: it asks @p run for @p threads tasks at a time.
+ * @brief Threads for a sink to draw with, which the sink does not make: it starts @p threads - 1 tasks at a time and draws with the calling thread as well.
  *
  * A render of strokes with the fast stroke coverage (::GSHCPU_STROKE_COVERAGE_FAST) onto an 8-bit premultiplied target, with
  * nothing else in it, queues its strokes (copying their outlines) and draws them over stripes of the target's rows; the
  * strokes of a stripe go in the order they were given and a stripe is written by one task, so the picture is the same bytes
- * for any @p threads and any executor.  Any other render, and a render with ::GSHSCENE_RENDER_CALLER_MEMORY (the queue and the
+ * for any @p threads and any executor.  While the tasks draw one batch of strokes the sink queues the next, so the thread that
+ * calls the sink is preparing strokes while the others draw them.  Any other render, and a render with ::GSHSCENE_RENDER_CALLER_MEMORY (the queue and the
  * tasks' memory come from the sink's allocator), is drawn by the calling thread alone.
  */
 typedef struct GSHCPU_Executor {
-  size_t threads;               ///< Tasks per step, at most ::GSHCPU_EXECUTOR_MAX_THREADS; below 2, nothing is spread.
-  GSHCPU_Executor_Fn run;       ///< The caller's executor; NULL for none.
-  void * user;                  ///< Handed to @p run.
+  size_t threads;               ///< Threads in all, the calling one among them, at most ::GSHCPU_EXECUTOR_MAX_THREADS; below 2, nothing is spread.
+  GSHCPU_Executor_Start_Fn start; ///< Begins tasks; NULL for no executor.
+  GSHCPU_Executor_Wait_Fn wait;   ///< Waits for them; required with @p start.
+  void * user;                  ///< Handed to both.
 } GSHCPU_Executor;
 
 /**

@@ -303,36 +303,46 @@ TEST(RenderLeanSink, AStrokePastTheCapOfTheSparseTierIsDrawnThroughTheLayerAndSt
 
 namespace {
 
-/** The caller's executor: a thread for each task but the first, which the calling thread runs; the count of calls is kept. */
+/** The caller's executor: a thread for each task started, joined by the wait; the count of starts is kept. */
 std::atomic<unsigned> g_runs{0};
 
-int thread_executor(void * user, size_t count, GSHCPU_Task_Fn task, void * ctx) {
+enum Mode { kAll, kRefuse, kHalf };
+
+struct Threads {
+  Mode mode = kAll;
+  std::vector<std::thread> running;
+};
+
+int thread_start(void * user, size_t count, GSHCPU_Task_Fn task, void * ctx) {
+  Threads * s = static_cast<Threads *>(user);
   g_runs++;
-  (void)user;
-  std::vector<std::thread> workers;
-  for (size_t i = 1; i < count; i++) {
-    workers.emplace_back([=] { task(ctx, i); });
+  if (s->mode == kRefuse) {
+    return 1; // nothing is run, and the calling thread must draw it all
   }
-  task(ctx, 0);
-  for (std::thread & t : workers) {
-    t.join();
+  for (size_t i = 0; i < count; i += s->mode == kHalf ? 2 : 1) { // kHalf: the odd tasks are never started
+    s->running.emplace_back([=] { task(ctx, i); });
   }
   return 0;
 }
 
-/** An executor that refuses: nothing is run, and the calling thread must draw it all. */
-int refusing_executor(void *, size_t, GSHCPU_Task_Fn, void *) {
-  return 1;
+void thread_wait(void * user) {
+  Threads * s = static_cast<Threads *>(user);
+  for (std::thread & t : s->running) {
+    t.join();
+  }
+  s->running.clear();
 }
 
 /** The hash of @p list drawn with the fast coverage and an executor of @p threads tasks, under the sparse cap @p max_deposits. */
 uint64_t drawn_hash(const GSHSCENE_List * list, size_t threads, uint64_t max_deposits, GSHSCENE_Result * result = nullptr,
-    GSHCPU_Executor_Fn run = thread_executor) {
+    Mode mode = kAll) {
   GSHCPU_Limits limits;
   gshcpu_limits_default(&limits);
   limits.max_deposits = max_deposits;
   limits.stroke_coverage = GSHCPU_STROKE_COVERAGE_FAST;
-  GSHCPU_Executor executor = {threads, threads > 1 ? run : nullptr, nullptr};
+  Threads state;
+  state.mode = mode;
+  GSHCPU_Executor executor = {threads, threads > 1 ? thread_start : nullptr, threads > 1 ? thread_wait : nullptr, &state};
   GSHSCENE_Sink * sink = nullptr;
   EXPECT_EQ(gshcpu_render_sink_create_with_executor(nullptr, nullptr, &limits, GSHCPU_RENDER_TIERS_ALL, nullptr, &executor, &sink),
       GSHCPU_OK);
@@ -348,8 +358,9 @@ uint64_t drawn_hash(const GSHSCENE_List * list, size_t threads, uint64_t max_dep
 
 TEST(RenderLeanThreads, ThePictureIsTheSameBytesForAnyNumberOfThreads) {
   Store store;
-  // 3 strokes are fewer than a batch takes to the threads, 24 are a few stripes' worth, 300 fill the batch more than once.
-  for (int count : {1, 3, 24, 300}) {
+  // 3 strokes are fewer than a batch takes to the threads, 24 are a few stripes' worth, 300 and 700 fill the batch once and twice
+  // (the threads draw one fill while the next is queued).
+  for (int count : {1, 3, 24, 300, 700}) {
     const GSHSCENE_List * list = crossing_strokes(store, count, 0.2, 3.0 + (count % 5));
     const uint64_t one = drawn_hash(list, 1, 0);
     ASSERT_NE(one, 0u);
@@ -385,11 +396,13 @@ TEST(RenderLeanThreads, TheExecutorIsAskedAndARefusalCostsTimeAndNotThePicture) 
   g_runs = 0;
   EXPECT_EQ(drawn_hash(list, 1, 0), one);
   EXPECT_EQ(g_runs.load(), 0u) << "one task is no executor";
-  EXPECT_EQ(drawn_hash(list, 4, 0, nullptr, refusing_executor), one) << "a refusal leaves it to the calling thread";
+  EXPECT_EQ(drawn_hash(list, 4, 0, nullptr, kRefuse), one) << "a refusal leaves it to the calling thread";
+  EXPECT_EQ(drawn_hash(list, 4, 0, nullptr, kHalf), one) << "tasks never started are drawn by the calling thread";
 }
 
 TEST(RenderLeanThreads, MoreTasksThanTheCeilingAreRefused) {
-  GSHCPU_Executor executor = {GSHCPU_EXECUTOR_MAX_THREADS, thread_executor, nullptr};
+  Threads state;
+  GSHCPU_Executor executor = {GSHCPU_EXECUTOR_MAX_THREADS, thread_start, thread_wait, &state};
   GSHSCENE_Sink * sink = nullptr;
   ASSERT_EQ(gshcpu_sink_create_with_executor(nullptr, nullptr, nullptr, &executor, &sink), GSHCPU_OK);
   EXPECT_EQ(gshscene_sink_destroy(sink), GSHSCENE_OK);

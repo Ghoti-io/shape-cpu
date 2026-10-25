@@ -861,7 +861,7 @@ void gshcpu_direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
 /** The strokes of a render held to be drawn together by several threads. */
 typedef struct GSHCPU_Batch GSHCPU_Batch;
 
-/** A batch drawn by @p executor (its `threads` at least 2, its `run` set) over windows up to @p width wide; NULL when it cannot be made. */
+/** A batch drawn by @p executor (its `threads` at least 2, its `start` and `wait` set) over windows up to @p width wide; NULL when it cannot be made. */
 GSHCPU_Batch * gshcpu_batch_create(const GSHGEOM_Allocator * alloc, const GSHCPU_Executor * executor, size_t width,
     unsigned char * pixels, size_t stride);
 

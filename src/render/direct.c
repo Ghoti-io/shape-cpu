@@ -144,12 +144,24 @@ void gshcpu_direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
 #define BATCH_MIN_ENTRIES 4u
 
 typedef struct Entry {
-  size_t point0;             /* its points, from the batch's array */
+  size_t point0;             /* its points, from the fill's array */
   size_t sub0, subs;         /* and its subpaths */
   int64_t shift_x, shift_y;
   GSHCPU_Rect rect;          /* the destination's window */
   GSHCPU_Direct8 d8;
 } Entry;
+
+/** What a batch holds between two flushes.  There are two: the executor draws one while the caller fills the other. */
+typedef struct Fill {
+  Entry * entry;
+  size_t entries;
+  GSHGEOM_Device_Point * point;
+  size_t points;
+  GSHGEOM_Flat_Subpath * sub;
+  size_t subs;
+  int64_t y0;                /* the first row of stripe 0 */
+  int64_t stripes;
+} Fill;
 
 typedef struct Worker {
   struct GSHCPU_Batch * batch;
@@ -164,25 +176,34 @@ struct GSHCPU_Batch {
   size_t width;              /* the widest window */
   unsigned char * pixels;
   size_t stride;
-  Entry * entry;
-  size_t entries;
-  GSHGEOM_Device_Point * point;
-  size_t points;
-  GSHGEOM_Flat_Subpath * sub;
-  size_t subs;
-  Worker * worker;           /* one for each task, made at the first flush that needs them */
+  Fill fill[2];
+  unsigned filling;          /* the one being queued into; the other is being drawn when `drawing` is set */
+  Fill * drawing;            /* the fill the tasks draw */
+  int started;               /* the executor was started on `drawing` and has not been waited for */
+  Worker * worker;           /* one for each thread, the caller's first, made at the first flush that needs them */
   size_t scratch_bytes;
-  /* a flush's */
+  /* the drawing's */
   GCU_Atomic_Int next;       /* the next stripe to take */
   GCU_Atomic_Int failed;     /* the first result that was not OK, as an int */
-  int64_t y0;                /* the first row of stripe 0 */
-  int64_t stripes;
 };
+
+static void fill_free(const GSHGEOM_Allocator * a, Fill * f) {
+  a->free_fn(a->ctx, f->entry);
+  a->free_fn(a->ctx, f->point);
+  a->free_fn(a->ctx, f->sub);
+}
+
+static int fill_make(const GSHGEOM_Allocator * a, Fill * f) {
+  f->entry = a->malloc_fn(a->ctx, BATCH_ENTRIES * sizeof *f->entry);
+  f->point = a->malloc_fn(a->ctx, BATCH_POINTS * sizeof *f->point);
+  f->sub = a->malloc_fn(a->ctx, BATCH_SUBPATHS * sizeof *f->sub);
+  return f->entry && f->point && f->sub;
+}
 
 GSHCPU_Batch * gshcpu_batch_create(const GSHGEOM_Allocator * alloc, const GSHCPU_Executor * executor, size_t width,
     unsigned char * pixels, size_t stride) {
-  if (!executor || !executor->run || executor->threads < 2u || executor->threads > GSHCPU_EXECUTOR_MAX_THREADS || !width ||
-      width > 65000u) {
+  if (!executor || !executor->start || !executor->wait || executor->threads < 2u ||
+      executor->threads > GSHCPU_EXECUTOR_MAX_THREADS || !width || width > 65000u) {
     return NULL;
   }
   GSHCPU_Batch * b = alloc->calloc_fn(alloc->ctx, 1, sizeof *b);
@@ -195,50 +216,30 @@ GSHCPU_Batch * gshcpu_batch_create(const GSHGEOM_Allocator * alloc, const GSHCPU
   b->width = width;
   b->pixels = pixels;
   b->stride = stride;
-  b->entry = alloc->malloc_fn(alloc->ctx, BATCH_ENTRIES * sizeof *b->entry);
-  b->point = alloc->malloc_fn(alloc->ctx, BATCH_POINTS * sizeof *b->point);
-  b->sub = alloc->malloc_fn(alloc->ctx, BATCH_SUBPATHS * sizeof *b->sub);
   b->scratch_bytes = gshcpu_lean_bytes(width, STRIPE_ROWS);
   gcu_atomic_int_init(&b->next, 0);
   gcu_atomic_int_init(&b->failed, 0);
-  if (!b->entry || !b->point || !b->sub) {
+  if (!fill_make(alloc, &b->fill[0]) || !fill_make(alloc, &b->fill[1])) {
     gshcpu_batch_destroy(b);
     return NULL;
   }
   return b;
 }
 
-void gshcpu_batch_destroy(GSHCPU_Batch * b) {
-  if (!b) {
-    return;
-  }
-  GSHGEOM_Allocator a = b->alloc;
-  if (b->worker) {
-    for (unsigned i = 0; i < b->threads; i++) {
-      a.free_fn(a.ctx, b->worker[i].scratch);
-      a.free_fn(a.ctx, b->worker[i].line);
-    }
-    a.free_fn(a.ctx, b->worker);
-  }
-  a.free_fn(a.ctx, b->entry);
-  a.free_fn(a.ctx, b->point);
-  a.free_fn(a.ctx, b->sub);
-  a.free_fn(a.ctx, b);
-}
-
-/** The stripe @p s of the flush, drawn by @p w: each queued stroke that reaches it, in the order queued. */
+/** The stripe @p s of the drawing, drawn by @p w: each queued stroke that reaches it, in the order queued. */
 static GSHCPU_Result batch_stripe(GSHCPU_Batch * b, Worker * w, int64_t s) {
-  const int64_t Y0 = b->y0 + s * STRIPE_ROWS;
+  const Fill * f = b->drawing;
+  const int64_t Y0 = f->y0 + s * STRIPE_ROWS;
   const int64_t Y1 = Y0 + STRIPE_ROWS;
-  for (size_t i = 0; i < b->entries; i++) {
-    const Entry * e = &b->entry[i];
+  for (size_t i = 0; i < f->entries; i++) {
+    const Entry * e = &f->entry[i];
     GSHCPU_Rect r = e->rect;
     if (r.y1 <= Y0 || r.y0 >= Y1) {
       continue;
     }
     r.y0 = r.y0 > Y0 ? r.y0 : Y0;
     r.y1 = r.y1 < Y1 ? r.y1 : Y1;
-    GSHCPU_Result x = gshcpu_render_lean_cover_points(b->point + e->point0, b->sub + e->sub0, e->subs, e->shift_x, e->shift_y, r,
+    GSHCPU_Result x = gshcpu_render_lean_cover_points(f->point + e->point0, f->sub + e->sub0, e->subs, e->shift_x, e->shift_y, r,
         w->scratch, b->scratch_bytes, w->line, gshcpu_direct8_span, (void *)&e->d8);
     if (x != GSHCPU_OK) {
       return x;
@@ -255,7 +256,7 @@ static void batch_work(Worker * w) {
       return;
     }
     const int64_t s = gcu_atomic_int_fetch_add(&b->next, 1);
-    if (s >= b->stripes) {
+    if (s >= b->drawing->stripes) {
       return;
     }
     GSHCPU_Result x = batch_stripe(b, w, s);
@@ -267,15 +268,15 @@ static void batch_work(Worker * w) {
   }
 }
 
-/** The executor's task: the stripes taken by task @p index with its own memory. */
+/** The executor's task: the stripes taken by the helper @p index, which has memory of its own (the caller's is the first). */
 static void batch_task(void * ctx, size_t index) {
   GSHCPU_Batch * b = ctx;
-  if (index < b->threads) {
-    batch_work(&b->worker[index]);
+  if (index + 1u < b->threads) {
+    batch_work(&b->worker[index + 1u]);
   }
 }
 
-/** The tasks' memory: a scratch and a row of coverages each.  @return 1 when they are there. */
+/** The threads' memory: a scratch and a row of coverages each.  @return 1 when they are there. */
 static int batch_workers(GSHCPU_Batch * b) {
   if (b->worker) {
     return 1;
@@ -297,32 +298,80 @@ static int batch_workers(GSHCPU_Batch * b) {
   return 1;
 }
 
-GSHCPU_Result gshcpu_batch_flush(GSHCPU_Batch * b) {
-  if (!b || b->entries == 0) {
+/** Wait for the drawing to be done: the caller takes the stripes left, then waits for the helpers.  Empties the drawn fill. */
+static GSHCPU_Result batch_complete(GSHCPU_Batch * b) {
+  if (!b->started) {
     return GSHCPU_OK;
   }
-  int64_t lo = b->entry[0].rect.y0;
-  int64_t hi = b->entry[0].rect.y1;
-  for (size_t i = 1; i < b->entries; i++) {
-    lo = b->entry[i].rect.y0 < lo ? b->entry[i].rect.y0 : lo;
-    hi = b->entry[i].rect.y1 > hi ? b->entry[i].rect.y1 : hi;
+  batch_work(&b->worker[0]);
+  b->executor.wait(b->executor.user);
+  b->started = 0;
+  b->drawing->entries = b->drawing->points = b->drawing->subs = 0;
+  return (GSHCPU_Result)gcu_atomic_int_load(&b->failed);
+}
+
+/**
+ * Hand what is queued to the threads and go on queueing into the other fill.  The one before it is waited for first, so the
+ * strokes are drawn in the order queued.  A render that has few strokes or stripes is drawn by the caller here and then.
+ */
+static GSHCPU_Result batch_submit(GSHCPU_Batch * b) {
+  Fill * f = &b->fill[b->filling];
+  if (f->entries == 0) {
+    return GSHCPU_OK;
   }
-  b->y0 = lo;
-  b->stripes = (hi - lo + STRIPE_ROWS - 1) / STRIPE_ROWS;
+  GSHCPU_Result r = batch_complete(b);
+  if (r != GSHCPU_OK || !batch_workers(b)) {
+    f->entries = f->points = f->subs = 0;
+    return r != GSHCPU_OK ? r : GSHCPU_ERR_OOM;
+  }
+  int64_t lo = f->entry[0].rect.y0;
+  int64_t hi = f->entry[0].rect.y1;
+  for (size_t i = 1; i < f->entries; i++) {
+    lo = f->entry[i].rect.y0 < lo ? f->entry[i].rect.y0 : lo;
+    hi = f->entry[i].rect.y1 > hi ? f->entry[i].rect.y1 : hi;
+  }
+  f->y0 = lo;
+  f->stripes = (hi - lo + STRIPE_ROWS - 1) / STRIPE_ROWS;
+  b->drawing = f;
   gcu_atomic_int_store(&b->next, 0);
   gcu_atomic_int_store(&b->failed, 0);
-  if (!batch_workers(b)) {
-    b->entries = b->points = b->subs = 0;
-    return GSHCPU_ERR_OOM;
+  if (f->entries >= BATCH_MIN_ENTRIES && f->stripes >= 2) {
+    /* The executor starts the helpers and returns; a refusal, or a helper it did not start, leaves the stripes to the rest. */
+    (void)b->executor.start(b->executor.user, b->threads - 1u, batch_task, b);
+    b->started = 1;
+    b->filling ^= 1u;
+    return GSHCPU_OK;
   }
-  /* A flush of few strokes or a few stripes does not pay for the tasks' wake: the caller draws it alone. */
-  if (b->entries >= BATCH_MIN_ENTRIES && b->stripes >= 2) {
-    /* The executor runs the tasks (a refusal, or a task it did not run, leaves its stripes to the rest and to the pass below). */
-    (void)b->executor.run(b->executor.user, b->threads, batch_task, b);
-  }
-  batch_work(&b->worker[0]); /* whatever is left: all of it when no executor ran, nothing when they did */
-  b->entries = b->points = b->subs = 0;
+  batch_work(&b->worker[0]);
+  f->entries = f->points = f->subs = 0;
   return (GSHCPU_Result)gcu_atomic_int_load(&b->failed);
+}
+
+GSHCPU_Result gshcpu_batch_flush(GSHCPU_Batch * b) {
+  if (!b) {
+    return GSHCPU_OK;
+  }
+  GSHCPU_Result r = batch_submit(b);
+  GSHCPU_Result c = batch_complete(b);
+  return r != GSHCPU_OK ? r : c;
+}
+
+void gshcpu_batch_destroy(GSHCPU_Batch * b) {
+  if (!b) {
+    return;
+  }
+  (void)batch_complete(b); /* nothing the executor started outlives the batch's memory */
+  GSHGEOM_Allocator a = b->alloc;
+  if (b->worker) {
+    for (unsigned i = 0; i < b->threads; i++) {
+      a.free_fn(a.ctx, b->worker[i].scratch);
+      a.free_fn(a.ctx, b->worker[i].line);
+    }
+    a.free_fn(a.ctx, b->worker);
+  }
+  fill_free(&a, &b->fill[0]);
+  fill_free(&a, &b->fill[1]);
+  a.free_fn(a.ctx, b);
 }
 
 int gshcpu_batch_add(GSHCPU_Batch * b, const GSHGEOM_Flat_Path * path, int64_t shift_x, int64_t shift_y, GSHCPU_Rect rect,
@@ -333,15 +382,17 @@ int gshcpu_batch_add(GSHCPU_Batch * b, const GSHGEOM_Flat_Path * path, int64_t s
   if (points > BATCH_POINTS || subs > BATCH_SUBPATHS || rect.x1 - rect.x0 > (int64_t)b->width) {
     return 0; /* more than a batch holds, or wider than its threads' scratch: the caller draws it itself, after the flush */
   }
-  if (b->entries == BATCH_ENTRIES || b->points + points > BATCH_POINTS || b->subs + subs > BATCH_SUBPATHS) {
-    *result = gshcpu_batch_flush(b);
+  Fill * f = &b->fill[b->filling];
+  if (f->entries == BATCH_ENTRIES || f->points + points > BATCH_POINTS || f->subs + subs > BATCH_SUBPATHS) {
+    *result = batch_submit(b); /* the threads draw it while the next is queued */
     if (*result != GSHCPU_OK) {
       return -1;
     }
+    f = &b->fill[b->filling];
   }
-  Entry * e = &b->entry[b->entries];
-  e->point0 = b->points;
-  e->sub0 = b->subs;
+  Entry * e = &f->entry[f->entries];
+  e->point0 = f->points;
+  e->sub0 = f->subs;
   e->subs = subs;
   e->shift_x = shift_x;
   e->shift_y = shift_y;
@@ -352,16 +403,16 @@ int gshcpu_batch_add(GSHCPU_Batch * b, const GSHGEOM_Flat_Path * path, int64_t s
   e->d8.dy = shift_y;
   gshcpu_direct8_color(&e->d8, color);
   if (points) {
-    memcpy(b->point + b->points, gshgeom_flat_path_points(path), points * sizeof *b->point);
+    memcpy(f->point + f->points, gshgeom_flat_path_points(path), points * sizeof *f->point);
   }
   for (size_t i = 0; i < subs; i++) {
-    if (gshgeom_flat_path_subpath(path, i, &b->sub[b->subs + i]) != GSHGEOM_OK) {
+    if (gshgeom_flat_path_subpath(path, i, &f->sub[f->subs + i]) != GSHGEOM_OK) {
       *result = GSHCPU_ERR_INTERNAL;
       return -1;
     }
   }
-  b->points += points;
-  b->subs += subs;
-  b->entries++;
+  f->points += points;
+  f->subs += subs;
+  f->entries++;
   return 1;
 }
