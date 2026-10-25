@@ -138,6 +138,71 @@ TEST(RenderLayer8, ClipWeighsAgreeWithTheIntegerRoundingOfD8) {
   }
 }
 
+TEST(RenderLayer8, PremultiplyingARowIsTheD8WeightOfEachChannel) {
+  std::mt19937 g(99);
+  for (size_t n : {0u, 1u, 7u, 8u, 9u, 64u, 101u}) {
+    std::vector<uint8_t> src(4 * (n + 1)), dst(4 * (n + 1), 0xAB), want(4 * (n + 1), 0xAB);
+    for (size_t i = 0; i < n; i++) {
+      for (int k = 0; k < 4; k++) {
+        src[4 * i + (size_t)k] = (uint8_t)(g() % 4 == 0 ? (g() % 2 ? 255 : 0) : g() % 256);
+      }
+      const uint32_t a = src[4 * i + 3];
+      for (int k = 0; k < 3; k++) {
+        want[4 * i + (size_t)k] = (uint8_t)gshcpu_render_weigh(src[4 * i + (size_t)k], a);
+      }
+      want[4 * i + 3] = (uint8_t)a;
+    }
+    gshcpu_direct8_premultiply_row(dst.data(), src.data(), n);
+    EXPECT_EQ(dst, want) << "n " << n;
+  }
+}
+
+TEST(RenderLayer8, AStraightStoreLeavesWhatTheDrawingDidNotChange) {
+  // A target of straight pixels of every kind of alpha, loaded (premultiplied), left as they are, and four of them changed.
+  const size_t n = 300;
+  std::mt19937 g(5);
+  std::vector<uint8_t> target(4 * n);
+  for (size_t i = 0; i < n; i++) {
+    for (int k = 0; k < 4; k++) {
+      target[4 * i + (size_t)k] = (uint8_t)(g() % 256);
+    }
+    if (i % 3 == 0) {
+      target[4 * i + 3] = 255;
+    } else if (i % 3 == 1 && i % 2) {
+      target[4 * i + 3] = 0;
+    }
+  }
+  const std::vector<uint8_t> original = target;
+  std::vector<uint8_t> layer(4 * n);
+  gshcpu_direct8_premultiply_row(layer.data(), target.data(), n);
+  std::vector<uint8_t> loaded = layer;
+  gshcpu_direct8_store_straight_row(target.data(), layer.data(), n);
+  EXPECT_EQ(target, original) << "untouched pixels come back as they were, rounding of the round trip or not";
+  // Change four: an opaque one to another color, a transparent to half red, a partial to a new alpha, one to clear.
+  size_t idx[4] = {3, 7, 4, 10};
+  const uint8_t value[4][4] = {{10, 20, 30, 255}, {100, 0, 0, 200}, {50, 40, 30, 120}, {0, 0, 0, 0}};
+  for (int j = 0; j < 4; j++) {
+    std::memcpy(&layer[4 * idx[j]], value[j], 4);
+  }
+  gshcpu_direct8_store_straight_row(target.data(), layer.data(), n);
+  for (size_t i = 0; i < n; i++) {
+    bool changed = false;
+    for (int j = 0; j < 4; j++) {
+      changed = changed || idx[j] == i;
+    }
+    if (!changed) {
+      EXPECT_EQ(std::memcmp(&target[4 * i], &original[4 * i], 4), 0) << "pixel " << i;
+    }
+  }
+  EXPECT_EQ(target[4 * 3 + 0], 10);
+  EXPECT_EQ(target[4 * 3 + 3], 255);
+  EXPECT_EQ(target[4 * 7 + 3], 200);
+  EXPECT_EQ(target[4 * 7 + 0], 128) << "100 of 200 is half: 127.5 rounds up";
+  EXPECT_EQ(target[4 * 10 + 3], 0);
+  EXPECT_EQ(target[4 * 10 + 0], 0);
+  (void)loaded;
+}
+
 namespace {
 
 GSHGEOM_Map map_of(double a, double b, double c, double d, double e, double f) {

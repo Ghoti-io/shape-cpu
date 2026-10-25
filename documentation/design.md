@@ -344,14 +344,17 @@ layer's space and premultiplied once, and kept (two tables, by gradient, paint a
 costs its parameter and one lookup; the color it gets is that of the nearest point, which differs from the evaluation by the
 change of the line over a 1,024th of its extent. A fill under 2,048 pixels that finds no table evaluates the line as before.
 
-On a target of 8-bit premultiplied pixels the same limit also holds the layers as bytes: the root is the target itself, drawn in
-place, and so is a group in the target's space; a group in another space keeps doubles (its pixels are converted where it is
-composed). A fill composes in integers with the arithmetic of the fast stroke's compositor, a gradient from its table of bytes,
-a group's source-over a row at a time, and a separable blend mode a row at a time in single-precision floats from the
-premultiplied channels. Every operation rounds to a byte, where the exact coverage rounds once at the end, so a picture differs
-from the exact one by a fraction of a level on the whole (0.5 to 0.7 of 255 a byte on the two showcase pictures). A list with a
-color component outside `[0, 1]` is drawn with doubles, for a byte cannot hold it. The two pictures take 0.22 s a frame on one
-thread.
+On a target of 8-bit pixels, premultiplied or straight, the same limit also holds the layers as bytes: a premultiplied target is the
+root itself, drawn in place; a straight one is loaded into a root of premultiplied bytes as the units reach it and stored at the
+end, the pixels whose bytes changed (one the drawing left as it loaded is left as it was). A group in the target's space is a byte
+layer; a group in another space keeps doubles (its pixels are converted where it is composed, linear light into the target's
+through a table). A fill composes in integers with the arithmetic of the fast stroke's compositor, a gradient from its table of
+bytes, a group's source-over a row at a time, and a separable blend mode a row at a time in single-precision floats from the
+premultiplied channels. The parameter of a radial or sweep gradient padded at both ends is found eight pixels at a time in single
+precision where the processor has AVX2. Every operation rounds to a byte, where the exact coverage rounds once at the end, so a
+picture differs from the exact one by a fraction of a level on the whole (0.4 to 0.7 of 255 a byte on the two showcase
+pictures). A list with a color component outside `[0, 1]` is drawn with doubles, for a byte cannot hold it. The two pictures take
+0.08 and 0.15 s a frame on one thread.
 
 The fast coverage is an integer area and cover per cell, in 8192ths of a pixel, with the cells a row notes kept in a bitset swept
 in order, in bands of up to 1,024 rows. With a fast coverage the accumulator is given room for a band as tall as the window (within 16 MiB), so that the edges are walked once and not once for each band of the few rows a smaller one holds. The points are already 64ths of a pixel, so an edge steps the quotient and remainder of a

@@ -400,6 +400,88 @@ void gshcpu_direct8_weigh(uint8_t * m, const uint8_t * c, size_t n) {
   }
 }
 
+/* --- straight-alpha targets ----------------------------------------------------------------------------- */
+
+#if defined(D8_AVX2)
+/** Eight pixels at a time of the premultiplication: the pixels done, a multiple of eight. */
+__attribute__((target("avx2"))) static size_t d8_avx2_premultiply(unsigned char * dst, const unsigned char * src, size_t n) {
+  const __m256i zero = _mm256_setzero_si256();
+  const __m256i k80 = _mm256_set1_epi16(0x80);
+  size_t i = 0;
+  for (; i + 8u <= n; i += 8) {
+    const __m256i px = _mm256_loadu_si256((const __m256i *)(const void *)(src + 4u * i));
+    const __m256i lo = _mm256_unpacklo_epi8(px, zero);
+    const __m256i hi = _mm256_unpackhi_epi8(px, zero);
+    const __m256i a_lo = _mm256_shufflehi_epi16(_mm256_shufflelo_epi16(lo, 0xff), 0xff);
+    const __m256i a_hi = _mm256_shufflehi_epi16(_mm256_shufflelo_epi16(hi, 0xff), 0xff);
+    __m256i t = _mm256_add_epi16(_mm256_mullo_epi16(lo, a_lo), k80);
+    __m256i p_lo = _mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8);
+    t = _mm256_add_epi16(_mm256_mullo_epi16(hi, a_hi), k80);
+    __m256i p_hi = _mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8);
+    p_lo = _mm256_blend_epi16(p_lo, lo, 0x88); /* the alpha lane is the alpha */
+    p_hi = _mm256_blend_epi16(p_hi, hi, 0x88);
+    _mm256_storeu_si256((__m256i *)(void *)(dst + 4u * i), _mm256_packus_epi16(p_lo, p_hi));
+  }
+  return i;
+}
+#endif
+
+/** The premultiplied channel of straight @p c under alpha @p a: `(c a + 127) / 255`, the weight of D8. */
+static inline uint8_t d8_premul(uint32_t c, uint32_t a) {
+  return (uint8_t)((c * a + 127u) / 255u);
+}
+
+void gshcpu_direct8_premultiply_row(unsigned char * dst, const unsigned char * src, size_t n) {
+  size_t i = 0;
+#if defined(D8_AVX2)
+  if (n >= 8u && d8_have_avx2()) {
+    i = d8_avx2_premultiply(dst, src, n);
+  }
+#endif
+  for (; i < n; i++) {
+    const uint32_t a = src[4u * i + 3u];
+    if (a == 255u) {
+      memcpy(dst + 4u * i, src + 4u * i, 4);
+    } else {
+      dst[4u * i + 0u] = d8_premul(src[4u * i + 0u], a);
+      dst[4u * i + 1u] = d8_premul(src[4u * i + 1u], a);
+      dst[4u * i + 2u] = d8_premul(src[4u * i + 2u], a);
+      dst[4u * i + 3u] = (uint8_t)a;
+    }
+  }
+}
+
+void gshcpu_direct8_store_straight_row(unsigned char * target, const unsigned char * premultiplied, size_t n) {
+  for (size_t i = 0; i < n; i++, target += 4, premultiplied += 4) {
+    const uint32_t ao = target[3];
+    /* A pixel the drawing left as it loaded is left as it was, whatever the rounding of the round trip would give. */
+    if (ao == 255u) {
+      if (memcmp(target, premultiplied, 4) == 0) {
+        continue;
+      }
+    } else if (ao == 0u) {
+      if (premultiplied[3] == 0 && premultiplied[0] == 0 && premultiplied[1] == 0 && premultiplied[2] == 0) {
+        continue;
+      }
+    } else if (premultiplied[3] == ao && premultiplied[0] == d8_premul(target[0], ao) && premultiplied[1] == d8_premul(target[1], ao) &&
+        premultiplied[2] == d8_premul(target[2], ao)) {
+      continue;
+    }
+    const uint32_t a = premultiplied[3];
+    if (a == 0u) {
+      memset(target, 0, 4);
+    } else if (a == 255u) {
+      memcpy(target, premultiplied, 4);
+    } else {
+      for (int k = 0; k < 3; k++) {
+        const uint32_t c = ((uint32_t)premultiplied[k] * 255u + a / 2u) / a;
+        target[k] = (uint8_t)(c > 255u ? 255u : c);
+      }
+      target[3] = (uint8_t)a;
+    }
+  }
+}
+
 /* --- blend modes on bytes ------------------------------------------------------------------------------ */
 
 /** The part of a separable mode's result that depends on both pixels, `As Ad B(Cb, Cs)` (B2), from the premultiplied channels. */

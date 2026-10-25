@@ -176,7 +176,8 @@ typedef struct Run {
   uint8_t * cov_result;
   int64_t * acc;
   GSHCPU_Exact exact[3];     /* UC9: the exact step's arrays, when the layout has them (strokes): one for each part of an aligned stroke */
-  int fast8;                 /* the fast fill coverage on an 8-bit premultiplied target: the layers are bytes, the root the target itself */
+  int straight8;             /* ... and the target is straight alpha: its root is a byte layer of its own, loaded and stored */
+  int fast8;                 /* the fast fill coverage on an 8-bit premultiplied or straight target: the layers are bytes, the root the target itself */
   int direct8;               /* the fast coverage composes straight into the target's bytes (strokes alone, 8-bit premultiplied) */
   GSHCPU_Batch * batch;      /* ... and its strokes are queued and drawn over stripes by several threads (GSHCPU_Limits.threads) */
   int acc_dirty;             /* the dense sweep leaves the accumulator written (1: the part it uses); the sparse one needs it zero (2: nothing is known of it) */
@@ -711,10 +712,13 @@ static void ready_span(Run * run, Frame * f, int64_t x0, int64_t x1, int64_t y) 
     return;
   }
   if (f->bytes) {
+    unsigned char * at8 = f->px8 + (size_t)(y - f->oy) * f->stride8 + 4u * (size_t)(x0 - f->ox);
     if (f != &run->frames[0]) {
-      memset(f->px8 + (size_t)(y - f->oy) * f->stride8 + 4u * (size_t)(x0 - f->ox), 0, 4u * (size_t)(x1 - x0));
+      memset(at8, 0, 4u * (size_t)(x1 - x0));
+    } else if (run->straight8) {
+      gshcpu_direct8_premultiply_row(at8, run->pixels + (size_t)y * run->stride + 4u * (size_t)x0, (size_t)(x1 - x0));
     }
-    return; /* the root is the target: nothing is read or cleared */
+    return; /* a premultiplied root is the target itself: nothing is read or cleared */
   }
   size_t p = at(run, x0, y);
   size_t n = (size_t)(x1 - x0);
@@ -1969,6 +1973,13 @@ static void finish(Run * run, GSHSCENE_Result result, void * memory) {
   }
   if (!run->fast8) {
     write_target(run);
+  } else if (run->straight8) {
+    const GSHCPU_Rect d = run->frames[0].dirty;
+    for (int64_t y = d.y0; y < d.y1 && d.x0 < d.x1; y++) {
+      gshcpu_direct8_store_straight_row(run->pixels + (size_t)y * run->stride + 4u * (size_t)d.x0,
+          run->frames[0].px8 + (size_t)(y - run->frames[0].oy) * run->frames[0].stride8 + 4u * (size_t)(d.x0 - run->frames[0].ox),
+          (size_t)(d.x1 - d.x0));
+    }
   }
   GSHSCENE_Job * job = run->job;
   gshscene_job_set_frame_bytes(job, run->layout.fixed);
@@ -2042,8 +2053,9 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
       run->exact[2].max_crossings = cs->max_crossings;
     }
   }
-  run->fast8 = cs->fast_fill && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) != 0 && run->format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED &&
-      !cs->observer && !L.wide;
+  run->fast8 = cs->fast_fill && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) != 0 &&
+      (run->format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED || run->format == GSHCPU_FORMAT_RGBA8_STRAIGHT) && !cs->observer && !L.wide;
+  run->straight8 = run->fast8 && run->format == GSHCPU_FORMAT_RGBA8_STRAIGHT;
   run->direct8 = cs->fast && run->format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED && !cs->observer && L.groups == 0 && L.clips == 0 &&
       !L.aligned && !L.other && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) != 0;
   if (run->direct8 && cs->executor.start && !caller) {
@@ -2077,10 +2089,19 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   memset(root, 0, sizeof *root);
   root->layer = run->root;
   root->bytes = run->fast8;
-  root->px8 = run->pixels;
-  root->stride8 = run->stride;
-  root->ox = 0;
-  root->oy = 0;
+  if (run->straight8) {
+    /* The target is straight: the root is premultiplied bytes of its own (the room of the double root), loaded as the units reach it
+     * and stored, the pixels that changed, at the end. */
+    root->px8 = (unsigned char *)(void *)run->root;
+    root->stride8 = 4u * run->layout.width;
+    root->ox = run->layout.region.x0;
+    root->oy = run->layout.region.y0;
+  } else {
+    root->px8 = run->pixels;
+    root->stride8 = run->stride;
+    root->ox = 0;
+    root->oy = 0;
+  }
   root->space = *gshscene_job_target_space(job);
 
   const GSHSCENE_Item * item;

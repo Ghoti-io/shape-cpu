@@ -709,6 +709,112 @@ __attribute__((target("avx2"))) static size_t table_row_avx2(const GSHCPU_Gradie
 }
 #endif
 
+#if defined(GRADIENT_AVX2)
+/**
+ * table_row for a gradient on a line padded at both ends, eight pixels at a time in single precision: the offset on the line
+ * of each pixel (the same operations as the double rows, the choices made with masks), held to the table, and its index.  The
+ * point of the first pixel is taken in doubles first; a float then holds the offsets of a row of pixels to about a millionth.
+ * @return the pixels done, a multiple of eight.
+ */
+__attribute__((target("avx2"))) static size_t table_row_avx2f(const GSHCPU_Gradient * g, double px0, double py0, double dpx,
+    double dpy, double t0, double dt, size_t count, const uint8_t * cov, uint32_t * index) {
+  const __m256 lane = _mm256_set_ps(7.0f, 6.0f, 5.0f, 4.0f, 3.0f, 2.0f, 1.0f, 0.0f);
+  const __m256 zero = _mm256_setzero_ps();
+  const __m256 ones = _mm256_castsi256_ps(_mm256_set1_epi32(-1));
+  const __m256 top = _mm256_set1_ps((float)GSHCPU_RENDER_GRADIENT_TABLE);
+  const __m256 half = _mm256_set1_ps(0.5f);
+  const __m256 scale = _mm256_set1_ps((float)g->scale);
+  const __m256 first = _mm256_set1_ps((float)g->o_first);
+  const __m256 x0 = _mm256_set1_ps((float)(px0 - g->p[0]));
+  const __m256 y0 = _mm256_set1_ps((float)(py0 - g->p[1]));
+  const __m256 dx = _mm256_set1_ps((float)dpx);
+  const __m256 dy = _mm256_set1_ps((float)dpy);
+  const __m256 n0 = _mm256_set1_ps((float)g->n[0]);
+  const __m256 n1 = _mm256_set1_ps((float)g->n[1]);
+  const __m256 r0 = _mm256_set1_ps((float)g->r0);
+  const __m256 dr = _mm256_set1_ps((float)g->dr);
+  const __m256 ra = _mm256_set1_ps((float)g->a);
+  const __m256 r0dr = _mm256_set1_ps((float)(g->r0 * g->dr));
+  const __m256 r0sq = _mm256_set1_ps((float)(g->r0 * g->r0));
+  const __m256 ua0 = _mm256_set1_ps((float)((t0 - g->o_first) * g->scale + 0.5));
+  const __m256 ub = _mm256_set1_ps((float)(dt * g->scale));
+  const __m256 turn = _mm256_set1_ps((float)(g->turn / TWO_PI));
+  const __m256 theta_a0 = _mm256_set1_ps((float)g->a0);
+  const __m256 theta_k = _mm256_set1_ps((float)(g->a1 != g->a0 ? 1.0 / (g->a1 - g->a0) : 0.0));
+  const __m256 sign = _mm256_set1_ps(-0.0f);
+  size_t i = 0;
+  for (; i + 8u <= count; i += 8) {
+    const __m256 k = _mm256_add_ps(_mm256_set1_ps((float)(int32_t)i), lane);
+    __m256 u;
+    __m256 none = zero;
+    if (g->kind == GSHSCENE_GRADIENT_LINEAR) {
+      u = _mm256_add_ps(ua0, _mm256_mul_ps(ub, k));
+    } else {
+      const __m256 x = _mm256_add_ps(x0, _mm256_mul_ps(dx, k));
+      const __m256 y = _mm256_add_ps(y0, _mm256_mul_ps(dy, k));
+      __m256 t;
+      if (g->kind == GSHSCENE_GRADIENT_RADIAL) {
+        const __m256 b = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(x, n0), _mm256_mul_ps(y, n1)), r0dr);
+        const __m256 c = _mm256_sub_ps(_mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y)), r0sq);
+        if (g->a == 0.0) {
+          t = _mm256_div_ps(c, _mm256_add_ps(b, b));
+          none = _mm256_or_ps(_mm256_cmp_ps(b, zero, _CMP_EQ_OQ),
+              _mm256_cmp_ps(_mm256_add_ps(r0, _mm256_mul_ps(t, dr)), zero, _CMP_NGT_UQ));
+        } else {
+          const __m256 disc = _mm256_sub_ps(_mm256_mul_ps(b, b), _mm256_mul_ps(ra, c));
+          const __m256 bad = _mm256_cmp_ps(disc, zero, _CMP_LT_OQ);
+          const __m256 root = _mm256_sqrt_ps(_mm256_max_ps(disc, zero));
+          const __m256 q = _mm256_blendv_ps(_mm256_add_ps(b, root), _mm256_sub_ps(b, root), _mm256_cmp_ps(b, zero, _CMP_LT_OQ));
+          const __m256 uu = _mm256_div_ps(q, ra);
+          const __m256 vv = _mm256_div_ps(c, q);
+          const __m256 gt = _mm256_cmp_ps(uu, vv, _CMP_GT_OQ);
+          const __m256 hi = _mm256_blendv_ps(vv, uu, gt);
+          const __m256 lo = _mm256_blendv_ps(uu, vv, gt);
+          const __m256 hi_ok = _mm256_cmp_ps(_mm256_add_ps(r0, _mm256_mul_ps(hi, dr)), zero, _CMP_GT_OQ);
+          const __m256 lo_ok = _mm256_cmp_ps(_mm256_add_ps(r0, _mm256_mul_ps(lo, dr)), zero, _CMP_GT_OQ);
+          const __m256 qz = _mm256_cmp_ps(q, zero, _CMP_EQ_OQ);
+          t = _mm256_blendv_ps(_mm256_blendv_ps(lo, hi, hi_ok), zero, qz);
+          const __m256 ok = _mm256_blendv_ps(_mm256_or_ps(hi_ok, lo_ok), _mm256_cmp_ps(r0, zero, _CMP_GT_OQ), qz);
+          none = _mm256_or_ps(bad, _mm256_xor_ps(ok, ones));
+        }
+      } else {
+        const __m256 ax = _mm256_andnot_ps(sign, x);
+        const __m256 ay = _mm256_andnot_ps(sign, y);
+        const __m256 swap = _mm256_cmp_ps(ay, ax, _CMP_GT_OQ);
+        const __m256 r = _mm256_div_ps(_mm256_min_ps(ax, ay), _mm256_max_ps(ax, ay));
+        const __m256 r2 = _mm256_mul_ps(r, r);
+        __m256 poly = _mm256_set1_ps(0.006842624897387503f);
+        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(-0.033725938103610145f));
+        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(0.0798112049555744f));
+        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(-0.13247522771595696f));
+        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(0.19813213509060276f));
+        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(-0.3331830289944582f));
+        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(0.9999966347006692f));
+        __m256 rad = _mm256_mul_ps(poly, r);
+        rad = _mm256_blendv_ps(rad, _mm256_sub_ps(_mm256_set1_ps(1.5707963267948966f), rad), swap);
+        const __m256 xneg = _mm256_cmp_ps(x, zero, _CMP_LT_OQ);
+        rad = _mm256_blendv_ps(rad, _mm256_sub_ps(_mm256_set1_ps(3.141592653589793f), rad), xneg);
+        rad = _mm256_blendv_ps(rad, _mm256_sub_ps(_mm256_set1_ps((float)TWO_PI), rad), _mm256_cmp_ps(y, zero, _CMP_LT_OQ));
+        const __m256 dy0 = _mm256_cmp_ps(y, zero, _CMP_EQ_OQ);
+        const __m256 dx0 = _mm256_cmp_ps(x, zero, _CMP_EQ_OQ);
+        rad = _mm256_blendv_ps(rad, _mm256_blendv_ps(zero, _mm256_set1_ps(3.141592653589793f), xneg), dy0);
+        rad = _mm256_blendv_ps(rad, _mm256_blendv_ps(_mm256_set1_ps(4.71238898038469f), _mm256_set1_ps(1.5707963267948966f),
+                                        _mm256_cmp_ps(y, zero, _CMP_GT_OQ)), _mm256_andnot_ps(dy0, dx0));
+        t = _mm256_mul_ps(_mm256_sub_ps(_mm256_mul_ps(rad, turn), theta_a0), theta_k);
+      }
+      u = _mm256_add_ps(_mm256_mul_ps(_mm256_sub_ps(t, first), scale), half);
+    }
+    u = _mm256_min_ps(_mm256_max_ps(u, zero), top); /* below the line, and a NaN, is the first point */
+    __m256i idx = _mm256_cvttps_epi32(u);
+    const __m256i uncovered = _mm256_cmpeq_epi32(_mm256_cvtepu8_epi32(_mm_loadl_epi64((const __m128i *)(const void *)(cov + i))),
+        _mm256_setzero_si256());
+    idx = _mm256_blendv_epi8(idx, _mm256_set1_epi32(-1), _mm256_or_si256(uncovered, _mm256_castps_si256(none)));
+    _mm256_storeu_si256((__m256i *)(void *)(index + i), idx);
+  }
+  return i;
+}
+#endif
+
 void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, double qy, size_t count, const uint8_t * cov,
     uint32_t * index) {
   if (g->degenerate) {
@@ -729,7 +835,13 @@ void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, dou
       /* The offset on the line is affine in the pixel too: no more than a multiply and an add each. */
       const double ua = (t0 - g->o_first) * g->scale + 0.5;
       const double ub = dt * g->scale;
-      for (size_t i = 0; i < count; i++) {
+      size_t done = 0;
+#if defined(GRADIENT_AVX2)
+      if (count >= 8u && gradient_have_avx2()) {
+        done = table_row_avx2f(g, 0.0, 0.0, 0.0, 0.0, t0, dt, count, cov, index);
+      }
+#endif
+      for (size_t i = done; i < count; i++) {
         index[i] = cov[i] ? table_point(ua + ub * (double)(int32_t)i) : GSHCPU_RENDER_GRADIENT_NONE;
       }
       return;
@@ -749,7 +861,13 @@ void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, dou
 #if defined(GRADIENT_AVX2)
   if (count >= 4u && g->period > 0.0 && g->extend == GSHSCENE_EXTEND_PAD && (g->kind == GSHSCENE_GRADIENT_RADIAL || g->a0 != g->a1) &&
       gradient_have_avx2()) {
-    done = table_row_avx2(g, px0, py0, dpx, dpy, count, cov, index);
+    if (count >= 8u) {
+      done = table_row_avx2f(g, px0, py0, dpx, dpy, 0.0, 0.0, count, cov, index);
+    }
+    if (count - done >= 4u) {
+      done += table_row_avx2(g, px0 + dpx * (double)(int32_t)done, py0 + dpy * (double)(int32_t)done, dpx, dpy, count - done, cov + done,
+          index + done);
+    }
   }
 #endif
   cov += done;

@@ -921,6 +921,16 @@ void gshcpu_direct8_span_table(unsigned char * row, const uint8_t * table, const
 /** D8: each of the @p n coverages @p m weighed by the clip coverage @p c, `(m c + 127) / 255`. */
 void gshcpu_direct8_weigh(uint8_t * m, const uint8_t * c, size_t n);
 
+/** The straight RGBA bytes @p src made premultiplied into @p dst, @p n pixels: each channel `(c a + 127) / 255`, the alpha as it is. */
+void gshcpu_direct8_premultiply_row(unsigned char * dst, const unsigned char * src, size_t n);
+
+/**
+ * The premultiplied bytes @p premultiplied stored as straight RGBA into @p target, which holds the straight pixels they were made
+ * from: a pixel that is what its premultiplication gives is left as it is, so that what the drawing did not touch comes back
+ * unchanged.
+ */
+void gshcpu_direct8_store_straight_row(unsigned char * target, const unsigned char * premultiplied, size_t n);
+
 /** Nonzero for a separable blend mode ::gshcpu_direct8_blend_row composes. */
 int gshcpu_direct8_blends(uint32_t op);
 

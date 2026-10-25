@@ -23,10 +23,10 @@ struct Picture {
   GSHSCENE_Result result = GSHSCENE_OK;
 };
 
-Picture draw(size_t index, uint64_t fill, uint64_t stroke) {
+Picture draw(size_t index, uint64_t fill, uint64_t stroke, GSHCPU_Format format = GSHCPU_FORMAT_RGBA8_PREMULTIPLIED) {
   Picture out;
   Fixture fx(index);
-  GIMG_Raster * raster = rf_raster(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, RF_WIDTH, RF_HEIGHT);
+  GIMG_Raster * raster = rf_raster(format, RF_WIDTH, RF_HEIGHT);
   EXPECT_NE(raster, nullptr);
   RasterRef keep(raster);
   GSHCPU_Limits limits;
@@ -45,11 +45,11 @@ Picture draw(size_t index, uint64_t fill, uint64_t stroke) {
 
 }  // namespace
 
-TEST(RenderFastFill, EveryFixtureStaysWithinAFewLevelsOfTheExactCoverage) {
+void every_fixture_stays_close(GSHCPU_Format format) {
   size_t differing = 0;
   for (size_t i = 0; i < RF_FIXTURE_COUNT; i++) {
-    Picture exact = draw(i, GSHCPU_FILL_COVERAGE_EXACT, GSHCPU_STROKE_COVERAGE_EXACT);
-    Picture fast = draw(i, GSHCPU_FILL_COVERAGE_FAST, GSHCPU_STROKE_COVERAGE_FAST);
+    Picture exact = draw(i, GSHCPU_FILL_COVERAGE_EXACT, GSHCPU_STROKE_COVERAGE_EXACT, format);
+    Picture fast = draw(i, GSHCPU_FILL_COVERAGE_FAST, GSHCPU_STROKE_COVERAGE_FAST, format);
     ASSERT_EQ(exact.bytes.size(), fast.bytes.size()) << RF_FIXTURES[i].name;
     EXPECT_EQ(exact.result, fast.result) << RF_FIXTURES[i].name;
     double sum = 0;
@@ -74,6 +74,14 @@ TEST(RenderFastFill, EveryFixtureStaysWithinAFewLevelsOfTheExactCoverage) {
     differing += sum > 0 ? 1 : 0;
   }
   EXPECT_GT(differing, RF_FIXTURE_COUNT / 2) << "the fast coverage was taken: its rounding shows in most pictures";
+}
+
+TEST(RenderFastFill, EveryFixtureStaysWithinAFewLevelsOfTheExactCoverage) {
+  every_fixture_stays_close(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED);
+}
+
+TEST(RenderFastFill, EveryFixtureStaysWithinAFewLevelsOnAStraightTarget) {
+  every_fixture_stays_close(GSHCPU_FORMAT_RGBA8_STRAIGHT);
 }
 
 TEST(RenderFastFill, TheFillCoverageIsRefusedPastTheDefinedValues) {
