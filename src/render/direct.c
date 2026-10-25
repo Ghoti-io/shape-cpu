@@ -136,9 +136,9 @@ void gshcpu_direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
 
 /* --- the batch ------------------------------------------------------------------------------------- */
 
-#define BATCH_ENTRIES 256u
-#define BATCH_POINTS 131072u /* 1 MiB of points */
-#define BATCH_SUBPATHS 8192u
+#define BATCH_ENTRIES 1024u
+#define BATCH_POINTS 524288u /* 4 MiB of points */
+#define BATCH_SUBPATHS 32768u
 #define STRIPE_ROWS 32
 /** The fewest queued strokes worth the threads' start: below it a flush is drawn by the caller alone. */
 #define BATCH_MIN_ENTRIES 4u

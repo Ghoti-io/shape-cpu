@@ -342,8 +342,9 @@ calling thread queues the next batch of strokes into a second buffer while the t
 stripes itself when it must wait; a task the executor did not start is drawn by the calling thread. A stripe is drawn by
 one task, its strokes in order, and a batch is waited for before the next is started, so the picture is byte-identical for any
 count. The strokes are queued with their points copied and handed over when the batch fills, before any stroke that is not
-queued, and at the end of the render. A sink with `CALLER_MEMORY` does not queue, since each task needs memory of its own. At 1, 2, 4 and 8 threads a frame takes 78, 47,
-27 and 21 ms, the dashed scene 26, 17, 10 and 8.5 ms; what remains serial is the opening of each stroke.
+queued, and at the end of the render. A sink with `CALLER_MEMORY` does not queue, since each task needs memory of its own. A batch holds up to 1,024 strokes, so that the start and the wait
+of the threads are paid ten times a frame and not forty. At 1, 2, 4 and 8 threads a frame takes 64, 39, 21 and 16 ms, the dashed scene 20, 14,
+7 and 6 ms; what remains serial is the opening of each stroke, about 2 ms, and the tail of each batch.
 
 **What a pixel may cost (UC9, UC17, UC19, UC20).** Two limits bound the step, both decided over what the whole render draws of
 an item, so a damaged render refuses what the whole one does. `max_exact_fragments` (default 32768, at least twice the densest pixel measured) bounds the raw pieces of a

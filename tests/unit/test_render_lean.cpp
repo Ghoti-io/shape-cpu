@@ -358,9 +358,9 @@ uint64_t drawn_hash(const GSHSCENE_List * list, size_t threads, uint64_t max_dep
 
 TEST(RenderLeanThreads, ThePictureIsTheSameBytesForAnyNumberOfThreads) {
   Store store;
-  // 3 strokes are fewer than a batch takes to the threads, 24 are a few stripes' worth, 300 and 700 fill the batch once and twice
+  // 3 strokes are fewer than a batch takes to the threads, 24 are a few stripes' worth, 1100 and 2300 fill the batch once and twice
   // (the threads draw one fill while the next is queued).
-  for (int count : {1, 3, 24, 300, 700}) {
+  for (int count : {1, 3, 24, 300, 1100, 2300}) {
     const GSHSCENE_List * list = crossing_strokes(store, count, 0.2, 3.0 + (count % 5));
     const uint64_t one = drawn_hash(list, 1, 0);
     ASSERT_NE(one, 0u);
