@@ -82,7 +82,7 @@ static inline void lean_add(Lean_Band * b, int y, int x, float v) {
  * window's left), directed down when @p dir is 1 and up when it is -1.  What is left of the window is a cover at its first column;
  * what is right of it is nothing.
  */
-static void lean_row(Lean_Band * b, int y, int width, double xa, double xb, float d) {
+static inline __attribute__((always_inline)) void lean_row(Lean_Band * b, int y, int width, double xa, double xb, float d) {
   if (xa > xb) {
     double t = xa;
     xa = xb;
