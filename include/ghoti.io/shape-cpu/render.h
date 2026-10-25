@@ -588,6 +588,48 @@ GSHCPU_API const char * gshcpu_format_string(GSHCPU_Format format);
 GSHCPU_API GSHCPU_Result gshcpu_sink_create(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
     const GSHCPU_Limits * limits, GSHSCENE_Sink ** out);
 
+/**
+ * @brief One task of a parallel step: @p index is in `[0, count)` of the ::GSHCPU_Executor_Fn call that ran it.
+ */
+typedef void (*GSHCPU_Task_Fn)(void * ctx, size_t index);
+
+/**
+ * @brief The caller's way to run tasks on its own threads.
+ *
+ * Call `task(ctx, i)` exactly once for every `i` in `[0, count)`, on any threads (all on the calling one is allowed), and return
+ * only when every call has returned.  Two calls with different indexes may run at the same time; the sink gives each index its
+ * own memory.  It may be called by several renders at once, so it must be safe for that.  @return 0 on success; a task not
+ * run (a nonzero return) is drawn by the calling thread, so a refusal costs time and never the picture.
+ */
+typedef int (*GSHCPU_Executor_Fn)(void * user, size_t count, GSHCPU_Task_Fn task, void * ctx);
+
+/** @brief ::GSHCPU_Executor.threads past this is ::GSHCPU_ERR_INVALID. */
+#define GSHCPU_EXECUTOR_MAX_THREADS ((size_t)256)
+
+/**
+ * @brief Threads for a sink to draw with, which the sink does not make: it asks @p run for @p threads tasks at a time.
+ *
+ * A render of strokes with the fast stroke coverage (::GSHCPU_STROKE_COVERAGE_FAST) onto an 8-bit premultiplied target, with
+ * nothing else in it, queues its strokes (copying their outlines) and draws them over stripes of the target's rows; the
+ * strokes of a stripe go in the order they were given and a stripe is written by one task, so the picture is the same bytes
+ * for any @p threads and any executor.  Any other render, and a render with ::GSHSCENE_RENDER_CALLER_MEMORY (the queue and the
+ * tasks' memory come from the sink's allocator), is drawn by the calling thread alone.
+ */
+typedef struct GSHCPU_Executor {
+  size_t threads;               ///< Tasks per step, at most ::GSHCPU_EXECUTOR_MAX_THREADS; below 2, nothing is spread.
+  GSHCPU_Executor_Fn run;       ///< The caller's executor; NULL for none.
+  void * user;                  ///< Handed to @p run.
+} GSHCPU_Executor;
+
+/**
+ * @brief ::gshcpu_sink_create with an executor (see ::GSHCPU_Executor).
+ *
+ * @param executor Copied; NULL is none.
+ * @return As ::gshcpu_sink_create; ::GSHCPU_ERR_INVALID also for `threads` past ::GSHCPU_EXECUTOR_MAX_THREADS.
+ */
+GSHCPU_API GSHCPU_Result gshcpu_sink_create_with_executor(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
+    const GSHCPU_Limits * limits, const GSHCPU_Executor * executor, GSHSCENE_Sink ** out);
+
 /** @brief Nonzero if @p sink was made by ::gshcpu_sink_create. */
 GSHCPU_API int gshcpu_sink_is(const GSHSCENE_Sink * sink);
 

@@ -39,9 +39,6 @@
 
 #include <string.h>
 
-#if defined(__SSE2__)
-#include <emmintrin.h>
-#endif
 
 /** What every carved piece is aligned to. */
 #define CARVE_ALIGN 16u
@@ -62,6 +59,7 @@ typedef struct Cpu_Sink {
   GSHCPU_Render_Counters own;       /* the counters, unless a test gave a place for them */
   GSHCPU_Render_Counters * counters;
   int fast;                         /* GSHCPU_Limits.stroke_coverage is FAST */
+  GSHCPU_Executor executor;         /* the caller's, or none (run NULL) */
   unsigned tiers;                   /* GSHCPU_RENDER_TIER_*: the tiers that are on */
   size_t elements;                  /* the most path elements a stored resource may hold: SC11's term */
 } Cpu_Sink;
@@ -157,6 +155,7 @@ typedef struct Run {
   int64_t * acc;
   GSHCPU_Exact exact[3];     /* UC9: the exact step's arrays, when the layout has them (strokes): one for each part of an aligned stroke */
   int direct8;               /* the fast coverage composes straight into the target's bytes (strokes alone, 8-bit premultiplied) */
+  GSHCPU_Batch * batch;      /* ... and its strokes are queued and drawn over stripes by several threads (GSHCPU_Limits.threads) */
   int acc_dirty;             /* the dense sweep leaves the accumulator written; the sparse one needs it zero */
   int caller;                /* CALLER_MEMORY: nothing allocated, so no cache */
   Resolved * resolved;       /* the gradients resolved so far (S17), open addressing on the id */
@@ -1002,100 +1001,6 @@ static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t 
 
 /* --- a stroke (SC1 to SC8) ------------------------------------------------------------------------------- */
 
-/**
- * The fast coverage's compositor for a render of strokes alone onto an 8-bit premultiplied target: the runs of coverage composed
- * straight into the target's bytes, source-over in integers, each step rounded to 8 bits as the rasterizers it is compared with
- * round it, in place of the double layer (which is eight times the memory and misses the cache where the target does not).
- */
-typedef struct Direct8 {
-  Run * run;
-  int64_t dx, dy;            /* the whole-pixel shift: the paths' frame to the destination's */
-  uint64_t lanes;            /* the premultiplied source, 8 bits a channel in 16-bit lanes (red, green, blue, alpha) */
-  uint8_t bytes[4];          /* ... and as a pixel */
-  int opaque;                /* its alpha is 255 */
-} Direct8;
-
-#define D8_LOW 0x00ff00ff00ff00ffull
-#define D8_ROUND 0x0080008000800080ull
-
-/** `x / 255` rounded, in each of four 16-bit lanes holding at most 255 * 255. */
-static inline uint64_t d8_div255(uint64_t x) {
-  const uint64_t t = x + D8_ROUND;
-  return ((t + ((t >> 8) & D8_LOW)) >> 8) & D8_LOW;
-}
-
-#if defined(__SSE2__)
-/** `x / 255` rounded, in each of eight 16-bit lanes holding at most 255 * 255: the scalar step's arithmetic. */
-static inline __m128i d8_div255_v(__m128i x) {
-  const __m128i t = _mm_add_epi16(x, _mm_set1_epi16(0x80));
-  return _mm_srli_epi16(_mm_add_epi16(t, _mm_srli_epi16(t, 8)), 8);
-}
-
-/** Four pixels of @p row composed under the coverages @p m (four bytes): the scalar step, a pixel to each half-register. */
-static inline void d8_four(unsigned char * row, const uint8_t * m, __m128i src) {
-  const __m128i zero = _mm_setzero_si128();
-  uint32_t m4;
-  memcpy(&m4, m, sizeof m4);
-  const __m128i mw = _mm_unpacklo_epi8(_mm_cvtsi32_si128((int)m4), zero); /* m0 m1 m2 m3 in 16 bits */
-  const __m128i mm = _mm_unpacklo_epi16(mw, mw);
-  const __m128i m_lo = _mm_unpacklo_epi32(mm, mm); /* m0 four times, m1 four times */
-  const __m128i m_hi = _mm_unpackhi_epi32(mm, mm);
-  const __m128i px = _mm_loadu_si128((const __m128i *)(const void *)row);
-  const __m128i e_lo = _mm_unpacklo_epi8(px, zero);
-  const __m128i e_hi = _mm_unpackhi_epi8(px, zero);
-  const __m128i w_lo = d8_div255_v(_mm_mullo_epi16(src, m_lo)); /* the source weighed by the coverage */
-  const __m128i w_hi = d8_div255_v(_mm_mullo_epi16(src, m_hi));
-  const __m128i k255 = _mm_set1_epi16(255);
-  /* the target's share: one minus the weighed alpha (lane 3 of each pixel, to all four lanes of it) */
-  const __m128i keep_lo = _mm_sub_epi16(k255, _mm_shufflehi_epi16(_mm_shufflelo_epi16(w_lo, 0xff), 0xff));
-  const __m128i keep_hi = _mm_sub_epi16(k255, _mm_shufflehi_epi16(_mm_shufflelo_epi16(w_hi, 0xff), 0xff));
-  __m128i r_lo = _mm_add_epi16(d8_div255_v(_mm_mullo_epi16(e_lo, keep_lo)), w_lo);
-  __m128i r_hi = _mm_add_epi16(d8_div255_v(_mm_mullo_epi16(e_hi, keep_hi)), w_hi);
-  r_lo = _mm_min_epi16(r_lo, k255); /* a lane past 255: the two roundings added up */
-  r_hi = _mm_min_epi16(r_hi, k255);
-  _mm_storeu_si128((__m128i *)(void *)row, _mm_packus_epi16(r_lo, r_hi));
-}
-#endif
-
-static void direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8) {
-  Direct8 * d = ctx;
-  Run * run = d->run;
-  unsigned char * row = run->pixels + (size_t)(y + d->dy) * run->stride + 4u * (size_t)(x + d->dx);
-  /* the next row of the stroke is near this one's columns, and the target is far larger than the cache: ask for it now */
-  __builtin_prefetch(row + run->stride, 1, 3);
-  __builtin_prefetch(row + run->stride + 4u * (n - 1u), 1, 3);
-  size_t i = 0;
-#if defined(__SSE2__)
-  const __m128i src = _mm_set_epi64x((long long)d->lanes, (long long)d->lanes);
-  for (; i + 4u <= n; i += 4, row += 16) {
-    d8_four(row, m8 + i, src);
-  }
-#endif
-  for (; i < n; i++, row += 4) {
-    const uint32_t m = m8[i];
-    if (m == 0) {
-      continue;
-    }
-    if (m == 255u && d->opaque) {
-      row[0] = d->bytes[0];
-      row[1] = d->bytes[1];
-      row[2] = d->bytes[2];
-      row[3] = d->bytes[3];
-      continue;
-    }
-    const uint64_t e = (uint64_t)row[0] | ((uint64_t)row[1] << 16) | ((uint64_t)row[2] << 32) | ((uint64_t)row[3] << 48);
-    const uint64_t w = m == 255u ? d->lanes : d8_div255(d->lanes * m); /* the source weighed by the coverage */
-    const uint64_t keep = 255u - (w >> 48); /* the target's share: one minus the weighed alpha */
-    uint64_t r = d8_div255(e * keep) + w;
-    const uint64_t over = (r >> 8) & 0x0001000100010001ull; /* a lane past 255: the two roundings added up */
-    r = (r | (over * 255u)) & D8_LOW;
-    row[0] = (uint8_t)r;
-    row[1] = (uint8_t)(r >> 16);
-    row[2] = (uint8_t)(r >> 32);
-    row[3] = (uint8_t)(r >> 48);
-  }
-}
-
 /** FT-2's receiver: one row of coverages, each weighed by the clips and composited if nonzero. */
 typedef struct Sparse {
   Run * run;
@@ -1261,10 +1166,6 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
     const size_t scratch = 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc;
     if (run->direct8) {
       /* Strokes alone onto an 8-bit premultiplied target: composed in integers straight into its bytes. */
-      Direct8 d8;
-      d8.run = run;
-      d8.dx = s.shift_x;
-      d8.dy = s.shift_y;
       uint8_t c[4];
       for (int i = 0; i < 4; i++) {
         c[i] = gshcpu_render_store8(src[i]);
@@ -1272,11 +1173,24 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
       for (int i = 0; i < 3; i++) {
         c[i] = c[i] > c[3] ? c[3] : c[i]; /* premultiplied: no channel past the alpha */
       }
-      memcpy(d8.bytes, c, 4);
-      d8.lanes = (uint64_t)c[0] | ((uint64_t)c[1] << 16) | ((uint64_t)c[2] << 32) | ((uint64_t)c[3] << 48);
-      d8.opaque = c[3] == 255;
-      r = c[3] == 0 ? GSHCPU_OK
-                    : gshcpu_render_lean_cover(body, s.shift_x, s.shift_y, rect, run->acc, scratch, run->coverage, direct8_span, &d8);
+      int queued = 0;
+      r = GSHCPU_OK;
+      if (c[3] != 0 && run->batch) {
+        /* Queued, and drawn with the others over stripes of the rows: its outline is copied, so it is closed below as ever. */
+        queued = gshcpu_batch_add(run->batch, body, s.shift_x, s.shift_y, rect, c, &r);
+      }
+      if (c[3] != 0 && queued == 0 && r == GSHCPU_OK) {
+        GSHCPU_Direct8 d8;
+        d8.pixels = run->pixels;
+        d8.stride = run->stride;
+        d8.dx = s.shift_x;
+        d8.dy = s.shift_y;
+        gshcpu_direct8_color(&d8, c);
+        r = run->batch ? gshcpu_batch_flush(run->batch) : GSHCPU_OK; /* what was queued comes first */
+        if (r == GSHCPU_OK) {
+          r = gshcpu_render_lean_cover(body, s.shift_x, s.shift_y, rect, run->acc, scratch, run->coverage, gshcpu_direct8_span, &d8);
+        }
+      }
     } else {
       widen(run, frame, rect);
       Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
@@ -1290,6 +1204,14 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
     }
     gshcpu_render_stroke_close(cache, &s);
     return r == GSHCPU_OK ? GSHSCENE_OK : scene_result(r);
+  }
+  if (run->batch) {
+    /* a stroke that is not queued reads the target through the layer: the ones queued before it come first */
+    GSHCPU_Result fr = gshcpu_batch_flush(run->batch);
+    if (fr != GSHCPU_OK) {
+      gshcpu_render_stroke_close(cache, &s);
+      return scene_result(fr);
+    }
   }
   if (solid && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits)) {
     /* FT-2 (SC8): the sweep gives only the pixels that can be nonzero; the rest the general loop would skip. */
@@ -1509,6 +1431,15 @@ static const char * reason_of(GSHSCENE_Result result) {
 /** Write what is done (the prefix), hand the result to the contract, free the memory. */
 static void finish(Run * run, GSHSCENE_Result result, void * memory) {
   Cpu_Sink * cs = run->cs;
+  if (run->batch) {
+    /* The strokes queued are drawn, whatever stopped the render: they are the prefix it reports as done. */
+    GSHCPU_Result fr = gshcpu_batch_flush(run->batch);
+    gshcpu_batch_destroy(run->batch);
+    run->batch = NULL;
+    if (fr != GSHCPU_OK && result == GSHSCENE_OK) {
+      result = scene_result(fr);
+    }
+  }
   if (cs->observer) {
     /* The observer sees the whole region (render_internal.h): what no unit reached is made what it would have been
      * had the root been read in full at the start, the target's values and an untouched map. */
@@ -1599,6 +1530,11 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   }
   run->direct8 = cs->fast && run->format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED && !cs->observer && L.groups == 0 && L.clips == 0 &&
       !L.aligned && !L.other && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) != 0;
+  if (run->direct8 && cs->executor.run && !caller) {
+    /* Several threads: the strokes are queued and drawn over stripes.  Nothing is queued without the batch (out of memory), and
+     * the render goes on as one thread does. */
+    run->batch = gshcpu_batch_create(&cs->alloc, &cs->executor, (size_t)(L.region.x1 - L.region.x0), run->pixels, run->stride);
+  }
   run->acc_dirty = 1; /* the caller's memory is not zeroed: the sparse sweep clears the accumulator before its first use */
   run->caller = caller;
   run->resolved = (Resolved *)(void *)(base + L.at_table);
@@ -1696,10 +1632,13 @@ int gshcpu_sink_is(const GSHSCENE_Sink * sink) {
   return sink && name && strcmp(name, "shape-cpu") == 0;
 }
 
-GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
-    const GSHCPU_Limits * limits, unsigned tiers, GSHCPU_Render_Counters * counters, GSHCPU_Render_Observer observer,
-    void * observer_ctx, GSHSCENE_Sink ** out) {
+static GSHCPU_Result sink_make(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits, const GSHCPU_Limits * limits,
+    unsigned tiers, GSHCPU_Render_Counters * counters, GSHCPU_Render_Observer observer, void * observer_ctx,
+    const GSHCPU_Executor * executor, GSHSCENE_Sink ** out) {
   if (!out) {
+    return GSHCPU_ERR_INVALID;
+  }
+  if (executor && executor->threads > GSHCPU_EXECUTOR_MAX_THREADS) {
     return GSHCPU_ERR_INVALID;
   }
   if (limits && limits->max_exact_fragments > GSHCPU_LIMITS_MAX_EXACT_FRAGMENTS) {
@@ -1723,6 +1662,9 @@ GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, c
   cs->observer_ctx = observer_ctx;
   cs->tiers = tiers;
   cs->fast = limits && limits->stroke_coverage == GSHCPU_STROKE_COVERAGE_FAST;
+  if (executor && executor->run && executor->threads > 1u) {
+    cs->executor = *executor;
+  }
   cs->counters = counters ? counters : &cs->own;
   memset(cs->counters, 0, sizeof *cs->counters);
   cs->elements = scene_limits && scene_limits->max_resource_elements ? scene_limits->max_resource_elements
@@ -1766,6 +1708,23 @@ GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, c
   }
   *out = sink;
   return GSHCPU_OK;
+}
+
+GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
+    const GSHCPU_Limits * limits, unsigned tiers, GSHCPU_Render_Counters * counters, GSHCPU_Render_Observer observer,
+    void * observer_ctx, GSHSCENE_Sink ** out) {
+  return sink_make(alloc, scene_limits, limits, tiers, counters, observer, observer_ctx, NULL, out);
+}
+
+GSHCPU_Result gshcpu_render_sink_create_with_executor(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
+    const GSHCPU_Limits * limits, unsigned tiers, GSHCPU_Render_Counters * counters, const GSHCPU_Executor * executor,
+    GSHSCENE_Sink ** out) {
+  return sink_make(alloc, scene_limits, limits, tiers, counters, NULL, NULL, executor, out);
+}
+
+GSHCPU_Result gshcpu_sink_create_with_executor(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
+    const GSHCPU_Limits * limits, const GSHCPU_Executor * executor, GSHSCENE_Sink ** out) {
+  return sink_make(alloc, scene_limits, limits, GSHCPU_RENDER_TIERS_ALL, NULL, NULL, NULL, executor, out);
 }
 
 GSHCPU_Result gshcpu_render_sink_create_observed(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,

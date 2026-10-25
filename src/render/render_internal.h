@@ -790,6 +790,14 @@ uint32_t gshcpu_render_stroke_compose(uint32_t b, uint32_t a, uint32_t c, int co
 GSHCPU_Result gshcpu_render_lean_cover(const GSHGEOM_Flat_Path * path, int64_t shift_x, int64_t shift_y, GSHCPU_Rect rect,
     void * scratch, size_t scratch_bytes, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx);
 
+/**
+ * ::gshcpu_render_lean_cover for an outline given as its points and subpaths, so that a copy of them (a queued stroke's) can be
+ * drawn after the stroke is closed.  The pieces are the same; @p subpaths index @p points.
+ */
+GSHCPU_Result gshcpu_render_lean_cover_points(const GSHGEOM_Device_Point * points, const GSHGEOM_Flat_Subpath * subpaths,
+    size_t subpath_count, int64_t shift_x, int64_t shift_y, GSHCPU_Rect rect, void * scratch, size_t scratch_bytes, uint8_t * line,
+    GSHCPU_Span_Fn fn, void * ctx);
+
 /** The scratch bytes of the lean cover for a rectangle @p width cells wide and a band of @p rows rows. */
 size_t gshcpu_lean_bytes(size_t width, size_t rows);
 
@@ -810,6 +818,11 @@ GSHCPU_Result gshcpu_render_cover_sparse(const GSHGEOM_Flat_Path * const * paths
  */
 typedef void (*GSHCPU_Render_Observer)(void * ctx, GSHCPU_Rect region, const double * root, const uint8_t * touched);
 
+/** ::gshcpu_render_sink_create_tiered with an executor and counters, for tests of the threads. */
+GSHCPU_Result gshcpu_render_sink_create_with_executor(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
+    const GSHCPU_Limits * limits, unsigned tiers, GSHCPU_Render_Counters * counters, const GSHCPU_Executor * executor,
+    GSHSCENE_Sink ** out);
+
 /** ::gshcpu_sink_create with an observer of every render (for tests). */
 GSHCPU_Result gshcpu_render_sink_create_observed(const GSHCPU_Allocator * alloc, const GSHSCENE_Limits * scene_limits,
     const GSHCPU_Limits * limits, GSHCPU_Render_Observer observer, void * observer_ctx, GSHSCENE_Sink ** out);
@@ -826,5 +839,44 @@ GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, c
 #ifdef __cplusplus
 }
 #endif
+
+/* --- the direct 8-bit compositor and its batch (direct.c) ------------------------------------------------------------- */
+
+/** A solid premultiplied source composed straight into an 8-bit premultiplied target's bytes, runs of coverage at a time. */
+typedef struct GSHCPU_Direct8 {
+  unsigned char * pixels;    /* the target's, and its stride */
+  size_t stride;
+  int64_t dx, dy;            /* the whole-pixel shift: the paths' frame to the destination's */
+  uint64_t lanes;            /* the source, 8 bits a channel in 16-bit lanes (red, green, blue, alpha) */
+  uint8_t bytes[4];          /* ... and as a pixel */
+  int opaque;                /* its alpha is 255 */
+} GSHCPU_Direct8;
+
+/** Set the source of @p d to the premultiplied bytes @p c (no channel past the alpha). */
+void gshcpu_direct8_color(GSHCPU_Direct8 * d, const uint8_t c[4]);
+
+/** A ::GSHCPU_Span_Fn: the runs composed into the target of the ::GSHCPU_Direct8 @p ctx. */
+void gshcpu_direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8);
+
+/** The strokes of a render held to be drawn together by several threads. */
+typedef struct GSHCPU_Batch GSHCPU_Batch;
+
+/** A batch drawn by @p executor (its `threads` at least 2, its `run` set) over windows up to @p width wide; NULL when it cannot be made. */
+GSHCPU_Batch * gshcpu_batch_create(const GSHGEOM_Allocator * alloc, const GSHCPU_Executor * executor, size_t width,
+    unsigned char * pixels, size_t stride);
+
+/** Draw what is queued, in order, and empty the batch. */
+GSHCPU_Result gshcpu_batch_flush(GSHCPU_Batch * batch);
+
+/** Draw what is queued and free the batch and its threads. */
+void gshcpu_batch_destroy(GSHCPU_Batch * batch);
+
+/**
+ * Queue the outline @p path, copied, to be composed in @p color under the lean cover of the window @p rect.  @return 1 when it
+ * is queued, 0 when it cannot be (too large for the batch: the caller flushes and draws it), or -1 with @p *result the error of
+ * a flush that was needed.
+ */
+int gshcpu_batch_add(GSHCPU_Batch * batch, const GSHGEOM_Flat_Path * path, int64_t shift_x, int64_t shift_y, GSHCPU_Rect rect,
+    const uint8_t color[4], GSHCPU_Result * result);
 
 #endif /* GHOTI_IO_GSHCPU_RENDER_INTERNAL_H */

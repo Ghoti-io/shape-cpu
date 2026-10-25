@@ -16,6 +16,8 @@ using stroke_gate::Ops;
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <atomic>
+#include <thread>
 #include <vector>
 
 using namespace sh;
@@ -297,6 +299,104 @@ TEST(RenderLeanSink, AStrokePastTheCapOfTheSparseTierIsDrawnThroughTheLayerAndSt
   }
   EXPECT_TRUE(fell_back) << "some cap sends a stroke through the double layer";
   EXPECT_TRUE(took_both) << "and some does not";
+}
+
+namespace {
+
+/** The caller's executor: a thread for each task but the first, which the calling thread runs; the count of calls is kept. */
+std::atomic<unsigned> g_runs{0};
+
+int thread_executor(void * user, size_t count, GSHCPU_Task_Fn task, void * ctx) {
+  g_runs++;
+  (void)user;
+  std::vector<std::thread> workers;
+  for (size_t i = 1; i < count; i++) {
+    workers.emplace_back([=] { task(ctx, i); });
+  }
+  task(ctx, 0);
+  for (std::thread & t : workers) {
+    t.join();
+  }
+  return 0;
+}
+
+/** An executor that refuses: nothing is run, and the calling thread must draw it all. */
+int refusing_executor(void *, size_t, GSHCPU_Task_Fn, void *) {
+  return 1;
+}
+
+/** The hash of @p list drawn with the fast coverage and an executor of @p threads tasks, under the sparse cap @p max_deposits. */
+uint64_t drawn_hash(const GSHSCENE_List * list, size_t threads, uint64_t max_deposits, GSHSCENE_Result * result = nullptr,
+    GSHCPU_Executor_Fn run = thread_executor) {
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  limits.max_deposits = max_deposits;
+  limits.stroke_coverage = GSHCPU_STROKE_COVERAGE_FAST;
+  GSHCPU_Executor executor = {threads, threads > 1 ? run : nullptr, nullptr};
+  GSHSCENE_Sink * sink = nullptr;
+  EXPECT_EQ(gshcpu_render_sink_create_with_executor(nullptr, nullptr, &limits, GSHCPU_RENDER_TIERS_ALL, nullptr, &executor, &sink),
+      GSHCPU_OK);
+  Drawn d = render_list(sink, list, 96, 64, GSHCPU_FORMAT_RGBA8_PREMULTIPLIED);
+  EXPECT_EQ(gshscene_sink_destroy(sink), GSHSCENE_OK);
+  if (result) {
+    *result = d.result;
+  }
+  return d.result == GSHSCENE_OK ? d.hash : 0;
+}
+
+}  // namespace
+
+TEST(RenderLeanThreads, ThePictureIsTheSameBytesForAnyNumberOfThreads) {
+  Store store;
+  // 3 strokes are fewer than a batch takes to the threads, 24 are a few stripes' worth, 300 fill the batch more than once.
+  for (int count : {1, 3, 24, 300}) {
+    const GSHSCENE_List * list = crossing_strokes(store, count, 0.2, 3.0 + (count % 5));
+    const uint64_t one = drawn_hash(list, 1, 0);
+    ASSERT_NE(one, 0u);
+    for (uint64_t threads : {2u, 3u, 8u, 256u}) {
+      EXPECT_EQ(drawn_hash(list, threads, 0), one) << count << " strokes on " << threads << " threads";
+    }
+  }
+}
+
+TEST(RenderLeanThreads, AStrokeThatIsNotQueuedKeepsItsPlaceInTheOrder) {
+  Store store;
+  const GSHSCENE_List * list = crossing_strokes(store, 24, 0.3, 6.0);
+  // Some cap sends some strokes through the double layer in the middle of a batch: the ones before it are drawn first.
+  int fell = 0;
+  for (uint64_t cap = 40; cap < 200000; cap = cap * 3 / 2) {
+    GSHSCENE_Result r1 = GSHSCENE_OK, r4 = GSHSCENE_OK;
+    const uint64_t one = drawn_hash(list, 1, cap, &r1);
+    const uint64_t four = drawn_hash(list, 4, cap, &r4);
+    EXPECT_EQ(r1, r4) << "cap " << cap;
+    EXPECT_EQ(one, four) << "cap " << cap;
+    fell += one != drawn_hash(list, 1, 0);
+  }
+  EXPECT_GT(fell, 0) << "some cap changes the picture, so some stroke took the other path";
+}
+
+TEST(RenderLeanThreads, TheExecutorIsAskedAndARefusalCostsTimeAndNotThePicture) {
+  Store store;
+  const GSHSCENE_List * list = crossing_strokes(store, 24, 0.2, 4.0);
+  const uint64_t one = drawn_hash(list, 1, 0);
+  g_runs = 0;
+  EXPECT_EQ(drawn_hash(list, 4, 0), one);
+  EXPECT_GT(g_runs.load(), 0u) << "the strokes were queued and the executor was asked to draw them";
+  g_runs = 0;
+  EXPECT_EQ(drawn_hash(list, 1, 0), one);
+  EXPECT_EQ(g_runs.load(), 0u) << "one task is no executor";
+  EXPECT_EQ(drawn_hash(list, 4, 0, nullptr, refusing_executor), one) << "a refusal leaves it to the calling thread";
+}
+
+TEST(RenderLeanThreads, MoreTasksThanTheCeilingAreRefused) {
+  GSHCPU_Executor executor = {GSHCPU_EXECUTOR_MAX_THREADS, thread_executor, nullptr};
+  GSHSCENE_Sink * sink = nullptr;
+  ASSERT_EQ(gshcpu_sink_create_with_executor(nullptr, nullptr, nullptr, &executor, &sink), GSHCPU_OK);
+  EXPECT_EQ(gshscene_sink_destroy(sink), GSHSCENE_OK);
+  executor.threads = GSHCPU_EXECUTOR_MAX_THREADS + 1;
+  sink = nullptr;
+  EXPECT_EQ(gshcpu_sink_create_with_executor(nullptr, nullptr, nullptr, &executor, &sink), GSHCPU_ERR_INVALID);
+  EXPECT_EQ(sink, nullptr);
 }
 
 int main(int argc, char ** argv) {

@@ -139,7 +139,11 @@ static void lean_row(Lean_Band * b, int y, int width, double xa, double xb, floa
   lean_add(b, y, xbi, d * am);
 }
 
-/** One edge into the band whose first row is @p top (rows @p rows), in the window's frame. */
+/**
+ * One edge into the band whose first row is @p top (rows @p rows), in the window's frame.  The x at a row's top and bottom is a
+ * function of that row boundary alone, `x0 + (y - y0) * dxdy` from the edge's own end, so the sums an edge leaves in a row are the
+ * same whatever band it is cut into: a stripe of the window is the picture's rows and nothing else.
+ */
 static void lean_edge(Lean_Band * b, int top, int rows, int width, double x0, double y0, double x1, double y1) {
   if (y0 == y1) {
     return;
@@ -160,22 +164,17 @@ static void lean_edge(Lean_Band * b, int top, int rows, int width, double x0, do
     return;
   }
   const double dxdy = (x1 - x0) / (y1 - y0);
-  double x = x0;
-  if (y0 < lo) {
-    x += (lo - y0) * dxdy;
-    y0 = lo;
-  }
-  if (y1 > hi) {
-    y1 = hi;
-  }
-  /* y0 is not below the band's top, which is not negative, so a cast is its floor */
-  const int first = (int)y0;
-  const int last = (int)y1 + ((double)(int)y1 < y1);
+  const double ys = y0 < lo ? lo : y0;
+  const double ye = y1 > hi ? hi : y1;
+  /* ys is not below the band's top, which is not negative, so a cast is its floor */
+  const int first = (int)ys;
+  const int last = (int)ye + ((double)(int)ye < ye);
+  double x = x0 + (ys - y0) * dxdy;
   for (int y = first; y < last; y++) {
-    const double ya = y > y0 ? (double)y : y0;
-    const double yb = (double)(y + 1) < y1 ? (double)(y + 1) : y1;
+    const double ya = y > ys ? (double)y : ys;
+    const double yb = (double)(y + 1) < ye ? (double)(y + 1) : ye;
     const double dy = yb - ya;
-    const double xn = x + dxdy * dy;
+    const double xn = x0 + (yb - y0) * dxdy;
     lean_row(b, y - top, width, x, xn, (float)dy * dir);
     x = xn;
   }
@@ -246,11 +245,23 @@ static void lean_sweep(Lean_Band * b, int rows, int width, int64_t x0, int64_t y
   }
 }
 
-GSHCPU_Result gshcpu_render_lean_cover(const GSHGEOM_Flat_Path * path, int64_t shift_x, int64_t shift_y, GSHCPU_Rect rect,
-    void * scratch, size_t scratch_bytes, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx) {
+/** The path's subpaths, from the path itself or from an array of them. */
+static inline GSHGEOM_Flat_Subpath lean_subpath(const GSHGEOM_Flat_Path * path, const GSHGEOM_Flat_Subpath * subs, size_t i, int * ok) {
+  GSHGEOM_Flat_Subpath sub = {0, 0, 0};
+  if (subs) {
+    *ok = 1;
+    return subs[i];
+  }
+  *ok = gshgeom_flat_path_subpath(path, i, &sub) == GSHGEOM_OK;
+  return sub;
+}
+
+static GSHCPU_Result lean_cover(const GSHGEOM_Flat_Path * path, const GSHGEOM_Device_Point * pt, const GSHGEOM_Flat_Subpath * subs,
+    size_t subpaths, int64_t shift_x, int64_t shift_y, GSHCPU_Rect rect, void * scratch, size_t scratch_bytes, uint8_t * line,
+    GSHCPU_Span_Fn fn, void * ctx) {
   const int64_t width = rect.x1 - rect.x0;
   const int64_t height = rect.y1 - rect.y0;
-  if (!path || width <= 0 || height <= 0 || width > 65000) {
+  if (width <= 0 || height <= 0 || width > 65000) {
     return GSHCPU_OK;
   }
   if (scratch_bytes < gshcpu_lean_bytes((size_t)width, (size_t)GSHCPU_RENDER_BAND_ROWS)) {
@@ -264,15 +275,15 @@ GSHCPU_Result gshcpu_render_lean_cover(const GSHGEOM_Flat_Path * path, int64_t s
   }
   Lean_Band b;
   lean_band(&b, scratch, (size_t)width, rows_max);
-  const GSHGEOM_Device_Point * pt = gshgeom_flat_path_points(path);
-  const size_t subpaths = gshgeom_flat_path_subpath_count(path);
-  const double ox = (double)(shift_x - rect.x0);
-  const double oy = (double)(shift_y - rect.y0);
+  /* a window and a shift are within the dimension limit, so the difference fits 32 bits: (a conversion from 64 bits is an x87 load on i686) */
+  const double ox = (double)(int32_t)(shift_x - rect.x0);
+  const double oy = (double)(int32_t)(shift_y - rect.y0);
   for (int64_t top = 0; top < height; top += (int64_t)rows_max) {
     const int rows = (int)(height - top < (int64_t)rows_max ? height - top : (int64_t)rows_max);
     for (size_t i = 0; i < subpaths; i++) {
-      GSHGEOM_Flat_Subpath sub;
-      if (gshgeom_flat_path_subpath(path, i, &sub) != GSHGEOM_OK) {
+      int ok;
+      GSHGEOM_Flat_Subpath sub = lean_subpath(path, subs, i, &ok);
+      if (!ok) {
         return GSHCPU_ERR_INTERNAL;
       }
       for (size_t k = 0; k < sub.count; k++) {
@@ -286,4 +297,22 @@ GSHCPU_Result gshcpu_render_lean_cover(const GSHGEOM_Flat_Path * path, int64_t s
     lean_sweep(&b, rows, (int)width, rect.x0 - shift_x, rect.y0 + top - shift_y, line, fn, ctx);
   }
   return GSHCPU_OK;
+}
+
+GSHCPU_Result gshcpu_render_lean_cover(const GSHGEOM_Flat_Path * path, int64_t shift_x, int64_t shift_y, GSHCPU_Rect rect,
+    void * scratch, size_t scratch_bytes, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx) {
+  if (!path) {
+    return GSHCPU_OK;
+  }
+  return lean_cover(path, gshgeom_flat_path_points(path), NULL, gshgeom_flat_path_subpath_count(path), shift_x, shift_y, rect, scratch,
+      scratch_bytes, line, fn, ctx);
+}
+
+GSHCPU_Result gshcpu_render_lean_cover_points(const GSHGEOM_Device_Point * points, const GSHGEOM_Flat_Subpath * subpaths,
+    size_t subpath_count, int64_t shift_x, int64_t shift_y, GSHCPU_Rect rect, void * scratch, size_t scratch_bytes, uint8_t * line,
+    GSHCPU_Span_Fn fn, void * ctx) {
+  if (!points || !subpaths) {
+    return GSHCPU_OK;
+  }
+  return lean_cover(NULL, points, subpaths, subpath_count, shift_x, shift_y, rect, scratch, scratch_bytes, line, fn, ctx);
 }
