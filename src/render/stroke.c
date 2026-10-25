@@ -626,7 +626,11 @@ int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_deposit
    * the deposits any render counts, and a stroke whose bound is within the cap cannot be refused for its cells.  There is no
    * other condition: the sweep gives the pixels that can be nonzero and the dense one gives them all, so it is never the
    * slower of the two (a share of the rectangle's pixels was once required, and seven of ten strokes of the benchmark failed it). */
-  return gshcpu_render_cells_bound(&path, 1, moved(box, s->shift_x, s->shift_y), max_deposits) <= max_deposits;
+  const GSHCPU_Rect walk = moved(box, s->shift_x, s->shift_y);
+  if (same_rect(walk, canonical_box(&s->meta, GSHCPU_STROKE_BODY))) {
+    return s->meta.bound[GSHCPU_STROKE_BODY] <= max_deposits; /* the bound made with the outline: the same walk, the same edges */
+  }
+  return gshcpu_render_cells_bound(&path, 1, walk, max_deposits) <= max_deposits;
 }
 
 const GSHGEOM_Flat_Path * gshcpu_render_stroke_cover_path(const GSHCPU_Stroke * s) {

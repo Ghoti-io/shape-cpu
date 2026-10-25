@@ -189,25 +189,33 @@ static inline uint8_t lean_level(float acc) {
   return (uint8_t)(c * 255.0f + 0.5f);
 }
 
-/** The next noted cell at or after @p x in a row's bits (@p words of them), or -1; the bit is cleared. */
-static inline int lean_next(uint64_t * bit, size_t words, int x) {
-  size_t w = (size_t)x >> 6;
-  if (w >= words) {
-    return -1;
+/** @p n bytes of @p m at @p p: the runs are short, and a call to memset for three bytes costs more than the three. */
+static inline void lean_fill(uint8_t * p, uint8_t m, size_t n) {
+  if (n >= 16u) {
+    memset(p, m, n);
+    return;
   }
-  uint64_t v = bit[w] & (~(uint64_t)0 << (x & 63));
-  while (v == 0) {
-    if (++w == words) {
-      return -1;
-    }
-    v = bit[w];
+  const uint64_t v = (uint64_t)m * 0x0101010101010101ull;
+  if (n >= 8u) {
+    memcpy(p, &v, 8);
+    memcpy(p + n - 8u, &v, 8);
+  } else if (n >= 4u) {
+    const uint32_t u = (uint32_t)v;
+    memcpy(p, &u, 4);
+    memcpy(p + n - 4u, &u, 4);
+  } else if (n >= 2u) {
+    const uint16_t u = (uint16_t)v;
+    memcpy(p, &u, 2);
+    memcpy(p + n - 2u, &u, 2);
+  } else if (n == 1u) {
+    p[0] = m;
   }
-  const int at = (int)(w << 6) + __builtin_ctzll(v);
-  bit[w] &= ~((uint64_t)1 << (at & 63));
-  return at;
 }
 
-/** Sweep the band's rows: each noted cell and the run after it, handed to @p fn as runs of nonzero coverage. */
+/**
+ * Sweep the band's rows: each noted cell and the run after it, handed to @p fn as runs of nonzero coverage.  A cell's run ends at
+ * the next noted cell, so a cell is finished when the next one is found (its level is kept until then).
+ */
 static void lean_sweep(Lean_Band * b, int rows, int width, int64_t x0, int64_t y0, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx) {
   for (int y = 0; y < rows; y++) {
     if (!b->n[y]) {
@@ -217,27 +225,50 @@ static void lean_sweep(Lean_Band * b, int rows, int width, int64_t x0, int64_t y
     float * a = b->a + (size_t)y * b->stride;
     uint64_t * bit = b->bit + (size_t)y * b->words;
     float acc = 0.0f;
-    int from = -1; /* the first column of the run open, or -1 */
-    int x = lean_next(bit, b->words, 0);
-    while (x >= 0) {
-      const int nx = lean_next(bit, b->words, x + 1);
-      acc += a[x];
-      a[x] = 0.0f;
-      if (x < width) {
-        const uint8_t m = lean_level(acc);
-        /* the cell's own coverage is its pixel's; the pixels after it up to the next cell have the sum alone, which is the same sum */
-        const int end = nx >= 0 ? (nx < width ? nx : width) : width;
-        if (m != 0) {
-          if (from < 0) {
-            from = x;
-          }
-          memset(line + (x - from), m, (size_t)(end - x));
-        } else if (from >= 0) {
-          fn(ctx, y0 + y, x0 + from, (size_t)(x - from), line);
-          from = -1;
-        }
+    int from = -1;   /* the first column of the run open, or -1 */
+    int cell = -1;   /* the last noted cell inside the window, whose run is not yet written, or -1 */
+    uint8_t level = 0;
+    for (size_t w = 0; w < b->words; w++) {
+      uint64_t v = bit[w];
+      if (!v) {
+        continue;
       }
-      x = nx;
+      bit[w] = 0;
+      do {
+        const int x = (int)(w << 6) + __builtin_ctzll(v);
+        v &= v - 1u;
+        if (cell >= 0) {
+          const int end = x < width ? x : width;
+          if (level != 0) {
+            if (from < 0) {
+              from = cell;
+            }
+            lean_fill(line + (cell - from), level, (size_t)(end - cell));
+          } else if (from >= 0) {
+            fn(ctx, y0 + y, x0 + from, (size_t)(cell - from), line);
+            from = -1;
+          }
+        }
+        acc += a[x];
+        a[x] = 0.0f;
+        if (x < width) {
+          cell = x;
+          level = lean_level(acc);
+        } else {
+          cell = -1;
+        }
+      } while (v);
+    }
+    if (cell >= 0) {
+      if (level != 0) {
+        if (from < 0) {
+          from = cell;
+        }
+        lean_fill(line + (cell - from), level, (size_t)(width - cell));
+      } else if (from >= 0) {
+        fn(ctx, y0 + y, x0 + from, (size_t)(cell - from), line);
+        from = -1;
+      }
     }
     if (from >= 0) {
       fn(ctx, y0 + y, x0 + from, (size_t)(width - from), line);
