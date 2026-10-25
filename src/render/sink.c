@@ -730,80 +730,6 @@ static uint32_t clip_at(const Clip * clip, int64_t x, int64_t y) {
   return clip->coverage[(size_t)(y - clip->rect.y0) * w + (size_t)(x - clip->rect.x0)];
 }
 
-/**
- * The geometry and the coverage of a fill or clip push, into @p out over @p rect (the item's pixels meet what it
- * can reach), and in @p whole_rect the rectangle the whole render draws of it (its pixels meet @p whole, what it can
- * reach there).  The cell cap is met over that one, so that a damage-limited render refuses the items the whole
- * render refuses (S4); a bound from its edges skips the count where the cap cannot be met.
- * @return ::GSHSCENE_OK; ::GSHSCENE_ERR_LIMIT for a resource limit (the caller refuses the item); OOM.
- */
-static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count,
-    GSHCPU_Rect reach, GSHCPU_Rect whole, uint8_t * out, GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect) {
-  GSHCPU_Item_Geometry g;
-  if (run->item_alloc == &run->arena.self) {
-    gshcpu_render_arena_reset(&run->arena);
-  }
-  GSHCPU_Result r = gshcpu_render_geometry(item, run->maps, count - 1, &run->job->target.map, run->item_alloc,
-      &run->cs->geometry, &g);
-  run->work += g.points;
-  /* A run from a font: each glyph's entry (glyph.h, D7); a glyph refused under strict stops the render here (S6). */
-  for (size_t i = 0; r == GSHCPU_OK && g.notes && i < g.count; i++) {
-    if (!g.notes[i].entry_class) {
-      continue;
-    }
-    GSHSCENE_Result e = gshscene_job_report_glyph(run->job, (GSHSCENE_Entry_Class)g.notes[i].entry_class,
-        (GSHSCENE_Reason)g.notes[i].reason, chain, count, i);
-    if (e == GSHSCENE_OK && g.notes[i].entry_class == GSHSCENE_ENTRY_REFUSED &&
-        (run->request->flags & GSHSCENE_RENDER_STRICT)) {
-      memcpy(run->stop, chain, count * sizeof *chain);
-      run->stop_count = count;
-      e = GSHSCENE_ERR_REFUSED;
-    }
-    if (e != GSHSCENE_OK) {
-      gshcpu_render_geometry_release(&g, run->item_alloc);
-      return e;
-    }
-  }
-  if (r == GSHCPU_OK) {
-    const GSHGEOM_Flat_Path * const * paths = (const GSHGEOM_Flat_Path * const *)g.paths;
-    *rect = gshcpu_render_rect_meet(g.box, reach);
-    if (gshcpu_render_rect_empty(*rect)) {
-      rect->x1 = rect->x0;
-      rect->y1 = rect->y0;
-    }
-    GSHCPU_Rect walk = gshcpu_render_rect_meet(g.box, whole);
-    *whole_rect = walk;
-    if (!gshcpu_render_rect_empty(walk)) {
-      uint64_t cells = 0;
-      /* Drawn in part (a damage): unless the bound says the cap cannot be met over the whole, count only where it
-       * is drawn; else count the whole while drawing the part. */
-      if ((rect->x0 != walk.x0 || rect->y0 != walk.y0 || rect->x1 != walk.x1 || rect->y1 != walk.y1) &&
-          gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_deposits) <= run->cs->max_deposits) {
-        walk = *rect;
-      }
-      if (run->cs->fast_fill && (run->cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && !gshcpu_render_rect_empty(*rect) &&
-          rect->x1 - rect->x0 <= 65000 &&
-          gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_deposits) <= run->cs->max_deposits) {
-        /* The fast fill coverage: the lean cover of every path at once, into the coverage of the rectangle. */
-        if (run->acc_dirty) {
-          memset(run->acc, 0, 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc);
-          run->acc_dirty = 0;
-        }
-        const size_t scratch = 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc;
-        r = gshcpu_render_lean_fill(paths, g.count, item->fill_rule == GSHGEOM_FILL_EVEN_ODD, 0, 0, *rect, run->acc, scratch, out);
-        run->work += (uint64_t)(rect->x1 - rect->x0) * (uint64_t)(rect->y1 - rect->y0);
-      } else {
-        r = gshcpu_render_cover_counted(paths, g.count, item->fill_rule, *rect, walk, out, run->acc, run->cs->max_deposits,
-            &cells);
-        run->acc_dirty = 1; /* the dense sweep writes the accumulator band by band and leaves it so */
-        run->work += cells;
-      }
-    }
-  }
-  gshcpu_render_geometry_release(&g, run->item_alloc);
-  return scene_result(r);
-}
-
 /** The pixels the clips in force in the innermost group allow (N9): the region meet their rectangles. */
 static GSHCPU_Rect reach_of(const Run * run, size_t from, size_t to) {
   GSHCPU_Rect r = run->layout.region;
@@ -887,15 +813,44 @@ static GSHSCENE_Result resolved_of(Run * run, const GSHSCENE_Resource * resource
 }
 
 /**
- * A gradient fill (G6 to G12, S11): at each pixel the paint is G12's source at the pixel's center, under the chain
- * composed by shape-geometry and inverted once; the color is converted per pixel from the interpolation space to the
- * layer's (N3, nothing when they are equal).  Where G8 gives nothing the pixel is not drawn.  A composed map past the
- * double range, or a rectangle (the whole render's: S4) mapped outside G14's domain, is the sink's own limit (S6).
+ * What paints the spans of an item's coverage (D8, N5, N7; G6 to G12, S11): the item's paint made ready by painter_begin, then
+ * each span, row by row, weighed by the clips in force and composited SRC_OVER into the layer.  A solid paint is one source;
+ * a gradient's source at each pixel is G12's at the pixel's center under the chain composed by shape-geometry and inverted
+ * once, converted per pixel from the interpolation space to the layer's (N3), or, under the fast fill coverage, read from a
+ * table of the line.  Where G8 gives nothing the pixel is not drawn.
  */
-static GSHSCENE_Result fill_gradient(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count,
-    Frame * frame, GSHCPU_Rect rect, GSHCPU_Rect whole, const uint8_t * cov) {
+typedef struct Painter {
+  Run * run;
+  Frame * frame;
+  int gradient;
+  int refused;               /* painter_begin refused the item (or the render stops under strict) */
+  double src[4];             /* a solid paint's source */
+  GSHCPU_Gradient gr;
+  GSHCPU_Convert conv;
+  const double * table;      /* the gradient's color table, or NULL: evaluated at each pixel */
+} Painter;
+
+/**
+ * Make the paint of @p item ready to paint @p rect (the pixels of the item that meet what it can reach; @p whole the
+ * render's), widening the frame to it.  A composed map past the double range, or a rectangle (the whole render's: S4) mapped
+ * outside G14's domain, is the sink's own limit (S6): @p p->refused is set and the result is refuse()'s.
+ */
+static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count,
+    Frame * frame, GSHCPU_Rect rect, GSHCPU_Rect whole) {
+  p->run = run;
+  p->frame = frame;
+  p->refused = 0;
+  p->table = NULL;
+  p->gradient = item->paint.kind == GSHSCENE_PAINT_GRADIENT;
+  if (!p->gradient) {
+    source_of(run, item, frame, p->src);
+    widen(run, frame, rect);
+    run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
+    return GSHSCENE_OK;
+  }
   if (gshcpu_render_rect_empty(whole)) {
-    return GSHSCENE_OK; /* nothing of it is in the whole render */
+    p->refused = 1; /* nothing of it is in the whole render: nothing to paint, and nothing to report */
+    return GSHSCENE_OK;
   }
   GSHSCENE_Gradient g;
   const Resolved * e = NULL;
@@ -910,150 +865,243 @@ static GSHSCENE_Result fill_gradient(Run * run, const GSHSCENE_Item * item, cons
   GSHGEOM_Map composed;
   run->maps[count - 1] = item->map;
   run->maps[count] = g.map;
-  GSHCPU_Gradient gr;
   if (gshgeom_map_compose_chain(run->maps, count + 1, &run->job->target.map, &composed) != GSHGEOM_OK ||
-      gshcpu_render_gradient_prepare(&gr, &g, run->pool + e->first, &composed, item->paint.rgba[3]) != GSHCPU_OK ||
-      !gshcpu_render_gradient_in_domain(&gr, whole)) {
+      gshcpu_render_gradient_prepare(&p->gr, &g, run->pool + e->first, &composed, item->paint.rgba[3]) != GSHCPU_OK ||
+      !gshcpu_render_gradient_in_domain(&p->gr, whole)) {
+    p->refused = 1;
     return refuse(run, item, chain, count);
   }
-  GSHCPU_Convert c;
-  gshcpu_render_convert_prepare(&c, &e->space, &frame->space);
+  gshcpu_render_convert_prepare(&p->conv, &e->space, &frame->space);
   widen(run, frame, rect);
-  size_t w = (size_t)(rect.x1 - rect.x0);
-  const double * table = NULL;
+  const uint64_t area = (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
+  run->work += area;
   if (run->cs->fast_fill && run->tables) {
     /* The fast fill coverage takes the color from a table of the line (made once for the paint, and kept for the next). */
-    for (size_t k = 0; k < TABLE_SLOTS && !table; k++) {
+    for (size_t k = 0; k < TABLE_SLOTS && !p->table; k++) {
       const Table_Key * key = &run->table_key[k];
       if (key->used && key->id == gshscene_resource_id(item->paint.gradient) && key->alpha == item->paint.rgba[3] &&
           key->space.primaries == frame->space.primaries && key->space.transfer == frame->space.transfer &&
           key->space.gamma == frame->space.gamma) {
-        table = run->tables + k * (GSHCPU_RENDER_GRADIENT_TABLE + 1u) * 4u;
+        p->table = run->tables + k * (GSHCPU_RENDER_GRADIENT_TABLE + 1u) * 4u;
       }
     }
-    if (!table && w * (size_t)(rect.y1 - rect.y0) >= 2048u) {
+    if (!p->table && area >= 2048u) {
       size_t k = run->table_next++ % TABLE_SLOTS;
       Table_Key * key = &run->table_key[k];
       key->used = 1;
       key->id = gshscene_resource_id(item->paint.gradient);
       key->alpha = item->paint.rgba[3];
       key->space = frame->space;
-      table = run->tables + k * (GSHCPU_RENDER_GRADIENT_TABLE + 1u) * 4u;
-      gshcpu_render_gradient_table(&gr, &c, (double *)(void *)table);
+      double * table = run->tables + k * (GSHCPU_RENDER_GRADIENT_TABLE + 1u) * 4u;
+      gshcpu_render_gradient_table(&p->gr, &p->conv, table);
+      p->table = table;
     }
   }
-  if (table) {
-    uint32_t index[256];
-    for (int64_t y = rect.y0; y < rect.y1; y++) {
-      const uint8_t * row = cov + (size_t)(y - rect.y0) * w;
-      for (size_t i0 = 0; i0 < w; i0 += 256u) {
-        const size_t n = w - i0 < 256u ? w - i0 : 256u;
-        size_t first = 0;
-        while (first < n && row[i0 + first] == 0) {
-          first++;
-        }
-        if (first == n) {
-          continue;
-        }
-        gshcpu_render_gradient_table_row(&gr, (double)(int32_t)(rect.x0 + (int64_t)i0) + 0.5, (double)(int32_t)y + 0.5, n, row + i0, index);
-        for (size_t i = first; i < n; i++) {
-          if (row[i0 + i] == 0 || index[i] == GSHCPU_RENDER_GRADIENT_NONE) {
-            continue;
-          }
-          const int64_t x = rect.x0 + (int64_t)(i0 + i);
-          uint32_t m8 = weigh_clips(run, frame->clip_base, run->clip_count, row[i0 + i], x, y);
-          if (m8 == 0) {
-            continue;
-          }
-          size_t p = at(run, x, y);
-          apply_src_over(&frame->layer[4u * p], table + 4u * (size_t)index[i], (double)m8 / 255.0);
-          if (run->top == 0) {
-            run->touched[p] = 1;
-          }
-        }
-      }
-    }
-    run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);
-    return GSHSCENE_OK;
-  }
-  for (int64_t y = rect.y0; y < rect.y1; y++) {
-    for (int64_t x = rect.x0; x < rect.x1; x++) {
-      uint32_t m8 = cov[(size_t)(y - rect.y0) * w + (size_t)(x - rect.x0)];
-      m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);
-      if (m8 == 0) {
-        continue;
-      }
-      double color[4];
-      if (!gshcpu_render_gradient_at(&gr, (double)(int32_t)x + 0.5, (double)(int32_t)y + 0.5, color)) {
-        continue; /* G8: outside the cone, the source is zero and src-over changes nothing */
-      }
-      gshcpu_render_convert_straight(&c, color, color);
-      double s[4] = {color[0] * color[3], color[1] * color[3], color[2] * color[3], color[3]};
-      size_t p = at(run, x, y);
-      apply_src_over(&frame->layer[4u * p], s, (double)m8 / 255.0);
-      if (run->top == 0) {
-        run->touched[p] = 1;
-      }
-    }
-  }
-  run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);
   return GSHSCENE_OK;
 }
 
-/**
- * The pixels of @p rect, weighed by the clips in force and the coverage @p cov (row by row over @p rect), composited
- * with the solid source @p src, SRC_OVER (N5, N7, D8).  A pixel of weight 0 is not touched.
- */
-static void composite_solid(Run * run, Frame * frame, const double src[4], GSHCPU_Rect rect, const uint8_t * cov) {
-  size_t w = (size_t)(rect.x1 - rect.x0);
-  for (int64_t y = rect.y0; y < rect.y1; y++) {
-    const uint8_t * row = cov + (size_t)(y - rect.y0) * w;
-    for (int64_t x = rect.x0; x < rect.x1; x++) {
-      size_t i = (size_t)(x - rect.x0);
-      if (row[i] == 0) {
-        /* A pixel of coverage 0 weighs 0 under any clips and is not touched (below): pass a run of them eight at a time. */
-        while (i + 8u <= w) {
+/** One pixel of weight @p m8 and source @p src at (x, y), in the layer. */
+static inline void painter_pixel(Run * run, Frame * frame, int64_t x, int64_t y, uint32_t m8, const double * src) {
+  const size_t p = at(run, x, y);
+  apply_src_over(&frame->layer[4u * p], src, gshcpu_k_level[m8]);
+  if (run->top == 0) {
+    run->touched[p] = 1;
+  }
+}
+
+/** The receiver of a span of coverages (GSHCPU_Span_Fn): @p n pixels from (@p x, @p y), a pixel of coverage 0 not drawn. */
+static void painter_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8) {
+  Painter * p = ctx;
+  Run * run = p->run;
+  Frame * frame = p->frame;
+  const int clipped = frame->clip_base < run->clip_count;
+  if (!p->gradient) {
+    for (size_t i = 0; i < n; i++) {
+      if (m8[i] == 0) {
+        /* A pixel of coverage 0 weighs 0 under any clips and is not touched: pass a run of them eight at a time. */
+        while (i + 8u <= n) {
           uint64_t eight;
-          memcpy(&eight, row + i, sizeof eight);
+          memcpy(&eight, m8 + i, sizeof eight);
           if (eight != 0) {
             break;
           }
           i += 8u;
         }
-        while (i < w && row[i] == 0) {
+        while (i < n && m8[i] == 0) {
           i++;
         }
-        if (i == w) {
-          break;
+        if (i == n) {
+          return;
         }
-        x = rect.x0 + (int64_t)i;
       }
-      uint32_t m8 = row[i];
-      m8 = weigh_clips(run, frame->clip_base, run->clip_count, m8, x, y);
-      if (m8 == 0) {
+      uint32_t m = m8[i];
+      if (clipped) {
+        m = weigh_clips(run, frame->clip_base, run->clip_count, m, x + (int64_t)i, y);
+        if (m == 0) {
+          continue;
+        }
+      }
+      painter_pixel(run, frame, x + (int64_t)i, y, m, p->src);
+    }
+    return;
+  }
+  if (p->table) {
+    uint32_t index[256];
+    for (size_t i0 = 0; i0 < n; i0 += 256u) {
+      const size_t len = n - i0 < 256u ? n - i0 : 256u;
+      size_t first = 0;
+      while (first < len && m8[i0 + first] == 0) {
+        first++;
+      }
+      if (first == len) {
         continue;
       }
-      size_t p = at(run, x, y);
-      apply_src_over(&frame->layer[4u * p], src, (double)m8 / 255.0);
-      if (run->top == 0) {
-        run->touched[p] = 1;
+      gshcpu_render_gradient_table_row(&p->gr, (double)(int32_t)(x + (int64_t)i0) + 0.5, (double)(int32_t)y + 0.5, len, m8 + i0, index);
+      for (size_t i = first; i < len; i++) {
+        if (m8[i0 + i] == 0 || index[i] == GSHCPU_RENDER_GRADIENT_NONE) {
+          continue;
+        }
+        uint32_t m = m8[i0 + i];
+        if (clipped) {
+          m = weigh_clips(run, frame->clip_base, run->clip_count, m, x + (int64_t)(i0 + i), y);
+          if (m == 0) {
+            continue;
+          }
+        }
+        painter_pixel(run, frame, x + (int64_t)(i0 + i), y, m, p->table + 4u * (size_t)index[i]);
       }
     }
+    return;
+  }
+  for (size_t i = 0; i < n; i++) {
+    if (m8[i] == 0) {
+      continue;
+    }
+    const int64_t px = x + (int64_t)i;
+    uint32_t m = clipped ? weigh_clips(run, frame->clip_base, run->clip_count, m8[i], px, y) : m8[i];
+    if (m == 0) {
+      continue;
+    }
+    double color[4];
+    if (!gshcpu_render_gradient_at(&p->gr, (double)(int32_t)px + 0.5, (double)(int32_t)y + 0.5, color)) {
+      continue; /* G8: outside the cone, the source is zero and src-over changes nothing */
+    }
+    gshcpu_render_convert_straight(&p->conv, color, color);
+    const double s[4] = {color[0] * color[3], color[1] * color[3], color[2] * color[3], color[3]};
+    painter_pixel(run, frame, px, y, m, s);
   }
 }
 
 /** The coverage of @p cov over @p rect painted as the item's paint says: the fill's tail, which a stroke shares (SC5). */
 static GSHSCENE_Result paint_coverage(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count,
     Frame * frame, GSHCPU_Rect rect, GSHCPU_Rect whole, const uint8_t * cov) {
-  if (item->paint.kind == GSHSCENE_PAINT_GRADIENT) {
-    return fill_gradient(run, item, chain, count, frame, rect, whole, cov);
+  Painter p;
+  GSHSCENE_Result r = painter_begin(&p, run, item, chain, count, frame, rect, whole);
+  if (r != GSHSCENE_OK || p.refused) {
+    return r;
   }
-  double s[4];
-  source_of(run, item, frame, s);
-  widen(run, frame, rect);
-  composite_solid(run, frame, s, rect, cov);
-  run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
+  const size_t w = (size_t)(rect.x1 - rect.x0);
+  for (int64_t y = rect.y0; y < rect.y1; y++) {
+    painter_span(&p, y, rect.x0, w, cov + (size_t)(y - rect.y0) * w);
+  }
   return GSHSCENE_OK;
+}
+
+/** A fill's paint, begun by shape() when the fast fill coverage sweeps straight into it (shape()). */
+typedef struct Span_Paint {
+  const GSHSCENE_Item * item;
+  const size_t * chain;
+  size_t count;
+  Frame * frame;
+  Painter painter;
+  int taken;
+} Span_Paint;
+
+/**
+ * The geometry and the coverage of a fill or clip push, into @p out over @p rect (the item's pixels meet what it
+ * can reach), and in @p whole_rect the rectangle the whole render draws of it (its pixels meet @p whole, what it can
+ * reach there).  The cell cap is met over that one, so that a damage-limited render refuses the items the whole
+ * render refuses (S4); a bound from its edges skips the count where the cap cannot be met.
+ * With @p sp (a fill, a stroke painted with a gradient) and the fast fill coverage, the spans of the coverage are painted as the sweep makes
+ * them and @p out is left alone: @p sp->taken is set, the paint was begun (or refused), and the result is the whole of it.
+ * @return ::GSHSCENE_OK; ::GSHSCENE_ERR_LIMIT for a resource limit (the caller refuses the item); OOM.
+ */
+static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count,
+    GSHCPU_Rect reach, GSHCPU_Rect whole, uint8_t * out, GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, Span_Paint * sp) {
+  GSHCPU_Item_Geometry g;
+  if (run->item_alloc == &run->arena.self) {
+    gshcpu_render_arena_reset(&run->arena);
+  }
+  GSHCPU_Result r = gshcpu_render_geometry(item, run->maps, count - 1, &run->job->target.map, run->item_alloc,
+      &run->cs->geometry, &g);
+  run->work += g.points;
+  /* A run from a font: each glyph's entry (glyph.h, D7); a glyph refused under strict stops the render here (S6). */
+  for (size_t i = 0; r == GSHCPU_OK && g.notes && i < g.count; i++) {
+    if (!g.notes[i].entry_class) {
+      continue;
+    }
+    GSHSCENE_Result e = gshscene_job_report_glyph(run->job, (GSHSCENE_Entry_Class)g.notes[i].entry_class,
+        (GSHSCENE_Reason)g.notes[i].reason, chain, count, i);
+    if (e == GSHSCENE_OK && g.notes[i].entry_class == GSHSCENE_ENTRY_REFUSED &&
+        (run->request->flags & GSHSCENE_RENDER_STRICT)) {
+      memcpy(run->stop, chain, count * sizeof *chain);
+      run->stop_count = count;
+      e = GSHSCENE_ERR_REFUSED;
+    }
+    if (e != GSHSCENE_OK) {
+      gshcpu_render_geometry_release(&g, run->item_alloc);
+      return e;
+    }
+  }
+  if (r == GSHCPU_OK) {
+    const GSHGEOM_Flat_Path * const * paths = (const GSHGEOM_Flat_Path * const *)g.paths;
+    *rect = gshcpu_render_rect_meet(g.box, reach);
+    if (gshcpu_render_rect_empty(*rect)) {
+      rect->x1 = rect->x0;
+      rect->y1 = rect->y0;
+    }
+    GSHCPU_Rect walk = gshcpu_render_rect_meet(g.box, whole);
+    *whole_rect = walk;
+    if (!gshcpu_render_rect_empty(walk)) {
+      uint64_t cells = 0;
+      /* Drawn in part (a damage): unless the bound says the cap cannot be met over the whole, count only where it
+       * is drawn; else count the whole while drawing the part. */
+      if ((rect->x0 != walk.x0 || rect->y0 != walk.y0 || rect->x1 != walk.x1 || rect->y1 != walk.y1) &&
+          gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_deposits) <= run->cs->max_deposits) {
+        walk = *rect;
+      }
+      if (run->cs->fast_fill && (run->cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && !gshcpu_render_rect_empty(*rect) &&
+          rect->x1 - rect->x0 <= 65000 &&
+          gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_deposits) <= run->cs->max_deposits) {
+        /* The fast fill coverage: the lean cover of every path at once, into the coverage of the rectangle. */
+        if (run->acc_dirty) {
+          memset(run->acc, 0, 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc);
+          run->acc_dirty = 0;
+        }
+        const size_t scratch = 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc;
+        if (sp) {
+          GSHSCENE_Result begun = painter_begin(&sp->painter, run, sp->item, sp->chain, sp->count, sp->frame, *rect, *whole_rect);
+          sp->taken = 1;
+          if (begun != GSHSCENE_OK || sp->painter.refused) {
+            gshcpu_render_geometry_release(&g, run->item_alloc);
+            return begun;
+          }
+          r = gshcpu_render_lean_fill_spans(paths, g.count, item->fill_rule == GSHGEOM_FILL_EVEN_ODD, 0, 0, *rect, run->acc, scratch,
+              painter_span, &sp->painter);
+        } else {
+          r = gshcpu_render_lean_fill(paths, g.count, item->fill_rule == GSHGEOM_FILL_EVEN_ODD, 0, 0, *rect, run->acc, scratch, out);
+          run->work += (uint64_t)(rect->x1 - rect->x0) * (uint64_t)(rect->y1 - rect->y0);
+        }
+      } else {
+        r = gshcpu_render_cover_counted(paths, g.count, item->fill_rule, *rect, walk, out, run->acc, run->cs->max_deposits,
+            &cells);
+        run->acc_dirty = 1; /* the dense sweep writes the accumulator band by band and leaves it so */
+        run->work += cells;
+      }
+    }
+  }
+  gshcpu_render_geometry_release(&g, run->item_alloc);
+  return scene_result(r);
 }
 
 /**
@@ -1068,6 +1116,16 @@ static GSHSCENE_Result fill_plane(Run * run, const GSHSCENE_Item * item, const s
   if (gshcpu_render_rect_empty(rect)) {
     rect.x1 = rect.x0;
     rect.y1 = rect.y0;
+  } else if (run->cs->fast_fill) {
+    /* The fast fill coverage: every row is the same row of 255, painted as a span. */
+    const size_t w = (size_t)(rect.x1 - rect.x0);
+    memset(run->coverage, 0xFF, w);
+    Painter p;
+    GSHSCENE_Result r = painter_begin(&p, run, item, chain, count, frame, rect, whole);
+    for (int64_t y = rect.y0; r == GSHSCENE_OK && !p.refused && y < rect.y1; y++) {
+      painter_span(&p, y, rect.x0, w, run->coverage);
+    }
+    return r;
   } else {
     memset(run->coverage, 0xFF, (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0));
   }
@@ -1081,8 +1139,12 @@ static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t 
   Frame * frame = &run->frames[run->top];
   GSHCPU_Rect rect;
   GSHCPU_Rect whole;
+  Span_Paint sp = {item, chain, count, frame, {0}, 0};
   GSHSCENE_Result r = shape(run, item, chain, count, reach_of(run, frame->clip_base, run->clip_count),
-      whole_reach_of(run, frame->clip_base, run->clip_count), run->coverage, &rect, &whole);
+      whole_reach_of(run, frame->clip_base, run->clip_count), run->coverage, &rect, &whole, &sp);
+  if (sp.taken) {
+    return r; /* painted as it was swept, or refused by its paint */
+  }
   if (r == GSHSCENE_ERR_LIMIT) {
     return refuse(run, item, chain, count);
   }
@@ -1319,14 +1381,15 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
     }
     const GSHGEOM_Flat_Path * body = gshcpu_render_stroke_cover_path(&s);
     const size_t scratch = 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc;
-    r = gshcpu_render_lean_fill(&body, 1, 0, s.shift_x, s.shift_y, rect, run->acc, scratch, run->coverage);
-    run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
-    GSHSCENE_Result result;
-    if (r != GSHCPU_OK) {
-      result = scene_result(r);
-    } else {
-      gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, strokes));
-      result = paint_coverage(run, item, chain, count, frame, rect, whole, run->coverage);
+    Painter painter;
+    GSHSCENE_Result result = painter_begin(&painter, run, item, chain, count, frame, rect, whole);
+    if (result == GSHSCENE_OK && !painter.refused) {
+      r = gshcpu_render_lean_fill_spans(&body, 1, 0, s.shift_x, s.shift_y, rect, run->acc, scratch, painter_span, &painter);
+      if (r != GSHCPU_OK) {
+        result = scene_result(r);
+      } else {
+        gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, strokes));
+      }
     }
     gshcpu_render_stroke_close(cache, &s);
     return result;
@@ -1411,7 +1474,7 @@ static GSHSCENE_Result clip_push(Run * run, const GSHSCENE_Item * item, const si
   Clip * clip = &run->clips[run->clip_count];
   clip->coverage = run->clip_memory + run->clip_count * run->layout.pixels;
   GSHSCENE_Result r = shape(run, item, chain, count, reach_of(run, frame->clip_base, run->clip_count),
-      whole_reach_of(run, frame->clip_base, run->clip_count), clip->coverage, &clip->rect, &clip->whole);
+      whole_reach_of(run, frame->clip_base, run->clip_count), clip->coverage, &clip->rect, &clip->whole, NULL);
   if (r == GSHSCENE_ERR_LIMIT) {
     return refuse(run, item, chain, count);
   }
@@ -1449,6 +1512,18 @@ static GSHSCENE_Result group_pop(Run * run) {
   /* The group's layer is zero outside its dirty rectangle (widen), where it was never made ready. */
   static const double zero[4] = {0.0, 0.0, 0.0, 0.0};
   widen(run, parent, region);
+  if (bounded && c.same && parent->clip_base == f->clip_base && !gshcpu_render_rect_empty(region)) {
+    /* No clips and no conversion, inside the group's dirty rectangle: a row at a time. */
+    for (int64_t y = region.y0; y < region.y1; y++) {
+      const size_t p0 = at(run, region.x0, y);
+      gshcpu_render_composite_row(op, o, &f->layer[4u * p0], &parent->layer[4u * p0], (size_t)(region.x1 - region.x0),
+          run->top == 1u ? run->touched + p0 : NULL);
+    }
+    run->work += (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0);
+    run->top--;
+    run->groups_open--;
+    return GSHSCENE_OK;
+  }
   for (int64_t y = region.y0; y < region.y1; y++) {
     for (int64_t x = region.x0; x < region.x1; x++) {
       uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);

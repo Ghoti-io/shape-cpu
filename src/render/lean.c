@@ -445,14 +445,13 @@ static void lean_out_span(void * ctx, int64_t y, int64_t x, size_t n, const uint
   memcpy(o->out + (size_t)(y - o->y0) * o->width + (size_t)(x - o->x0), m8, n);
 }
 
-GSHCPU_Result gshcpu_render_lean_fill(const GSHGEOM_Flat_Path * const * paths, size_t count, int even_odd, int64_t shift_x,
-    int64_t shift_y, GSHCPU_Rect rect, void * scratch, size_t scratch_bytes, uint8_t * out) {
+GSHCPU_Result gshcpu_render_lean_fill_spans(const GSHGEOM_Flat_Path * const * paths, size_t count, int even_odd, int64_t shift_x,
+    int64_t shift_y, GSHCPU_Rect rect, void * scratch, size_t scratch_bytes, GSHCPU_Span_Fn fn, void * ctx) {
   const int64_t width = rect.x1 - rect.x0;
   const int64_t height = rect.y1 - rect.y0;
   if (width <= 0 || height <= 0 || width > 65000) {
     return GSHCPU_OK;
   }
-  memset(out, 0, (size_t)width * (size_t)height);
   /* the row of coverages the sweep makes lies at the end of the scratch, past the band */
   const size_t line_bytes = ((size_t)width + 63u) & ~(size_t)63u;
   if (scratch_bytes < line_bytes + gshcpu_lean_bytes((size_t)width, (size_t)GSHCPU_RENDER_BAND_ROWS)) {
@@ -467,7 +466,6 @@ GSHCPU_Result gshcpu_render_lean_fill(const GSHGEOM_Flat_Path * const * paths, s
   Lean_Band b;
   lean_band(&b, scratch, (size_t)width, rows_max);
   b.even_odd = even_odd;
-  Lean_Out o = {out, rect.x0, rect.y0, (size_t)width};
   const int64_t ox = (int64_t)(int32_t)(shift_x - rect.x0) * 64;
   const int64_t oy = (int64_t)(int32_t)(shift_y - rect.y0) * 64;
   for (int64_t top = 0; top < height; top += (int64_t)rows_max) {
@@ -491,8 +489,20 @@ GSHCPU_Result gshcpu_render_lean_fill(const GSHGEOM_Flat_Path * const * paths, s
         }
       }
     }
-    lean_sweep(&b, rows, (int)width, rect.x0, rect.y0 + top, line, lean_out_span, &o);
+    lean_sweep(&b, rows, (int)width, rect.x0, rect.y0 + top, line, fn, ctx);
   }
   memset(line, 0, line_bytes);
   return GSHCPU_OK;
+}
+
+GSHCPU_Result gshcpu_render_lean_fill(const GSHGEOM_Flat_Path * const * paths, size_t count, int even_odd, int64_t shift_x,
+    int64_t shift_y, GSHCPU_Rect rect, void * scratch, size_t scratch_bytes, uint8_t * out) {
+  const int64_t width = rect.x1 - rect.x0;
+  const int64_t height = rect.y1 - rect.y0;
+  if (width <= 0 || height <= 0 || width > 65000) {
+    return GSHCPU_OK;
+  }
+  memset(out, 0, (size_t)width * (size_t)height);
+  Lean_Out o = {out, rect.x0, rect.y0, (size_t)width};
+  return gshcpu_render_lean_fill_spans(paths, count, even_odd, shift_x, shift_y, rect, scratch, scratch_bytes, lean_out_span, &o);
 }

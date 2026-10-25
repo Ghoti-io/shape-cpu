@@ -99,6 +99,14 @@ void gshcpu_render_convert_premultiplied(const GSHCPU_Convert * c, const double 
  */
 int gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op);
 
+/**
+ * @p n pixels of a group's layer (@p src, four doubles each) composited onto @p dst with the operator @p op at the full weight,
+ * each scaled by @p opacity first: for each pixel what ::gshcpu_render_apply gives with `m = 1`, in the same operations.  A
+ * pixel of a bounded operator whose scaled source is all zero is left alone; @p touched (or NULL) is set where one is not.
+ * The layer is already in the destination's space.
+ */
+void gshcpu_render_composite_row(uint32_t op, double opacity, const double * src, double * dst, size_t n, uint8_t * touched);
+
 /** N4: nonzero for an operator with `op(0, D) = D` for every `D` (every blend mode, B3). */
 int gshcpu_render_bounded(uint32_t op);
 
@@ -519,6 +527,7 @@ typedef struct GSHCPU_Gradient {
   const GSHCPU_Stop * stops;
   size_t count;
   double o_first, o_last, period;
+  double inv_period, scale;  /* 1 / period, and the table's points to a unit of the parameter (the fast fill coverage's) */
   double alpha;              /* the paint's alpha multiplier (G12) */
 } GSHCPU_Gradient;
 
@@ -815,6 +824,10 @@ GSHCPU_Result gshcpu_render_lean_cover(const GSHGEOM_Flat_Path * path, int64_t s
  * ::gshcpu_render_lean_cover (the last row's width of it is the row of coverages the sweep makes, and is left zero).  Overlaps are summed and held at one (folded, for
  * even-odd), not made exact.
  */
+/** ::gshcpu_render_lean_fill into spans: each run of nonzero coverages is handed to @p fn (the rectangle's own coordinates), row by row; nothing is written elsewhere. */
+GSHCPU_Result gshcpu_render_lean_fill_spans(const GSHGEOM_Flat_Path * const * paths, size_t count, int even_odd, int64_t shift_x,
+    int64_t shift_y, GSHCPU_Rect rect, void * scratch, size_t scratch_bytes, GSHCPU_Span_Fn fn, void * ctx);
+
 GSHCPU_Result gshcpu_render_lean_fill(const GSHGEOM_Flat_Path * const * paths, size_t count, int even_odd, int64_t shift_x,
     int64_t shift_y, GSHCPU_Rect rect, void * scratch, size_t scratch_bytes, uint8_t * out);
 

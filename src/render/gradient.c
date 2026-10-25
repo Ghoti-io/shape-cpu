@@ -220,6 +220,10 @@ GSHCPU_Result gshcpu_render_gradient_prepare(GSHCPU_Gradient * out, const GSHSCE
     out->o_first = stops[0].offset;
     out->o_last = stops[out->count - 1].offset;
     out->period = out->o_last - out->o_first;
+    if (out->period > 0.0) {
+      out->inv_period = 1.0 / out->period;
+      out->scale = (double)GSHCPU_RENDER_GRADIENT_TABLE / out->period;
+    }
   }
   switch (g->kind) {
     case GSHSCENE_GRADIENT_LINEAR: {
@@ -508,8 +512,28 @@ void gshcpu_render_gradient_table(const GSHCPU_Gradient * g, const GSHCPU_Conver
   }
 }
 
+/** The floor of @p v, by a 32-bit conversion where the value is within its range. */
+static inline double table_floor(double v) {
+  if (v > -2147483000.0 && v < 2147483000.0) {
+    const double r = (double)(int32_t)v; /* 32-bit: no x87 (AD-17) */
+    return r > v ? r - 1.0 : r;
+  }
+  return gmath_floor(v);
+}
+
+/** The table index of the offset @p u on the line, in points from its first end (past either end: that end's). */
+static inline uint32_t table_point(double u) {
+  if (!(u > 0.0)) {
+    return 0;
+  }
+  if (u >= (double)GSHCPU_RENDER_GRADIENT_TABLE) {
+    return GSHCPU_RENDER_GRADIENT_TABLE;
+  }
+  return (uint32_t)(int32_t)u; /* 32-bit: no x87 (AD-17) */
+}
+
 /** The table index of the parameter @p t. */
-static uint32_t table_index(const GSHCPU_Gradient * g, double t) {
+static inline uint32_t table_index(const GSHCPU_Gradient * g, double t) {
   const uint32_t n = GSHCPU_RENDER_GRADIENT_TABLE;
   if (!(t >= -GSHCPU_RENDER_T_LIMIT)) {
     return 0;
@@ -523,23 +547,16 @@ static uint32_t table_index(const GSHCPU_Gradient * g, double t) {
   if (g->extend != GSHSCENE_EXTEND_PAD && (t < g->o_first || t > g->o_last)) {
     double x = t - g->o_first;
     if (g->extend == GSHSCENE_EXTEND_REPEAT) {
-      x = x - gmath_floor(x / g->period) * g->period;
+      x = x - table_floor(x * g->inv_period) * g->period;
     } else {
       double twice = 2.0 * g->period;
-      double m = x - gmath_floor(x / twice) * twice;
+      double m = x - table_floor(x * (0.5 * g->inv_period)) * twice;
       double d = m - g->period;
       x = g->period - (d < 0.0 ? -d : d);
     }
     t = g->o_first + x;
   }
-  double u = (t - g->o_first) / g->period * (double)n + 0.5;
-  if (!(u > 0.0)) {
-    return 0;
-  }
-  if (u >= (double)n) {
-    return n;
-  }
-  return (uint32_t)(int32_t)u; /* 32-bit: no x87 (AD-17) */
+  return table_point((t - g->o_first) * g->scale + 0.5);
 }
 
 void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, double qy, size_t count, const uint8_t * cov,
@@ -558,6 +575,15 @@ void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, dou
     (void)gshcpu_render_gradient_param(g, px0, py0, &t0);
     (void)gshcpu_render_gradient_param(g, px1, py1, &t1);
     const double dt = t1 - t0;
+    if (g->period > 0.0 && g->extend == GSHSCENE_EXTEND_PAD && t0 - t0 == 0.0 && dt - dt == 0.0) {
+      /* The offset on the line is affine in the pixel too: no more than a multiply and an add each. */
+      const double ua = (t0 - g->o_first) * g->scale + 0.5;
+      const double ub = dt * g->scale;
+      for (size_t i = 0; i < count; i++) {
+        index[i] = cov[i] ? table_point(ua + ub * (double)(int32_t)i) : GSHCPU_RENDER_GRADIENT_NONE;
+      }
+      return;
+    }
     for (size_t i = 0; i < count; i++) {
       index[i] = cov[i] ? table_index(g, t0 + dt * (double)(int32_t)i) : GSHCPU_RENDER_GRADIENT_NONE;
     }

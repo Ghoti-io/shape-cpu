@@ -489,7 +489,7 @@ int gshcpu_render_bounded(uint32_t op) {
   }
 }
 
-int gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op) {
+static inline __attribute__((always_inline)) int apply_core(double d[4], const double s[4], double m, uint32_t op) {
   const double sa = s[3];
   const double da = d[3];
   double fa = 0.0;
@@ -577,6 +577,61 @@ int gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op) {
     d[i] = gshcpu_render_saturate((1.0 - m) * d[i] + m * o[i]); /* N1 */
   }
   return 1;
+}
+
+int gshcpu_render_apply(double d[4], const double s[4], double m, uint32_t op) {
+  return apply_core(d, s, m, op);
+}
+
+void gshcpu_render_composite_row(uint32_t op, double opacity, const double * src, double * dst, size_t n, uint8_t * touched) {
+  const int bounded = gshcpu_render_bounded(op);
+  /* One loop for each operator, its constant folded into the body: the same operations, in the same order, as apply. */
+#define ROW_CASE(OP) \
+  case OP: \
+    for (size_t i = 0; i < n; i++) { \
+      double s[4]; \
+      for (int k = 0; k < 4; k++) { \
+        s[k] = opacity * src[4u * i + (size_t)k]; \
+      } \
+      if (bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0) { \
+        continue; \
+      } \
+      (void)apply_core(&dst[4u * i], s, 1.0, OP); \
+      if (touched) { \
+        touched[i] = 1; \
+      } \
+    } \
+    return;
+  switch (op) {
+    ROW_CASE(GSHSCENE_COMPOSITE_SRC_OVER)
+    ROW_CASE(GSHSCENE_COMPOSITE_SCREEN)
+    ROW_CASE(GSHSCENE_COMPOSITE_OVERLAY)
+    ROW_CASE(GSHSCENE_COMPOSITE_DARKEN)
+    ROW_CASE(GSHSCENE_COMPOSITE_LIGHTEN)
+    ROW_CASE(GSHSCENE_COMPOSITE_COLOR_DODGE)
+    ROW_CASE(GSHSCENE_COMPOSITE_COLOR_BURN)
+    ROW_CASE(GSHSCENE_COMPOSITE_HARD_LIGHT)
+    ROW_CASE(GSHSCENE_COMPOSITE_SOFT_LIGHT)
+    ROW_CASE(GSHSCENE_COMPOSITE_DIFFERENCE)
+    ROW_CASE(GSHSCENE_COMPOSITE_EXCLUSION)
+    ROW_CASE(GSHSCENE_COMPOSITE_MULTIPLY)
+    default:
+      for (size_t i = 0; i < n; i++) {
+        double s[4];
+        for (int k = 0; k < 4; k++) {
+          s[k] = opacity * src[4u * i + (size_t)k];
+        }
+        if (bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0) {
+          continue;
+        }
+        (void)apply_core(&dst[4u * i], s, 1.0, op);
+        if (touched) {
+          touched[i] = 1;
+        }
+      }
+      return;
+  }
+#undef ROW_CASE
 }
 
 /* --- D8: the weight under a clip ------------------------------------------------------------- */
