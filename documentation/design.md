@@ -314,7 +314,7 @@ in `long double`, the meetings from testing every pair), to the earlier step kep
 own invariants (each slab's order sorted at its end, the meetings made equal to the meetings counted) in a test build.
 
 **The fast stroke coverage.** `GSHCPU_Limits.stroke_coverage` is `GSHCPU_STROKE_COVERAGE_EXACT` (0) by default, the exact union
-of the paragraphs above, or `GSHCPU_STROKE_COVERAGE_FAST` (1): the coverage of a solid stroke's outline summed in floats, the
+of the paragraphs above, or `GSHCPU_STROKE_COVERAGE_FAST` (1): the coverage of a solid stroke's outline summed in integers, the
 area and cover each edge leaves in the cells it crosses (the form of font-rs and stb_truetype), kept by rows of sparse cells that
 are sorted and swept between, so that the work follows the outline and never the rectangle it lies in, and the magnitude held at
 one, which is how Skia and Blend2D draw a stroke whose pieces overlap. It differs from the exact coverage only where pieces of one
@@ -331,10 +331,12 @@ coverage is a copy, and a render with anything else keeps the double layer. On t
 132 ms against 267 ms for the exact coverage, and its dashed scene 43 ms against 101 ms; against the pictures of Blend2D and
 Skia the two tiers differ from them by the same mean (0.7 and 0.9 of 255 against Blend2D, 1.9 against Skia).
 
-The fast coverage is a float area and cover per cell, with the cells a row notes kept in a bitset swept in order, in bands of
-up to 1,024 rows; an edge's x at a row boundary is computed from its origin, so the cover does not depend on where a band
-or a stripe begins. The compositor blends four pixels at a time with SSE2 where the target has it (the same rounding as the
-scalar word). The frame of 2,500 strokes takes 74 ms on one thread.
+The fast coverage is an integer area and cover per cell, in 8192ths of a pixel, with the cells a row notes kept in a bitset swept
+in order, in bands of up to 1,024 rows. The points are already 64ths of a pixel, so an edge steps the quotient and remainder of a
+row's share and its x at a row boundary is the nearest 64th of the line's, found from the edge's origin, so the cover does not
+depend on where a band or a stripe begins; only the shares of a piece that spans four cells or more are made from a double. The
+compositor blends four pixels at a time with SSE2 where the target has it (the same rounding as the scalar word), and eight with
+AVX2 where the processor has it, found when the first run is blended. The frame of 2,500 strokes takes about 50 ms on one thread.
 
 A sink created with `gshcpu_sink_create_with_executor` draws those strokes over 32-row stripes on threads the caller owns.
 The library starts none: it asks the executor to start a count of tasks, which return at once, and later to wait for them. The
