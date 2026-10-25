@@ -9,6 +9,7 @@
  * Copyright 2026 by Corey Pennycuff
  */
 
+#include "../../src/render/render_internal.h"
 #include "render_helpers.h"
 
 #include <algorithm>
@@ -82,6 +83,24 @@ TEST(RenderFastFill, EveryFixtureStaysWithinAFewLevelsOfTheExactCoverage) {
 
 TEST(RenderFastFill, EveryFixtureStaysWithinAFewLevelsOnAStraightTarget) {
   every_fixture_stays_close(GSHCPU_FORMAT_RGBA8_STRAIGHT);
+}
+
+// The vector kernels and their scalar twins draw the same bytes: a processor without AVX2 gives the picture one with it does.
+TEST(RenderFastFill, EveryFixtureIsTheSameWithTheVectorKernelsOff) {
+  const GSHCPU_Format formats[2] = {GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, GSHCPU_FORMAT_RGBA8_STRAIGHT};
+  for (GSHCPU_Format format : formats) {
+    for (size_t i = 0; i < RF_FIXTURE_COUNT; i++) {
+      gshcpu_direct8_vector(1);
+      gshcpu_render_gradient_vector(1);
+      Picture with = draw(i, GSHCPU_FILL_COVERAGE_FAST, GSHCPU_STROKE_COVERAGE_FAST, format);
+      gshcpu_direct8_vector(0);
+      gshcpu_render_gradient_vector(0);
+      Picture without = draw(i, GSHCPU_FILL_COVERAGE_FAST, GSHCPU_STROKE_COVERAGE_FAST, format);
+      gshcpu_direct8_vector(1);
+      gshcpu_render_gradient_vector(1);
+      EXPECT_EQ(with.bytes, without.bytes) << RF_FIXTURES[i].name;
+    }
+  }
 }
 
 TEST(RenderFastFill, TheFillCoverageIsRefusedPastTheDefinedValues) {

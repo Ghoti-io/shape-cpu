@@ -357,3 +357,86 @@ TEST(RenderLayer8, TheVectorRowsMakeTheIndicesOfTheirScalarTwins) {
   }
   EXPECT_GT(compared, 10000u);
 }
+
+// Every vector kernel of the 8-bit compositor and its scalar twin make the same bytes, so that a processor without AVX2 draws the
+// picture one with it does.
+TEST(RenderLayer8, TheVectorKernelsMakeTheBytesOfTheirScalarTwins) {
+  std::mt19937 g(31337);
+  auto both = [&](auto && run) {
+    gshcpu_direct8_vector(1);
+    auto a = run();
+    gshcpu_direct8_vector(0);
+    auto b = run();
+    gshcpu_direct8_vector(1);
+    return std::make_pair(a, b);
+  };
+  const uint32_t ops[] = {GSHSCENE_COMPOSITE_MULTIPLY, GSHSCENE_COMPOSITE_SCREEN, GSHSCENE_COMPOSITE_OVERLAY,
+      GSHSCENE_COMPOSITE_HARD_LIGHT, GSHSCENE_COMPOSITE_DARKEN, GSHSCENE_COMPOSITE_LIGHTEN, GSHSCENE_COMPOSITE_DIFFERENCE,
+      GSHSCENE_COMPOSITE_EXCLUSION};
+  for (int trial = 0; trial < 300; trial++) {
+    const size_t n = 1 + g() % 140;
+    std::vector<uint8_t> dst(4 * n), src(4 * n), m(n);
+    std::vector<uint32_t> srcw(n), index(n);
+    std::vector<uint8_t> table(4 * 64);
+    for (size_t i = 0; i < n; i++) {
+      random_pixel(g, &dst[4 * i]);
+      random_pixel(g, &src[4 * i]);
+      m[i] = g() % 4 == 0 ? 0 : (g() % 3 == 0 ? 255 : (uint8_t)(g() % 256));
+      index[i] = g() % 7 == 0 ? GSHCPU_RENDER_GRADIENT_NONE : g() % 64;
+    }
+    for (size_t k = 0; k < 64; k++) {
+      random_pixel(g, &table[4 * k]);
+    }
+    std::memcpy(srcw.data(), src.data(), 4 * n);
+    {
+      auto r = both([&] {
+        std::vector<uint8_t> d = dst;
+        gshcpu_direct8_span_pixels(d.data(), srcw.data(), m.data(), 0, n);
+        return d;
+      });
+      ASSERT_EQ(r.first, r.second) << "span_pixels, n " << n;
+    }
+    {
+      auto r = both([&] {
+        std::vector<uint8_t> d = dst;
+        gshcpu_direct8_span_pixels(d.data(), srcw.data(), nullptr, 100u, n);
+        return d;
+      });
+      ASSERT_EQ(r.first, r.second) << "span_pixels with one coverage, n " << n;
+    }
+    {
+      auto r = both([&] {
+        std::vector<uint8_t> d = dst;
+        gshcpu_direct8_span_table(d.data(), table.data(), index.data(), m.data(), n);
+        return d;
+      });
+      ASSERT_EQ(r.first, r.second) << "span_table, n " << n;
+    }
+    {
+      auto r = both([&] {
+        std::vector<uint8_t> mm = m;
+        gshcpu_direct8_weigh(mm.data(), dst.data(), n);
+        return mm;
+      });
+      ASSERT_EQ(r.first, r.second) << "weigh, n " << n;
+    }
+    {
+      auto r = both([&] {
+        std::vector<uint8_t> d(4 * n);
+        gshcpu_direct8_premultiply_row(d.data(), dst.data(), n);
+        return d;
+      });
+      ASSERT_EQ(r.first, r.second) << "premultiply, n " << n;
+    }
+    for (uint32_t op : ops) {
+      for (float opacity : {1.0f, 0.22f, 0.75f}) {
+        auto r = both([&] {
+          std::vector<uint8_t> d = dst;
+          gshcpu_direct8_blend_row(op, d.data(), src.data(), n, opacity);
+          return d;
+        });
+        ASSERT_EQ(r.first, r.second) << "blend op " << op << " opacity " << opacity << " n " << n;
+      }
+    }
+  }
+}

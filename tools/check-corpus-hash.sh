@@ -3,7 +3,7 @@
 #
 # Fail unless the hashes a probe prints are the committed ones (CAP-13).
 #
-# Usage: check-corpus-hash.sh PROBE HASH_FILE [RENDER_FILE [DENSE_FILE]]
+# Usage: check-corpus-hash.sh PROBE HASH_FILE [RENDER_FILE [DENSE_FILE [FAST_FILE]]]
 #
 # PROBE is tools/corpus-hash.c built for this host (or a planted variant);
 # HASH_FILE is tests/corpus/coverage.hash, whose `hash` and `count` lines are
@@ -11,12 +11,14 @@
 # tests/corpus/render.hash: one `render FIXTURE FORMAT HASH` line per render
 # and the `hash` and `count` of their fold, each of which the probe must print
 # (story 13b).  DENSE_FILE, when given, is tests/corpus/dense.hash: the `hash` and `count` of the fold of the dense cells of
-# tests/dense_vectors.h through the exact step (strokes story S4c).  No value may be empty, so a probe that crashed, or a hash file
+# tests/dense_vectors.h through the exact step (strokes story S4c).  FAST_FILE, when given, is tests/corpus/render-fast.hash: the
+# renders of the same fixtures under the fast coverages, in the form of RENDER_FILE.  No value may be empty, so a probe that crashed, or a hash file
 # that was emptied, fails rather than comparing nothing with nothing.
-probe="${1:?usage: check-corpus-hash.sh PROBE HASH_FILE [RENDER_FILE [DENSE_FILE]]}"
-file="${2:?usage: check-corpus-hash.sh PROBE HASH_FILE [RENDER_FILE [DENSE_FILE]]}"
+probe="${1:?usage: check-corpus-hash.sh PROBE HASH_FILE [RENDER_FILE [DENSE_FILE [FAST_FILE]]]}"
+file="${2:?usage: check-corpus-hash.sh PROBE HASH_FILE [RENDER_FILE [DENSE_FILE [FAST_FILE]]]}"
 renders="${3:-}"
 dense="${4:-}"
+fast="${5:-}"
 
 got="$("$probe")" || { printf 'check-corpus-hash: the probe failed\n' >&2; exit 1; }
 got_hash=$(printf '%s\n' "$got" | awk '$1=="shape-cpu.hash"{print $2}')
@@ -78,3 +80,30 @@ if [ "$got_dhash" != "$want_dhash" ] || [ "$got_dcount" != "$want_dcount" ]; the
   exit 1
 fi
 printf 'check-corpus-hash: ok, dense cells %s over %s\n' "$got_dhash" "$got_dcount"
+[ -n "$fast" ] || exit 0
+
+got_fhash=$(printf '%s\n' "$got" | awk '$1=="shape-cpu.render-fast-hash"{print $2}')
+got_fcount=$(printf '%s\n' "$got" | awk '$1=="shape-cpu.render-fast-count"{print $2}')
+want_fhash=$(awk '$1=="hash"{print $2}' "$fast" 2>/dev/null)
+want_fcount=$(awk '$1=="count"{print $2}' "$fast" 2>/dev/null)
+got_flines=$(printf '%s\n' "$got" | awk '$1=="shape-cpu.render-fast"{print $2, $3, $4}')
+want_flines=$(awk '$1=="render"{print $2, $3, $4}' "$fast" 2>/dev/null)
+if [ -z "$want_fhash" ] || [ -z "$want_fcount" ] || [ -z "$got_fhash" ] || [ -z "$got_fcount" ] \
+  || [ -z "$want_flines" ] || [ -z "$got_flines" ]; then
+  printf 'check-corpus-hash: no fast renders to compare (probe %s/%s, committed %s/%s in %s)\n' \
+    "$got_fhash" "$got_fcount" "$want_fhash" "$want_fcount" "$fast" >&2
+  exit 1
+fi
+if [ "$got_flines" != "$want_flines" ]; then
+  printf 'check-corpus-hash: FAIL: these fast renders differ from %s:\n' "$fast" >&2
+  printf '%s\n' "$got_flines" > "${TMPDIR:-/tmp}/check-corpus-hash.$$.got"
+  printf '%s\n' "$want_flines" | diff - "${TMPDIR:-/tmp}/check-corpus-hash.$$.got" | sed -n 's/^> /  probe: /p; s/^< /  committed: /p' >&2
+  rm -f "${TMPDIR:-/tmp}/check-corpus-hash.$$.got"
+  exit 1
+fi
+if [ "$got_fhash" != "$want_fhash" ] || [ "$got_fcount" != "$want_fcount" ]; then
+  printf 'check-corpus-hash: FAIL: fast renders %s over %s, committed %s over %s\n' \
+    "$got_fhash" "$got_fcount" "$want_fhash" "$want_fcount" >&2
+  exit 1
+fi
+printf 'check-corpus-hash: ok, fast renders %s over %s\n' "$got_fhash" "$got_fcount"

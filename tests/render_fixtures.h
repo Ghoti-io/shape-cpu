@@ -1726,11 +1726,12 @@ static const GSHCPU_Format RF_FORMATS[4] = {GSHCPU_FORMAT_RGBA8_STRAIGHT, GSHCPU
     GSHCPU_FORMAT_RGBAF32_STRAIGHT, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED};
 
 /**
- * Render fixture @p index on a fresh raster of @p format with a fresh sink and give the render's hash.
+ * Render fixture @p index on a fresh raster of @p format with a fresh sink (of @p limits, or the defaults) and give the render's hash.
  *
  * @return The render's result (shape-scene's), or -1 when the fixture could not be built.
  */
-static inline int rf_render(size_t index, GSHCPU_Format format, uint64_t * hash, GIMG_Raster ** keep) {
+static inline int rf_render_with(size_t index, GSHCPU_Format format, const GSHCPU_Limits * limits, uint64_t * hash,
+    GIMG_Raster ** keep) {
   RF_Ctx c;
   rf_begin(&c);
   GSHSCENE_List * list = RF_FIXTURES[index].build(&c);
@@ -1738,7 +1739,7 @@ static inline int rf_render(size_t index, GSHCPU_Format format, uint64_t * hash,
   GSHSCENE_Sink * sink = NULL;
   GSHSCENE_Report * report = NULL;
   int result = -1;
-  if (!c.failed && list && raster && gshcpu_sink_create(NULL, NULL, NULL, &sink) == GSHCPU_OK &&
+  if (!c.failed && list && raster && gshcpu_sink_create(NULL, NULL, limits, &sink) == GSHCPU_OK &&
       gshscene_report_create(NULL, NULL, &report) == GSHSCENE_OK) {
     GSHSCENE_Target target;
     memset(&target, 0, sizeof target);
@@ -1764,6 +1765,11 @@ static inline int rf_render(size_t index, GSHCPU_Format format, uint64_t * hash,
     gimg_raster_destroy(raster);
   }
   return result;
+}
+
+/** rf_render with the sink's default limits. */
+static inline int rf_render(size_t index, GSHCPU_Format format, uint64_t * hash, GIMG_Raster ** keep) {
+  return rf_render_with(index, format, NULL, hash, keep);
 }
 
 #endif /* GHOTI_IO_GSHCPU_TEST_RENDER_FIXTURES_H */

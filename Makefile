@@ -518,7 +518,7 @@ $(HASH_PROBE): tools/corpus-hash.c tests/render_fixtures.h tests/dense_vectors.h
 	$(CC) $(CFLAGS) $(INCLUDE) -o $@ $< $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
 
 check-corpus-hash: $(HASH_PROBE) ## Fail unless the probe prints the committed cross-target hash (CAP-13)
-	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash tests/corpus/render.hash tests/corpus/dense.hash
+	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash tests/corpus/render.hash tests/corpus/dense.hash tests/corpus/render-fast.hash
 
 check-vectors: ## Fail if tests/known_answers.h or tests/render_vectors.h is not what its independent generator writes
 	@python3 tools/gen-coverage-vectors.py --check

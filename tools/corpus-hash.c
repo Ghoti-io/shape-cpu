@@ -274,6 +274,30 @@ int main(void) {
   printf("shape-cpu.render-hash %016" PRIx64 "\n", gshgeom_hash_value(&renders));
   printf("shape-cpu.render-count %lu\n", render_count);
 
+  /* The same fixtures under the fast coverages (GSHCPU_FILL_COVERAGE_FAST, GSHCPU_STROKE_COVERAGE_FAST): integer cells, byte layers and
+   * single-precision gradient rows, and where the processor has vector instructions a kernel and its scalar twin, which must give one
+   * answer on every target. */
+  GSHCPU_Limits fast;
+  gshcpu_limits_default(&fast);
+  fast.fill_coverage = GSHCPU_FILL_COVERAGE_FAST;
+  fast.stroke_coverage = GSHCPU_STROKE_COVERAGE_FAST;
+  GSHGEOM_Hash fast_renders;
+  gshgeom_hash_init(&fast_renders);
+  unsigned long fast_count = 0;
+  for (size_t i = 0; i < RF_FIXTURE_COUNT; i++) {
+    for (size_t f = 0; f < 4; f++) {
+      uint64_t h = 0;
+      if (rf_render_with(i, RF_FORMATS[f], &fast, &h, NULL) != 0) {
+        fail("a fixture did not render under the fast coverages");
+      }
+      printf("shape-cpu.render-fast %s %s %016" PRIx64 "\n", RF_FIXTURES[i].name, gshcpu_format_string(RF_FORMATS[f]), h);
+      gshgeom_hash_u64(&fast_renders, h);
+      fast_count++;
+    }
+  }
+  printf("shape-cpu.render-fast-hash %016" PRIx64 "\n", gshgeom_hash_value(&fast_renders));
+  printf("shape-cpu.render-fast-count %lu\n", fast_count);
+
   /* Strokes story S4c: the dense cells of tests/dense_vectors.h through the exact step, each vector's result and the counters
    * (its meetings, the evaluations at the slabs' ends, its fragments) folded in order.  Every one is an integer: the sweep
    * has no floating point, so a target that prints another value has a defect and not a rounding. */

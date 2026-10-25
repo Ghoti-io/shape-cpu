@@ -102,16 +102,12 @@ static inline void d8_four(unsigned char * row, const uint8_t * m, __m128i src) 
 
 
 #if defined(D8_AVX2)
-/** Whether this processor has AVX2, asked once (a race on it only repeats the question). */
+/** Whether the vector kernels may be used: a test turns them off to compare them with their scalar twins. */
+static int d8_vector_on = 1;
+
+/** Whether this processor has AVX2 and the vector kernels are on, asked once (a race on it only repeats the question). */
 static int d8_have_avx2(void) {
-  static int have = -1;
-  int h = have;
-  if (h < 0) {
-    __builtin_cpu_init();
-    h = __builtin_cpu_supports("avx2") ? 1 : 0;
-    have = h;
-  }
-  return h;
+  return __builtin_cpu_supports("avx2") && d8_vector_on; /* the answer is made before main: a read, no race */
 }
 
 /**
@@ -152,6 +148,14 @@ __attribute__((target("avx2"))) static size_t d8_avx2_blocks(unsigned char * row
   return i;
 }
 #endif
+
+void gshcpu_direct8_vector(int enable) {
+#if defined(D8_AVX2)
+  d8_vector_on = enable;
+#else
+  (void)enable;
+#endif
+}
 
 void gshcpu_direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8) {
   const GSHCPU_Direct8 * d = ctx;
@@ -536,11 +540,11 @@ static inline uint8_t d8_byte(float v, uint8_t top) {
     if (src[3] == 0) { \
       continue; \
     } \
-    const float sa = (float)src[3] * (1.0f / 255.0f) * opacity; \
+    const float sa = (float)src[3] * sk; \
     const float da = (float)dst[3] * (1.0f / 255.0f); \
     float c[4]; \
     for (int k = 0; k < 3; k++) { \
-      const float s = (float)src[k] * (1.0f / 255.0f) * opacity; \
+      const float s = (float)src[k] * sk; \
       const float d = (float)dst[k] * (1.0f / 255.0f); \
       c[k] = s * (1.0f - da) + d * (1.0f - sa) + d8_both(OP, s, d, sa, da); \
     } \
@@ -673,6 +677,7 @@ void gshcpu_direct8_blend_row(uint32_t op, unsigned char * dst, const unsigned c
     n -= done;
   }
 #endif
+  const float sk = (1.0f / 255.0f) * opacity; /* as the vector kernel scales: the product of the two first */
   switch (op) {
     case GSHSCENE_COMPOSITE_MULTIPLY:
       D8_BLEND_LOOP(GSHSCENE_COMPOSITE_MULTIPLY)

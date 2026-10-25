@@ -944,6 +944,9 @@ int gshcpu_direct8_blends(uint32_t op);
  */
 void gshcpu_direct8_blend_row(uint32_t op, unsigned char * dst, const unsigned char * src, size_t n, float opacity);
 
+/** Turn the vector kernels of the 8-bit compositor off (0) or on (1, the default): a test's way to compare them with their scalar twins. */
+void gshcpu_direct8_vector(int enable);
+
 /** The strokes of a render held to be drawn together by several threads. */
 typedef struct GSHCPU_Batch GSHCPU_Batch;
 

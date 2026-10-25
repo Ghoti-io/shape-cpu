@@ -741,14 +741,7 @@ static uint32_t row_f_pixel(const Row_F * c, float k) {
 static int gradient_vector_on = 1;
 
 static int gradient_have_avx2(void) {
-  static int have = -1;
-  int h = have;
-  if (h < 0) {
-    __builtin_cpu_init();
-    h = __builtin_cpu_supports("avx2") ? 1 : 0;
-    have = h;
-  }
-  return h && gradient_vector_on;
+  return __builtin_cpu_supports("avx2") && gradient_vector_on; /* the answer is made before main: a read, no race */
 }
 
 /** row_f_pixel for eight pixels from @p first: the same operations, the choices made with masks.  @return the pixels done, a multiple of eight. */
