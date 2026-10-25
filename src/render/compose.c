@@ -615,7 +615,7 @@ static int premultiplied(GSHCPU_Format format) {
 }
 
 /** `level / 255.0` for each of the 256 levels: the doubles the division gives, without it. */
-static const double k_level[256] = {
+const double gshcpu_k_level[256] = {
     0/255.0, 1/255.0, 2/255.0, 3/255.0, 4/255.0, 5/255.0, 6/255.0, 7/255.0,
     8/255.0, 9/255.0, 10/255.0, 11/255.0, 12/255.0, 13/255.0, 14/255.0, 15/255.0,
     16/255.0, 17/255.0, 18/255.0, 19/255.0, 20/255.0, 21/255.0, 22/255.0, 23/255.0,
@@ -653,15 +653,15 @@ static const double k_level[256] = {
 void gshcpu_render_load(GSHCPU_Format format, const unsigned char * row, size_t x, double out[4]) {
   if (gshcpu_render_pixel_bytes(format) == 4u) {
     const unsigned char * p = row + x * 4u;
-    const double a = k_level[p[3]];
+    const double a = gshcpu_k_level[p[3]];
     if (premultiplied(format)) {
-      out[0] = k_level[p[0]];
-      out[1] = k_level[p[1]];
-      out[2] = k_level[p[2]];
+      out[0] = gshcpu_k_level[p[0]];
+      out[1] = gshcpu_k_level[p[1]];
+      out[2] = gshcpu_k_level[p[2]];
     } else {
-      out[0] = k_level[p[0]] * a;
-      out[1] = k_level[p[1]] * a;
-      out[2] = k_level[p[2]] * a;
+      out[0] = gshcpu_k_level[p[0]] * a;
+      out[1] = gshcpu_k_level[p[1]] * a;
+      out[2] = gshcpu_k_level[p[2]] * a;
     }
     out[3] = a;
     return;

@@ -631,6 +631,9 @@ typedef struct GSHCPU_Stroke_Meta {
 } GSHCPU_Stroke_Meta;
 
 /** A receiver of the pixels one row of a sparse sweep covers: `n` coverages from pixel @p x (in the paths' frame). */
+/** `i / 255.0` for each 8-bit level `i`: the division, once. */
+extern const double gshcpu_k_level[256];
+
 typedef void (*GSHCPU_Span_Fn)(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8);
 
 /**
@@ -757,6 +760,9 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
  */
 int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_deposits);
 
+/** The outline of the body part a cover draws: without the edges that cancel when it has them. */
+const GSHGEOM_Flat_Path * gshcpu_render_stroke_cover_path(const GSHCPU_Stroke * s);
+
 /** The pixels ::gshcpu_render_stroke_cover would cover (@p rect) and the whole render's (@p whole_rect), without covering. */
 void gshcpu_render_stroke_rects(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole, GSHCPU_Rect * rect,
     GSHCPU_Rect * whole_rect);
@@ -774,6 +780,18 @@ GSHCPU_Result gshcpu_render_stroke_cover_sparse(const GSHCPU_Stroke * s, GSHCPU_
  * its complement, then `k = 255 - ((255 - b) * (255 - t) + 127) / 255`.
  */
 uint32_t gshcpu_render_stroke_compose(uint32_t b, uint32_t a, uint32_t c, int complement);
+
+/**
+ * The lean cover (lean.c): the coverage of @p path under the nonzero rule, summed in floats by rows of sparse cells, handed to
+ * @p fn as runs of nonzero coverage like the sparse sweep does, for the cells of @p rect (the destination's, @p shift_x and
+ * @p shift_y the paths' frame to it).  @p scratch is the accumulator (`gshcpu_lean_bytes` of the rectangle's width, and it
+ * holds zero before and after), @p line a row of coverages.  Overlaps are summed and held at one, not made exact.
+ */
+GSHCPU_Result gshcpu_render_lean_cover(const GSHGEOM_Flat_Path * path, int64_t shift_x, int64_t shift_y, GSHCPU_Rect rect,
+    void * scratch, size_t scratch_bytes, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx);
+
+/** The scratch bytes of the lean cover for a rectangle @p width cells wide and a band of @p rows rows. */
+size_t gshcpu_lean_bytes(size_t width, size_t rows);
 
 /**
  * FT-2: what ::gshcpu_render_cover_counted computes, handed to @p fn a row at a time and only where it can be

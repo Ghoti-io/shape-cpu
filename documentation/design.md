@@ -313,6 +313,17 @@ unit and none by a byte. The step is held to an engine that shares none of its w
 in `long double`, the meetings from testing every pair), to the earlier step kept in the tests (the dual render), and to its
 own invariants (each slab's order sorted at its end, the meetings made equal to the meetings counted) in a test build.
 
+**The fast stroke coverage.** `GSHCPU_Limits.stroke_coverage` is `GSHCPU_STROKE_COVERAGE_EXACT` (0) by default, the exact union
+of the paragraphs above, or `GSHCPU_STROKE_COVERAGE_FAST` (1): the coverage of a solid stroke's outline summed in floats, the
+area and cover each edge leaves in the cells it crosses (the form of font-rs and stb_truetype), kept by rows of sparse cells that
+are sorted and swept between, so that the work follows the outline and never the rectangle it lies in, and the magnitude held at
+one, which is how Skia and Blend2D draw a stroke whose pieces overlap. It differs from the exact coverage only where pieces of one
+stroke overlap (and by at most three levels of 255 elsewhere, the rounding of a float for the floor of an integer): on the
+benchmark's stroke scene the two pictures differ by a mean of 0.056 of 255 a byte, 1,769 bytes of 8.3 million by more than 8,
+at most 61. It is taken by every stroke the sparse composite takes (a single part, a solid paint, its bound of deposits within
+the cap) and by no other; the others, and every fill, use the exact one. It costs about 15 % less time on the scene of 2,500
+strokes and a third less on its dashed one; where the time goes after it is composing the pixels, which both share.
+
 **What a pixel may cost (UC9, UC17, UC19, UC20).** Two limits bound the step, both decided over what the whole render draws of
 an item, so a damaged render refuses what the whole one does. `max_exact_fragments` (default 32768, at least twice the densest pixel measured) bounds the raw pieces of a
 part in a pixel: the pieces are what the rasterizer finds, and the step's memory and its first pass are linear in them. The

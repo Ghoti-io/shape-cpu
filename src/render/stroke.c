@@ -629,6 +629,10 @@ int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_deposit
   return gshcpu_render_cells_bound(&path, 1, moved(box, s->shift_x, s->shift_y), max_deposits) <= max_deposits;
 }
 
+const GSHGEOM_Flat_Path * gshcpu_render_stroke_cover_path(const GSHCPU_Stroke * s) {
+  return cover_of(s->outline, GSHCPU_STROKE_BODY);
+}
+
 void gshcpu_render_stroke_rects(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole, GSHCPU_Rect * rect,
     GSHCPU_Rect * whole_rect) {
   Part body = part_rects(s, GSHCPU_STROKE_BODY, reach, whole);

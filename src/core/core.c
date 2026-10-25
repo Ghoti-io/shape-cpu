@@ -72,6 +72,7 @@ void gshcpu_limits_default(GSHCPU_Limits * limits) {
   limits->max_deposits = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS */
   limits->max_exact_fragments = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS */
   limits->max_exact_crossings = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS */
+  limits->stroke_coverage = GSHCPU_STROKE_COVERAGE_EXACT;
 }
 
 GSHCPU_Result gshcpu_limits_for_memory(GSHCPU_Limits * limits, uint64_t bytes) {

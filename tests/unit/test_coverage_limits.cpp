@@ -89,10 +89,14 @@ TEST(CoverageLimits, TheDefaultsAreWhatTheHeaderSays) {
   EXPECT_EQ(GSHCPU_LIMITS_MAX_EXACT_CROSSINGS, (uint64_t)1 << 32);
   EXPECT_EQ(l.max_deposits, 0u) << "zero is the default, 32 Mi, for the sink's crossings counted over one item (SC6)";
   EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS, (uint64_t)1 << 25);
-  // The same layout on every target: four sizes and four 64-bit fields, none of it padding the sizes would not.
-  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 4 * sizeof(uint64_t));
+  EXPECT_EQ(l.stroke_coverage, GSHCPU_STROKE_COVERAGE_EXACT) << "the exact union is the default; the fast coverage is asked for";
+  EXPECT_EQ(GSHCPU_STROKE_COVERAGE_FAST, (uint64_t)1);
+  // The same layout on every target: four sizes and five 64-bit fields, none of it padding the sizes would not.
+  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 5 * sizeof(uint64_t));
   EXPECT_EQ(offsetof(GSHCPU_Limits, max_exact_crossings), offsetof(GSHCPU_Limits, max_exact_fragments) + sizeof(uint64_t))
       << "appended after max_exact_fragments";
+  EXPECT_EQ(offsetof(GSHCPU_Limits, stroke_coverage), offsetof(GSHCPU_Limits, max_exact_crossings) + sizeof(uint64_t))
+      << "appended after max_exact_crossings";
   gshcpu_limits_default(nullptr);   // ignored
   EXPECT_LT((size_t)GSHCPU_MAX_DIMENSION_CEILING * 64, (size_t)INT32_MAX);
 }

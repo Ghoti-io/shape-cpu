@@ -178,7 +178,23 @@ typedef struct GSHCPU_Limits {
    * the sink; the coverage functions ignore it.
    */
   uint64_t max_exact_crossings;
+  /**
+   * How the sink makes the coverage of a stroke's outline where pieces of it overlap (render.h, UC1 to UC20):
+   * ::GSHCPU_STROKE_COVERAGE_EXACT (0, the default) makes the union exact, to the unit of the lattice;
+   * ::GSHCPU_STROKE_COVERAGE_FAST sums the coverage of the pieces in floats and holds the magnitude at one, which is what the
+   * rasterizers it is compared with do, and costs about half the time of a stroke.  It differs from the exact coverage only
+   * in the pixels where pieces of one stroke overlap and in the rounding of a float for an integer.  Another value is
+   * ::GSHCPU_ERR_INVALID at sink creation.  A `uint64_t` whatever the target.  Read by the sink; the coverage functions
+   * ignore it.
+   */
+  uint64_t stroke_coverage;
 } GSHCPU_Limits;
+
+/** ::GSHCPU_Limits.stroke_coverage: the union of a stroke's pieces made exact (the default). */
+#define GSHCPU_STROKE_COVERAGE_EXACT ((uint64_t)0)
+
+/** ::GSHCPU_Limits.stroke_coverage: the coverage of a stroke's pieces summed in floats, overlaps not made exact. */
+#define GSHCPU_STROKE_COVERAGE_FAST ((uint64_t)1)
 
 /**
  * @brief Fill @p limits with the built-in defaults.

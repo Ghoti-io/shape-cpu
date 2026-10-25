@@ -57,6 +57,7 @@ typedef struct Cpu_Sink {
   GSHCPU_Stroke_Cache * cache;      /* SC7: the expansions kept across renders */
   GSHCPU_Render_Counters own;       /* the counters, unless a test gave a place for them */
   GSHCPU_Render_Counters * counters;
+  int fast;                         /* GSHCPU_Limits.stroke_coverage is FAST */
   unsigned tiers;                   /* GSHCPU_RENDER_TIER_*: the tiers that are on */
   size_t elements;                  /* the most path elements a stored resource may hold: SC11's term */
 } Cpu_Sink;
@@ -1015,7 +1016,7 @@ static void sparse_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_
       continue;
     }
     size_t p = at(run, px, py);
-    apply_src_over(&frame->layer[4u * p], sp->src, (double)m / 255.0);
+    apply_src_over(&frame->layer[4u * p], sp->src, gshcpu_k_level[m]);
     if (run->top == 0) {
       run->touched[p] = 1;
     }
@@ -1142,6 +1143,29 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
   uint8_t * cov = run->coverage;
   GSHCPU_Exact * exact = cs->tiers & GSHCPU_RENDER_TIER_EXACT ? run->exact : NULL; /* UC1 to UC11 (off only as a gate's control) */
   int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT;
+  if (solid && cs->fast && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits)) {
+    /* The fast stroke coverage: the lean cover, the pixels of its runs composed like the sparse sweep's. */
+    if (run->acc_dirty) {
+      memset(run->acc, 0, 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc);
+      run->acc_dirty = 0;
+    }
+    double src[4];
+    source_of(run, item, frame, src);
+    gshcpu_render_stroke_rects(&s, reach, wreach, &rect, &whole);
+    widen(run, frame, rect);
+    Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
+    const GSHGEOM_Flat_Path * body = gshcpu_render_stroke_cover_path(&s);
+    r = gshcpu_render_lean_cover(body, s.shift_x, s.shift_y, rect, run->acc,
+        2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc, run->coverage, sparse_span, &sp);
+    run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
+    if (r == GSHCPU_OK) {
+      gshcpu_stroke_cache_count(cs->cache, s.hairline ? offsetof(GSHCPU_Render_Counters, sparse_hairline)
+                                                      : offsetof(GSHCPU_Render_Counters, sparse_plain));
+      gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, strokes));
+    }
+    gshcpu_render_stroke_close(cache, &s);
+    return r == GSHCPU_OK ? GSHSCENE_OK : scene_result(r);
+  }
   if (solid && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits)) {
     /* FT-2 (SC8): the sweep gives only the pixels that can be nonzero; the rest the general loop would skip. */
     if (run->acc_dirty) {
@@ -1543,6 +1567,9 @@ GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, c
   if (limits && limits->max_exact_crossings > GSHCPU_LIMITS_MAX_EXACT_CROSSINGS) {
     return GSHCPU_ERR_INVALID; /* UC19: and in its crossings, which the budget bounds: past the ceiling is refused, not clamped */
   }
+  if (limits && limits->stroke_coverage > GSHCPU_STROKE_COVERAGE_FAST) {
+    return GSHCPU_ERR_INVALID;
+  }
   if (!alloc) {
     alloc = gshgeom_allocator_default();
   }
@@ -1554,6 +1581,7 @@ GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, c
   cs->observer = observer;
   cs->observer_ctx = observer_ctx;
   cs->tiers = tiers;
+  cs->fast = limits && limits->stroke_coverage == GSHCPU_STROKE_COVERAGE_FAST;
   cs->counters = counters ? counters : &cs->own;
   memset(cs->counters, 0, sizeof *cs->counters);
   cs->elements = scene_limits && scene_limits->max_resource_elements ? scene_limits->max_resource_elements
