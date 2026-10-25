@@ -55,6 +55,20 @@ typedef struct Lean_Band {
 /** The most rows a band of the lean cover holds. */
 #define LEAN_BAND_MAX 1024u
 
+/** The most scratch the lean cover is given for its bands (the sink's). */
+#define LEAN_SCRATCH_CAP ((size_t)16 << 20)
+
+size_t gshcpu_lean_scratch(size_t width, size_t height) {
+  size_t rows = height < LEAN_BAND_MAX ? height : LEAN_BAND_MAX;
+  if (rows < (size_t)GSHCPU_RENDER_BAND_ROWS) {
+    rows = (size_t)GSHCPU_RENDER_BAND_ROWS;
+  }
+  while (rows > (size_t)GSHCPU_RENDER_BAND_ROWS && gshcpu_lean_bytes(width, rows) > LEAN_SCRATCH_CAP) {
+    rows /= 2u;
+  }
+  return ((width + 63u) & ~(size_t)63u) + gshcpu_lean_bytes(width, rows) + 64u; /* the row of coverages of a fill's sweep is at the end */
+}
+
 size_t gshcpu_lean_bytes(size_t width, size_t rows) {
   size_t stride = width + 2u;
   size_t words = (stride + 63u) / 64u;

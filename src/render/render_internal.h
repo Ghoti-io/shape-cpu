@@ -842,6 +842,9 @@ GSHCPU_Result gshcpu_render_lean_cover_points(const GSHGEOM_Device_Point * point
 /** The scratch bytes of the lean cover for a rectangle @p width cells wide and a band of @p rows rows. */
 size_t gshcpu_lean_bytes(size_t width, size_t rows);
 
+/** The scratch to give the lean cover (and a fill's row of coverages after it) of a window @p width by @p height: as many rows in a band as the window has, within a cap. */
+size_t gshcpu_lean_scratch(size_t width, size_t height);
+
 /**
  * FT-2: what ::gshcpu_render_cover_counted computes, handed to @p fn a row at a time and only where it can be
  * nonzero, with the cells counted as it counts them.  @p acc must be all zero on entry and is left so.  @p line holds
@@ -908,6 +911,12 @@ void gshcpu_direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
  * first) under the coverages @p m8 (or the one coverage @p m_const where @p m8 is NULL): the arithmetic of ::gshcpu_direct8_span.
  */
 void gshcpu_direct8_span_pixels(unsigned char * row, const uint32_t * src, const uint8_t * m8, uint32_t m_const, size_t n);
+
+/**
+ * ::gshcpu_direct8_span_pixels with the sources the entries of @p table (four bytes each) at @p index; a pixel whose index is
+ * ::GSHCPU_RENDER_GRADIENT_NONE, or whose coverage in @p m8 is 0, is left alone.
+ */
+void gshcpu_direct8_span_table(unsigned char * row, const uint8_t * table, const uint32_t * index, const uint8_t * m8, size_t n);
 
 /** Nonzero for a separable blend mode ::gshcpu_direct8_blend_row composes. */
 int gshcpu_direct8_blends(uint32_t op);

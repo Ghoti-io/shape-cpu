@@ -354,7 +354,7 @@ color component outside `[0, 1]` is drawn with doubles, for a byte cannot hold i
 thread.
 
 The fast coverage is an integer area and cover per cell, in 8192ths of a pixel, with the cells a row notes kept in a bitset swept
-in order, in bands of up to 1,024 rows. The points are already 64ths of a pixel, so an edge steps the quotient and remainder of a
+in order, in bands of up to 1,024 rows. With a fast coverage the accumulator is given room for a band as tall as the window (within 16 MiB), so that the edges are walked once and not once for each band of the few rows a smaller one holds. The points are already 64ths of a pixel, so an edge steps the quotient and remainder of a
 row's share and its x at a row boundary is the nearest 64th of the line's, found from the edge's origin, so the cover does not
 depend on where a band or a stripe begins; only the shares of a piece that spans four cells or more are made from a double. The
 compositor blends four pixels at a time with SSE2 where the target has it (the same rounding as the scalar word), and eight with
