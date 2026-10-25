@@ -1024,6 +1024,9 @@ static void direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
   Direct8 * d = ctx;
   Run * run = d->run;
   unsigned char * row = run->pixels + (size_t)(y + d->dy) * run->stride + 4u * (size_t)(x + d->dx);
+  /* the next row of the stroke is near this one's columns, and the target is far larger than the cache: ask for it now */
+  __builtin_prefetch(row + run->stride, 1, 3);
+  __builtin_prefetch(row + run->stride + 4u * (n - 1u), 1, 3);
   for (size_t i = 0; i < n; i++, row += 4) {
     const uint32_t m = m8[i];
     if (m == 0) {

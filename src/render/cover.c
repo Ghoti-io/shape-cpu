@@ -109,7 +109,7 @@ static int64_t round_div(int64_t numerator, int64_t denominator) {
 }
 
 /** Divide, rounding toward negative infinity. */
-static int64_t floor_div(int64_t numerator, int64_t denominator) {
+static inline __attribute__((always_inline)) int64_t floor_div(int64_t numerator, int64_t denominator) {
   int64_t q = numerator / denominator;
   if ((numerator % denominator != 0) && ((numerator < 0) != (denominator < 0))) {
     q -= 1;

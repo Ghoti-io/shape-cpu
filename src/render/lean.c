@@ -50,6 +50,9 @@ typedef struct Lean_Band {
   size_t words;   /* the 64-bit words of the bits of a row */
 } Lean_Band;
 
+/** The most rows a band of the lean cover holds. */
+#define LEAN_BAND_MAX 1024u
+
 size_t gshcpu_lean_bytes(size_t width, size_t rows) {
   size_t stride = width + 2u;
   size_t words = (stride + 63u) / 64u;
@@ -250,9 +253,14 @@ GSHCPU_Result gshcpu_render_lean_cover(const GSHGEOM_Flat_Path * path, int64_t s
   if (!path || width <= 0 || height <= 0 || width > 65000) {
     return GSHCPU_OK;
   }
-  const size_t rows_max = (size_t)GSHCPU_RENDER_BAND_ROWS;
-  if (scratch_bytes < gshcpu_lean_bytes((size_t)width, rows_max)) {
+  if (scratch_bytes < gshcpu_lean_bytes((size_t)width, (size_t)GSHCPU_RENDER_BAND_ROWS)) {
     return GSHCPU_ERR_INTERNAL;
+  }
+  /* The scratch is sized for the sink's widest window, and a stroke's is narrow: as many rows in a band as it holds, so that
+   * the edges are walked once for a band of the stroke and not once for every sixteen rows of it. */
+  size_t rows_max = (size_t)height < LEAN_BAND_MAX ? (size_t)height : LEAN_BAND_MAX;
+  while (rows_max > (size_t)GSHCPU_RENDER_BAND_ROWS && gshcpu_lean_bytes((size_t)width, rows_max) > scratch_bytes) {
+    rows_max /= 2u;
   }
   Lean_Band b;
   lean_band(&b, scratch, (size_t)width, rows_max);
@@ -269,7 +277,7 @@ GSHCPU_Result gshcpu_render_lean_cover(const GSHGEOM_Flat_Path * path, int64_t s
       }
       for (size_t k = 0; k < sub.count; k++) {
         const GSHGEOM_Device_Point p = pt[sub.first + k];
-        const GSHGEOM_Device_Point q = pt[sub.first + (k + 1) % sub.count];
+        const GSHGEOM_Device_Point q = pt[sub.first + (k + 1 == sub.count ? 0 : k + 1)];
         lean_edge(&b, (int)top, rows, (int)width, (double)p.x / 64.0 + ox, (double)p.y / 64.0 + oy, (double)q.x / 64.0 + ox,
             (double)q.y / 64.0 + oy);
       }
