@@ -95,6 +95,9 @@ typedef struct Clip {
 /** The color tables kept for the fast fill coverage: the gradients most recently painted. */
 #define TABLE_SLOTS 2u
 
+/** The points of the table of a transfer between two spaces of one gamut (fast8). */
+#define XFER_POINTS 4096u
+
 /** Which gradient, paint alpha and layer space a color table was made for. */
 typedef struct Table_Key {
   int used;
@@ -182,6 +185,9 @@ typedef struct Run {
   GSHCPU_Stop * pool;        /* their stops */
   double * tables;           /* TABLE_SLOTS color tables (gradient.c), when the layout has gradients */
   Table_Key table_key[TABLE_SLOTS];
+  float xfer[XFER_POINTS + 1u]; /* fast8: the transfer of a group's space into its parent's, at XFER_POINTS + 1 points of 0..1 */
+  GSHSCENE_Color_Space xfer_from, xfer_to;
+  int xfer_ready;
   size_t table_next;
   size_t pooled;
   GSHCPU_Arena arena;        /* CALLER_MEMORY: the items' geometry */
@@ -981,6 +987,28 @@ static inline void painter_pixel(Run * run, Frame * frame, int64_t x, int64_t y,
   }
 }
 
+/** D8: the @p len coverages @p m of row @p y from @p x weighed by every clip in force (a pixel outside a clip's rectangle weighs 0). */
+static void weigh_row(const Run * run, const Frame * frame, int64_t y, int64_t x, size_t len, uint8_t * m) {
+  for (size_t k = frame->clip_base; k < run->clip_count; k++) {
+    const Clip * clip = &run->clips[k];
+    const GSHCPU_Rect r = clip->rect;
+    if (y < r.y0 || y >= r.y1 || x >= r.x1 || x + (int64_t)len <= r.x0) {
+      memset(m, 0, len);
+      return;
+    }
+    const int64_t from = x < r.x0 ? r.x0 : x;
+    const int64_t to = x + (int64_t)len < r.x1 ? x + (int64_t)len : r.x1;
+    if (from > x) {
+      memset(m, 0, (size_t)(from - x));
+    }
+    if (to < x + (int64_t)len) {
+      memset(m + (to - x), 0, (size_t)(x + (int64_t)len - to));
+    }
+    gshcpu_direct8_weigh(m + (from - x), clip->coverage + (size_t)(y - r.y0) * (size_t)(r.x1 - r.x0) + (size_t)(from - r.x0),
+        (size_t)(to - from));
+  }
+}
+
 /** painter_span on bytes (fast8): the coverages weighed by the clips, then composed in integers into the layer. */
 static void painter_span8(Painter * p, int64_t y, int64_t x, size_t n, const uint8_t * m8) {
   Run * run = p->run;
@@ -995,9 +1023,8 @@ static void painter_span8(Painter * p, int64_t y, int64_t x, size_t n, const uin
   for (size_t i0 = 0; i0 < n; i0 += 256u) {
     const size_t len = n - i0 < 256u ? n - i0 : 256u;
     if (clipped) {
-      for (size_t i = 0; i < len; i++) {
-        m[i] = m8[i0 + i] ? (uint8_t)weigh_clips(run, frame->clip_base, run->clip_count, m8[i0 + i], x + (int64_t)(i0 + i), y) : 0;
-      }
+      memcpy(m, m8 + i0, len);
+      weigh_row(run, frame, y, x + (int64_t)i0, len, m);
     } else {
       memcpy(m, m8 + i0, len);
     }
@@ -1646,6 +1673,37 @@ static void encode8(const double d[4], unsigned char * b) {
   memcpy(b, c, 4);
 }
 
+/** The value of the transfer table at the straight color @p c (held to 0..1), by interpolation. */
+static inline double xfer_value(const Run * run, double c) {
+  if (!(c > 0.0)) {
+    return (double)run->xfer[0];
+  }
+  if (c >= 1.0) {
+    return (double)run->xfer[XFER_POINTS];
+  }
+  const double at_c = c * (double)XFER_POINTS;
+  const int32_t i = (int32_t)at_c; /* 32-bit: no x87 (AD-17) */
+  const double f = at_c - (double)i;
+  return (double)run->xfer[i] + f * ((double)run->xfer[i + 1] - (double)run->xfer[i]);
+}
+
+/** Make the transfer table from @p from to @p to; 0 where one of the transfers is not the linear or the sRGB (the generic loop converts). */
+static int xfer_prepare(Run * run, const GSHSCENE_Color_Space * from, const GSHSCENE_Color_Space * to) {
+  if ((from->transfer != GCOL_TRANSFER_LINEAR && from->transfer != GCOL_TRANSFER_SRGB) ||
+      (to->transfer != GCOL_TRANSFER_LINEAR && to->transfer != GCOL_TRANSFER_SRGB)) {
+    return 0;
+  }
+  if (!run->xfer_ready || !same_space(from, &run->xfer_from) || !same_space(to, &run->xfer_to)) {
+    for (size_t i = 0; i <= XFER_POINTS; i++) {
+      run->xfer[i] = (float)gshcpu_render_encode(to, gshcpu_render_decode(from, (double)i / (double)XFER_POINTS));
+    }
+    run->xfer_from = *from;
+    run->xfer_to = *to;
+    run->xfer_ready = 1;
+  }
+  return 1;
+}
+
 /**
  * group_pop with byte layers (fast8): between two byte layers with no clip and no conversion, a row at a time in integers
  * (source-over) or single-precision floats (a separable blend mode); every other pair through doubles, a pixel at a time.
@@ -1667,6 +1725,33 @@ static GSHSCENE_Result group_pop8(Run * run) {
     for (int64_t y = region.y0; y < region.y1; y++) {
       gshcpu_direct8_span_pixels(pixel8(parent, region.x0, y), (const uint32_t *)(const void *)pixel8(f, region.x0, y), NULL, m_const,
           (size_t)(region.x1 - region.x0));
+    }
+  } else if (bounded && !f->bytes && parent->bytes && !c.same && !c.matrix && parent->clip_base == f->clip_base &&
+      op == GSHSCENE_COMPOSITE_SRC_OVER && xfer_prepare(run, &f->space, &parent->space)) {
+    /* A double layer in another transfer of the same gamut (linear light into the target's): the colors through a table. */
+    const uint32_t m_const = o >= 1.0 ? 255u : gshcpu_render_store8(o);
+    uint32_t src[256];
+    for (int64_t y = region.y0; y < region.y1; y++) {
+      for (int64_t x0 = region.x0; x0 < region.x1; x0 += 256) {
+        const size_t len = (size_t)(region.x1 - x0 < 256 ? region.x1 - x0 : 256);
+        const double * in = &f->layer[4u * at(run, x0, y)];
+        for (size_t i = 0; i < len; i++, in += 4) {
+          unsigned char b[4] = {0, 0, 0, 0};
+          const double a = in[3];
+          if (a > 0.0) {
+            const double inv = 1.0 / a;
+            for (int k = 0; k < 3; k++) {
+              b[k] = gshcpu_render_store8(xfer_value(run, in[k] * inv) * a);
+            }
+            b[3] = gshcpu_render_store8(a);
+            for (int k = 0; k < 3; k++) {
+              b[k] = b[k] > b[3] ? b[3] : b[k];
+            }
+          }
+          memcpy(&src[i], b, 4);
+        }
+        gshcpu_direct8_span_pixels(pixel8(parent, x0, y), src, NULL, m_const, len);
+      }
     }
   } else if (plain && gshcpu_direct8_blends(op)) {
     for (int64_t y = region.y0; y < region.y1; y++) {

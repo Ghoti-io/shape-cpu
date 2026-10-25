@@ -918,6 +918,9 @@ void gshcpu_direct8_span_pixels(unsigned char * row, const uint32_t * src, const
  */
 void gshcpu_direct8_span_table(unsigned char * row, const uint8_t * table, const uint32_t * index, const uint8_t * m8, size_t n);
 
+/** D8: each of the @p n coverages @p m weighed by the clip coverage @p c, `(m c + 127) / 255`. */
+void gshcpu_direct8_weigh(uint8_t * m, const uint8_t * c, size_t n);
+
 /** Nonzero for a separable blend mode ::gshcpu_direct8_blend_row composes. */
 int gshcpu_direct8_blends(uint32_t op);
 

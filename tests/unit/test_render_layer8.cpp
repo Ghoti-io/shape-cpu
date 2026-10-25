@@ -120,6 +120,24 @@ TEST(RenderLayer8, ABlendRowStaysWithinALevelOrTwoOfTheDoubleOperator) {
   }
 }
 
+TEST(RenderLayer8, ClipWeighsAgreeWithTheIntegerRoundingOfD8) {
+  std::mt19937 g(4242);
+  for (size_t n : {0u, 1u, 31u, 32u, 33u, 64u, 100u, 257u}) {
+    std::vector<uint8_t> m(n + 1), c(n + 1);
+    for (size_t i = 0; i < n; i++) {
+      m[i] = (uint8_t)(g() % 256);
+      c[i] = (uint8_t)(g() % 256);
+    }
+    m[n] = 77;
+    std::vector<uint8_t> want = m;
+    for (size_t i = 0; i < n; i++) {
+      want[i] = (uint8_t)gshcpu_render_weigh(m[i], c[i]);
+    }
+    gshcpu_direct8_weigh(m.data(), c.data(), n);
+    EXPECT_EQ(m, want) << "n " << n;
+  }
+}
+
 namespace {
 
 GSHGEOM_Map map_of(double a, double b, double c, double d, double e, double f) {

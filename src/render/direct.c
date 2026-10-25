@@ -370,6 +370,36 @@ void gshcpu_direct8_span_table(unsigned char * row, const uint8_t * table, const
   }
 }
 
+#if defined(D8_AVX2)
+__attribute__((target("avx2"))) static size_t d8_avx2_weigh(uint8_t * m, const uint8_t * c, size_t n) {
+  const __m256i zero = _mm256_setzero_si256();
+  const __m256i k80 = _mm256_set1_epi16(0x80);
+  size_t i = 0;
+  for (; i + 32u <= n; i += 32) {
+    const __m256i a = _mm256_loadu_si256((const __m256i *)(const void *)(m + i));
+    const __m256i b = _mm256_loadu_si256((const __m256i *)(const void *)(c + i));
+    __m256i t = _mm256_add_epi16(_mm256_mullo_epi16(_mm256_unpacklo_epi8(a, zero), _mm256_unpacklo_epi8(b, zero)), k80);
+    const __m256i lo = _mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8);
+    t = _mm256_add_epi16(_mm256_mullo_epi16(_mm256_unpackhi_epi8(a, zero), _mm256_unpackhi_epi8(b, zero)), k80);
+    const __m256i hi = _mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8);
+    _mm256_storeu_si256((__m256i *)(void *)(m + i), _mm256_packus_epi16(lo, hi));
+  }
+  return i;
+}
+#endif
+
+void gshcpu_direct8_weigh(uint8_t * m, const uint8_t * c, size_t n) {
+  size_t i = 0;
+#if defined(D8_AVX2)
+  if (n >= 32u && d8_have_avx2()) {
+    i = d8_avx2_weigh(m, c, n);
+  }
+#endif
+  for (; i < n; i++) {
+    m[i] = (uint8_t)(((uint32_t)m[i] * c[i] + 127u) / 255u);
+  }
+}
+
 /* --- blend modes on bytes ------------------------------------------------------------------------------ */
 
 /** The part of a separable mode's result that depends on both pixels, `As Ad B(Cb, Cs)` (B2), from the premultiplied channels. */
