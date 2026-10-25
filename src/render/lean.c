@@ -29,7 +29,7 @@
  * of the default coverage is not made.
  *
  * The scratch is the sink's accumulator, a band of rows at a time, and is left all zero, so the next user finds it as it
- * expects.  The sums are floats, `+ - * /` and `floor`, `ceil`, so that every target that rounds as IEEE says gives the
+ * expects.  The sums are floats, `+ - * /`, so that every target that rounds as IEEE says gives the
  * same bits (no contraction: the build says so).
  */
 
@@ -41,40 +41,37 @@
 #include <stdlib.h>
 #include <string.h>
 
-/** The scratch of a band of @p rows rows of @p width cells, in @p memory: the row counts, the sums, the cell lists and the marks. */
+/** The scratch of a band of @p rows rows of @p width cells, in @p memory: the row flags, the sums and the bits of the cells noted. */
 typedef struct Lean_Band {
-  uint32_t * n;   /* the cells noted in each row */
+  uint32_t * n;   /* 1 for a row that has a cell noted */
   float * a;      /* the sums of each row: width + 2 */
-  uint16_t * xs;  /* the cells noted in each row, in the order they were first touched */
-  uint8_t * mark; /* which cells of a row are noted */
+  uint64_t * bit; /* which cells of a row are noted, a bit each: words per row */
   size_t stride;  /* width + 2 */
+  size_t words;   /* the 64-bit words of the bits of a row */
 } Lean_Band;
 
 size_t gshcpu_lean_bytes(size_t width, size_t rows) {
   size_t stride = width + 2u;
-  return rows * 4u + 8u + rows * stride * (sizeof(float) + sizeof(uint16_t) + 1u) + 24u;
+  size_t words = (stride + 63u) / 64u;
+  return rows * 4u + 8u + rows * stride * sizeof(float) + 8u + rows * words * sizeof(uint64_t) + 24u;
 }
 
 static void lean_band(Lean_Band * b, void * memory, size_t width, size_t rows) {
   unsigned char * p = (unsigned char *)memory;
   b->stride = width + 2u;
+  b->words = (b->stride + 63u) / 64u;
   b->n = (uint32_t *)(void *)p;
   p += (rows * 4u + 7u) & ~(size_t)7u;
   b->a = (float *)(void *)p;
   p += (rows * b->stride * sizeof(float) + 7u) & ~(size_t)7u;
-  b->xs = (uint16_t *)(void *)p;
-  p += (rows * b->stride * sizeof(uint16_t) + 7u) & ~(size_t)7u;
-  b->mark = p;
+  b->bit = (uint64_t *)(void *)p;
 }
 
 /** Add @p v to cell @p x of row @p y, noting the cell when it is new. */
 static inline void lean_add(Lean_Band * b, int y, int x, float v) {
-  const size_t at = (size_t)y * b->stride;
-  if (!b->mark[at + (size_t)x]) {
-    b->mark[at + (size_t)x] = 1;
-    b->xs[at + b->n[y]++] = (uint16_t)x;
-  }
-  b->a[at + (size_t)x] += v;
+  b->n[y] = 1;
+  b->bit[(size_t)y * b->words + ((size_t)x >> 6)] |= (uint64_t)1 << (x & 63);
+  b->a[(size_t)y * b->stride + (size_t)x] += v;
 }
 
 /**
@@ -107,10 +104,12 @@ static void lean_row(Lean_Band * b, int y, int width, double xa, double xb, floa
     xa = lo;
     xb = hi;
   }
-  const double xaf = floor(xa);
-  const int xai = (int)xaf;
-  const double xbc = ceil(xb);
-  const int xbi = (int)xbc;
+  /* xa and xb are not negative here, so a cast is their floor, and one more when it falls short is the ceiling of xb */
+  const int xai = (int)xa;
+  const double xaf = (double)xai;
+  const int xbt = (int)xb;
+  const int xbi = xbt + ((double)xbt < xb);
+  const double xbc = (double)xbi;
   if (xbi <= xai + 1) {
     const float xmf = (float)(0.5 * (xa + xb) - xaf);
     lean_add(b, y, xai, d - d * xmf);
@@ -166,8 +165,9 @@ static void lean_edge(Lean_Band * b, int top, int rows, int width, double x0, do
   if (y1 > hi) {
     y1 = hi;
   }
-  const int first = (int)floor(y0);
-  const int last = (int)ceil(y1);
+  /* y0 is not below the band's top, which is not negative, so a cast is its floor */
+  const int first = (int)y0;
+  const int last = (int)y1 + ((double)(int)y1 < y1);
   for (int y = first; y < last; y++) {
     const double ya = y > y0 ? (double)y : y0;
     const double yb = (double)(y + 1) < y1 ? (double)(y + 1) : y1;
@@ -176,10 +176,6 @@ static void lean_edge(Lean_Band * b, int top, int rows, int width, double x0, do
     lean_row(b, y - top, width, x, xn, (float)dy * dir);
     x = xn;
   }
-}
-
-static int lean_cmp(const void * p, const void * q) {
-  return (int)*(const uint16_t *)p - (int)*(const uint16_t *)q;
 }
 
 /** The coverage of an accumulated sum, 0 to 255. */
@@ -191,59 +187,59 @@ static inline uint8_t lean_level(float acc) {
   return (uint8_t)(c * 255.0f + 0.5f);
 }
 
+/** The next noted cell at or after @p x in a row's bits (@p words of them), or -1; the bit is cleared. */
+static inline int lean_next(uint64_t * bit, size_t words, int x) {
+  size_t w = (size_t)x >> 6;
+  if (w >= words) {
+    return -1;
+  }
+  uint64_t v = bit[w] & (~(uint64_t)0 << (x & 63));
+  while (v == 0) {
+    if (++w == words) {
+      return -1;
+    }
+    v = bit[w];
+  }
+  const int at = (int)(w << 6) + __builtin_ctzll(v);
+  bit[w] &= ~((uint64_t)1 << (at & 63));
+  return at;
+}
+
 /** Sweep the band's rows: each noted cell and the run after it, handed to @p fn as runs of nonzero coverage. */
 static void lean_sweep(Lean_Band * b, int rows, int width, int64_t x0, int64_t y0, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx) {
   for (int y = 0; y < rows; y++) {
-    const uint32_t cnt = b->n[y];
-    if (cnt == 0) {
+    if (!b->n[y]) {
       continue;
     }
     b->n[y] = 0;
     float * a = b->a + (size_t)y * b->stride;
-    uint8_t * mark = b->mark + (size_t)y * b->stride;
-    uint16_t * xs = b->xs + (size_t)y * b->stride;
-    if (cnt > 1) {
-      if (cnt <= 24) {
-        for (uint32_t i = 1; i < cnt; i++) {
-          const uint16_t v = xs[i];
-          uint32_t j = i;
-          while (j > 0 && xs[j - 1] > v) {
-            xs[j] = xs[j - 1];
-            j--;
-          }
-          xs[j] = v;
-        }
-      } else {
-        qsort(xs, cnt, sizeof *xs, lean_cmp);
-      }
-    }
+    uint64_t * bit = b->bit + (size_t)y * b->words;
     float acc = 0.0f;
     int from = -1; /* the first column of the run open, or -1 */
-    for (uint32_t i = 0; i < cnt; i++) {
-      const int x = xs[i];
+    int x = lean_next(bit, b->words, 0);
+    while (x >= 0) {
+      const int nx = lean_next(bit, b->words, x + 1);
       acc += a[x];
       a[x] = 0.0f;
-      mark[x] = 0;
-      if (x >= width) {
-        continue;
-      }
-      const uint8_t m = lean_level(acc);
-      /* the cell's own coverage is its pixel's; the pixels after it up to the next cell have the sum alone, which is the same sum */
-      const int end = i + 1 < cnt ? (xs[i + 1] < width ? xs[i + 1] : width) : width;
-      if (m != 0) {
-        if (from < 0) {
-          from = x;
+      if (x < width) {
+        const uint8_t m = lean_level(acc);
+        /* the cell's own coverage is its pixel's; the pixels after it up to the next cell have the sum alone, which is the same sum */
+        const int end = nx >= 0 ? (nx < width ? nx : width) : width;
+        if (m != 0) {
+          if (from < 0) {
+            from = x;
+          }
+          memset(line + (x - from), m, (size_t)(end - x));
+        } else if (from >= 0) {
+          fn(ctx, y0 + y, x0 + from, (size_t)(x - from), line);
+          from = -1;
         }
-        memset(line + (x - from), m, (size_t)(end - x));
-      } else if (from >= 0) {
-        fn(ctx, y0 + y, x0 + from, (size_t)(x - from), line);
-        from = -1;
       }
+      x = nx;
     }
     if (from >= 0) {
       fn(ctx, y0 + y, x0 + from, (size_t)(width - from), line);
     }
-    memset(xs, 0, (size_t)cnt * sizeof *xs); /* the list is scratch too, and the accumulator is handed back all zero */
   }
 }
 
