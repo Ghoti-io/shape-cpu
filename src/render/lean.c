@@ -77,6 +77,22 @@ static inline void lean_add(Lean_Band * b, int y, int x, float v) {
   b->a[(size_t)y * b->stride + (size_t)x] += v;
 }
 
+/** Add @p v0 to cell @p x of row @p y and @p v1 to the cell after it: the common case of a piece, whose cells share a word of the set but at a word's last bit. */
+static inline void lean_add2(Lean_Band * b, int y, int x, float v0, float v1) {
+  b->n[y] = 1;
+  uint64_t * w = b->bit + (size_t)y * b->words + ((size_t)x >> 6);
+  const unsigned sh = (unsigned)x & 63u;
+  if (sh != 63u) {
+    *w |= (uint64_t)3 << sh;
+  } else {
+    w[0] |= (uint64_t)1 << 63;
+    w[1] |= 1u;
+  }
+  float * a = b->a + (size_t)y * b->stride + (size_t)x;
+  a[0] += v0;
+  a[1] += v1;
+}
+
 /**
  * The part of one row of an edge: from (@p xa, @p ya) down to (@p xb, @p yb) in the band's frame (row @p y, 0 at its top and x at the
  * window's left), directed down when @p dir is 1 and up when it is -1.  What is left of the window is a cover at its first column;
@@ -115,8 +131,7 @@ static inline __attribute__((always_inline)) void lean_row(Lean_Band * b, int y,
   const double xbc = (double)xbi;
   if (xbi <= xai + 1) {
     const float xmf = (float)(0.5 * (xa + xb) - xaf);
-    lean_add(b, y, xai, d - d * xmf);
-    lean_add(b, y, xai + 1, d * xmf);
+    lean_add2(b, y, xai, d - d * xmf, d * xmf);
     return;
   }
   const float s = (float)(1.0 / (xb - xa));
