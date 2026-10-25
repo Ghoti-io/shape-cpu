@@ -78,6 +78,10 @@ typedef struct Frame {
   GSHSCENE_Group group;      /* a group's properties */
   size_t clip_base;          /* the first clip pushed in this group */
   GSHCPU_Rect dirty;         /* the pixels anything was applied to, and the pixels made ready */
+  int bytes;                 /* fast8: the layer is premultiplied bytes (px8), not doubles: the root and a group in the target's space */
+  unsigned char * px8;       /* fast8: the layer as premultiplied bytes (the target's own for the root), pixel (x, y) at ... */
+  size_t stride8;            /* ... px8 + (y - oy) * stride8 + 4 (x - ox) */
+  int64_t ox, oy;
 } Frame;
 
 /** A clip in force: its coverage inside its rectangle (0 outside it). */
@@ -96,6 +100,7 @@ typedef struct Table_Key {
   int used;
   uint64_t id;
   double alpha;
+  int bytes;                 /* the table is bytes (fast8), not doubles */
   GSHSCENE_Color_Space space;
 } Table_Key;
 
@@ -130,6 +135,7 @@ typedef struct Layout {
   int aligned;               /* the expansion holds a stroke that aligns: three more coverage arrays (SC5) */
   int strokes;               /* the expansion holds a stroke: the exact step's memory (UC9) */
   int other;                 /* it holds a fill, or a stroke painted with a gradient */
+  int wide;                  /* it holds a color with a component outside [0, 1]: no byte layer can hold it */
   size_t exact_bytes;        /* ... of the first part's, and (only when something aligns) of the second's and the third's */
   size_t exact_second, exact_third; /* ... where, from at_exact */
   size_t acc_bytes;          /* the cell accumulator: one for each of the three parts when something aligns (UC8) */
@@ -166,6 +172,7 @@ typedef struct Run {
   uint8_t * cov_result;
   int64_t * acc;
   GSHCPU_Exact exact[3];     /* UC9: the exact step's arrays, when the layout has them (strokes): one for each part of an aligned stroke */
+  int fast8;                 /* the fast fill coverage on an 8-bit premultiplied target: the layers are bytes, the root the target itself */
   int direct8;               /* the fast coverage composes straight into the target's bytes (strokes alone, 8-bit premultiplied) */
   GSHCPU_Batch * batch;      /* ... and its strokes are queued and drawn over stripes by several threads (GSHCPU_Limits.threads) */
   int acc_dirty;             /* the dense sweep leaves the accumulator written; the sparse one needs it zero */
@@ -218,8 +225,14 @@ static size_t mul3(size_t a, size_t b, size_t c) {
  * The most groups and clips open at once in @p list's expansion, a picture's counting where it is drawn; and its
  * gradient fills and their stops added to @p gradients and @p stops (0 when a sum would overflow).
  */
+static int out_of_range(const GSHSCENE_Paint * paint) {
+  return paint->kind == GSHSCENE_PAINT_SOLID &&
+      !(paint->rgba[0] >= 0.0 && paint->rgba[0] <= 1.0 && paint->rgba[1] >= 0.0 && paint->rgba[1] <= 1.0 &&
+          paint->rgba[2] >= 0.0 && paint->rgba[2] <= 1.0);
+}
+
 static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops,
-    int * aligned, int * strokes, int * other) {
+    int * aligned, int * strokes, int * other, int * wide) {
   size_t g = 0;
   size_t c = 0;
   size_t most_g = 0;
@@ -236,6 +249,12 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
         item->paint.kind == GSHSCENE_PAINT_GRADIENT &&
         gshscene_resource_gradient(item->paint.gradient, &gradient) == GSHSCENE_OK) {
       ok = ok && gcu_safe_add_size(*gradients, 1u, gradients) && gcu_safe_add_size(*stops, gradient.stop_count, stops);
+      for (size_t k = 0; k < gradient.stop_count && gradient.stops; k++) {
+        *wide = *wide || out_of_range(&gradient.stops[k].color);
+      }
+    }
+    if (item->kind == GSHSCENE_ITEM_FILL || item->kind == GSHSCENE_ITEM_STROKE) {
+      *wide = *wide || out_of_range(&item->paint);
     }
     GSHSCENE_Stroke_Style style;
     if (item->kind == GSHSCENE_ITEM_FILL || (item->kind == GSHSCENE_ITEM_STROKE && item->paint.kind == GSHSCENE_PAINT_GRADIENT)) {
@@ -264,7 +283,7 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
       case GSHSCENE_ITEM_INSTANCE: {
         size_t ig = 0;
         size_t ic = 0;
-        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops, aligned, strokes, other) && ok;
+        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops, aligned, strokes, other, wide) && ok;
         most_g = g + ig > most_g ? g + ig : most_g;
         most_c = c + ic > most_c ? c + ic : most_c;
         break;
@@ -317,7 +336,7 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
   }
   L->walk = gshscene_expansion_bytes(list);
   L->levels = L->walk / (sizeof(const GSHSCENE_List *) + sizeof(size_t));
-  if (!nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned, &L->strokes, &L->other)) {
+  if (!nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned, &L->strokes, &L->other, &L->wide)) {
     return GSHCPU_ERR_LIMIT;
   }
   /* UC9: the walk of a stroke is as wide as the whole render's region at most. */
@@ -660,6 +679,11 @@ static inline void apply_src_over(double d[4], const double s[4], double m) {
   }
 }
 
+/** Whether two concrete color spaces are the same. */
+static int same_space(const GSHSCENE_Color_Space * a, const GSHSCENE_Color_Space * b) {
+  return a->primaries == b->primaries && a->transfer == b->transfer && a->gamma == b->gamma;
+}
+
 /** The pixel (x, y) of a region-sized buffer. */
 static size_t at(const Run * run, int64_t x, int64_t y) {
   return (size_t)(y - run->layout.region.y0) * run->layout.width + (size_t)(x - run->layout.region.x0);
@@ -672,6 +696,12 @@ static size_t at(const Run * run, int64_t x, int64_t y) {
 static void ready_span(Run * run, Frame * f, int64_t x0, int64_t x1, int64_t y) {
   if (x0 >= x1) {
     return;
+  }
+  if (f->bytes) {
+    if (f != &run->frames[0]) {
+      memset(f->px8 + (size_t)(y - f->oy) * f->stride8 + 4u * (size_t)(x0 - f->ox), 0, 4u * (size_t)(x1 - x0));
+    }
+    return; /* the root is the target: nothing is read or cleared */
   }
   size_t p = at(run, x0, y);
   size_t n = (size_t)(x1 - x0);
@@ -828,6 +858,8 @@ typedef struct Painter {
   GSHCPU_Gradient gr;
   GSHCPU_Convert conv;
   const double * table;      /* the gradient's color table, or NULL: evaluated at each pixel */
+  GSHCPU_Direct8 d8;         /* fast8: a solid paint's source, and the layer it is composed into */
+  const uint8_t * table8;    /* fast8: the table as premultiplied bytes, four to a point */
 } Painter;
 
 /**
@@ -841,9 +873,24 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
   p->frame = frame;
   p->refused = 0;
   p->table = NULL;
+  p->table8 = NULL;
   p->gradient = item->paint.kind == GSHSCENE_PAINT_GRADIENT;
   if (!p->gradient) {
     source_of(run, item, frame, p->src);
+    if (frame->bytes) {
+      uint8_t c[4];
+      for (int i = 0; i < 4; i++) {
+        c[i] = gshcpu_render_store8(p->src[i]);
+      }
+      for (int i = 0; i < 3; i++) {
+        c[i] = c[i] > c[3] ? c[3] : c[i]; /* premultiplied: no channel past the alpha */
+      }
+      p->d8.pixels = frame->px8;
+      p->d8.stride = frame->stride8;
+      p->d8.dx = -frame->ox;
+      p->d8.dy = -frame->oy;
+      gshcpu_direct8_color(&p->d8, c);
+    }
     widen(run, frame, rect);
     run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
     return GSHSCENE_OK;
@@ -879,23 +926,41 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
     /* The fast fill coverage takes the color from a table of the line (made once for the paint, and kept for the next). */
     for (size_t k = 0; k < TABLE_SLOTS && !p->table; k++) {
       const Table_Key * key = &run->table_key[k];
-      if (key->used && key->id == gshscene_resource_id(item->paint.gradient) && key->alpha == item->paint.rgba[3] &&
+      if (key->used && key->id == gshscene_resource_id(item->paint.gradient) && key->alpha == item->paint.rgba[3] && key->bytes == frame->bytes &&
           key->space.primaries == frame->space.primaries && key->space.transfer == frame->space.transfer &&
           key->space.gamma == frame->space.gamma) {
         p->table = run->tables + k * (GSHCPU_RENDER_GRADIENT_TABLE + 1u) * 4u;
       }
     }
-    if (!p->table && area >= 2048u) {
+    if (!p->table && (area >= 2048u || frame->bytes)) {
       size_t k = run->table_next++ % TABLE_SLOTS;
       Table_Key * key = &run->table_key[k];
       key->used = 1;
       key->id = gshscene_resource_id(item->paint.gradient);
       key->alpha = item->paint.rgba[3];
+      key->bytes = frame->bytes;
       key->space = frame->space;
       double * table = run->tables + k * (GSHCPU_RENDER_GRADIENT_TABLE + 1u) * 4u;
       gshcpu_render_gradient_table(&p->gr, &p->conv, table);
+      if (frame->bytes) {
+        /* The table as bytes, in place: a point's four bytes are written below where its four doubles were read. */
+        uint8_t * bytes = (uint8_t *)(void *)table;
+        for (size_t q = 0; q <= GSHCPU_RENDER_GRADIENT_TABLE; q++) {
+          uint8_t c[4];
+          for (size_t i = 0; i < 4; i++) {
+            c[i] = gshcpu_render_store8(table[4u * q + i]);
+          }
+          for (size_t i = 0; i < 3; i++) {
+            c[i] = c[i] > c[3] ? c[3] : c[i];
+          }
+          memcpy(bytes + 4u * q, c, 4);
+        }
+      }
       p->table = table;
     }
+  }
+  if (frame->bytes && p->table) {
+    p->table8 = (const uint8_t *)(const void *)p->table;
   }
   return GSHSCENE_OK;
 }
@@ -909,11 +974,54 @@ static inline void painter_pixel(Run * run, Frame * frame, int64_t x, int64_t y,
   }
 }
 
+/** painter_span on bytes (fast8): the coverages weighed by the clips, then composed in integers into the layer. */
+static void painter_span8(Painter * p, int64_t y, int64_t x, size_t n, const uint8_t * m8) {
+  Run * run = p->run;
+  Frame * frame = p->frame;
+  const int clipped = frame->clip_base < run->clip_count;
+  if (!p->gradient && !clipped) {
+    gshcpu_direct8_span(&p->d8, y, x, n, m8);
+    return;
+  }
+  uint8_t m[256];
+  uint32_t src[256];
+  uint32_t index[256];
+  for (size_t i0 = 0; i0 < n; i0 += 256u) {
+    const size_t len = n - i0 < 256u ? n - i0 : 256u;
+    if (clipped) {
+      for (size_t i = 0; i < len; i++) {
+        m[i] = m8[i0 + i] ? (uint8_t)weigh_clips(run, frame->clip_base, run->clip_count, m8[i0 + i], x + (int64_t)(i0 + i), y) : 0;
+      }
+    } else {
+      memcpy(m, m8 + i0, len);
+    }
+    if (!p->gradient) {
+      gshcpu_direct8_span(&p->d8, y, x + (int64_t)i0, len, m);
+      continue;
+    }
+    gshcpu_render_gradient_table_row(&p->gr, (double)(int32_t)(x + (int64_t)i0) + 0.5, (double)(int32_t)y + 0.5, len, m, index);
+    for (size_t i = 0; i < len; i++) {
+      if (index[i] == GSHCPU_RENDER_GRADIENT_NONE) {
+        src[i] = 0;
+        m[i] = 0;
+      } else {
+        memcpy(&src[i], p->table8 + 4u * (size_t)index[i], 4);
+      }
+    }
+    gshcpu_direct8_span_pixels(frame->px8 + (size_t)(y - frame->oy) * frame->stride8 + 4u * (size_t)(x + (int64_t)i0 - frame->ox), src, m, 0,
+        len);
+  }
+}
+
 /** The receiver of a span of coverages (GSHCPU_Span_Fn): @p n pixels from (@p x, @p y), a pixel of coverage 0 not drawn. */
 static void painter_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8) {
   Painter * p = ctx;
   Run * run = p->run;
   Frame * frame = p->frame;
+  if (frame->bytes) {
+    painter_span8(p, y, x, n, m8);
+    return;
+  }
   const int clipped = frame->clip_base < run->clip_count;
   if (!p->gradient) {
     for (size_t i = 0; i < n; i++) {
@@ -1164,6 +1272,17 @@ typedef struct Sparse {
   int64_t dx, dy;            /* the whole-pixel shift: the paths' frame to the destination's */
 } Sparse;
 
+/** The same receiver on bytes (fast8): the painter of the stroke's solid paint, the runs shifted to the destination. */
+typedef struct Sparse8 {
+  Painter * painter;
+  int64_t dx, dy;
+} Sparse8;
+
+static void sparse8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8) {
+  const Sparse8 * sp = ctx;
+  painter_span(sp->painter, y + sp->dy, x + sp->dx, n, m8);
+}
+
 static void sparse_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8) {
   Sparse * sp = ctx;
   Run * run = sp->run;
@@ -1346,6 +1465,13 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
           r = gshcpu_render_lean_cover(body, s.shift_x, s.shift_y, rect, run->acc, scratch, run->coverage, gshcpu_direct8_span, &d8);
         }
       }
+    } else if (frame->bytes) {
+      Painter painter;
+      const uint64_t counted = run->work;
+      (void)painter_begin(&painter, run, item, chain, count, frame, rect, whole); /* a solid paint is always ready */
+      run->work = counted; /* the area is added below */
+      Sparse8 sp8 = {&painter, s.shift_x, s.shift_y};
+      r = gshcpu_render_lean_cover(body, s.shift_x, s.shift_y, rect, run->acc, scratch, run->coverage, sparse8_span, &sp8);
     } else {
       widen(run, frame, rect);
       Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
@@ -1462,7 +1588,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
  */
 static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
   GSHSCENE_Result result = stroke_item(run, item, chain, count);
-  if (run->direct8) {
+  if (run->direct8 && !run->fast8) {
     write_target(run);
     memset(&run->frames[0].dirty, 0, sizeof run->frames[0].dirty);
   }
@@ -1493,11 +1619,117 @@ static void group_push(Run * run, const GSHSCENE_Item * item) {
   f->space = gshscene_color_space_is_target(&item->group.blend_space) ? parent->space : item->group.blend_space;
   f->clip_base = run->clip_count;
   f->dirty.x0 = f->dirty.y0 = f->dirty.x1 = f->dirty.y1 = 0;
+  f->bytes = run->fast8 && same_space(&f->space, &run->frames[0].space);
+  f->px8 = (unsigned char *)(void *)f->layer;
+  f->stride8 = 4u * run->layout.width;
+  f->ox = run->layout.region.x0;
+  f->oy = run->layout.region.y0;
   run->groups_open++;
   run->work += run->layout.pixels;
 }
 
+/** The pixel (x, y) of @p f's layer, in bytes (fast8). */
+static unsigned char * pixel8(const Frame * f, int64_t x, int64_t y) {
+  return f->px8 + (size_t)(y - f->oy) * f->stride8 + 4u * (size_t)(x - f->ox);
+}
+
+/** The premultiplied bytes @p b as doubles. */
+static void decode8(const unsigned char * b, double d[4]) {
+  for (int i = 0; i < 4; i++) {
+    d[i] = gshcpu_k_level[b[i]];
+  }
+}
+
+/** The premultiplied doubles @p d as bytes, no channel past the alpha. */
+static void encode8(const double d[4], unsigned char * b) {
+  unsigned char c[4];
+  for (int i = 0; i < 4; i++) {
+    c[i] = gshcpu_render_store8(d[i]);
+  }
+  for (int i = 0; i < 3; i++) {
+    c[i] = c[i] > c[3] ? c[3] : c[i];
+  }
+  memcpy(b, c, 4);
+}
+
+/**
+ * group_pop with byte layers (fast8): between two byte layers with no clip and no conversion, a row at a time in integers
+ * (source-over) or single-precision floats (a separable blend mode); every other pair through doubles, a pixel at a time.
+ */
+static GSHSCENE_Result group_pop8(Run * run) {
+  const Frame * f = &run->frames[run->top];
+  Frame * parent = &run->frames[run->top - 1u];
+  uint32_t op = f->group.composite;
+  int bounded = gshcpu_render_bounded(op);
+  GSHCPU_Rect region = bounded ? f->dirty : run->layout.region;
+  region = gshcpu_render_rect_meet(region, reach_of(run, parent->clip_base, f->clip_base));
+  GSHCPU_Convert c;
+  gshcpu_render_convert_prepare(&c, &f->space, &parent->space);
+  const double o = f->group.opacity;
+  widen(run, parent, region);
+  const int plain = bounded && f->bytes && parent->bytes && c.same && parent->clip_base == f->clip_base;
+  if (plain && op == GSHSCENE_COMPOSITE_SRC_OVER) {
+    const uint32_t m_const = o >= 1.0 ? 255u : gshcpu_render_store8(o);
+    for (int64_t y = region.y0; y < region.y1; y++) {
+      gshcpu_direct8_span_pixels(pixel8(parent, region.x0, y), (const uint32_t *)(const void *)pixel8(f, region.x0, y), NULL, m_const,
+          (size_t)(region.x1 - region.x0));
+    }
+  } else if (plain && gshcpu_direct8_blends(op)) {
+    for (int64_t y = region.y0; y < region.y1; y++) {
+      gshcpu_direct8_blend_row(op, pixel8(parent, region.x0, y), pixel8(f, region.x0, y), (size_t)(region.x1 - region.x0), (float)o);
+    }
+  } else {
+    static const double zero[4] = {0.0, 0.0, 0.0, 0.0};
+    for (int64_t y = region.y0; y < region.y1; y++) {
+      for (int64_t x = region.x0; x < region.x1; x++) {
+        uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);
+        if (m8 == 0) {
+          continue;
+        }
+        double in[4];
+        double s[4];
+        if (!inside(f->dirty, x, y)) {
+          memcpy(in, zero, sizeof in);
+        } else if (f->bytes) {
+          decode8(pixel8(f, x, y), in);
+        } else {
+          memcpy(in, &f->layer[4u * at(run, x, y)], sizeof in);
+        }
+        gshcpu_render_convert_premultiplied(&c, in, s);
+        for (int i = 0; i < 4; i++) {
+          s[i] = o * s[i];
+        }
+        if (bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0) {
+          continue;
+        }
+        double d[4];
+        double * target = d;
+        if (parent->bytes) {
+          decode8(pixel8(parent, x, y), d);
+        } else {
+          target = &parent->layer[4u * at(run, x, y)];
+        }
+        if (!gshcpu_render_apply(target, s, gshcpu_k_level[m8], op)) {
+          return GSHSCENE_ERR_INTERNAL; /* unreachable: the planning pass refuses an operator the caps do not claim */
+        }
+        if (parent->bytes) {
+          encode8(d, pixel8(parent, x, y));
+        }
+      }
+    }
+  }
+  if (!gshcpu_render_rect_empty(region)) {
+    run->work += (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0);
+  }
+  run->top--;
+  run->groups_open--;
+  return GSHSCENE_OK;
+}
+
 static GSHSCENE_Result group_pop(Run * run) {
+  if (run->fast8) {
+    return group_pop8(run);
+  }
   const Frame * f = &run->frames[run->top];
   Frame * parent = &run->frames[run->top - 1u];
   uint32_t op = f->group.composite;
@@ -1656,7 +1888,9 @@ static void finish(Run * run, GSHSCENE_Result result, void * memory) {
     }
     cs->observer(cs->observer_ctx, run->layout.region, run->root, run->touched);
   }
-  write_target(run);
+  if (!run->fast8) {
+    write_target(run);
+  }
   GSHSCENE_Job * job = run->job;
   gshscene_job_set_frame_bytes(job, run->layout.fixed);
   gshscene_job_complete(job, result, run->stop, run->stop_count, result == GSHSCENE_OK ? NULL : reason_of(result));
@@ -1729,6 +1963,8 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
       run->exact[2].max_crossings = cs->max_crossings;
     }
   }
+  run->fast8 = cs->fast_fill && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) != 0 && run->format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED &&
+      !cs->observer && !L.wide;
   run->direct8 = cs->fast && run->format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED && !cs->observer && L.groups == 0 && L.clips == 0 &&
       !L.aligned && !L.other && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) != 0;
   if (run->direct8 && cs->executor.start && !caller) {
@@ -1761,6 +1997,11 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   Frame * root = &run->frames[0];
   memset(root, 0, sizeof *root);
   root->layer = run->root;
+  root->bytes = run->fast8;
+  root->px8 = run->pixels;
+  root->stride8 = run->stride;
+  root->ox = 0;
+  root->oy = 0;
   root->space = *gshscene_job_target_space(job);
 
   const GSHSCENE_Item * item;

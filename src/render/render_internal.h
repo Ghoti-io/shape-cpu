@@ -899,6 +899,22 @@ void gshcpu_direct8_color(GSHCPU_Direct8 * d, const uint8_t c[4]);
 /** A ::GSHCPU_Span_Fn: the runs composed into the target of the ::GSHCPU_Direct8 @p ctx. */
 void gshcpu_direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8);
 
+/**
+ * @p n pixels of @p row (premultiplied bytes) composed source-over with the premultiplied pixels @p src (each four bytes, red
+ * first) under the coverages @p m8 (or the one coverage @p m_const where @p m8 is NULL): the arithmetic of ::gshcpu_direct8_span.
+ */
+void gshcpu_direct8_span_pixels(unsigned char * row, const uint32_t * src, const uint8_t * m8, uint32_t m_const, size_t n);
+
+/** Nonzero for a separable blend mode ::gshcpu_direct8_blend_row composes. */
+int gshcpu_direct8_blends(uint32_t op);
+
+/**
+ * @p n pixels of the group layer @p src (premultiplied bytes, scaled by @p opacity first) composed onto @p dst with the blend
+ * mode @p op (a ::gshcpu_direct8_blends one) at full weight, in single-precision floats from the premultiplied channels
+ * (`As Ad B(Cb, Cs)` without the divisions), the result rounded to bytes.  A pixel of no source alpha is left alone.
+ */
+void gshcpu_direct8_blend_row(uint32_t op, unsigned char * dst, const unsigned char * src, size_t n, float opacity);
+
 /** The strokes of a render held to be drawn together by several threads. */
 typedef struct GSHCPU_Batch GSHCPU_Batch;
 

@@ -215,6 +215,226 @@ void gshcpu_direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
   }
 }
 
+/* --- sources that differ from pixel to pixel ---------------------------------------------------------- */
+
+#if defined(__SSE2__)
+/** Four pixels of @p row composed with the four premultiplied pixels @p src under the coverages @p m (four bytes, or all @p m_const). */
+static inline void d8_four_src(unsigned char * row, const uint32_t * src, const uint8_t * m, uint32_t m_const) {
+  const __m128i zero = _mm_setzero_si128();
+  __m128i m_lo;
+  __m128i m_hi;
+  if (m) {
+    uint32_t m4;
+    memcpy(&m4, m, sizeof m4);
+    const __m128i mw = _mm_unpacklo_epi8(_mm_cvtsi32_si128((int)m4), zero);
+    const __m128i mm = _mm_unpacklo_epi16(mw, mw);
+    m_lo = _mm_unpacklo_epi32(mm, mm);
+    m_hi = _mm_unpackhi_epi32(mm, mm);
+  } else {
+    m_lo = m_hi = _mm_set1_epi16((short)m_const);
+  }
+  const __m128i px = _mm_loadu_si128((const __m128i *)(const void *)row);
+  const __m128i sp = _mm_loadu_si128((const __m128i *)(const void *)src);
+  const __m128i e_lo = _mm_unpacklo_epi8(px, zero);
+  const __m128i e_hi = _mm_unpackhi_epi8(px, zero);
+  const __m128i w_lo = d8_div255_v(_mm_mullo_epi16(_mm_unpacklo_epi8(sp, zero), m_lo));
+  const __m128i w_hi = d8_div255_v(_mm_mullo_epi16(_mm_unpackhi_epi8(sp, zero), m_hi));
+  const __m128i k255 = _mm_set1_epi16(255);
+  const __m128i keep_lo = _mm_sub_epi16(k255, _mm_shufflehi_epi16(_mm_shufflelo_epi16(w_lo, 0xff), 0xff));
+  const __m128i keep_hi = _mm_sub_epi16(k255, _mm_shufflehi_epi16(_mm_shufflelo_epi16(w_hi, 0xff), 0xff));
+  __m128i r_lo = _mm_add_epi16(d8_div255_v(_mm_mullo_epi16(e_lo, keep_lo)), w_lo);
+  __m128i r_hi = _mm_add_epi16(d8_div255_v(_mm_mullo_epi16(e_hi, keep_hi)), w_hi);
+  r_lo = _mm_min_epi16(r_lo, k255);
+  r_hi = _mm_min_epi16(r_hi, k255);
+  _mm_storeu_si128((__m128i *)(void *)row, _mm_packus_epi16(r_lo, r_hi));
+}
+#endif
+
+#if defined(D8_AVX2)
+/** Eight pixels at a time, as d8_four_src: the pixels done, a multiple of eight. */
+__attribute__((target("avx2"))) static size_t d8_avx2_src_blocks(unsigned char * row, const uint32_t * src, const uint8_t * m8,
+    uint32_t m_const, size_t n) {
+  const __m256i zero = _mm256_setzero_si256();
+  const __m256i k255 = _mm256_set1_epi16(255);
+  const __m256i k80 = _mm256_set1_epi16(0x80);
+  size_t i = 0;
+  for (; i + 8u <= n; i += 8, row += 32) {
+    __m256i m_lo;
+    __m256i m_hi;
+    if (m8) {
+      uint64_t m;
+      memcpy(&m, m8 + i, sizeof m);
+      const __m128i w = _mm_unpacklo_epi8(_mm_cvtsi64_si128((long long)m), _mm_setzero_si128());
+      const __m256i x = _mm256_inserti128_si256(_mm256_castsi128_si256(w), _mm_srli_si128(w, 8), 1);
+      const __m256i mm = _mm256_unpacklo_epi16(x, x);
+      m_lo = _mm256_unpacklo_epi32(mm, mm);
+      m_hi = _mm256_unpackhi_epi32(mm, mm);
+    } else {
+      m_lo = m_hi = _mm256_set1_epi16((short)m_const);
+    }
+    const __m256i px = _mm256_loadu_si256((const __m256i *)(const void *)row);
+    const __m256i sp = _mm256_loadu_si256((const __m256i *)(const void *)(src + i));
+    const __m256i e_lo = _mm256_unpacklo_epi8(px, zero);
+    const __m256i e_hi = _mm256_unpackhi_epi8(px, zero);
+    __m256i t = _mm256_add_epi16(_mm256_mullo_epi16(_mm256_unpacklo_epi8(sp, zero), m_lo), k80);
+    const __m256i w_lo = _mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8);
+    t = _mm256_add_epi16(_mm256_mullo_epi16(_mm256_unpackhi_epi8(sp, zero), m_hi), k80);
+    const __m256i w_hi = _mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8);
+    const __m256i keep_lo = _mm256_sub_epi16(k255, _mm256_shufflehi_epi16(_mm256_shufflelo_epi16(w_lo, 0xff), 0xff));
+    const __m256i keep_hi = _mm256_sub_epi16(k255, _mm256_shufflehi_epi16(_mm256_shufflelo_epi16(w_hi, 0xff), 0xff));
+    t = _mm256_add_epi16(_mm256_mullo_epi16(e_lo, keep_lo), k80);
+    __m256i r_lo = _mm256_add_epi16(_mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8), w_lo);
+    t = _mm256_add_epi16(_mm256_mullo_epi16(e_hi, keep_hi), k80);
+    __m256i r_hi = _mm256_add_epi16(_mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8), w_hi);
+    r_lo = _mm256_min_epi16(r_lo, k255);
+    r_hi = _mm256_min_epi16(r_hi, k255);
+    _mm256_storeu_si256((__m256i *)(void *)row, _mm256_packus_epi16(r_lo, r_hi));
+  }
+  return i;
+}
+#endif
+
+/** The four bytes at @p p as four 16-bit lanes (the first byte lowest). */
+static inline uint64_t d8_lanes_of(const uint8_t * p) {
+  return (uint64_t)p[0] | ((uint64_t)p[1] << 16) | ((uint64_t)p[2] << 32) | ((uint64_t)p[3] << 48);
+}
+
+void gshcpu_direct8_span_pixels(unsigned char * row, const uint32_t * src, const uint8_t * m8, uint32_t m_const, size_t n) {
+  size_t i = 0;
+#if defined(D8_AVX2)
+  if (n >= 8u && d8_have_avx2()) {
+    i = d8_avx2_src_blocks(row, src, m8, m_const, n);
+    row += 4u * i;
+  }
+#endif
+#if defined(__SSE2__)
+  for (; i + 4u <= n; i += 4, row += 16) {
+    d8_four_src(row, src + i, m8 ? m8 + i : NULL, m_const);
+  }
+#endif
+  for (; i < n; i++, row += 4) {
+    const uint32_t m = m8 ? m8[i] : m_const;
+    const uint8_t * sb = (const uint8_t *)(const void *)(src + i);
+    if (m == 0 || sb[3] == 0) {
+      continue;
+    }
+    if (m == 255u && sb[3] == 255u) {
+      memcpy(row, sb, 4);
+      continue;
+    }
+    const uint64_t e = d8_lanes_of(row);
+    const uint64_t sl = d8_lanes_of(sb);
+    const uint64_t w = m == 255u ? sl : d8_div255(sl * m);
+    const uint64_t keep = 255u - (w >> 48);
+    uint64_t r = d8_div255(e * keep) + w;
+    const uint64_t over = (r >> 8) & 0x0001000100010001ull;
+    r = (r | (over * 255u)) & D8_LOW;
+    row[0] = (uint8_t)r;
+    row[1] = (uint8_t)(r >> 16);
+    row[2] = (uint8_t)(r >> 32);
+    row[3] = (uint8_t)(r >> 48);
+  }
+}
+
+/* --- blend modes on bytes ------------------------------------------------------------------------------ */
+
+/** The part of a separable mode's result that depends on both pixels, `As Ad B(Cb, Cs)` (B2), from the premultiplied channels. */
+static inline __attribute__((always_inline)) float d8_both(uint32_t op, float s, float d, float sa, float da) {
+  switch (op) {
+    case GSHSCENE_COMPOSITE_MULTIPLY:
+      return s * d;
+    case GSHSCENE_COMPOSITE_SCREEN:
+      return sa * d + da * s - s * d;
+    case GSHSCENE_COMPOSITE_OVERLAY:
+      /* hard-light with the pixels exchanged */
+      return 2.0f * d <= da ? 2.0f * s * d : da * s + sa * (2.0f * d - da) - s * (2.0f * d - da);
+    case GSHSCENE_COMPOSITE_HARD_LIGHT:
+      return 2.0f * s <= sa ? 2.0f * s * d : sa * d + da * (2.0f * s - sa) - d * (2.0f * s - sa);
+    case GSHSCENE_COMPOSITE_DARKEN:
+      return sa * d < da * s ? sa * d : da * s;
+    case GSHSCENE_COMPOSITE_LIGHTEN:
+      return sa * d > da * s ? sa * d : da * s;
+    case GSHSCENE_COMPOSITE_DIFFERENCE: {
+      const float t = sa * d - da * s;
+      return t < 0.0f ? -t : t;
+    }
+    default: /* GSHSCENE_COMPOSITE_EXCLUSION */
+      return sa * d + da * s - 2.0f * s * d;
+  }
+}
+
+int gshcpu_direct8_blends(uint32_t op) {
+  switch (op) {
+    case GSHSCENE_COMPOSITE_MULTIPLY:
+    case GSHSCENE_COMPOSITE_SCREEN:
+    case GSHSCENE_COMPOSITE_OVERLAY:
+    case GSHSCENE_COMPOSITE_HARD_LIGHT:
+    case GSHSCENE_COMPOSITE_DARKEN:
+    case GSHSCENE_COMPOSITE_LIGHTEN:
+    case GSHSCENE_COMPOSITE_DIFFERENCE:
+    case GSHSCENE_COMPOSITE_EXCLUSION:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+/** One byte of `v` (a float in 0..1): rounded, held to 0..@p top. */
+static inline uint8_t d8_byte(float v, uint8_t top) {
+  const int32_t n = (int32_t)(v * 255.0f + 0.5f);
+  return n <= 0 ? 0 : n >= (int32_t)top ? top : (uint8_t)n;
+}
+
+#define D8_BLEND_LOOP(OP) \
+  for (size_t i = 0; i < n; i++, dst += 4, src += 4) { \
+    if (src[3] == 0) { \
+      continue; \
+    } \
+    const float sa = (float)src[3] * (1.0f / 255.0f) * opacity; \
+    const float da = (float)dst[3] * (1.0f / 255.0f); \
+    float c[4]; \
+    for (int k = 0; k < 3; k++) { \
+      const float s = (float)src[k] * (1.0f / 255.0f) * opacity; \
+      const float d = (float)dst[k] * (1.0f / 255.0f); \
+      c[k] = s * (1.0f - da) + d * (1.0f - sa) + d8_both(OP, s, d, sa, da); \
+    } \
+    c[3] = sa + da - sa * da; \
+    const uint8_t a = d8_byte(c[3], 255); \
+    dst[3] = a; \
+    for (int k = 0; k < 3; k++) { \
+      dst[k] = d8_byte(c[k], a); \
+    } \
+  }
+
+void gshcpu_direct8_blend_row(uint32_t op, unsigned char * dst, const unsigned char * src, size_t n, float opacity) {
+  switch (op) {
+    case GSHSCENE_COMPOSITE_MULTIPLY:
+      D8_BLEND_LOOP(GSHSCENE_COMPOSITE_MULTIPLY)
+      break;
+    case GSHSCENE_COMPOSITE_SCREEN:
+      D8_BLEND_LOOP(GSHSCENE_COMPOSITE_SCREEN)
+      break;
+    case GSHSCENE_COMPOSITE_OVERLAY:
+      D8_BLEND_LOOP(GSHSCENE_COMPOSITE_OVERLAY)
+      break;
+    case GSHSCENE_COMPOSITE_HARD_LIGHT:
+      D8_BLEND_LOOP(GSHSCENE_COMPOSITE_HARD_LIGHT)
+      break;
+    case GSHSCENE_COMPOSITE_DARKEN:
+      D8_BLEND_LOOP(GSHSCENE_COMPOSITE_DARKEN)
+      break;
+    case GSHSCENE_COMPOSITE_LIGHTEN:
+      D8_BLEND_LOOP(GSHSCENE_COMPOSITE_LIGHTEN)
+      break;
+    case GSHSCENE_COMPOSITE_DIFFERENCE:
+      D8_BLEND_LOOP(GSHSCENE_COMPOSITE_DIFFERENCE)
+      break;
+    default:
+      D8_BLEND_LOOP(GSHSCENE_COMPOSITE_EXCLUSION)
+      break;
+  }
+}
+
 /* --- the batch ------------------------------------------------------------------------------------- */
 
 #define BATCH_ENTRIES 1024u
