@@ -135,8 +135,8 @@ static inline __attribute__((always_inline)) void lean_row(Lean_Band * b, int y,
   }
   /* The share of d that has crossed by each pixel's end: twice the area of the line right of the pixel's own left edge, over 128 * w.
    * The first sum is the share left of pixel xai's end, and every sum after is the difference of two. */
-  const int32_t dm = ds < 0 ? -ds : ds;
-  const double scale = (double)dm / (128.0 * (double)(xb - xa));
+  const double scale = (double)ds / (128.0 * (double)(xb - xa));
+  const double half = ds < 0 ? -0.5 : 0.5; /* the cast truncates toward zero: a half of the sum's sign rounds it to the nearest */
   int32_t prev = 0;
   for (int k = xai; k < xbi; k++) {
     const int u = (k + 1) << 6;
@@ -145,8 +145,7 @@ static inline __attribute__((always_inline)) void lean_row(Lean_Band * b, int y,
     /* 2 * (the integral of the clamped distance to u over [xa, xb]): the part left of the pixel counts 64 wide, the part inside is a trapezoid */
     const int64_t left = (int64_t)(p - xa) * 128;
     const int64_t inside = (int64_t)(q - p) * (2 * (int64_t)u - p - q);
-    const int32_t mag = (int32_t)((double)(left + inside) * scale + 0.5);
-    const int32_t cum = ds < 0 ? -mag : mag;
+    const int32_t cum = (int32_t)((double)(left + inside) * scale + half);
     lean_add(b, y, k, cum - prev);
     prev = cum;
   }
@@ -154,7 +153,7 @@ static inline __attribute__((always_inline)) void lean_row(Lean_Band * b, int y,
 }
 
 /** The floor of a quotient found in a double, without the libm. */
-static inline int64_t lean_floor(double v) {
+static inline __attribute__((always_inline)) int64_t lean_floor(double v) {
   const int64_t t = (int64_t)v;
   return t - ((double)t > v);
 }
@@ -194,12 +193,21 @@ static void lean_edge(Lean_Band * b, int top, int rows, int width, int64_t x0, i
   const double ddf = (double)dd;
   int64_t xa = ys == y0 ? x0 : x0 + lean_floor((double)(2 * (ys - y0) * dx + dy) / ddf);
   int64_t yb = ((ys >> 6) + 1) << 6;
+  if (yb > ye) {
+    /* one piece, ending where the edge does */
+    lean_row(b, (int)(ys >> 6) - top, width, (int)xa, (int)x1, (int)(ye - ys) * dir);
+    return;
+  }
   const int64_t num = 2 * (yb - y0) * dx + dy;
   int64_t q0 = lean_floor((double)num / ddf);
   int64_t r0 = num - q0 * dd;
-  const int64_t step = 128 * dx;
-  const int64_t qs = lean_floor((double)step / ddf);
-  const int64_t rs = step - qs * dd;
+  int64_t qs = 0;
+  int64_t rs = 0;
+  if (yb + 64 <= ye) { /* a second boundary: the step to it */
+    const int64_t step = 128 * dx;
+    qs = lean_floor((double)step / ddf);
+    rs = step - qs * dd;
+  }
   int64_t ya = ys;
   int y = (int)(ys >> 6);
   for (;;) {
@@ -224,7 +232,7 @@ static void lean_edge(Lean_Band * b, int top, int rows, int width, int64_t x0, i
 }
 
 /** The coverage of an accumulated sum, 0 to 255. */
-static inline uint8_t lean_level(int32_t acc) {
+static inline __attribute__((always_inline)) uint8_t lean_level(int32_t acc) {
   int32_t c = acc < 0 ? -acc : acc;
   if (c > 8192) {
     c = 8192;
@@ -233,7 +241,7 @@ static inline uint8_t lean_level(int32_t acc) {
 }
 
 /** @p n bytes of @p m at @p p: the runs are short, and a call to memset for three bytes costs more than the three. */
-static inline void lean_fill(uint8_t * p, uint8_t m, size_t n) {
+static inline __attribute__((always_inline)) void lean_fill(uint8_t * p, uint8_t m, size_t n) {
   if (n >= 16u) {
     memset(p, m, n);
     return;
