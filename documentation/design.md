@@ -331,6 +331,19 @@ coverage is a copy, and a render with anything else keeps the double layer. On t
 132 ms against 267 ms for the exact coverage, and its dashed scene 43 ms against 101 ms; against the pictures of Blend2D and
 Skia the two tiers differ from them by the same mean (0.7 and 0.9 of 255 against Blend2D, 1.9 against Skia).
 
+The fast coverage is a float area and cover per cell, with the cells a row notes kept in a bitset swept in order, in bands of
+up to 1,024 rows; an edge's x at a row boundary is computed from its origin, so the cover does not depend on where a band
+or a stripe begins. The compositor blends four pixels at a time with SSE2 where the target has it (the same rounding as the
+scalar word). The frame of 2,500 strokes takes 74 ms on one thread.
+
+A sink created with `gshcpu_sink_create_with_executor` draws those strokes over 32-row stripes on threads the caller owns.
+The library starts none: it hands the executor a count and a task, which the executor runs on as many threads as it has
+(the calling thread may run one); a stripe is drawn by one task, its strokes in order, so the picture is byte-identical for
+any count, and an executor that refuses or runs fewer tasks leaves the rest to the caller. The strokes are queued with their
+points copied and drawn when the batch fills, before any stroke that is not queued, and at the end of the render. A sink
+with `CALLER_MEMORY` does not queue, since each task needs memory of its own. At 1, 2, 4 and 8 tasks a frame takes 74, 59,
+36 and 30 ms, the dashed scene 26, 20, 14 and 14 ms; what remains serial is the opening of each stroke.
+
 **What a pixel may cost (UC9, UC17, UC19, UC20).** Two limits bound the step, both decided over what the whole render draws of
 an item, so a damaged render refuses what the whole one does. `max_exact_fragments` (default 32768, at least twice the densest pixel measured) bounds the raw pieces of a
 part in a pixel: the pieces are what the rasterizer finds, and the step's memory and its first pass are linear in them. The
