@@ -596,8 +596,150 @@ static inline double angle_fast(const GSHCPU_Gradient * g, double dx, double dy)
   return g->unit == GSHGEOM_ANGLE_RADIANS ? rad : rad / TWO_PI * g->turn;
 }
 
+/* --- the rows of a table's indices, in single precision ----------------------------------------------------- */
+
+/**
+ * A gradient padded at both ends has its offsets on the line found in single precision, a row of pixels at a time: the same
+ * operations, in the same order and with the same constants, in the scalar function (row_f_pixel) and in the AVX2 kernel
+ * (row_f_avx2), so that a processor without AVX2 gives the bytes one with it does.  A float holds a row of pixels' offsets to
+ * about a millionth, past what the table can tell apart; the first pixel's point is taken in doubles first.
+ */
+typedef struct Row_F {
+  uint32_t kind;
+  int a_zero;        /* radial: a is zero */
+  float x0, y0, dx, dy;
+  float n0, n1, r0, dr, ra, r0dr, r0sq;
+  float ua0, ub;     /* linear: the offset of a pixel is ua0 + ub k, already in table points */
+  float turn, a0, k; /* sweep: the angle's unit, a0, 1 / (a1 - a0) */
+  float first, scale;
+} Row_F;
+
+#define ROW_ATAN0 0.9999966347006692f
+#define ROW_ATAN1 -0.3331830289944582f
+#define ROW_ATAN2 0.19813213509060276f
+#define ROW_ATAN3 -0.13247522771595696f
+#define ROW_ATAN4 0.0798112049555744f
+#define ROW_ATAN5 -0.033725938103610145f
+#define ROW_ATAN6 0.006842624897387503f
+#define ROW_HALF_PI 1.5707963267948966f
+#define ROW_PI 3.141592653589793f
+#define ROW_TWO_PI 6.283185307179586f
+#define ROW_THREE_HALF_PI 4.71238898038469f
+
+static void row_f_prepare(const GSHCPU_Gradient * g, double px0, double py0, double dpx, double dpy, double t0, double dt, Row_F * c) {
+  memset(c, 0, sizeof *c);
+  c->kind = g->kind;
+  c->a_zero = g->a == 0.0;
+  c->x0 = (float)(px0 - g->p[0]);
+  c->y0 = (float)(py0 - g->p[1]);
+  c->dx = (float)dpx;
+  c->dy = (float)dpy;
+  c->n0 = (float)g->n[0];
+  c->n1 = (float)g->n[1];
+  c->r0 = (float)g->r0;
+  c->dr = (float)g->dr;
+  c->ra = (float)g->a;
+  c->r0dr = (float)(g->r0 * g->dr);
+  c->r0sq = (float)(g->r0 * g->r0);
+  c->ua0 = (float)((t0 - g->o_first) * g->scale + 0.5);
+  c->ub = (float)(dt * g->scale);
+  c->turn = (float)(g->turn / TWO_PI);
+  c->a0 = (float)g->a0;
+  c->k = (float)(g->a1 != g->a0 ? 1.0 / (g->a1 - g->a0) : 0.0);
+  c->first = (float)g->o_first;
+  c->scale = (float)g->scale;
+}
+
+/** The operands' order of the vector instructions: a maximum or a minimum with a NaN is the second operand. */
+static inline float row_max(float a, float b) {
+  return a > b ? a : b;
+}
+static inline float row_min(float a, float b) {
+  return a < b ? a : b;
+}
+static inline float row_abs(float v) {
+  uint32_t bits;
+  memcpy(&bits, &v, sizeof bits);
+  bits &= 0x7fffffffu;
+  memcpy(&v, &bits, sizeof bits);
+  return v;
+}
+
+/** The table index of the pixel @p k from the row's first, or ::GSHCPU_RENDER_GRADIENT_NONE where the gradient draws nothing there. */
+static uint32_t row_f_pixel(const Row_F * c, float k) {
+  float u;
+  int none = 0;
+  if (c->kind == GSHSCENE_GRADIENT_LINEAR) {
+    u = c->ua0 + c->ub * k;
+  } else {
+    const float x = c->x0 + c->dx * k;
+    const float y = c->y0 + c->dy * k;
+    float t;
+    if (c->kind == GSHSCENE_GRADIENT_RADIAL) {
+      const float b = (x * c->n0 + y * c->n1) + c->r0dr;
+      const float cc = (x * x + y * y) - c->r0sq;
+      if (c->a_zero) {
+        t = cc / (b + b);
+        none = b == 0.0f || !(c->r0 + t * c->dr > 0.0f);
+      } else {
+        const float disc = b * b - c->ra * cc;
+        const float root = (float)gmath_sqrt((double)row_max(disc, 0.0f)); /* a float's root, rounded twice, is its root rounded once */
+        const float q = b < 0.0f ? b - root : b + root;
+        const float uu = q / c->ra;
+        const float vv = cc / q;
+        const int gt = uu > vv;
+        const float hi = gt ? uu : vv;
+        const float lo = gt ? vv : uu;
+        const int hi_ok = c->r0 + hi * c->dr > 0.0f;
+        const int lo_ok = c->r0 + lo * c->dr > 0.0f;
+        const int qz = q == 0.0f;
+        t = qz ? 0.0f : (hi_ok ? hi : lo);
+        const int ok = qz ? c->r0 > 0.0f : (hi_ok || lo_ok);
+        none = disc < 0.0f || !ok;
+      }
+    } else {
+      const float ax = row_abs(x);
+      const float ay = row_abs(y);
+      const float r = row_min(ax, ay) / row_max(ax, ay);
+      const float r2 = r * r;
+      float poly = ROW_ATAN6;
+      poly = poly * r2 + ROW_ATAN5;
+      poly = poly * r2 + ROW_ATAN4;
+      poly = poly * r2 + ROW_ATAN3;
+      poly = poly * r2 + ROW_ATAN2;
+      poly = poly * r2 + ROW_ATAN1;
+      poly = poly * r2 + ROW_ATAN0;
+      float rad = poly * r;
+      if (ay > ax) {
+        rad = ROW_HALF_PI - rad;
+      }
+      const int xneg = x < 0.0f;
+      if (xneg) {
+        rad = ROW_PI - rad;
+      }
+      if (y < 0.0f) {
+        rad = ROW_TWO_PI - rad;
+      }
+      const int dy0 = y == 0.0f;
+      const int dx0 = x == 0.0f;
+      if (dy0) {
+        rad = xneg ? ROW_PI : 0.0f;
+      }
+      if (!dy0 && dx0) {
+        rad = y > 0.0f ? ROW_HALF_PI : ROW_THREE_HALF_PI;
+      }
+      t = ((rad * c->turn) - c->a0) * c->k;
+    }
+    u = ((t - c->first) * c->scale) + 0.5f;
+  }
+  u = row_min(row_max(u, 0.0f), (float)GSHCPU_RENDER_GRADIENT_TABLE); /* below the line, and a NaN, is the first point */
+  return none ? GSHCPU_RENDER_GRADIENT_NONE : (uint32_t)(int32_t)u;
+}
+
 #if defined(GRADIENT_AVX2)
-/** Whether this processor has AVX2, asked once (a race on it only repeats the question). */
+/** Whether the vector kernel may be used: the processor has AVX2 (asked once; a race on it only repeats the question) and a test has not turned it off. */
+static int gradient_vector_on = 1;
+
 static int gradient_have_avx2(void) {
   static int have = -1;
   int h = have;
@@ -606,167 +748,45 @@ static int gradient_have_avx2(void) {
     h = __builtin_cpu_supports("avx2") ? 1 : 0;
     have = h;
   }
-  return h;
+  return h && gradient_vector_on;
 }
 
-/** Four table indices from four parameters on a line padded at both ends; NONE in the lanes of @p none. */
-__attribute__((target("avx2"))) static inline __attribute__((always_inline)) void store_indices(const GSHCPU_Gradient * g, __m256d t,
-    __m256d none, const uint8_t * cov, uint32_t * index) {
-  const __m256d half = _mm256_set1_pd(0.5);
-  const __m256d top = _mm256_set1_pd((double)GSHCPU_RENDER_GRADIENT_TABLE);
-  __m256d u = _mm256_add_pd(_mm256_mul_pd(_mm256_sub_pd(t, _mm256_set1_pd(g->o_first)), _mm256_set1_pd(g->scale)), half);
-  u = _mm256_max_pd(u, _mm256_setzero_pd()); /* below the line, and a NaN, is the first point */
-  u = _mm256_min_pd(u, top);
-  __m128i idx = _mm256_cvttpd_epi32(u);
-  uint32_t c4;
-  memcpy(&c4, cov, sizeof c4);
-  const __m128i uncovered = _mm_cmpeq_epi32(_mm_cvtepu8_epi32(_mm_cvtsi32_si128((int)c4)), _mm_setzero_si128());
-  const __m128i skip = _mm_or_si128(uncovered, _mm256_cvtpd_epi32(_mm256_and_pd(none, _mm256_set1_pd(1.0)))); /* 1 where none */
-  const __m128i drop = _mm_or_si128(uncovered, _mm_cmpgt_epi32(skip, _mm_setzero_si128()));
-  idx = _mm_blendv_epi8(idx, _mm_set1_epi32(-1), drop);
-  _mm_storeu_si128((__m128i *)(void *)index, idx);
-}
-
-/**
- * table_row for a radial or a sweep gradient on a line padded at both ends, four pixels at a time: the same operations as
- * radial_param and angle_fast, the choices made with masks.  @return the pixels done, a multiple of four.
- */
-__attribute__((target("avx2"))) static size_t table_row_avx2(const GSHCPU_Gradient * g, double px0, double py0, double dpx, double dpy,
-    size_t count, const uint8_t * cov, uint32_t * index) {
-  const __m256d lane = _mm256_set_pd(3.0, 2.0, 1.0, 0.0);
-  const __m256d zero = _mm256_setzero_pd();
-  const __m256d one = _mm256_set1_pd(1.0);
-  size_t i = 0;
-  for (; i + 4u <= count; i += 4) {
-    const __m256d k = _mm256_add_pd(_mm256_set1_pd((double)(int32_t)i), lane);
-    const __m256d x = _mm256_sub_pd(_mm256_add_pd(_mm256_set1_pd(px0), _mm256_mul_pd(_mm256_set1_pd(dpx), k)), _mm256_set1_pd(g->p[0]));
-    const __m256d y = _mm256_sub_pd(_mm256_add_pd(_mm256_set1_pd(py0), _mm256_mul_pd(_mm256_set1_pd(dpy), k)), _mm256_set1_pd(g->p[1]));
-    __m256d t;
-    __m256d none;
-    if (g->kind == GSHSCENE_GRADIENT_RADIAL) {
-      const __m256d r0 = _mm256_set1_pd(g->r0);
-      const __m256d dr = _mm256_set1_pd(g->dr);
-      const __m256d b = _mm256_add_pd(_mm256_add_pd(_mm256_mul_pd(x, _mm256_set1_pd(g->n[0])), _mm256_mul_pd(y, _mm256_set1_pd(g->n[1]))),
-          _mm256_set1_pd(g->r0 * g->dr));
-      const __m256d c = _mm256_sub_pd(_mm256_add_pd(_mm256_mul_pd(x, x), _mm256_mul_pd(y, y)), _mm256_set1_pd(g->r0 * g->r0));
-      if (g->a == 0.0) {
-        t = _mm256_div_pd(c, _mm256_mul_pd(_mm256_set1_pd(2.0), b));
-        none = _mm256_or_pd(_mm256_cmp_pd(b, zero, _CMP_EQ_OQ),
-            _mm256_cmp_pd(_mm256_add_pd(r0, _mm256_mul_pd(t, dr)), zero, _CMP_NGT_UQ));
-      } else {
-        const __m256d a = _mm256_set1_pd(g->a);
-        const __m256d disc = _mm256_sub_pd(_mm256_mul_pd(b, b), _mm256_mul_pd(a, c));
-        const __m256d bad = _mm256_cmp_pd(disc, zero, _CMP_LT_OQ);
-        const __m256d root = _mm256_sqrt_pd(_mm256_max_pd(disc, zero));
-        const __m256d q = _mm256_blendv_pd(_mm256_add_pd(b, root), _mm256_sub_pd(b, root), _mm256_cmp_pd(b, zero, _CMP_LT_OQ));
-        const __m256d u = _mm256_div_pd(q, a);
-        const __m256d v = _mm256_div_pd(c, q);
-        const __m256d hi = _mm256_blendv_pd(v, u, _mm256_cmp_pd(u, v, _CMP_GT_OQ));
-        const __m256d lo = _mm256_blendv_pd(u, v, _mm256_cmp_pd(u, v, _CMP_GT_OQ));
-        const __m256d hi_ok = _mm256_cmp_pd(_mm256_add_pd(r0, _mm256_mul_pd(hi, dr)), zero, _CMP_GT_OQ);
-        const __m256d lo_ok = _mm256_cmp_pd(_mm256_add_pd(r0, _mm256_mul_pd(lo, dr)), zero, _CMP_GT_OQ);
-        const __m256d qz = _mm256_cmp_pd(q, zero, _CMP_EQ_OQ);
-        __m256d tt = _mm256_blendv_pd(lo, hi, hi_ok);
-        __m256d ok = _mm256_or_pd(hi_ok, lo_ok);
-        tt = _mm256_blendv_pd(tt, zero, qz); /* the double root 0 */
-        ok = _mm256_blendv_pd(ok, _mm256_cmp_pd(r0, zero, _CMP_GT_OQ), qz);
-        t = tt;
-        none = _mm256_or_pd(bad, _mm256_xor_pd(ok, _mm256_castsi256_pd(_mm256_set1_epi64x(-1))));
-      }
-    } else {
-      /* G9: the angle in [0, one turn) from the polynomial's arctangent, the axes exactly. */
-      const __m256d ax = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x);
-      const __m256d ay = _mm256_andnot_pd(_mm256_set1_pd(-0.0), y);
-      const __m256d swap = _mm256_cmp_pd(ay, ax, _CMP_GT_OQ);
-      const __m256d mx = _mm256_max_pd(ax, ay);
-      const __m256d mn = _mm256_min_pd(ax, ay);
-      const __m256d r = _mm256_div_pd(mn, mx);
-      const __m256d r2 = _mm256_mul_pd(r, r);
-      __m256d poly = _mm256_set1_pd(0.006842624897387503);
-      poly = _mm256_add_pd(_mm256_mul_pd(poly, r2), _mm256_set1_pd(-0.033725938103610145));
-      poly = _mm256_add_pd(_mm256_mul_pd(poly, r2), _mm256_set1_pd(0.0798112049555744));
-      poly = _mm256_add_pd(_mm256_mul_pd(poly, r2), _mm256_set1_pd(-0.13247522771595696));
-      poly = _mm256_add_pd(_mm256_mul_pd(poly, r2), _mm256_set1_pd(0.19813213509060276));
-      poly = _mm256_add_pd(_mm256_mul_pd(poly, r2), _mm256_set1_pd(-0.3331830289944582));
-      poly = _mm256_add_pd(_mm256_mul_pd(poly, r2), _mm256_set1_pd(0.9999966347006692));
-      __m256d rad = _mm256_mul_pd(poly, r);
-      rad = _mm256_blendv_pd(rad, _mm256_sub_pd(_mm256_set1_pd(1.5707963267948966), rad), swap);
-      rad = _mm256_blendv_pd(rad, _mm256_sub_pd(_mm256_set1_pd(3.141592653589793), rad), _mm256_cmp_pd(x, zero, _CMP_LT_OQ));
-      rad = _mm256_blendv_pd(rad, _mm256_sub_pd(_mm256_set1_pd(TWO_PI), rad), _mm256_cmp_pd(y, zero, _CMP_LT_OQ));
-      const __m256d dy0 = _mm256_cmp_pd(y, zero, _CMP_EQ_OQ);
-      const __m256d dx0 = _mm256_cmp_pd(x, zero, _CMP_EQ_OQ);
-      rad = _mm256_blendv_pd(rad, _mm256_blendv_pd(_mm256_set1_pd(0.0), _mm256_set1_pd(3.141592653589793), _mm256_cmp_pd(x, zero, _CMP_LT_OQ)), dy0);
-      rad = _mm256_blendv_pd(rad, _mm256_blendv_pd(_mm256_set1_pd(4.71238898038469), _mm256_set1_pd(1.5707963267948966),
-                                      _mm256_cmp_pd(y, zero, _CMP_GT_OQ)), _mm256_andnot_pd(dy0, dx0));
-      const __m256d theta = _mm256_mul_pd(rad, _mm256_set1_pd(g->turn / TWO_PI));
-      t = _mm256_mul_pd(_mm256_sub_pd(theta, _mm256_set1_pd(g->a0)), _mm256_set1_pd(1.0 / (g->a1 - g->a0)));
-      none = zero;
-    }
-    (void)one;
-    store_indices(g, t, none, cov + i, index + i);
-  }
-  return i;
-}
-#endif
-
-#if defined(GRADIENT_AVX2)
-/**
- * table_row for a gradient on a line padded at both ends, eight pixels at a time in single precision: the offset on the line
- * of each pixel (the same operations as the double rows, the choices made with masks), held to the table, and its index.  The
- * point of the first pixel is taken in doubles first; a float then holds the offsets of a row of pixels to about a millionth.
- * @return the pixels done, a multiple of eight.
- */
-__attribute__((target("avx2"))) static size_t table_row_avx2f(const GSHCPU_Gradient * g, double px0, double py0, double dpx,
-    double dpy, double t0, double dt, size_t count, const uint8_t * cov, uint32_t * index) {
+/** row_f_pixel for eight pixels from @p first: the same operations, the choices made with masks.  @return the pixels done, a multiple of eight. */
+__attribute__((target("avx2"))) static size_t row_f_avx2(const Row_F * c, size_t count, const uint8_t * cov, uint32_t * index) {
   const __m256 lane = _mm256_set_ps(7.0f, 6.0f, 5.0f, 4.0f, 3.0f, 2.0f, 1.0f, 0.0f);
   const __m256 zero = _mm256_setzero_ps();
   const __m256 ones = _mm256_castsi256_ps(_mm256_set1_epi32(-1));
-  const __m256 top = _mm256_set1_ps((float)GSHCPU_RENDER_GRADIENT_TABLE);
-  const __m256 half = _mm256_set1_ps(0.5f);
-  const __m256 scale = _mm256_set1_ps((float)g->scale);
-  const __m256 first = _mm256_set1_ps((float)g->o_first);
-  const __m256 x0 = _mm256_set1_ps((float)(px0 - g->p[0]));
-  const __m256 y0 = _mm256_set1_ps((float)(py0 - g->p[1]));
-  const __m256 dx = _mm256_set1_ps((float)dpx);
-  const __m256 dy = _mm256_set1_ps((float)dpy);
-  const __m256 n0 = _mm256_set1_ps((float)g->n[0]);
-  const __m256 n1 = _mm256_set1_ps((float)g->n[1]);
-  const __m256 r0 = _mm256_set1_ps((float)g->r0);
-  const __m256 dr = _mm256_set1_ps((float)g->dr);
-  const __m256 ra = _mm256_set1_ps((float)g->a);
-  const __m256 r0dr = _mm256_set1_ps((float)(g->r0 * g->dr));
-  const __m256 r0sq = _mm256_set1_ps((float)(g->r0 * g->r0));
-  const __m256 ua0 = _mm256_set1_ps((float)((t0 - g->o_first) * g->scale + 0.5));
-  const __m256 ub = _mm256_set1_ps((float)(dt * g->scale));
-  const __m256 turn = _mm256_set1_ps((float)(g->turn / TWO_PI));
-  const __m256 theta_a0 = _mm256_set1_ps((float)g->a0);
-  const __m256 theta_k = _mm256_set1_ps((float)(g->a1 != g->a0 ? 1.0 / (g->a1 - g->a0) : 0.0));
   const __m256 sign = _mm256_set1_ps(-0.0f);
+  const __m256 half_pi = _mm256_set1_ps(ROW_HALF_PI);
+  const __m256 pi = _mm256_set1_ps(ROW_PI);
   size_t i = 0;
   for (; i + 8u <= count; i += 8) {
     const __m256 k = _mm256_add_ps(_mm256_set1_ps((float)(int32_t)i), lane);
     __m256 u;
     __m256 none = zero;
-    if (g->kind == GSHSCENE_GRADIENT_LINEAR) {
-      u = _mm256_add_ps(ua0, _mm256_mul_ps(ub, k));
+    if (c->kind == GSHSCENE_GRADIENT_LINEAR) {
+      u = _mm256_add_ps(_mm256_set1_ps(c->ua0), _mm256_mul_ps(_mm256_set1_ps(c->ub), k));
     } else {
-      const __m256 x = _mm256_add_ps(x0, _mm256_mul_ps(dx, k));
-      const __m256 y = _mm256_add_ps(y0, _mm256_mul_ps(dy, k));
+      const __m256 x = _mm256_add_ps(_mm256_set1_ps(c->x0), _mm256_mul_ps(_mm256_set1_ps(c->dx), k));
+      const __m256 y = _mm256_add_ps(_mm256_set1_ps(c->y0), _mm256_mul_ps(_mm256_set1_ps(c->dy), k));
       __m256 t;
-      if (g->kind == GSHSCENE_GRADIENT_RADIAL) {
-        const __m256 b = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(x, n0), _mm256_mul_ps(y, n1)), r0dr);
-        const __m256 c = _mm256_sub_ps(_mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y)), r0sq);
-        if (g->a == 0.0) {
-          t = _mm256_div_ps(c, _mm256_add_ps(b, b));
+      if (c->kind == GSHSCENE_GRADIENT_RADIAL) {
+        const __m256 r0 = _mm256_set1_ps(c->r0);
+        const __m256 dr = _mm256_set1_ps(c->dr);
+        const __m256 b = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(x, _mm256_set1_ps(c->n0)), _mm256_mul_ps(y, _mm256_set1_ps(c->n1))),
+            _mm256_set1_ps(c->r0dr));
+        const __m256 cc = _mm256_sub_ps(_mm256_add_ps(_mm256_mul_ps(x, x), _mm256_mul_ps(y, y)), _mm256_set1_ps(c->r0sq));
+        if (c->a_zero) {
+          t = _mm256_div_ps(cc, _mm256_add_ps(b, b));
           none = _mm256_or_ps(_mm256_cmp_ps(b, zero, _CMP_EQ_OQ),
               _mm256_cmp_ps(_mm256_add_ps(r0, _mm256_mul_ps(t, dr)), zero, _CMP_NGT_UQ));
         } else {
-          const __m256 disc = _mm256_sub_ps(_mm256_mul_ps(b, b), _mm256_mul_ps(ra, c));
-          const __m256 bad = _mm256_cmp_ps(disc, zero, _CMP_LT_OQ);
+          const __m256 ra = _mm256_set1_ps(c->ra);
+          const __m256 disc = _mm256_sub_ps(_mm256_mul_ps(b, b), _mm256_mul_ps(ra, cc));
           const __m256 root = _mm256_sqrt_ps(_mm256_max_ps(disc, zero));
           const __m256 q = _mm256_blendv_ps(_mm256_add_ps(b, root), _mm256_sub_ps(b, root), _mm256_cmp_ps(b, zero, _CMP_LT_OQ));
           const __m256 uu = _mm256_div_ps(q, ra);
-          const __m256 vv = _mm256_div_ps(c, q);
+          const __m256 vv = _mm256_div_ps(cc, q);
           const __m256 gt = _mm256_cmp_ps(uu, vv, _CMP_GT_OQ);
           const __m256 hi = _mm256_blendv_ps(vv, uu, gt);
           const __m256 lo = _mm256_blendv_ps(uu, vv, gt);
@@ -775,45 +795,69 @@ __attribute__((target("avx2"))) static size_t table_row_avx2f(const GSHCPU_Gradi
           const __m256 qz = _mm256_cmp_ps(q, zero, _CMP_EQ_OQ);
           t = _mm256_blendv_ps(_mm256_blendv_ps(lo, hi, hi_ok), zero, qz);
           const __m256 ok = _mm256_blendv_ps(_mm256_or_ps(hi_ok, lo_ok), _mm256_cmp_ps(r0, zero, _CMP_GT_OQ), qz);
-          none = _mm256_or_ps(bad, _mm256_xor_ps(ok, ones));
+          none = _mm256_or_ps(_mm256_cmp_ps(disc, zero, _CMP_LT_OQ), _mm256_xor_ps(ok, ones));
         }
       } else {
         const __m256 ax = _mm256_andnot_ps(sign, x);
         const __m256 ay = _mm256_andnot_ps(sign, y);
-        const __m256 swap = _mm256_cmp_ps(ay, ax, _CMP_GT_OQ);
         const __m256 r = _mm256_div_ps(_mm256_min_ps(ax, ay), _mm256_max_ps(ax, ay));
         const __m256 r2 = _mm256_mul_ps(r, r);
-        __m256 poly = _mm256_set1_ps(0.006842624897387503f);
-        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(-0.033725938103610145f));
-        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(0.0798112049555744f));
-        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(-0.13247522771595696f));
-        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(0.19813213509060276f));
-        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(-0.3331830289944582f));
-        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(0.9999966347006692f));
+        __m256 poly = _mm256_set1_ps(ROW_ATAN6);
+        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(ROW_ATAN5));
+        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(ROW_ATAN4));
+        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(ROW_ATAN3));
+        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(ROW_ATAN2));
+        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(ROW_ATAN1));
+        poly = _mm256_add_ps(_mm256_mul_ps(poly, r2), _mm256_set1_ps(ROW_ATAN0));
         __m256 rad = _mm256_mul_ps(poly, r);
-        rad = _mm256_blendv_ps(rad, _mm256_sub_ps(_mm256_set1_ps(1.5707963267948966f), rad), swap);
+        rad = _mm256_blendv_ps(rad, _mm256_sub_ps(half_pi, rad), _mm256_cmp_ps(ay, ax, _CMP_GT_OQ));
         const __m256 xneg = _mm256_cmp_ps(x, zero, _CMP_LT_OQ);
-        rad = _mm256_blendv_ps(rad, _mm256_sub_ps(_mm256_set1_ps(3.141592653589793f), rad), xneg);
-        rad = _mm256_blendv_ps(rad, _mm256_sub_ps(_mm256_set1_ps((float)TWO_PI), rad), _mm256_cmp_ps(y, zero, _CMP_LT_OQ));
+        rad = _mm256_blendv_ps(rad, _mm256_sub_ps(pi, rad), xneg);
+        rad = _mm256_blendv_ps(rad, _mm256_sub_ps(_mm256_set1_ps(ROW_TWO_PI), rad), _mm256_cmp_ps(y, zero, _CMP_LT_OQ));
         const __m256 dy0 = _mm256_cmp_ps(y, zero, _CMP_EQ_OQ);
         const __m256 dx0 = _mm256_cmp_ps(x, zero, _CMP_EQ_OQ);
-        rad = _mm256_blendv_ps(rad, _mm256_blendv_ps(zero, _mm256_set1_ps(3.141592653589793f), xneg), dy0);
-        rad = _mm256_blendv_ps(rad, _mm256_blendv_ps(_mm256_set1_ps(4.71238898038469f), _mm256_set1_ps(1.5707963267948966f),
-                                        _mm256_cmp_ps(y, zero, _CMP_GT_OQ)), _mm256_andnot_ps(dy0, dx0));
-        t = _mm256_mul_ps(_mm256_sub_ps(_mm256_mul_ps(rad, turn), theta_a0), theta_k);
+        rad = _mm256_blendv_ps(rad, _mm256_blendv_ps(zero, pi, xneg), dy0);
+        rad = _mm256_blendv_ps(rad, _mm256_blendv_ps(_mm256_set1_ps(ROW_THREE_HALF_PI), half_pi, _mm256_cmp_ps(y, zero, _CMP_GT_OQ)),
+            _mm256_andnot_ps(dy0, dx0));
+        t = _mm256_mul_ps(_mm256_sub_ps(_mm256_mul_ps(rad, _mm256_set1_ps(c->turn)), _mm256_set1_ps(c->a0)), _mm256_set1_ps(c->k));
       }
-      u = _mm256_add_ps(_mm256_mul_ps(_mm256_sub_ps(t, first), scale), half);
+      u = _mm256_add_ps(_mm256_mul_ps(_mm256_sub_ps(t, _mm256_set1_ps(c->first)), _mm256_set1_ps(c->scale)), _mm256_set1_ps(0.5f));
     }
-    u = _mm256_min_ps(_mm256_max_ps(u, zero), top); /* below the line, and a NaN, is the first point */
+    u = _mm256_min_ps(_mm256_max_ps(u, zero), _mm256_set1_ps((float)GSHCPU_RENDER_GRADIENT_TABLE));
     __m256i idx = _mm256_cvttps_epi32(u);
-    const __m256i uncovered = _mm256_cmpeq_epi32(_mm256_cvtepu8_epi32(_mm_loadl_epi64((const __m128i *)(const void *)(cov + i))),
-        _mm256_setzero_si256());
-    idx = _mm256_blendv_epi8(idx, _mm256_set1_epi32(-1), _mm256_or_si256(uncovered, _mm256_castps_si256(none)));
+    idx = _mm256_blendv_epi8(idx, _mm256_set1_epi32(-1), _mm256_castps_si256(none));
     _mm256_storeu_si256((__m256i *)(void *)(index + i), idx);
   }
+  (void)cov;
   return i;
 }
 #endif
+
+void gshcpu_render_gradient_vector(int enable) {
+#if defined(GRADIENT_AVX2)
+  gradient_vector_on = enable;
+#else
+  (void)enable;
+#endif
+}
+
+/** The indices of @p count pixels by the single-precision rows (the vector kernel's eight at a time, the scalar function for the rest), NONE where @p cov is 0. */
+static void table_row_f(const Row_F * c, size_t count, const uint8_t * cov, uint32_t * index) {
+  size_t done = 0;
+#if defined(GRADIENT_AVX2)
+  if (count >= 8u && gradient_have_avx2()) {
+    done = row_f_avx2(c, count, cov, index);
+  }
+#endif
+  for (size_t i = done; i < count; i++) {
+    index[i] = row_f_pixel(c, (float)(int32_t)i);
+  }
+  for (size_t i = 0; i < count; i++) {
+    if (!cov[i]) {
+      index[i] = GSHCPU_RENDER_GRADIENT_NONE; /* (a pixel not covered is not asked about: the vector kernel did it for the pixels it computed) */
+    }
+  }
+}
 
 void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, double qy, size_t count, const uint8_t * cov,
     uint32_t * index) {
@@ -823,6 +867,7 @@ void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, dou
     }
     return;
   }
+  const int padded = g->period > 0.0 && g->extend == GSHSCENE_EXTEND_PAD;
   if (g->kind == GSHSCENE_GRADIENT_LINEAR) {
     /* The parameter is affine in the pixel's x: its value at the first center and its step. */
     double px0, py0, px1, py1, t0 = 0.0, t1 = 0.0;
@@ -831,19 +876,11 @@ void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, dou
     (void)gshcpu_render_gradient_param(g, px0, py0, &t0);
     (void)gshcpu_render_gradient_param(g, px1, py1, &t1);
     const double dt = t1 - t0;
-    if (g->period > 0.0 && g->extend == GSHSCENE_EXTEND_PAD && t0 - t0 == 0.0 && dt - dt == 0.0) {
+    if (padded && t0 - t0 == 0.0 && dt - dt == 0.0) {
       /* The offset on the line is affine in the pixel too: no more than a multiply and an add each. */
-      const double ua = (t0 - g->o_first) * g->scale + 0.5;
-      const double ub = dt * g->scale;
-      size_t done = 0;
-#if defined(GRADIENT_AVX2)
-      if (count >= 8u && gradient_have_avx2()) {
-        done = table_row_avx2f(g, 0.0, 0.0, 0.0, 0.0, t0, dt, count, cov, index);
-      }
-#endif
-      for (size_t i = done; i < count; i++) {
-        index[i] = cov[i] ? table_point(ua + ub * (double)(int32_t)i) : GSHCPU_RENDER_GRADIENT_NONE;
-      }
+      Row_F c;
+      row_f_prepare(g, 0.0, 0.0, 0.0, 0.0, t0, dt, &c);
+      table_row_f(&c, count, cov, index);
       return;
     }
     for (size_t i = 0; i < count; i++) {
@@ -857,24 +894,12 @@ void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, dou
   gshcpu_render_gradient_unmap(g, qx0 + 1.0, qy, &px1, &py1);
   const double dpx = px1 - px0;
   const double dpy = py1 - py0;
-  size_t done = 0;
-#if defined(GRADIENT_AVX2)
-  if (count >= 4u && g->period > 0.0 && g->extend == GSHSCENE_EXTEND_PAD && (g->kind == GSHSCENE_GRADIENT_RADIAL || g->a0 != g->a1) &&
-      gradient_have_avx2()) {
-    if (count >= 8u) {
-      done = table_row_avx2f(g, px0, py0, dpx, dpy, 0.0, 0.0, count, cov, index);
-    }
-    if (count - done >= 4u) {
-      done += table_row_avx2(g, px0 + dpx * (double)(int32_t)done, py0 + dpy * (double)(int32_t)done, dpx, dpy, count - done, cov + done,
-          index + done);
-    }
+  if (padded && (g->kind == GSHSCENE_GRADIENT_RADIAL || g->a0 != g->a1)) {
+    Row_F c;
+    row_f_prepare(g, px0, py0, dpx, dpy, 0.0, 0.0, &c);
+    table_row_f(&c, count, cov, index);
+    return;
   }
-#endif
-  cov += done;
-  index += done;
-  px0 += dpx * (double)(int32_t)done;
-  py0 += dpy * (double)(int32_t)done;
-  count -= done;
   if (g->kind == GSHSCENE_GRADIENT_RADIAL) {
     for (size_t i = 0; i < count; i++) {
       double t;

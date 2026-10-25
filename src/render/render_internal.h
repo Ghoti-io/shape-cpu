@@ -578,6 +578,9 @@ void gshcpu_render_gradient_table(const GSHCPU_Gradient * g, const GSHCPU_Conver
 void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, double qy, size_t count, const uint8_t * cov,
     uint32_t * index);
 
+/** Turn the vector kernel of ::gshcpu_render_gradient_table_row off (0) or on (1, the default): a test's way to compare it with its scalar twin. */
+void gshcpu_render_gradient_vector(int enable);
+
 /* --- strokes (stroke.c, stroke_cache.c; strokes story S4) -------------------------------------- */
 
 /** Tiers a test can switch off to force the general tier (render.h, SC8).  Every tier is on by default. */

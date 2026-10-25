@@ -127,6 +127,38 @@ static inline void lean_add3(Lean_Band * b, int y, int x, int32_t v0, int32_t v1
   a[2] += v2;
 }
 
+/** The floor of a quotient found in a double, without the libm. */
+static inline __attribute__((always_inline)) int64_t lean_floor(double v) {
+  const int64_t t = (int64_t)v;
+  return t - ((double)t > v);
+}
+
+/**
+ * @p v, an integer within 2^53, as a double.  Where a pointer is 64 bits the conversion is an instruction; on a 32-bit target (i686) a
+ * 64-bit integer goes through the x87 stack, which this code never uses (AD-17), so it is made of its halves, each exact.
+ */
+static inline __attribute__((always_inline)) double lean_dbl(int64_t v) {
+#if __SIZEOF_POINTER__ >= 8
+  return (double)v;
+#else
+  const int32_t hi = (int32_t)(v >> 32);
+  const uint32_t lo = (uint32_t)v;
+  return (double)hi * 4294967296.0 + ((double)(int32_t)(lo ^ 0x80000000u) + 2147483648.0);
+#endif
+}
+
+/** The floor of @p n / @p d for @p d > 0 and @p n within 2^53; @p df is @p d as a double.  On a 32-bit target the quotient is an integer one. */
+static inline __attribute__((always_inline)) int64_t lean_fdiv(int64_t n, int64_t d, double df) {
+#if __SIZEOF_POINTER__ >= 8
+  (void)d;
+  return lean_floor(lean_dbl(n) / df);
+#else
+  (void)df;
+  const int64_t q = n / d;
+  return q - (n < 0 && n % d != 0);
+#endif
+}
+
 /**
  * The part of one row of an edge, in 64ths of a pixel: from @p xa to @p xb across the row, @p d of its height (a 64th each, signed by its
  * direction).  The sums are in 8192ths of a pixel: a full pixel is 8192, so what a piece adds in all adds up to @p d * 128, and the
@@ -189,17 +221,11 @@ static inline __attribute__((always_inline)) void lean_row(Lean_Band * b, int y,
     /* 2 * (the integral of the clamped distance to u over [xa, xb]): the part left of the pixel counts 64 wide, the part inside is a trapezoid */
     const int64_t left = (int64_t)(p - xa) * 128;
     const int64_t inside = (int64_t)(q - p) * (2 * (int64_t)u - p - q);
-    const int32_t cum = (int32_t)((double)(left + inside) * scale + half);
+    const int32_t cum = (int32_t)(lean_dbl(left + inside) * scale + half);
     lean_add(b, y, k, cum - prev);
     prev = cum;
   }
   lean_add(b, y, xbi, ds - prev);
-}
-
-/** The floor of a quotient found in a double, without the libm. */
-static inline __attribute__((always_inline)) int64_t lean_floor(double v) {
-  const int64_t t = (int64_t)v;
-  return t - ((double)t > v);
 }
 
 /**
@@ -234,8 +260,8 @@ static void lean_edge(Lean_Band * b, int top, int rows, int width, int64_t x0, i
   /* x at a boundary y is x0 + the nearest integer to (y - y0) * dx / dy, halves up: the floor of (2 (y - y0) dx + dy) / 2 dy.  A quotient is
    * under 2^22 and its fraction needs 23 bits more, so a double holds the floor of it exactly. */
   const int64_t dd = 2 * dy;
-  const double ddf = (double)dd;
-  int64_t xa = ys == y0 ? x0 : x0 + lean_floor((double)(2 * (ys - y0) * dx + dy) / ddf);
+  const double ddf = lean_dbl(dd);
+  int64_t xa = ys == y0 ? x0 : x0 + lean_fdiv(2 * (ys - y0) * dx + dy, dd, ddf);
   int64_t yb = ((ys >> 6) + 1) << 6;
   if (yb > ye) {
     /* one piece, ending where the edge does */
@@ -243,13 +269,13 @@ static void lean_edge(Lean_Band * b, int top, int rows, int width, int64_t x0, i
     return;
   }
   const int64_t num = 2 * (yb - y0) * dx + dy;
-  int64_t q0 = lean_floor((double)num / ddf);
+  int64_t q0 = lean_fdiv(num, dd, ddf);
   int64_t r0 = num - q0 * dd;
   int64_t qs = 0;
   int64_t rs = 0;
   if (yb + 64 <= ye) { /* a second boundary: the step to it */
     const int64_t step = 128 * dx;
-    qs = lean_floor((double)step / ddf);
+    qs = lean_fdiv(step, dd, ddf);
     rs = step - qs * dd;
   }
   int64_t ya = ys;

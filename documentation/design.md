@@ -350,8 +350,8 @@ end, the pixels whose bytes changed (one the drawing left as it loaded is left a
 layer; a group in another space keeps doubles (its pixels are converted where it is composed, linear light into the target's
 through a table). A fill composes in integers with the arithmetic of the fast stroke's compositor, a gradient from its table of
 bytes, a group's source-over a row at a time, and a separable blend mode a row at a time in single-precision floats from the
-premultiplied channels. The parameter of a radial or sweep gradient padded at both ends is found eight pixels at a time in single
-precision where the processor has AVX2. Every operation rounds to a byte, where the exact coverage rounds once at the end, so a
+premultiplied channels. The offset on the line of a gradient padded at both ends is found in single precision, eight pixels at a
+time where the processor has AVX2 and by the same operations, one at a time, where it has not, so that both give the same bytes. Every operation rounds to a byte, where the exact coverage rounds once at the end, so a
 picture differs from the exact one by a fraction of a level on the whole (0.4 to 0.7 of 255 a byte on the two showcase
 pictures). A list with a color component outside `[0, 1]` is drawn with doubles, for a byte cannot hold it. The two pictures take
 0.08 and 0.15 s a frame on one thread.

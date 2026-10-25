@@ -215,6 +215,46 @@ GSHGEOM_Map map_of(double a, double b, double c, double d, double e, double f) {
 
 }  // namespace
 
+GSHSCENE_Gradient gradient_of(int kind, const GSHGEOM_Map & id) {
+  GSHSCENE_Gradient gs{};
+  gs.extend = GSHSCENE_EXTEND_PAD;
+  gs.stop_count = 3;
+  switch (kind) {
+    case 0:
+      gs.kind = GSHSCENE_GRADIENT_LINEAR;
+      gs.p0[0] = 20;
+      gs.p1[0] = 90;
+      gs.p1[1] = 30;
+      break;
+    case 1:
+      gs.kind = GSHSCENE_GRADIENT_RADIAL;
+      gs.c0[0] = 40;
+      gs.c0[1] = 30;
+      gs.r0 = 3;
+      gs.c1[0] = 50;
+      gs.c1[1] = 35;
+      gs.r1 = 60;
+      break;
+    case 2:
+      gs.kind = GSHSCENE_GRADIENT_RADIAL; /* two circles of one size, touching: a is zero */
+      gs.c0[0] = 10;
+      gs.r0 = 20;
+      gs.c1[0] = 60;
+      gs.r1 = 20;
+      break;
+    default:
+      gs.kind = GSHSCENE_GRADIENT_SWEEP;
+      gs.center[0] = 50;
+      gs.center[1] = 40;
+      gs.angle_unit = GSHGEOM_ANGLE_RADIANS;
+      gs.a0 = 0.5;
+      gs.a1 = 5.5;
+      break;
+  }
+  gs.map = id;
+  return gs;
+}
+
 // The table's index of every pixel of a row, whichever kind of gradient and however the row ends, is the point whose color is
 // the evaluation's at that pixel (to the spacing of the points): the vector rows of the radial and the sweep and the scalar
 // tail make the same choices.
@@ -235,42 +275,7 @@ TEST(RenderLayer8, TheTableRowAgreesWithTheEvaluationPixelByPixel) {
   GSHGEOM_Map id = map_of(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
   GSHGEOM_Map slanted = map_of(1.3, 0.2, -0.1, 0.9, 5.0, -3.0);
   for (int kind = 0; kind < 4; kind++) {
-    GSHSCENE_Gradient gs{};
-    gs.extend = GSHSCENE_EXTEND_PAD;
-    gs.stop_count = 3;
-    switch (kind) {
-      case 0:
-        gs.kind = GSHSCENE_GRADIENT_LINEAR;
-        gs.p0[0] = 20;
-        gs.p1[0] = 90;
-        gs.p1[1] = 30;
-        break;
-      case 1:
-        gs.kind = GSHSCENE_GRADIENT_RADIAL;
-        gs.c0[0] = 40;
-        gs.c0[1] = 30;
-        gs.r0 = 3;
-        gs.c1[0] = 50;
-        gs.c1[1] = 35;
-        gs.r1 = 60;
-        break;
-      case 2:
-        gs.kind = GSHSCENE_GRADIENT_RADIAL; /* two circles of one size, touching: a is zero */
-        gs.c0[0] = 10;
-        gs.r0 = 20;
-        gs.c1[0] = 60;
-        gs.r1 = 20;
-        break;
-      default:
-        gs.kind = GSHSCENE_GRADIENT_SWEEP;
-        gs.center[0] = 50;
-        gs.center[1] = 40;
-        gs.angle_unit = GSHGEOM_ANGLE_RADIANS;
-        gs.a0 = 0.5;
-        gs.a1 = 5.5;
-        break;
-    }
-    gs.map = id;
+    GSHSCENE_Gradient gs = gradient_of(kind, id);
     for (const GSHGEOM_Map * m : {&id, &slanted}) {
       GSHCPU_Gradient gr;
       ASSERT_EQ(gshcpu_render_gradient_prepare(&gr, &gs, stops, m, 1.0), GSHCPU_OK);
@@ -314,4 +319,41 @@ TEST(RenderLayer8, TheTableRowAgreesWithTheEvaluationPixelByPixel) {
 int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
+}
+
+// The vector kernel and its scalar twin: the same indices, bit for bit, for every kind, whatever the row's start and length.
+TEST(RenderLayer8, TheVectorRowsMakeTheIndicesOfTheirScalarTwins) {
+  GSHCPU_Stop stops[3] = {};
+  stops[1].offset = 0.5;
+  stops[2].offset = 1.0;
+  stops[2].rgba[3] = 1.0;
+  GSHGEOM_Map id = map_of(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+  GSHGEOM_Map slanted = map_of(0.9, 0.3, -0.2, 1.1, 3.0, -7.0);
+  std::mt19937 g(2024);
+  size_t compared = 0;
+  for (int kind = 0; kind < 4; kind++) {
+    GSHSCENE_Gradient gs = gradient_of(kind, id);
+    for (const GSHGEOM_Map * m : {&id, &slanted}) {
+      GSHCPU_Gradient gr;
+      ASSERT_EQ(gshcpu_render_gradient_prepare(&gr, &gs, stops, m, 1.0), GSHCPU_OK);
+      for (int trial = 0; trial < 200; trial++) {
+        const size_t count = 1 + g() % 130;
+        const double qx = (double)(int)(g() % 400) - 100.0 + 0.5;
+        const double qy = (double)(int)(g() % 300) - 60.0 + 0.5;
+        std::vector<uint8_t> cov(count);
+        for (auto & c : cov) {
+          c = g() % 5 == 0 ? 0 : (uint8_t)(1 + g() % 255);
+        }
+        std::vector<uint32_t> vec(count), sca(count);
+        gshcpu_render_gradient_vector(1);
+        gshcpu_render_gradient_table_row(&gr, qx, qy, count, cov.data(), vec.data());
+        gshcpu_render_gradient_vector(0);
+        gshcpu_render_gradient_table_row(&gr, qx, qy, count, cov.data(), sca.data());
+        gshcpu_render_gradient_vector(1);
+        ASSERT_EQ(vec, sca) << "kind " << kind << " trial " << trial << " count " << count;
+        compared += count;
+      }
+    }
+  }
+  EXPECT_GT(compared, 10000u);
 }
