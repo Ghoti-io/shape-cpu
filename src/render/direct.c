@@ -108,6 +108,24 @@ void gshcpu_direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
   for (; i + 4u <= n; i += 4, row += 16) {
     d8_four(row, m8 + i, src);
   }
+  if (i + 2u <= n) {
+    /* two or three pixels left: two in a half-register (a pixel of no coverage is left as it is), and one more below */
+    const __m128i zero = _mm_setzero_si128();
+    uint16_t m2;
+    memcpy(&m2, m8 + i, sizeof m2);
+    const __m128i mw = _mm_unpacklo_epi8(_mm_cvtsi32_si128((int)m2), zero);
+    const __m128i mm = _mm_unpacklo_epi16(mw, mw);
+    const __m128i m_lo = _mm_unpacklo_epi32(mm, mm);
+    const __m128i px = _mm_loadl_epi64((const __m128i *)(const void *)row);
+    const __m128i e_lo = _mm_unpacklo_epi8(px, zero);
+    const __m128i w_lo = d8_div255_v(_mm_mullo_epi16(src, m_lo));
+    const __m128i keep_lo = _mm_sub_epi16(_mm_set1_epi16(255), _mm_shufflehi_epi16(_mm_shufflelo_epi16(w_lo, 0xff), 0xff));
+    __m128i r_lo = _mm_add_epi16(d8_div255_v(_mm_mullo_epi16(e_lo, keep_lo)), w_lo);
+    r_lo = _mm_min_epi16(r_lo, _mm_set1_epi16(255));
+    _mm_storel_epi64((__m128i *)(void *)row, _mm_packus_epi16(r_lo, r_lo));
+    i += 2;
+    row += 8;
+  }
 #endif
   for (; i < n; i++, row += 4) {
     const uint32_t m = m8[i];
