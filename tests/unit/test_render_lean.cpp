@@ -11,6 +11,8 @@
 
 #include "stroke_helpers.h"
 
+using stroke_gate::Ops;
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -185,6 +187,116 @@ TEST(RenderLean, MoreRowsThanABandAndAnEmptyRectangle) {
   Flat f(tall);
   std::vector<int64_t> scratch(64, 0);
   EXPECT_EQ(gshcpu_render_lean_cover(f.flat, 0, 0, rect_of(5, 5, 5, 9), scratch.data(), 64 * 8, nullptr, collect, nullptr), GSHCPU_OK);
+}
+
+namespace {
+
+/** A list of @p count strokes, translucent with alpha @p alpha, crossing one another on a 96 by 64 raster. */
+const GSHSCENE_List * crossing_strokes(Store & store, int count, double alpha, double width, bool trailing_fill = false) {
+  GSHGEOM_Stroke g;
+  gshgeom_stroke_init(&g);
+  g.width = width;
+  g.join = GSHGEOM_STROKE_JOIN_ROUND;
+  g.cap = GSHGEOM_STROKE_CAP_ROUND;
+  const GSHSCENE_Resource * style = intern_style(store, g);
+  GSHSCENE_List * l = store.open();
+  for (int i = 0; i < count; i++) {
+    const Ops ops = {{'M', {6.0 + 3.0 * i, 8.0 + 9.0 * i}}, {'Q', {50.0, 2.0 + 14.0 * i, 90.0 - 4.0 * i, 56.0 - 6.0 * i}},
+        {'L', {12.0 + 5.0 * i, 58.0}}};
+    const GSHSCENE_Resource * path = store.path(stroke_gate::build(ops));
+    GSHSCENE_Paint paint = solid(1, 1, 1, alpha);
+    GSHGEOM_Map identity = translation(0.0, 0.0);
+    EXPECT_EQ(gshscene_list_stroke(l, path, style, &identity, &paint, 0, 0.0), GSHSCENE_OK);
+  }
+  if (trailing_fill) {
+    /* a fill that draws nothing: its presence is what keeps the render off the 8-bit compositor (strokes alone), through the double layer */
+    GSHSCENE_Paint nothing = solid(0, 0, 0, 0);
+    EXPECT_EQ(gshscene_list_fill(l, store.rect(94, 62, 95, 63), nullptr, GSHGEOM_FILL_NONZERO, &nothing, 0, 0.0), GSHSCENE_OK);
+  }
+  EXPECT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  return l;
+}
+
+struct Pair {
+  std::vector<uint8_t> exact, fast;
+  uint64_t fast_sparse = 0;
+  GSHSCENE_Result exact_result = GSHSCENE_OK, fast_result = GSHSCENE_OK;
+};
+
+Pair draw_both(const GSHSCENE_List * list, uint64_t max_deposits) {
+  Pair out;
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  limits.max_deposits = max_deposits;
+  {
+    Sink sink(GSHCPU_RENDER_TIERS_ALL, &limits);
+    Drawn d = render_list(sink.sink, list, 96, 64, GSHCPU_FORMAT_RGBA8_PREMULTIPLIED);
+    out.exact = d.alpha;
+    out.exact_result = d.result;
+  }
+  limits.stroke_coverage = GSHCPU_STROKE_COVERAGE_FAST;
+  {
+    Sink sink(GSHCPU_RENDER_TIERS_ALL, &limits);
+    Drawn d = render_list(sink.sink, list, 96, 64, GSHCPU_FORMAT_RGBA8_PREMULTIPLIED);
+    out.fast = d.alpha;
+    out.fast_result = d.result;
+    out.fast_sparse = sink.counters.sparse_plain + sink.counters.sparse_hairline;
+  }
+  return out;
+}
+
+int worst_difference(const Pair & p) {
+  int worst = 0;
+  for (size_t i = 0; i < p.exact.size() && i < p.fast.size(); i++) {
+    worst = std::max(worst, std::abs((int)p.exact[i] - (int)p.fast[i]));
+  }
+  return worst;
+}
+
+}  // namespace
+
+TEST(RenderLeanSink, TheFastCoverageOfStrokesAloneComposesIn8BitsWithinTheRoundingOfTheLayer) {
+  Store store;
+  const GSHSCENE_List * opaque = crossing_strokes(store, 1, 1.0, 5.0);
+  Pair a = draw_both(opaque, 0);
+  ASSERT_EQ(a.exact_result, GSHSCENE_OK);
+  ASSERT_EQ(a.fast_result, GSHSCENE_OK);
+  EXPECT_GE(a.fast_sparse, 1u);
+  for (int n = 1; n <= 5; n++) {
+    // The same strokes and the same fast coverage, once composed in 8 bits straight into the target (strokes alone) and once through the double layer
+    // (a fill that draws nothing follows them): the difference is the compositor's rounding at each step, a level a stroke.
+    const GSHSCENE_List * direct = crossing_strokes(store, n, 0.45, 4.0 + n);
+    const GSHSCENE_List * layered = crossing_strokes(store, n, 0.45, 4.0 + n, true);
+    Pair b = draw_both(direct, 0);
+    Pair c = draw_both(layered, 0);
+    ASSERT_EQ(b.fast_result, GSHSCENE_OK);
+    ASSERT_EQ(c.fast_result, GSHSCENE_OK);
+    EXPECT_EQ(b.fast_sparse, (uint64_t)n);
+    int worst = 0;
+    for (size_t i = 0; i < b.fast.size(); i++) {
+      worst = std::max(worst, std::abs((int)b.fast[i] - (int)c.fast[i]));
+    }
+    EXPECT_LE(worst, 1 + n) << n << " strokes: each step rounds to 8 bits, the layer rounds once";
+    EXPECT_LE(worst_difference(b), 70) << "and the coverage is the fast one's against the exact: overlaps summed";
+  }
+}
+
+TEST(RenderLeanSink, AStrokePastTheCapOfTheSparseTierIsDrawnThroughTheLayerAndStoredBeforeTheNext) {
+  Store store;
+  const GSHSCENE_List * list = crossing_strokes(store, 3, 0.6, 6.0);
+  bool fell_back = false;
+  bool took_both = false;
+  for (uint64_t cap = 40; cap < 200000; cap = cap * 3 / 2) {
+    Pair p = draw_both(list, cap);
+    if (p.exact_result != GSHSCENE_OK || p.fast_result != GSHSCENE_OK) {
+      continue;
+    }
+    EXPECT_LE(worst_difference(p), 6) << "cap " << cap;
+    fell_back = fell_back || p.fast_sparse < 3;
+    took_both = took_both || p.fast_sparse == 3;
+  }
+  EXPECT_TRUE(fell_back) << "some cap sends a stroke through the double layer";
+  EXPECT_TRUE(took_both) << "and some does not";
 }
 
 int main(int argc, char ** argv) {

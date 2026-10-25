@@ -322,7 +322,14 @@ stroke overlap (and by at most three levels of 255 elsewhere, the rounding of a 
 benchmark's stroke scene the two pictures differ by a mean of 0.056 of 255 a byte, 1,769 bytes of 8.3 million by more than 8,
 at most 61. It is taken by every stroke the sparse composite takes (a single part, a solid paint, its bound of deposits within
 the cap) and by no other; the others, and every fill, use the exact one. It costs about 15 % less time on the scene of 2,500
-strokes and a third less on its dashed one; where the time goes after it is composing the pixels, which both share.
+strokes and a third less on its dashed one.
+
+A render that holds only strokes, on `GSHCPU_FORMAT_RGBA8_PREMULTIPLIED`, with the fast coverage, source-over, solid paints and
+no clip, composes straight into the 8-bit target and never forms the double layer, whose memory traffic was most of the time:
+each run is blended in four 16-bit lanes of a word, rounding at each step as the 8-bit engines do, an opaque source at full
+coverage is a copy, and a render with anything else keeps the double layer. On the benchmark's stroke scene a frame takes
+132 ms against 267 ms for the exact coverage, and its dashed scene 43 ms against 101 ms; against the pictures of Blend2D and
+Skia the two tiers differ from them by the same mean (0.7 and 0.9 of 255 against Blend2D, 1.9 against Skia).
 
 **What a pixel may cost (UC9, UC17, UC19, UC20).** Two limits bound the step, both decided over what the whole render draws of
 an item, so a damaged render refuses what the whole one does. `max_exact_fragments` (default 32768, at least twice the densest pixel measured) bounds the raw pieces of a

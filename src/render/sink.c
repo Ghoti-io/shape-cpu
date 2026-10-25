@@ -115,6 +115,7 @@ typedef struct Layout {
   size_t table;              /* the resolved table's slots: a power of two at least twice the gradient fills */
   int aligned;               /* the expansion holds a stroke that aligns: three more coverage arrays (SC5) */
   int strokes;               /* the expansion holds a stroke: the exact step's memory (UC9) */
+  int other;                 /* it holds a fill, or a stroke painted with a gradient */
   size_t exact_bytes;        /* ... of the first part's, and (only when something aligns) of the second's and the third's */
   size_t exact_second, exact_third; /* ... where, from at_exact */
   size_t acc_bytes;          /* the cell accumulator: one for each of the three parts when something aligns (UC8) */
@@ -151,6 +152,7 @@ typedef struct Run {
   uint8_t * cov_result;
   int64_t * acc;
   GSHCPU_Exact exact[3];     /* UC9: the exact step's arrays, when the layout has them (strokes): one for each part of an aligned stroke */
+  int direct8;               /* the fast coverage composes straight into the target's bytes (strokes alone, 8-bit premultiplied) */
   int acc_dirty;             /* the dense sweep leaves the accumulator written; the sparse one needs it zero */
   int caller;                /* CALLER_MEMORY: nothing allocated, so no cache */
   Resolved * resolved;       /* the gradients resolved so far (S17), open addressing on the id */
@@ -199,7 +201,7 @@ static size_t mul3(size_t a, size_t b, size_t c) {
  * gradient fills and their stops added to @p gradients and @p stops (0 when a sum would overflow).
  */
 static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops,
-    int * aligned, int * strokes) {
+    int * aligned, int * strokes, int * other) {
   size_t g = 0;
   size_t c = 0;
   size_t most_g = 0;
@@ -218,6 +220,9 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
       ok = ok && gcu_safe_add_size(*gradients, 1u, gradients) && gcu_safe_add_size(*stops, gradient.stop_count, stops);
     }
     GSHSCENE_Stroke_Style style;
+    if (item->kind == GSHSCENE_ITEM_FILL || (item->kind == GSHSCENE_ITEM_STROKE && item->paint.kind == GSHSCENE_PAINT_GRADIENT)) {
+      *other = 1; /* a drawing the 8-bit compositor of the fast coverage does not make: fills, gradients */
+    }
     if (item->kind == GSHSCENE_ITEM_STROKE) {
       *strokes = 1; /* UC9: the exact step's counts and pool */
     }
@@ -241,7 +246,7 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
       case GSHSCENE_ITEM_INSTANCE: {
         size_t ig = 0;
         size_t ic = 0;
-        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops, aligned, strokes) && ok;
+        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops, aligned, strokes, other) && ok;
         most_g = g + ig > most_g ? g + ig : most_g;
         most_c = c + ic > most_c ? c + ic : most_c;
         break;
@@ -294,7 +299,7 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
   }
   L->walk = gshscene_expansion_bytes(list);
   L->levels = L->walk / (sizeof(const GSHSCENE_List *) + sizeof(size_t));
-  if (!nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned, &L->strokes)) {
+  if (!nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned, &L->strokes, &L->other)) {
     return GSHCPU_ERR_LIMIT;
   }
   /* UC9: the walk of a stroke is as wide as the whole render's region at most. */
@@ -993,6 +998,57 @@ static GSHSCENE_Result fill(Run * run, const GSHSCENE_Item * item, const size_t 
 
 /* --- a stroke (SC1 to SC8) ------------------------------------------------------------------------------- */
 
+/**
+ * The fast coverage's compositor for a render of strokes alone onto an 8-bit premultiplied target: the runs of coverage composed
+ * straight into the target's bytes, source-over in integers, each step rounded to 8 bits as the rasterizers it is compared with
+ * round it, in place of the double layer (which is eight times the memory and misses the cache where the target does not).
+ */
+typedef struct Direct8 {
+  Run * run;
+  int64_t dx, dy;            /* the whole-pixel shift: the paths' frame to the destination's */
+  uint64_t lanes;            /* the premultiplied source, 8 bits a channel in 16-bit lanes (red, green, blue, alpha) */
+  uint8_t bytes[4];          /* ... and as a pixel */
+  int opaque;                /* its alpha is 255 */
+} Direct8;
+
+#define D8_LOW 0x00ff00ff00ff00ffull
+#define D8_ROUND 0x0080008000800080ull
+
+/** `x / 255` rounded, in each of four 16-bit lanes holding at most 255 * 255. */
+static inline uint64_t d8_div255(uint64_t x) {
+  const uint64_t t = x + D8_ROUND;
+  return ((t + ((t >> 8) & D8_LOW)) >> 8) & D8_LOW;
+}
+
+static void direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8) {
+  Direct8 * d = ctx;
+  Run * run = d->run;
+  unsigned char * row = run->pixels + (size_t)(y + d->dy) * run->stride + 4u * (size_t)(x + d->dx);
+  for (size_t i = 0; i < n; i++, row += 4) {
+    const uint32_t m = m8[i];
+    if (m == 0) {
+      continue;
+    }
+    if (m == 255u && d->opaque) {
+      row[0] = d->bytes[0];
+      row[1] = d->bytes[1];
+      row[2] = d->bytes[2];
+      row[3] = d->bytes[3];
+      continue;
+    }
+    const uint64_t e = (uint64_t)row[0] | ((uint64_t)row[1] << 16) | ((uint64_t)row[2] << 32) | ((uint64_t)row[3] << 48);
+    const uint64_t w = m == 255u ? d->lanes : d8_div255(d->lanes * m); /* the source weighed by the coverage */
+    const uint64_t keep = 255u - (w >> 48); /* the target's share: one minus the weighed alpha */
+    uint64_t r = d8_div255(e * keep) + w;
+    const uint64_t over = (r >> 8) & 0x0001000100010001ull; /* a lane past 255: the two roundings added up */
+    r = (r | (over * 255u)) & D8_LOW;
+    row[0] = (uint8_t)r;
+    row[1] = (uint8_t)(r >> 16);
+    row[2] = (uint8_t)(r >> 32);
+    row[3] = (uint8_t)(r >> 48);
+  }
+}
+
 /** FT-2's receiver: one row of coverages, each weighed by the clips and composited if nonzero. */
 typedef struct Sparse {
   Run * run;
@@ -1103,7 +1159,9 @@ static GSHSCENE_Result report_run_notes(Run * run, const GSHCPU_Stroke * s, cons
  * A stroke (SC1 to SC8): the centerline expanded at the canonical map by shape-geometry, the parts covered and
  * composed into one coverage `k`, and from there a fill's tail (the clips, the layers, the operator, the paint).
  */
-static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+static void write_target(Run * run);
+
+static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
   Frame * frame = &run->frames[run->top];
   Cpu_Sink * cs = run->cs;
   GSHGEOM_Map composed;
@@ -1152,11 +1210,31 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
     double src[4];
     source_of(run, item, frame, src);
     gshcpu_render_stroke_rects(&s, reach, wreach, &rect, &whole);
-    widen(run, frame, rect);
-    Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
     const GSHGEOM_Flat_Path * body = gshcpu_render_stroke_cover_path(&s);
-    r = gshcpu_render_lean_cover(body, s.shift_x, s.shift_y, rect, run->acc,
-        2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc, run->coverage, sparse_span, &sp);
+    const size_t scratch = 2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS * sizeof *run->acc;
+    if (run->direct8) {
+      /* Strokes alone onto an 8-bit premultiplied target: composed in integers straight into its bytes. */
+      Direct8 d8;
+      d8.run = run;
+      d8.dx = s.shift_x;
+      d8.dy = s.shift_y;
+      uint8_t c[4];
+      for (int i = 0; i < 4; i++) {
+        c[i] = gshcpu_render_store8(src[i]);
+      }
+      for (int i = 0; i < 3; i++) {
+        c[i] = c[i] > c[3] ? c[3] : c[i]; /* premultiplied: no channel past the alpha */
+      }
+      memcpy(d8.bytes, c, 4);
+      d8.lanes = (uint64_t)c[0] | ((uint64_t)c[1] << 16) | ((uint64_t)c[2] << 32) | ((uint64_t)c[3] << 48);
+      d8.opaque = c[3] == 255;
+      r = c[3] == 0 ? GSHCPU_OK
+                    : gshcpu_render_lean_cover(body, s.shift_x, s.shift_y, rect, run->acc, scratch, run->coverage, direct8_span, &d8);
+    } else {
+      widen(run, frame, rect);
+      Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
+      r = gshcpu_render_lean_cover(body, s.shift_x, s.shift_y, rect, run->acc, scratch, run->coverage, sparse_span, &sp);
+    }
     run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
     if (r == GSHCPU_OK) {
       gshcpu_stroke_cache_count(cs->cache, s.hairline ? offsetof(GSHCPU_Render_Counters, sparse_hairline)
@@ -1216,6 +1294,20 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
     result = paint_coverage(run, item, chain, count, frame, rect, whole, cov);
   }
   gshcpu_render_stroke_close(cache, &s);
+  return result;
+}
+
+/**
+ * A stroke.  In a render whose strokes compose straight into the target's bytes, one that goes through the double layer instead (a
+ * stroke past the cap of the sparse tier) is stored at its end and the layer given up, so that the next stroke finds the target
+ * as the layer left it.
+ */
+static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  GSHSCENE_Result result = stroke_item(run, item, chain, count);
+  if (run->direct8) {
+    write_target(run);
+    memset(&run->frames[0].dirty, 0, sizeof run->frames[0].dirty);
+  }
   return result;
 }
 
@@ -1458,6 +1550,8 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
       run->exact[2].max_crossings = cs->max_crossings;
     }
   }
+  run->direct8 = cs->fast && run->format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED && !cs->observer && L.groups == 0 && L.clips == 0 &&
+      !L.aligned && !L.other && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) != 0;
   run->acc_dirty = 1; /* the caller's memory is not zeroed: the sparse sweep clears the accumulator before its first use */
   run->caller = caller;
   run->resolved = (Resolved *)(void *)(base + L.at_table);
