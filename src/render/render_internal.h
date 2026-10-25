@@ -881,6 +881,10 @@ GSHCPU_Result gshcpu_render_sink_create_tiered(const GSHCPU_Allocator * alloc, c
 }
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* --- the direct 8-bit compositor and its batch (direct.c) ------------------------------------------------------------- */
 
 /** A solid premultiplied source composed straight into an 8-bit premultiplied target's bytes, runs of coverage at a time. */
@@ -935,5 +939,9 @@ void gshcpu_batch_destroy(GSHCPU_Batch * batch);
  */
 int gshcpu_batch_add(GSHCPU_Batch * batch, const GSHGEOM_Flat_Path * path, int64_t shift_x, int64_t shift_y, GSHCPU_Rect rect,
     const uint8_t color[4], GSHCPU_Result * result);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* GHOTI_IO_GSHCPU_RENDER_INTERNAL_H */

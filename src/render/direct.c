@@ -406,7 +406,127 @@ static inline uint8_t d8_byte(float v, uint8_t top) {
     } \
   }
 
+#if defined(D8_AVX2)
+/** The result of a separable mode that depends on both pixels (d8_both), eight pixels at a time. */
+__attribute__((target("avx2"))) static inline __attribute__((always_inline)) __m256 d8_both_v(uint32_t op, __m256 s, __m256 d, __m256 sa,
+    __m256 da) {
+  const __m256 two = _mm256_set1_ps(2.0f);
+  const __m256 sd = _mm256_mul_ps(s, d);
+  switch (op) {
+    case GSHSCENE_COMPOSITE_MULTIPLY:
+      return sd;
+    case GSHSCENE_COMPOSITE_SCREEN:
+      return _mm256_sub_ps(_mm256_add_ps(_mm256_mul_ps(sa, d), _mm256_mul_ps(da, s)), sd);
+    case GSHSCENE_COMPOSITE_OVERLAY: {
+      const __m256 d2 = _mm256_mul_ps(two, d);
+      const __m256 t = _mm256_sub_ps(d2, da);
+      const __m256 hi = _mm256_sub_ps(_mm256_add_ps(_mm256_mul_ps(da, s), _mm256_mul_ps(sa, t)), _mm256_mul_ps(s, t));
+      const __m256 lo = _mm256_mul_ps(two, sd);
+      return _mm256_blendv_ps(hi, lo, _mm256_cmp_ps(d2, da, _CMP_LE_OQ));
+    }
+    case GSHSCENE_COMPOSITE_HARD_LIGHT: {
+      const __m256 s2 = _mm256_mul_ps(two, s);
+      const __m256 t = _mm256_sub_ps(s2, sa);
+      const __m256 hi = _mm256_sub_ps(_mm256_add_ps(_mm256_mul_ps(sa, d), _mm256_mul_ps(da, t)), _mm256_mul_ps(d, t));
+      const __m256 lo = _mm256_mul_ps(two, sd);
+      return _mm256_blendv_ps(hi, lo, _mm256_cmp_ps(s2, sa, _CMP_LE_OQ));
+    }
+    case GSHSCENE_COMPOSITE_DARKEN:
+      return _mm256_min_ps(_mm256_mul_ps(sa, d), _mm256_mul_ps(da, s));
+    case GSHSCENE_COMPOSITE_LIGHTEN:
+      return _mm256_max_ps(_mm256_mul_ps(sa, d), _mm256_mul_ps(da, s));
+    case GSHSCENE_COMPOSITE_DIFFERENCE:
+      return _mm256_andnot_ps(_mm256_set1_ps(-0.0f), _mm256_sub_ps(_mm256_mul_ps(sa, d), _mm256_mul_ps(da, s)));
+    default: /* GSHSCENE_COMPOSITE_EXCLUSION */
+      return _mm256_sub_ps(_mm256_add_ps(_mm256_mul_ps(sa, d), _mm256_mul_ps(da, s)), _mm256_mul_ps(two, sd));
+  }
+}
+
+/** The channel @p k (0 to 3) of eight packed pixels as eight floats of 0..255. */
+__attribute__((target("avx2"))) static inline __attribute__((always_inline)) __m256 d8_channel(__m256i px, int k) {
+  return _mm256_cvtepi32_ps(_mm256_and_si256(_mm256_srli_epi32(px, 8 * k), _mm256_set1_epi32(255)));
+}
+
+/** A result channel of 0..1 as eight ints of 0..@p top (rounded). */
+__attribute__((target("avx2"))) static inline __attribute__((always_inline)) __m256i d8_round_v(__m256 v, __m256i top) {
+  const __m256i n = _mm256_cvttps_epi32(_mm256_add_ps(_mm256_mul_ps(v, _mm256_set1_ps(255.0f)), _mm256_set1_ps(0.5f)));
+  return _mm256_min_epi32(_mm256_max_epi32(n, _mm256_setzero_si256()), top);
+}
+
+#define D8_AVX2_BLEND(NAME, OP) \
+  __attribute__((target("avx2"))) static size_t NAME(unsigned char * dst, const unsigned char * src, size_t n, float opacity) { \
+    const __m256 inv = _mm256_set1_ps(1.0f / 255.0f); \
+    const __m256 op = _mm256_set1_ps(opacity); \
+    const __m256 sk = _mm256_mul_ps(inv, op); \
+    const __m256 one = _mm256_set1_ps(1.0f); \
+    size_t i = 0; \
+    for (; i + 8u <= n; i += 8) { \
+      const __m256i sp = _mm256_loadu_si256((const __m256i *)(const void *)(src + 4u * i)); \
+      const __m256i dp = _mm256_loadu_si256((const __m256i *)(const void *)(dst + 4u * i)); \
+      const __m256 sa = _mm256_mul_ps(d8_channel(sp, 3), sk); \
+      const __m256 da = _mm256_mul_ps(d8_channel(dp, 3), inv); \
+      const __m256 fa = _mm256_sub_ps(one, da); \
+      const __m256 fb = _mm256_sub_ps(one, sa); \
+      const __m256 oa = _mm256_sub_ps(_mm256_add_ps(sa, da), _mm256_mul_ps(sa, da)); \
+      const __m256i a = d8_round_v(oa, _mm256_set1_epi32(255)); \
+      __m256i out = _mm256_slli_epi32(a, 24); \
+      for (int k = 0; k < 3; k++) { \
+        const __m256 s = _mm256_mul_ps(d8_channel(sp, k), sk); \
+        const __m256 d = _mm256_mul_ps(d8_channel(dp, k), inv); \
+        const __m256 c = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(s, fa), _mm256_mul_ps(d, fb)), d8_both_v(OP, s, d, sa, da)); \
+        out = _mm256_or_si256(out, _mm256_slli_epi32(d8_round_v(c, a), 8 * k)); \
+      } \
+      /* a pixel with no source alpha is left alone */ \
+      const __m256i keep = _mm256_cmpeq_epi32(_mm256_srli_epi32(sp, 24), _mm256_setzero_si256()); \
+      _mm256_storeu_si256((__m256i *)(void *)(dst + 4u * i), _mm256_blendv_epi8(out, dp, keep)); \
+    } \
+    return i; \
+  }
+
+D8_AVX2_BLEND(d8_avx2_multiply, GSHSCENE_COMPOSITE_MULTIPLY)
+D8_AVX2_BLEND(d8_avx2_screen, GSHSCENE_COMPOSITE_SCREEN)
+D8_AVX2_BLEND(d8_avx2_overlay, GSHSCENE_COMPOSITE_OVERLAY)
+D8_AVX2_BLEND(d8_avx2_hard_light, GSHSCENE_COMPOSITE_HARD_LIGHT)
+D8_AVX2_BLEND(d8_avx2_darken, GSHSCENE_COMPOSITE_DARKEN)
+D8_AVX2_BLEND(d8_avx2_lighten, GSHSCENE_COMPOSITE_LIGHTEN)
+D8_AVX2_BLEND(d8_avx2_difference, GSHSCENE_COMPOSITE_DIFFERENCE)
+D8_AVX2_BLEND(d8_avx2_exclusion, GSHSCENE_COMPOSITE_EXCLUSION)
+
+/** The pixels of the row a vector kernel does, a multiple of eight; 0 where the processor has no AVX2. */
+static size_t d8_blend_avx2(uint32_t op, unsigned char * dst, const unsigned char * src, size_t n, float opacity) {
+  if (n < 8u || !d8_have_avx2()) {
+    return 0;
+  }
+  switch (op) {
+    case GSHSCENE_COMPOSITE_MULTIPLY:
+      return d8_avx2_multiply(dst, src, n, opacity);
+    case GSHSCENE_COMPOSITE_SCREEN:
+      return d8_avx2_screen(dst, src, n, opacity);
+    case GSHSCENE_COMPOSITE_OVERLAY:
+      return d8_avx2_overlay(dst, src, n, opacity);
+    case GSHSCENE_COMPOSITE_HARD_LIGHT:
+      return d8_avx2_hard_light(dst, src, n, opacity);
+    case GSHSCENE_COMPOSITE_DARKEN:
+      return d8_avx2_darken(dst, src, n, opacity);
+    case GSHSCENE_COMPOSITE_LIGHTEN:
+      return d8_avx2_lighten(dst, src, n, opacity);
+    case GSHSCENE_COMPOSITE_DIFFERENCE:
+      return d8_avx2_difference(dst, src, n, opacity);
+    default:
+      return d8_avx2_exclusion(dst, src, n, opacity);
+  }
+}
+#endif
+
 void gshcpu_direct8_blend_row(uint32_t op, unsigned char * dst, const unsigned char * src, size_t n, float opacity) {
+#if defined(D8_AVX2)
+  {
+    const size_t done = d8_blend_avx2(op, dst, src, n, opacity);
+    dst += 4u * done;
+    src += 4u * done;
+    n -= done;
+  }
+#endif
   switch (op) {
     case GSHSCENE_COMPOSITE_MULTIPLY:
       D8_BLEND_LOOP(GSHSCENE_COMPOSITE_MULTIPLY)

@@ -40,6 +40,11 @@
 
 #include <string.h>
 
+#if defined(__x86_64__) && defined(__GNUC__)
+#include <immintrin.h>
+#define GRADIENT_AVX2 1
+#endif
+
 /** Two pi, the double nearest (twice the double nearest pi, which is exact). */
 #define TWO_PI 6.283185307179586
 
@@ -341,15 +346,8 @@ static double angle_of(const GSHCPU_Gradient * g, double dx, double dy) {
   return g->unit == GSHGEOM_ANGLE_RADIANS ? rad : rad / TWO_PI * g->turn;
 }
 
-int gshcpu_render_gradient_param(const GSHCPU_Gradient * g, double px, double py, double * t) {
-  if (g->degenerate) {
-    return 0;
-  }
-  if (g->kind == GSHSCENE_GRADIENT_LINEAR) {
-    *t = ((px - g->p[0]) * g->n[0] + (py - g->p[1]) * g->n[1]) / g->den;
-    return 1;
-  }
-  if (g->kind == GSHSCENE_GRADIENT_RADIAL) {
+/** G8: the parameter of the radial gradient @p g at the gradient-space point (@p px, @p py); 0 where nothing is drawn. */
+static inline int radial_param(const GSHCPU_Gradient * g, double px, double py, double * t) {
     double x = px - g->p[0];
     double y = py - g->p[1];
     double b = x * g->n[0] + y * g->n[1] + g->r0 * g->dr;
@@ -385,6 +383,18 @@ int gshcpu_render_gradient_param(const GSHCPU_Gradient * g, double px, double py
       }
     }
     return 0;
+}
+
+int gshcpu_render_gradient_param(const GSHCPU_Gradient * g, double px, double py, double * t) {
+  if (g->degenerate) {
+    return 0;
+  }
+  if (g->kind == GSHSCENE_GRADIENT_LINEAR) {
+    *t = ((px - g->p[0]) * g->n[0] + (py - g->p[1]) * g->n[1]) / g->den;
+    return 1;
+  }
+  if (g->kind == GSHSCENE_GRADIENT_RADIAL) {
+    return radial_param(g, px, py, t);
   }
   double theta = angle_of(g, px - g->p[0], py - g->p[1]);
   if (g->a0 == g->a1) {
@@ -559,6 +569,146 @@ static inline uint32_t table_index(const GSHCPU_Gradient * g, double t) {
   return table_point((t - g->o_first) * g->scale + 0.5);
 }
 
+/** atan(x) for x in [0, 1] by an odd polynomial of the seventh degree in x: within 3e-7. */
+static inline double atan_unit(double x) {
+  const double x2 = x * x;
+  return x * (0.9999966347006692 + x2 * (-0.3331830289944582 + x2 * (0.19813213509060276 + x2 * (-0.13247522771595696 +
+      x2 * (0.0798112049555744 + x2 * (-0.033725938103610145 + x2 * 0.006842624897387503))))));
+}
+
+/** G9's angle (angle_of) with the arctangent of the polynomial: within 3e-7 of a turn's 2 pi. */
+static inline double angle_fast(const GSHCPU_Gradient * g, double dx, double dy) {
+  if (dy == 0.0) {
+    return dx < 0.0 ? 0.5 * g->turn : 0.0;
+  }
+  if (dx == 0.0) {
+    return (dy > 0.0 ? 0.25 : 0.75) * g->turn;
+  }
+  const double ax = dx < 0.0 ? -dx : dx;
+  const double ay = dy < 0.0 ? -dy : dy;
+  double rad = ay > ax ? 1.5707963267948966 - atan_unit(ax / ay) : atan_unit(ay / ax);
+  if (dx < 0.0) {
+    rad = 3.141592653589793 - rad;
+  }
+  if (dy < 0.0) {
+    rad = TWO_PI - rad; /* the angle in [0, 2 pi) */
+  }
+  return g->unit == GSHGEOM_ANGLE_RADIANS ? rad : rad / TWO_PI * g->turn;
+}
+
+#if defined(GRADIENT_AVX2)
+/** Whether this processor has AVX2, asked once (a race on it only repeats the question). */
+static int gradient_have_avx2(void) {
+  static int have = -1;
+  int h = have;
+  if (h < 0) {
+    __builtin_cpu_init();
+    h = __builtin_cpu_supports("avx2") ? 1 : 0;
+    have = h;
+  }
+  return h;
+}
+
+/** Four table indices from four parameters on a line padded at both ends; NONE in the lanes of @p none. */
+__attribute__((target("avx2"))) static inline __attribute__((always_inline)) void store_indices(const GSHCPU_Gradient * g, __m256d t,
+    __m256d none, const uint8_t * cov, uint32_t * index) {
+  const __m256d half = _mm256_set1_pd(0.5);
+  const __m256d top = _mm256_set1_pd((double)GSHCPU_RENDER_GRADIENT_TABLE);
+  __m256d u = _mm256_add_pd(_mm256_mul_pd(_mm256_sub_pd(t, _mm256_set1_pd(g->o_first)), _mm256_set1_pd(g->scale)), half);
+  u = _mm256_max_pd(u, _mm256_setzero_pd()); /* below the line, and a NaN, is the first point */
+  u = _mm256_min_pd(u, top);
+  __m128i idx = _mm256_cvttpd_epi32(u);
+  uint32_t c4;
+  memcpy(&c4, cov, sizeof c4);
+  const __m128i uncovered = _mm_cmpeq_epi32(_mm_cvtepu8_epi32(_mm_cvtsi32_si128((int)c4)), _mm_setzero_si128());
+  const __m128i skip = _mm_or_si128(uncovered, _mm256_cvtpd_epi32(_mm256_and_pd(none, _mm256_set1_pd(1.0)))); /* 1 where none */
+  const __m128i drop = _mm_or_si128(uncovered, _mm_cmpgt_epi32(skip, _mm_setzero_si128()));
+  idx = _mm_blendv_epi8(idx, _mm_set1_epi32(-1), drop);
+  _mm_storeu_si128((__m128i *)(void *)index, idx);
+}
+
+/**
+ * table_row for a radial or a sweep gradient on a line padded at both ends, four pixels at a time: the same operations as
+ * radial_param and angle_fast, the choices made with masks.  @return the pixels done, a multiple of four.
+ */
+__attribute__((target("avx2"))) static size_t table_row_avx2(const GSHCPU_Gradient * g, double px0, double py0, double dpx, double dpy,
+    size_t count, const uint8_t * cov, uint32_t * index) {
+  const __m256d lane = _mm256_set_pd(3.0, 2.0, 1.0, 0.0);
+  const __m256d zero = _mm256_setzero_pd();
+  const __m256d one = _mm256_set1_pd(1.0);
+  size_t i = 0;
+  for (; i + 4u <= count; i += 4) {
+    const __m256d k = _mm256_add_pd(_mm256_set1_pd((double)(int32_t)i), lane);
+    const __m256d x = _mm256_sub_pd(_mm256_add_pd(_mm256_set1_pd(px0), _mm256_mul_pd(_mm256_set1_pd(dpx), k)), _mm256_set1_pd(g->p[0]));
+    const __m256d y = _mm256_sub_pd(_mm256_add_pd(_mm256_set1_pd(py0), _mm256_mul_pd(_mm256_set1_pd(dpy), k)), _mm256_set1_pd(g->p[1]));
+    __m256d t;
+    __m256d none;
+    if (g->kind == GSHSCENE_GRADIENT_RADIAL) {
+      const __m256d r0 = _mm256_set1_pd(g->r0);
+      const __m256d dr = _mm256_set1_pd(g->dr);
+      const __m256d b = _mm256_add_pd(_mm256_add_pd(_mm256_mul_pd(x, _mm256_set1_pd(g->n[0])), _mm256_mul_pd(y, _mm256_set1_pd(g->n[1]))),
+          _mm256_set1_pd(g->r0 * g->dr));
+      const __m256d c = _mm256_sub_pd(_mm256_add_pd(_mm256_mul_pd(x, x), _mm256_mul_pd(y, y)), _mm256_set1_pd(g->r0 * g->r0));
+      if (g->a == 0.0) {
+        t = _mm256_div_pd(c, _mm256_mul_pd(_mm256_set1_pd(2.0), b));
+        none = _mm256_or_pd(_mm256_cmp_pd(b, zero, _CMP_EQ_OQ),
+            _mm256_cmp_pd(_mm256_add_pd(r0, _mm256_mul_pd(t, dr)), zero, _CMP_NGT_UQ));
+      } else {
+        const __m256d a = _mm256_set1_pd(g->a);
+        const __m256d disc = _mm256_sub_pd(_mm256_mul_pd(b, b), _mm256_mul_pd(a, c));
+        const __m256d bad = _mm256_cmp_pd(disc, zero, _CMP_LT_OQ);
+        const __m256d root = _mm256_sqrt_pd(_mm256_max_pd(disc, zero));
+        const __m256d q = _mm256_blendv_pd(_mm256_add_pd(b, root), _mm256_sub_pd(b, root), _mm256_cmp_pd(b, zero, _CMP_LT_OQ));
+        const __m256d u = _mm256_div_pd(q, a);
+        const __m256d v = _mm256_div_pd(c, q);
+        const __m256d hi = _mm256_blendv_pd(v, u, _mm256_cmp_pd(u, v, _CMP_GT_OQ));
+        const __m256d lo = _mm256_blendv_pd(u, v, _mm256_cmp_pd(u, v, _CMP_GT_OQ));
+        const __m256d hi_ok = _mm256_cmp_pd(_mm256_add_pd(r0, _mm256_mul_pd(hi, dr)), zero, _CMP_GT_OQ);
+        const __m256d lo_ok = _mm256_cmp_pd(_mm256_add_pd(r0, _mm256_mul_pd(lo, dr)), zero, _CMP_GT_OQ);
+        const __m256d qz = _mm256_cmp_pd(q, zero, _CMP_EQ_OQ);
+        __m256d tt = _mm256_blendv_pd(lo, hi, hi_ok);
+        __m256d ok = _mm256_or_pd(hi_ok, lo_ok);
+        tt = _mm256_blendv_pd(tt, zero, qz); /* the double root 0 */
+        ok = _mm256_blendv_pd(ok, _mm256_cmp_pd(r0, zero, _CMP_GT_OQ), qz);
+        t = tt;
+        none = _mm256_or_pd(bad, _mm256_xor_pd(ok, _mm256_castsi256_pd(_mm256_set1_epi64x(-1))));
+      }
+    } else {
+      /* G9: the angle in [0, one turn) from the polynomial's arctangent, the axes exactly. */
+      const __m256d ax = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x);
+      const __m256d ay = _mm256_andnot_pd(_mm256_set1_pd(-0.0), y);
+      const __m256d swap = _mm256_cmp_pd(ay, ax, _CMP_GT_OQ);
+      const __m256d mx = _mm256_max_pd(ax, ay);
+      const __m256d mn = _mm256_min_pd(ax, ay);
+      const __m256d r = _mm256_div_pd(mn, mx);
+      const __m256d r2 = _mm256_mul_pd(r, r);
+      __m256d poly = _mm256_set1_pd(0.006842624897387503);
+      poly = _mm256_add_pd(_mm256_mul_pd(poly, r2), _mm256_set1_pd(-0.033725938103610145));
+      poly = _mm256_add_pd(_mm256_mul_pd(poly, r2), _mm256_set1_pd(0.0798112049555744));
+      poly = _mm256_add_pd(_mm256_mul_pd(poly, r2), _mm256_set1_pd(-0.13247522771595696));
+      poly = _mm256_add_pd(_mm256_mul_pd(poly, r2), _mm256_set1_pd(0.19813213509060276));
+      poly = _mm256_add_pd(_mm256_mul_pd(poly, r2), _mm256_set1_pd(-0.3331830289944582));
+      poly = _mm256_add_pd(_mm256_mul_pd(poly, r2), _mm256_set1_pd(0.9999966347006692));
+      __m256d rad = _mm256_mul_pd(poly, r);
+      rad = _mm256_blendv_pd(rad, _mm256_sub_pd(_mm256_set1_pd(1.5707963267948966), rad), swap);
+      rad = _mm256_blendv_pd(rad, _mm256_sub_pd(_mm256_set1_pd(3.141592653589793), rad), _mm256_cmp_pd(x, zero, _CMP_LT_OQ));
+      rad = _mm256_blendv_pd(rad, _mm256_sub_pd(_mm256_set1_pd(TWO_PI), rad), _mm256_cmp_pd(y, zero, _CMP_LT_OQ));
+      const __m256d dy0 = _mm256_cmp_pd(y, zero, _CMP_EQ_OQ);
+      const __m256d dx0 = _mm256_cmp_pd(x, zero, _CMP_EQ_OQ);
+      rad = _mm256_blendv_pd(rad, _mm256_blendv_pd(_mm256_set1_pd(0.0), _mm256_set1_pd(3.141592653589793), _mm256_cmp_pd(x, zero, _CMP_LT_OQ)), dy0);
+      rad = _mm256_blendv_pd(rad, _mm256_blendv_pd(_mm256_set1_pd(4.71238898038469), _mm256_set1_pd(1.5707963267948966),
+                                      _mm256_cmp_pd(y, zero, _CMP_GT_OQ)), _mm256_andnot_pd(dy0, dx0));
+      const __m256d theta = _mm256_mul_pd(rad, _mm256_set1_pd(g->turn / TWO_PI));
+      t = _mm256_mul_pd(_mm256_sub_pd(theta, _mm256_set1_pd(g->a0)), _mm256_set1_pd(1.0 / (g->a1 - g->a0)));
+      none = zero;
+    }
+    (void)one;
+    store_indices(g, t, none, cov + i, index + i);
+  }
+  return i;
+}
+#endif
+
 void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, double qy, size_t count, const uint8_t * cov,
     uint32_t * index) {
   if (g->degenerate) {
@@ -589,13 +739,44 @@ void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, dou
     }
     return;
   }
+  /* The gradient-space point is affine in the pixel's x: its value at the first center and its step. */
+  double px0, py0, px1, py1;
+  gshcpu_render_gradient_unmap(g, qx0, qy, &px0, &py0);
+  gshcpu_render_gradient_unmap(g, qx0 + 1.0, qy, &px1, &py1);
+  const double dpx = px1 - px0;
+  const double dpy = py1 - py0;
+  size_t done = 0;
+#if defined(GRADIENT_AVX2)
+  if (count >= 4u && g->period > 0.0 && g->extend == GSHSCENE_EXTEND_PAD && (g->kind == GSHSCENE_GRADIENT_RADIAL || g->a0 != g->a1) &&
+      gradient_have_avx2()) {
+    done = table_row_avx2(g, px0, py0, dpx, dpy, count, cov, index);
+  }
+#endif
+  cov += done;
+  index += done;
+  px0 += dpx * (double)(int32_t)done;
+  py0 += dpy * (double)(int32_t)done;
+  count -= done;
+  if (g->kind == GSHSCENE_GRADIENT_RADIAL) {
+    for (size_t i = 0; i < count; i++) {
+      double t;
+      index[i] = cov[i] && radial_param(g, px0 + dpx * (double)(int32_t)i, py0 + dpy * (double)(int32_t)i, &t) ? table_index(g, t)
+                                                                                                               : GSHCPU_RENDER_GRADIENT_NONE;
+    }
+    return;
+  }
   for (size_t i = 0; i < count; i++) {
-    double px, py, t;
     if (!cov[i]) {
       index[i] = GSHCPU_RENDER_GRADIENT_NONE;
       continue;
     }
-    gshcpu_render_gradient_unmap(g, qx0 + (double)(int32_t)i, qy, &px, &py);
-    index[i] = gshcpu_render_gradient_param(g, px, py, &t) ? table_index(g, t) : GSHCPU_RENDER_GRADIENT_NONE;
+    const double theta = angle_fast(g, px0 + dpx * (double)(int32_t)i - g->p[0], py0 + dpy * (double)(int32_t)i - g->p[1]);
+    double t;
+    if (g->a0 == g->a1) {
+      t = theta < g->a0 ? -GSHCPU_RENDER_T_LIMIT : GSHCPU_RENDER_T_LIMIT;
+    } else {
+      t = (theta - g->a0) / (g->a1 - g->a0);
+    }
+    index[i] = table_index(g, t);
   }
 }
