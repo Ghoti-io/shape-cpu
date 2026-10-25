@@ -206,6 +206,8 @@ TEST(RenderGradientVectors, TheEvaluationAgreesWithTheOracleWithinTheStatedToler
   size_t nothing = 0;
   size_t exact = 0;
   size_t exact_equal = 0;
+  size_t table_checked = 0;
+  size_t table_close = 0;
   Store s;
   for (size_t i = 0; i < n; i++) {
     const gradient_vectors::VCase & c = kGradientCases[i];
@@ -287,7 +289,28 @@ TEST(RenderGradientVectors, TheEvaluationAgreesWithTheOracleWithinTheStatedToler
       exact++;
       exact_equal += equal ? 1 : 0;
     }
+    // The fast fill coverage's table stands in for the evaluation to the spacing of its points.
+    {
+      std::vector<double> table(4u * (GSHCPU_RENDER_GRADIENT_TABLE + 1u));
+      GSHCPU_Convert same;
+      GSHSCENE_Color_Space space{};
+      gshcpu_render_convert_prepare(&same, &space, &space);
+      gshcpu_render_gradient_table(&gr, &same, table.data());
+      const uint8_t covered = 255;
+      uint32_t index = 0;
+      gshcpu_render_gradient_table_row(&gr, c.q[0], c.q[1], 1, &covered, &index);
+      ASSERT_NE(index, GSHCPU_RENDER_GRADIENT_NONE) << c.name;
+      ASSERT_LE(index, GSHCPU_RENDER_GRADIENT_TABLE) << c.name;
+      const double want[4] = {out[0] * out[3], out[1] * out[3], out[2] * out[3], out[3]};
+      double worst_entry = 0;
+      for (int k = 0; k < 4; k++) {
+        worst_entry = std::max(worst_entry, std::fabs(table[4u * index + (size_t)k] - want[k]));
+      }
+      table_checked++;
+      table_close += worst_entry <= 0.02 ? 1 : 0;
+    }
   }
+  EXPECT_GE(table_close * 100u, table_checked * 97u) << "the table matches the evaluation but at a step between its points";
   std::printf("gradient vectors: %zu points, %zu drawn, %zu nothing; worst color error linear %.3g radial %.3g sweep "
               "%.3g; worst t linear %.3g radial %.3g sweep %.3g (tolerance %g); %zu of %zu exact cases bit for bit\n",
       n, drawn, nothing, worst[1], worst[2], worst[3], worst_t[1], worst_t[2], worst_t[3],

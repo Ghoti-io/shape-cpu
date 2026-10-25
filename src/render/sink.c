@@ -88,6 +88,17 @@ typedef struct Clip {
 } Clip;
 
 /** A gradient resolved in this render (S17: once per gradient per render), by resource id. */
+/** The color tables kept for the fast fill coverage: the gradients most recently painted. */
+#define TABLE_SLOTS 2u
+
+/** Which gradient, paint alpha and layer space a color table was made for. */
+typedef struct Table_Key {
+  int used;
+  uint64_t id;
+  double alpha;
+  GSHSCENE_Color_Space space;
+} Table_Key;
+
 typedef struct Resolved {
   uint64_t id;               /* the resource's id */
   int used;
@@ -123,7 +134,7 @@ typedef struct Layout {
   size_t exact_second, exact_third; /* ... where, from at_exact */
   size_t acc_bytes;          /* the cell accumulator: one for each of the three parts when something aligns (UC8) */
   size_t at_walk, at_maps, at_stop, at_frames, at_clips, at_root, at_layers, at_touched, at_coverage, at_clip_memory,
-      at_acc, at_exact, at_table, at_pool, at_items; /* offsets from the aligned base */
+      at_acc, at_exact, at_table, at_pool, at_tables, at_items; /* offsets from the aligned base */
   size_t at_cov_aligned, at_cov_clip, at_cov_result; /* the aligned stroke's arrays */
   size_t fixed;              /* the bytes before the items' arena, the alignment slack included */
 } Layout;
@@ -161,6 +172,9 @@ typedef struct Run {
   int caller;                /* CALLER_MEMORY: nothing allocated, so no cache */
   Resolved * resolved;       /* the gradients resolved so far (S17), open addressing on the id */
   GSHCPU_Stop * pool;        /* their stops */
+  double * tables;           /* TABLE_SLOTS color tables (gradient.c), when the layout has gradients */
+  Table_Key table_key[TABLE_SLOTS];
+  size_t table_next;
   size_t pooled;
   GSHCPU_Arena arena;        /* CALLER_MEMORY: the items' geometry */
   const GSHGEOM_Allocator * item_alloc;
@@ -352,7 +366,8 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
       place(&at, L->acc_bytes, &L->at_acc) &&
       place(&at, L->exact_bytes, &L->at_exact) &&
       place(&at, mul3(L->table, sizeof(Resolved), 1), &L->at_table) &&
-      place(&at, mul3(L->stops, sizeof(GSHCPU_Stop), 1), &L->at_pool);
+      place(&at, mul3(L->stops, sizeof(GSHCPU_Stop), 1), &L->at_pool) &&
+      place(&at, L->gradients ? TABLE_SLOTS * (GSHCPU_RENDER_GRADIENT_TABLE + 1u) * 4u * sizeof(double) : 0, &L->at_tables);
   L->at_items = at;
   if (!ok || !gcu_safe_add_size(at, CARVE_ALIGN - 1u, &L->fixed)) {
     return GSHCPU_ERR_LIMIT;
@@ -627,6 +642,14 @@ static GSHSCENE_Result refuse(Run * run, const GSHSCENE_Item * item, const size_
  * doubles, without the dispatch on the operator or the call.
  */
 static inline void apply_src_over(double d[4], const double s[4], double m) {
+  if (m == 1.0 && s[3] == 1.0) {
+    /* Full weight of an opaque source: keep is 0 and fb is 0, so o is the source itself. */
+    for (int i = 0; i < 4; i++) {
+      d[i] = s[i] > GSHSCENE_COLOR_SATURATION ? GSHSCENE_COLOR_SATURATION
+          : s[i] < -GSHSCENE_COLOR_SATURATION ? -GSHSCENE_COLOR_SATURATION : s[i];
+    }
+    return;
+  }
   const double fb = 1.0 - s[3];
   const double keep = 1.0 - m;
   for (int i = 0; i < 4; i++) {
@@ -897,6 +920,62 @@ static GSHSCENE_Result fill_gradient(Run * run, const GSHSCENE_Item * item, cons
   gshcpu_render_convert_prepare(&c, &e->space, &frame->space);
   widen(run, frame, rect);
   size_t w = (size_t)(rect.x1 - rect.x0);
+  const double * table = NULL;
+  if (run->cs->fast_fill && run->tables) {
+    /* The fast fill coverage takes the color from a table of the line (made once for the paint, and kept for the next). */
+    for (size_t k = 0; k < TABLE_SLOTS && !table; k++) {
+      const Table_Key * key = &run->table_key[k];
+      if (key->used && key->id == gshscene_resource_id(item->paint.gradient) && key->alpha == item->paint.rgba[3] &&
+          key->space.primaries == frame->space.primaries && key->space.transfer == frame->space.transfer &&
+          key->space.gamma == frame->space.gamma) {
+        table = run->tables + k * (GSHCPU_RENDER_GRADIENT_TABLE + 1u) * 4u;
+      }
+    }
+    if (!table && w * (size_t)(rect.y1 - rect.y0) >= 2048u) {
+      size_t k = run->table_next++ % TABLE_SLOTS;
+      Table_Key * key = &run->table_key[k];
+      key->used = 1;
+      key->id = gshscene_resource_id(item->paint.gradient);
+      key->alpha = item->paint.rgba[3];
+      key->space = frame->space;
+      table = run->tables + k * (GSHCPU_RENDER_GRADIENT_TABLE + 1u) * 4u;
+      gshcpu_render_gradient_table(&gr, &c, (double *)(void *)table);
+    }
+  }
+  if (table) {
+    uint32_t index[256];
+    for (int64_t y = rect.y0; y < rect.y1; y++) {
+      const uint8_t * row = cov + (size_t)(y - rect.y0) * w;
+      for (size_t i0 = 0; i0 < w; i0 += 256u) {
+        const size_t n = w - i0 < 256u ? w - i0 : 256u;
+        size_t first = 0;
+        while (first < n && row[i0 + first] == 0) {
+          first++;
+        }
+        if (first == n) {
+          continue;
+        }
+        gshcpu_render_gradient_table_row(&gr, (double)(int32_t)(rect.x0 + (int64_t)i0) + 0.5, (double)(int32_t)y + 0.5, n, row + i0, index);
+        for (size_t i = first; i < n; i++) {
+          if (row[i0 + i] == 0 || index[i] == GSHCPU_RENDER_GRADIENT_NONE) {
+            continue;
+          }
+          const int64_t x = rect.x0 + (int64_t)(i0 + i);
+          uint32_t m8 = weigh_clips(run, frame->clip_base, run->clip_count, row[i0 + i], x, y);
+          if (m8 == 0) {
+            continue;
+          }
+          size_t p = at(run, x, y);
+          apply_src_over(&frame->layer[4u * p], table + 4u * (size_t)index[i], (double)m8 / 255.0);
+          if (run->top == 0) {
+            run->touched[p] = 1;
+          }
+        }
+      }
+    }
+    run->work += (uint64_t)w * (uint64_t)(rect.y1 - rect.y0);
+    return GSHSCENE_OK;
+  }
   for (int64_t y = rect.y0; y < rect.y1; y++) {
     for (int64_t x = rect.x0; x < rect.x1; x++) {
       uint32_t m8 = cov[(size_t)(y - rect.y0) * w + (size_t)(x - rect.x0)];
@@ -1586,6 +1665,7 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   run->caller = caller;
   run->resolved = (Resolved *)(void *)(base + L.at_table);
   run->pool = (GSHCPU_Stop *)(void *)(base + L.at_pool);
+  run->tables = (double *)(void *)(base + L.at_tables);
   memset(run->resolved, 0, L.table * sizeof *run->resolved); /* the gradient fills' slots, never the region */
   if (caller) {
     /* The items' geometry from the rest of the workspace. */

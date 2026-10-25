@@ -486,3 +486,90 @@ int gshcpu_render_gradient_at(const GSHCPU_Gradient * g, double qx, double qy, d
   gshcpu_render_gradient_color(g, t, out);
   return 1;
 }
+
+/* --- the table (the fast fill coverage) ----------------------------------------------------------------------- */
+
+void gshcpu_render_gradient_table(const GSHCPU_Gradient * g, const GSHCPU_Convert * c, double * out) {
+  const size_t n = GSHCPU_RENDER_GRADIENT_TABLE;
+  for (size_t k = 0; k <= n; k++) {
+    double t = g->period > 0.0 ? g->o_first + g->period * ((double)k / (double)n) : g->o_first;
+    if (k == 0 && (g->period == 0.0 || g->extend == GSHSCENE_EXTEND_PAD)) {
+      t = g->o_first - 1.0; /* before the line: the first stop, as a pad holds it */
+    } else if (k == n) {
+      t = g->o_last;
+    }
+    double color[4];
+    gshcpu_render_gradient_color(g, t, color);
+    gshcpu_render_convert_straight(c, color, color);
+    out[4u * k + 0u] = color[0] * color[3];
+    out[4u * k + 1u] = color[1] * color[3];
+    out[4u * k + 2u] = color[2] * color[3];
+    out[4u * k + 3u] = color[3];
+  }
+}
+
+/** The table index of the parameter @p t. */
+static uint32_t table_index(const GSHCPU_Gradient * g, double t) {
+  const uint32_t n = GSHCPU_RENDER_GRADIENT_TABLE;
+  if (!(t >= -GSHCPU_RENDER_T_LIMIT)) {
+    return 0;
+  }
+  if (t > GSHCPU_RENDER_T_LIMIT) {
+    return n;
+  }
+  if (!(g->period > 0.0)) {
+    return t < g->o_first ? 0u : n; /* a step: the first stop before the offset, the last from it */
+  }
+  if (g->extend != GSHSCENE_EXTEND_PAD && (t < g->o_first || t > g->o_last)) {
+    double x = t - g->o_first;
+    if (g->extend == GSHSCENE_EXTEND_REPEAT) {
+      x = x - gmath_floor(x / g->period) * g->period;
+    } else {
+      double twice = 2.0 * g->period;
+      double m = x - gmath_floor(x / twice) * twice;
+      double d = m - g->period;
+      x = g->period - (d < 0.0 ? -d : d);
+    }
+    t = g->o_first + x;
+  }
+  double u = (t - g->o_first) / g->period * (double)n + 0.5;
+  if (!(u > 0.0)) {
+    return 0;
+  }
+  if (u >= (double)n) {
+    return n;
+  }
+  return (uint32_t)(int32_t)u; /* 32-bit: no x87 (AD-17) */
+}
+
+void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, double qy, size_t count, const uint8_t * cov,
+    uint32_t * index) {
+  if (g->degenerate) {
+    for (size_t i = 0; i < count; i++) {
+      index[i] = GSHCPU_RENDER_GRADIENT_NONE;
+    }
+    return;
+  }
+  if (g->kind == GSHSCENE_GRADIENT_LINEAR) {
+    /* The parameter is affine in the pixel's x: its value at the first center and its step. */
+    double px0, py0, px1, py1, t0 = 0.0, t1 = 0.0;
+    gshcpu_render_gradient_unmap(g, qx0, qy, &px0, &py0);
+    gshcpu_render_gradient_unmap(g, qx0 + 1.0, qy, &px1, &py1);
+    (void)gshcpu_render_gradient_param(g, px0, py0, &t0);
+    (void)gshcpu_render_gradient_param(g, px1, py1, &t1);
+    const double dt = t1 - t0;
+    for (size_t i = 0; i < count; i++) {
+      index[i] = cov[i] ? table_index(g, t0 + dt * (double)(int32_t)i) : GSHCPU_RENDER_GRADIENT_NONE;
+    }
+    return;
+  }
+  for (size_t i = 0; i < count; i++) {
+    double px, py, t;
+    if (!cov[i]) {
+      index[i] = GSHCPU_RENDER_GRADIENT_NONE;
+      continue;
+    }
+    gshcpu_render_gradient_unmap(g, qx0 + (double)(int32_t)i, qy, &px, &py);
+    index[i] = gshcpu_render_gradient_param(g, px, py, &t) ? table_index(g, t) : GSHCPU_RENDER_GRADIENT_NONE;
+  }
+}

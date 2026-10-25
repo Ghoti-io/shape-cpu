@@ -550,6 +550,25 @@ void gshcpu_render_gradient_color(const GSHCPU_Gradient * g, double t, double ou
 /** Both: the straight color at device point (@p qx, @p qy); 0 where nothing is drawn. */
 int gshcpu_render_gradient_at(const GSHCPU_Gradient * g, double qx, double qy, double out[4]);
 
+/** The entries after the first of a gradient's color table (the fast fill coverage): the line is sampled at `n + 1` points. */
+#define GSHCPU_RENDER_GRADIENT_TABLE 1024u
+/** The index ::gshcpu_render_gradient_table_row gives a pixel the gradient draws nothing at. */
+#define GSHCPU_RENDER_GRADIENT_NONE UINT32_MAX
+
+/**
+ * The color line of @p g sampled at `GSHCPU_RENDER_GRADIENT_TABLE + 1` points of its extent: in @p out, four doubles each, the
+ * color at the point converted by @p c to the layer's space and premultiplied (what a pixel's source is), the first and
+ * the last at the line's ends.  The table stands in for G4, G5 and G12 up to the spacing of its points.
+ */
+void gshcpu_render_gradient_table(const GSHCPU_Gradient * g, const GSHCPU_Convert * c, double * out);
+
+/**
+ * The table index of each of the @p count pixels of row @p qy from @p qx0 (centers one apart) where @p cov is not 0, else
+ * ::GSHCPU_RENDER_GRADIENT_NONE, which is also where the gradient draws nothing.
+ */
+void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, double qy, size_t count, const uint8_t * cov,
+    uint32_t * index);
+
 /* --- strokes (stroke.c, stroke_cache.c; strokes story S4) -------------------------------------- */
 
 /** Tiers a test can switch off to force the general tier (render.h, SC8).  Every tier is on by default. */

@@ -339,6 +339,11 @@ glyph outlines, gradients, clips and groups, one thread) it takes a frame from 2
 0.6 s (geometry) together with the fast stroke coverage, and the pictures differ from the exact ones by a mean of 0.01 and
 0.07 of 255 a byte, where the references differ from them by 1.0 to 1.2.
 
+The same limit lets a gradient fill take its color from a table of the line: 1,025 points of the extent, each converted to the
+layer's space and premultiplied once, and kept (two tables, by gradient, paint alpha and space) for the fills that follow. A pixel
+costs its parameter and one lookup; the color it gets is that of the nearest point, which differs from the evaluation by the
+change of the line over a 1,024th of its extent. A fill under 2,048 pixels that finds no table evaluates the line as before.
+
 The fast coverage is an integer area and cover per cell, in 8192ths of a pixel, with the cells a row notes kept in a bitset swept
 in order, in bands of up to 1,024 rows. The points are already 64ths of a pixel, so an edge steps the quotient and remainder of a
 row's share and its x at a row boundary is the nearest 64th of the line's, found from the edge's origin, so the cover does not
