@@ -21,7 +21,7 @@
 /**
  * @file
  *
- * The lean cover (the fast stroke coverage): the coverage of one stroke part's outline under the nonzero rule, summed in floats
+ * The lean cover (the fast stroke coverage): the coverage of one stroke part's outline under the nonzero rule, summed in integers
  * as the area and cover of each cell an edge crosses, by rows of sparse cells.  An edge adds to the cells it crosses and to
  * nothing else, the cells a row holds are kept in a list and sorted, and the sweep of a row visits them and the runs between
  * them, so the work follows the outline and never the rectangle it lies in.  Where pieces of the outline overlap the
@@ -29,8 +29,9 @@
  * of the default coverage is not made.
  *
  * The scratch is the sink's accumulator, a band of rows at a time, and is left all zero, so the next user finds it as it
- * expects.  The sums are floats, `+ - * /`, so that every target that rounds as IEEE says gives the
- * same bits (no contraction: the build says so).
+ * expects.  The sums are 32-bit integers in 8192ths of a pixel and the edges are walked in 64ths, the unit of the points, with the
+ * quotient and remainder of a row's step, so the sums do not depend on how a target rounds a float; only the share of a piece that
+ * spans three cells or more is made from a double, whose product and one cast are the same on every target that rounds as IEEE.
  */
 
 #include <ghoti.io/shape-cpu/macros.h>
@@ -44,7 +45,7 @@
 /** The scratch of a band of @p rows rows of @p width cells, in @p memory: the row flags, the sums and the bits of the cells noted. */
 typedef struct Lean_Band {
   uint32_t * n;   /* 1 for a row that has a cell noted */
-  float * a;      /* the sums of each row: width + 2 */
+  int32_t * a;    /* the sums of each row, in 8192ths of a pixel: width + 2 */
   uint64_t * bit; /* which cells of a row are noted, a bit each: words per row */
   size_t stride;  /* width + 2 */
   size_t words;   /* the 64-bit words of the bits of a row */
@@ -65,20 +66,20 @@ static void lean_band(Lean_Band * b, void * memory, size_t width, size_t rows) {
   b->words = (b->stride + 63u) / 64u;
   b->n = (uint32_t *)(void *)p;
   p += (rows * 4u + 7u) & ~(size_t)7u;
-  b->a = (float *)(void *)p;
+  b->a = (int32_t *)(void *)p;
   p += (rows * b->stride * sizeof(float) + 7u) & ~(size_t)7u;
   b->bit = (uint64_t *)(void *)p;
 }
 
 /** Add @p v to cell @p x of row @p y, noting the cell when it is new. */
-static inline void lean_add(Lean_Band * b, int y, int x, float v) {
+static inline void lean_add(Lean_Band * b, int y, int x, int32_t v) {
   b->n[y] = 1;
   b->bit[(size_t)y * b->words + ((size_t)x >> 6)] |= (uint64_t)1 << (x & 63);
   b->a[(size_t)y * b->stride + (size_t)x] += v;
 }
 
 /** Add @p v0 to cell @p x of row @p y and @p v1 to the cell after it: the common case of a piece, whose cells share a word of the set but at a word's last bit. */
-static inline void lean_add2(Lean_Band * b, int y, int x, float v0, float v1) {
+static inline void lean_add2(Lean_Band * b, int y, int x, int32_t v0, int32_t v1) {
   b->n[y] = 1;
   uint64_t * w = b->bit + (size_t)y * b->words + ((size_t)x >> 6);
   const unsigned sh = (unsigned)x & 63u;
@@ -88,120 +89,147 @@ static inline void lean_add2(Lean_Band * b, int y, int x, float v0, float v1) {
     w[0] |= (uint64_t)1 << 63;
     w[1] |= 1u;
   }
-  float * a = b->a + (size_t)y * b->stride + (size_t)x;
+  int32_t * a = b->a + (size_t)y * b->stride + (size_t)x;
   a[0] += v0;
   a[1] += v1;
 }
 
 /**
- * The part of one row of an edge: from (@p xa, @p ya) down to (@p xb, @p yb) in the band's frame (row @p y, 0 at its top and x at the
- * window's left), directed down when @p dir is 1 and up when it is -1.  What is left of the window is a cover at its first column;
- * what is right of it is nothing.
+ * The part of one row of an edge, in 64ths of a pixel: from @p xa to @p xb across the row, @p d of its height (a 64th each, signed by its
+ * direction).  The sums are in 8192ths of a pixel: a full pixel is 8192, so what a piece adds in all adds up to @p d * 128, and the
+ * sum of a row up to a cell is that cell's coverage.  What is left of the window is a cover at its first column; what is right of it is nothing.
  */
-static inline __attribute__((always_inline)) void lean_row(Lean_Band * b, int y, int width, double xa, double xb, float d) {
+static inline __attribute__((always_inline)) void lean_row(Lean_Band * b, int y, int width, int xa, int xb, int d) {
   if (xa > xb) {
-    double t = xa;
+    const int t = xa;
     xa = xb;
     xb = t;
   }
-  const double span = xb - xa;
-  if (xb <= 0.0) {
-    lean_add(b, y, 0, d);
+  int32_t ds = (int32_t)d * 128;
+  const int right = width << 6;
+  if (xb <= 0) {
+    lean_add(b, y, 0, ds);
     return;
   }
-  if (xa >= (double)width) {
+  if (xa >= right) {
     return;
   }
-  if (xa < 0.0 || xb > (double)width) {
+  if (xa < 0 || xb > right) {
     /* The edge leaves the window inside this row: the share of its height outside is a cover at the window's left or nothing. */
-    const double lo = xa < 0.0 ? 0.0 : xa;
-    const double hi = xb > (double)width ? (double)width : xb;
-    if (xa < 0.0) {
-      lean_add(b, y, 0, (float)((double)d * (lo - xa) / span));
+    const int64_t span = (int64_t)xb - xa;
+    const int lo = xa < 0 ? 0 : xa;
+    const int hi = xb > right ? right : xb;
+    if (xa < 0) {
+      lean_add(b, y, 0, (int32_t)((int64_t)ds * (lo - xa) / span));
     }
-    d = (float)((double)d * (hi - lo) / span);
+    ds = (int32_t)((int64_t)ds * (hi - lo) / span);
     xa = lo;
     xb = hi;
   }
-  /* xa and xb are not negative here, so a cast is their floor, and one more when it falls short is the ceiling of xb */
-  const int xai = (int)xa;
-  const double xaf = (double)xai;
-  const int xbt = (int)xb;
-  const int xbi = xbt + ((double)xbt < xb);
-  const double xbc = (double)xbi;
+  const int xai = xa >> 6;
+  const int xbi = (xb + 63) >> 6;
   if (xbi <= xai + 1) {
-    const float xmf = (float)(0.5 * (xa + xb) - xaf);
-    lean_add2(b, y, xai, d - d * xmf, d * xmf);
+    const int32_t v1 = (ds * (xa + xb - (xai << 7))) >> 7;
+    lean_add2(b, y, xai, ds - v1, v1);
     return;
   }
-  const float s = (float)(1.0 / (xb - xa));
-  const float x0f = (float)(xa - xaf);
-  const float a0 = 0.5f * s * (1.0f - x0f) * (1.0f - x0f);
-  const float x1f = (float)(xb - xbc + 1.0);
-  const float am = 0.5f * s * x1f * x1f;
-  lean_add(b, y, xai, d * a0);
-  if (xbi == xai + 2) {
-    lean_add(b, y, xai + 1, d * (1.0f - a0 - am));
-  } else {
-    const float a1 = s * (1.5f - x0f);
-    lean_add(b, y, xai + 1, d * (a1 - a0));
-    for (int xi = xai + 2; xi < xbi - 1; xi++) {
-      lean_add(b, y, xi, d * s);
-    }
-    const float a2 = a1 + (float)(xbi - xai - 3) * s;
-    lean_add(b, y, xbi - 1, d * (1.0f - a2 - am));
+  /* The share of d that has crossed by each pixel's end: twice the area of the line right of the pixel's own left edge, over 128 * w.
+   * The first sum is the share left of pixel xai's end, and every sum after is the difference of two. */
+  const int32_t dm = ds < 0 ? -ds : ds;
+  const double scale = (double)dm / (128.0 * (double)(xb - xa));
+  int32_t prev = 0;
+  for (int k = xai; k < xbi; k++) {
+    const int u = (k + 1) << 6;
+    const int p = xa > (k << 6) ? xa : (k << 6);
+    const int q = xb < u ? xb : u;
+    /* 2 * (the integral of the clamped distance to u over [xa, xb]): the part left of the pixel counts 64 wide, the part inside is a trapezoid */
+    const int64_t left = (int64_t)(p - xa) * 128;
+    const int64_t inside = (int64_t)(q - p) * (2 * (int64_t)u - p - q);
+    const int32_t mag = (int32_t)((double)(left + inside) * scale + 0.5);
+    const int32_t cum = ds < 0 ? -mag : mag;
+    lean_add(b, y, k, cum - prev);
+    prev = cum;
   }
-  lean_add(b, y, xbi, d * am);
+  lean_add(b, y, xbi, ds - prev);
+}
+
+/** The floor of a quotient found in a double, without the libm. */
+static inline int64_t lean_floor(double v) {
+  const int64_t t = (int64_t)v;
+  return t - ((double)t > v);
 }
 
 /**
- * One edge into the band whose first row is @p top (rows @p rows), in the window's frame.  The x at a row's top and bottom is a
- * function of that row boundary alone, `x0 + (y - y0) * dxdy` from the edge's own end, so the sums an edge leaves in a row are the
- * same whatever band it is cut into: a stripe of the window is the picture's rows and nothing else.
+ * One edge into the band whose first row is @p top (rows @p rows), in the window's frame and in 64ths of a pixel.  The x at a row's top and
+ * bottom is `x0 + (y - y0) * dx / dy`, rounded to a 64th, at that row boundary and nothing else, found by stepping the quotient and remainder of
+ * a row's share, so the sums an edge leaves in a row are the same whatever band it is cut into: a stripe of the window is the picture's
+ * rows and nothing else.
  */
-static void lean_edge(Lean_Band * b, int top, int rows, int width, double x0, double y0, double x1, double y1) {
+static void lean_edge(Lean_Band * b, int top, int rows, int width, int64_t x0, int64_t y0, int64_t x1, int64_t y1) {
   if (y0 == y1) {
     return;
   }
-  float dir = 1.0f;
+  int dir = 1;
   if (y0 > y1) {
-    double t = x0;
+    int64_t t = x0;
     x0 = x1;
     x1 = t;
     t = y0;
     y0 = y1;
     y1 = t;
-    dir = -1.0f;
+    dir = -1;
   }
-  const double lo = (double)top;
-  const double hi = (double)(top + rows);
+  const int64_t lo = (int64_t)top << 6;
+  const int64_t hi = (int64_t)(top + rows) << 6;
   if (y1 <= lo || y0 >= hi) {
     return;
   }
-  const double dxdy = (x1 - x0) / (y1 - y0);
-  const double ys = y0 < lo ? lo : y0;
-  const double ye = y1 > hi ? hi : y1;
-  /* ys is not below the band's top, which is not negative, so a cast is its floor */
-  const int first = (int)ys;
-  const int last = (int)ye + ((double)(int)ye < ye);
-  double x = x0 + (ys - y0) * dxdy;
-  for (int y = first; y < last; y++) {
-    const double ya = y > ys ? (double)y : ys;
-    const double yb = (double)(y + 1) < ye ? (double)(y + 1) : ye;
-    const double dy = yb - ya;
-    const double xn = x0 + (yb - y0) * dxdy;
-    lean_row(b, y - top, width, x, xn, (float)dy * dir);
-    x = xn;
+  const int64_t dx = x1 - x0;
+  const int64_t dy = y1 - y0;
+  const int64_t ys = y0 < lo ? lo : y0;
+  const int64_t ye = y1 > hi ? hi : y1;
+  /* x at a boundary y is x0 + the nearest integer to (y - y0) * dx / dy, halves up: the floor of (2 (y - y0) dx + dy) / 2 dy.  A quotient is
+   * under 2^22 and its fraction needs 23 bits more, so a double holds the floor of it exactly. */
+  const int64_t dd = 2 * dy;
+  const double ddf = (double)dd;
+  int64_t xa = ys == y0 ? x0 : x0 + lean_floor((double)(2 * (ys - y0) * dx + dy) / ddf);
+  int64_t yb = ((ys >> 6) + 1) << 6;
+  const int64_t num = 2 * (yb - y0) * dx + dy;
+  int64_t q0 = lean_floor((double)num / ddf);
+  int64_t r0 = num - q0 * dd;
+  const int64_t step = 128 * dx;
+  const int64_t qs = lean_floor((double)step / ddf);
+  const int64_t rs = step - qs * dd;
+  int64_t ya = ys;
+  int y = (int)(ys >> 6);
+  for (;;) {
+    if (yb >= ye) {
+      const int64_t xb = ye == yb ? x0 + q0 : x1;
+      lean_row(b, y - top, width, (int)xa, (int)xb, (int)(ye - ya) * dir);
+      return;
+    }
+    const int64_t xb = x0 + q0;
+    lean_row(b, y - top, width, (int)xa, (int)xb, (int)(yb - ya) * dir);
+    xa = xb;
+    ya = yb;
+    yb += 64;
+    y++;
+    q0 += qs;
+    r0 += rs;
+    if (r0 >= dd) {
+      r0 -= dd;
+      q0++;
+    }
   }
 }
 
 /** The coverage of an accumulated sum, 0 to 255. */
-static inline uint8_t lean_level(float acc) {
-  float c = acc < 0.0f ? -acc : acc;
-  if (c > 1.0f) {
-    c = 1.0f;
+static inline uint8_t lean_level(int32_t acc) {
+  int32_t c = acc < 0 ? -acc : acc;
+  if (c > 8192) {
+    c = 8192;
   }
-  return (uint8_t)(c * 255.0f + 0.5f);
+  return (uint8_t)((c * 255 + 4096) >> 13);
 }
 
 /** @p n bytes of @p m at @p p: the runs are short, and a call to memset for three bytes costs more than the three. */
@@ -237,9 +265,9 @@ static void lean_sweep(Lean_Band * b, int rows, int width, int64_t x0, int64_t y
       continue;
     }
     b->n[y] = 0;
-    float * a = b->a + (size_t)y * b->stride;
+    int32_t * a = b->a + (size_t)y * b->stride;
     uint64_t * bit = b->bit + (size_t)y * b->words;
-    float acc = 0.0f;
+    int32_t acc = 0;
     int from = -1;   /* the first column of the run open, or -1 */
     int cell = -1;   /* the last noted cell inside the window, whose run is not yet written, or -1 */
     uint8_t level = 0;
@@ -265,7 +293,7 @@ static void lean_sweep(Lean_Band * b, int rows, int width, int64_t x0, int64_t y
           }
         }
         acc += a[x];
-        a[x] = 0.0f;
+        a[x] = 0;
         if (x < width) {
           cell = x;
           level = lean_level(acc);
@@ -322,8 +350,8 @@ static GSHCPU_Result lean_cover(const GSHGEOM_Flat_Path * path, const GSHGEOM_De
   Lean_Band b;
   lean_band(&b, scratch, (size_t)width, rows_max);
   /* a window and a shift are within the dimension limit, so the difference fits 32 bits: (a conversion from 64 bits is an x87 load on i686) */
-  const double ox = (double)(int32_t)(shift_x - rect.x0);
-  const double oy = (double)(int32_t)(shift_y - rect.y0);
+  const int64_t ox = (int64_t)(int32_t)(shift_x - rect.x0) * 64;
+  const int64_t oy = (int64_t)(int32_t)(shift_y - rect.y0) * 64;
   for (int64_t top = 0; top < height; top += (int64_t)rows_max) {
     const int rows = (int)(height - top < (int64_t)rows_max ? height - top : (int64_t)rows_max);
     for (size_t i = 0; i < subpaths; i++) {
@@ -335,8 +363,7 @@ static GSHCPU_Result lean_cover(const GSHGEOM_Flat_Path * path, const GSHGEOM_De
       for (size_t k = 0; k < sub.count; k++) {
         const GSHGEOM_Device_Point p = pt[sub.first + k];
         const GSHGEOM_Device_Point q = pt[sub.first + (k + 1 == sub.count ? 0 : k + 1)];
-        lean_edge(&b, (int)top, rows, (int)width, (double)p.x / 64.0 + ox, (double)p.y / 64.0 + oy, (double)q.x / 64.0 + ox,
-            (double)q.y / 64.0 + oy);
+        lean_edge(&b, (int)top, rows, (int)width, (int64_t)p.x + ox, (int64_t)p.y + oy, (int64_t)q.x + ox, (int64_t)q.y + oy);
       }
     }
     /* the runs are handed over in the paths' frame, as the sparse sweep's are: the receiver adds the shift */
