@@ -39,6 +39,10 @@
 
 #include <string.h>
 
+#if defined(__SSE2__)
+#include <emmintrin.h>
+#endif
+
 /** What every carved piece is aligned to. */
 #define CARVE_ALIGN 16u
 
@@ -1020,6 +1024,39 @@ static inline uint64_t d8_div255(uint64_t x) {
   return ((t + ((t >> 8) & D8_LOW)) >> 8) & D8_LOW;
 }
 
+#if defined(__SSE2__)
+/** `x / 255` rounded, in each of eight 16-bit lanes holding at most 255 * 255: the scalar step's arithmetic. */
+static inline __m128i d8_div255_v(__m128i x) {
+  const __m128i t = _mm_add_epi16(x, _mm_set1_epi16(0x80));
+  return _mm_srli_epi16(_mm_add_epi16(t, _mm_srli_epi16(t, 8)), 8);
+}
+
+/** Four pixels of @p row composed under the coverages @p m (four bytes): the scalar step, a pixel to each half-register. */
+static inline void d8_four(unsigned char * row, const uint8_t * m, __m128i src) {
+  const __m128i zero = _mm_setzero_si128();
+  uint32_t m4;
+  memcpy(&m4, m, sizeof m4);
+  const __m128i mw = _mm_unpacklo_epi8(_mm_cvtsi32_si128((int)m4), zero); /* m0 m1 m2 m3 in 16 bits */
+  const __m128i mm = _mm_unpacklo_epi16(mw, mw);
+  const __m128i m_lo = _mm_unpacklo_epi32(mm, mm); /* m0 four times, m1 four times */
+  const __m128i m_hi = _mm_unpackhi_epi32(mm, mm);
+  const __m128i px = _mm_loadu_si128((const __m128i *)(const void *)row);
+  const __m128i e_lo = _mm_unpacklo_epi8(px, zero);
+  const __m128i e_hi = _mm_unpackhi_epi8(px, zero);
+  const __m128i w_lo = d8_div255_v(_mm_mullo_epi16(src, m_lo)); /* the source weighed by the coverage */
+  const __m128i w_hi = d8_div255_v(_mm_mullo_epi16(src, m_hi));
+  const __m128i k255 = _mm_set1_epi16(255);
+  /* the target's share: one minus the weighed alpha (lane 3 of each pixel, to all four lanes of it) */
+  const __m128i keep_lo = _mm_sub_epi16(k255, _mm_shufflehi_epi16(_mm_shufflelo_epi16(w_lo, 0xff), 0xff));
+  const __m128i keep_hi = _mm_sub_epi16(k255, _mm_shufflehi_epi16(_mm_shufflelo_epi16(w_hi, 0xff), 0xff));
+  __m128i r_lo = _mm_add_epi16(d8_div255_v(_mm_mullo_epi16(e_lo, keep_lo)), w_lo);
+  __m128i r_hi = _mm_add_epi16(d8_div255_v(_mm_mullo_epi16(e_hi, keep_hi)), w_hi);
+  r_lo = _mm_min_epi16(r_lo, k255); /* a lane past 255: the two roundings added up */
+  r_hi = _mm_min_epi16(r_hi, k255);
+  _mm_storeu_si128((__m128i *)(void *)row, _mm_packus_epi16(r_lo, r_hi));
+}
+#endif
+
 static void direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_t * m8) {
   Direct8 * d = ctx;
   Run * run = d->run;
@@ -1027,7 +1064,14 @@ static void direct8_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
   /* the next row of the stroke is near this one's columns, and the target is far larger than the cache: ask for it now */
   __builtin_prefetch(row + run->stride, 1, 3);
   __builtin_prefetch(row + run->stride + 4u * (n - 1u), 1, 3);
-  for (size_t i = 0; i < n; i++, row += 4) {
+  size_t i = 0;
+#if defined(__SSE2__)
+  const __m128i src = _mm_set_epi64x((long long)d->lanes, (long long)d->lanes);
+  for (; i + 4u <= n; i += 4, row += 16) {
+    d8_four(row, m8 + i, src);
+  }
+#endif
+  for (; i < n; i++, row += 4) {
     const uint32_t m = m8[i];
     if (m == 0) {
       continue;
