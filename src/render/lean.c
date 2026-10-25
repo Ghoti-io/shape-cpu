@@ -94,6 +94,23 @@ static inline void lean_add2(Lean_Band * b, int y, int x, int32_t v0, int32_t v1
   a[1] += v1;
 }
 
+/** Add the three sums to the cells from @p x of row @p y. */
+static inline void lean_add3(Lean_Band * b, int y, int x, int32_t v0, int32_t v1, int32_t v2) {
+  b->n[y] = 1;
+  uint64_t * w = b->bit + (size_t)y * b->words + ((size_t)x >> 6);
+  const unsigned sh = (unsigned)x & 63u;
+  if (sh <= 61u) {
+    *w |= (uint64_t)7 << sh;
+  } else {
+    w[0] |= (uint64_t)7 << sh;
+    w[1] |= (uint64_t)7 >> (64u - sh);
+  }
+  int32_t * a = b->a + (size_t)y * b->stride + (size_t)x;
+  a[0] += v0;
+  a[1] += v1;
+  a[2] += v2;
+}
+
 /**
  * The part of one row of an edge, in 64ths of a pixel: from @p xa to @p xb across the row, @p d of its height (a 64th each, signed by its
  * direction).  The sums are in 8192ths of a pixel: a full pixel is 8192, so what a piece adds in all adds up to @p d * 128, and the
@@ -131,6 +148,17 @@ static inline __attribute__((always_inline)) void lean_row(Lean_Band * b, int y,
   if (xbi <= xai + 1) {
     const int32_t v1 = (ds * (xa + xb - (xai << 7))) >> 7;
     lean_add2(b, y, xai, ds - v1, v1);
+    return;
+  }
+  if (xbi == xai + 2) {
+    /* three cells: e and f are the parts of the piece in the first and the last, and the middle one is the 64 between */
+    const int32_t e = ((xai + 1) << 6) - xa;
+    const int32_t f = xb - ((xai + 1) << 6);
+    const double sc = (double)ds / (128.0 * (double)(xb - xa));
+    const double hf = ds < 0 ? -0.5 : 0.5;
+    const int32_t c0 = (int32_t)((double)(e * e) * sc + hf);
+    const int32_t c1 = (int32_t)((double)(e * 128 + f * (128 - f)) * sc + hf);
+    lean_add3(b, y, xai, c0, c1 - c0, ds - c1);
     return;
   }
   /* The share of d that has crossed by each pixel's end: twice the area of the line right of the pixel's own left edge, over 128 * w.
