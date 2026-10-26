@@ -351,13 +351,16 @@ layer; a group in another space keeps doubles (its pixels are converted where it
 through a table). A fill composes in integers with the arithmetic of the fast stroke's compositor, a gradient from its table of
 bytes, a group's source-over a row at a time, and a separable blend mode a row at a time in single-precision floats from the
 premultiplied channels. The offset on the line of a gradient padded at both ends is found in single precision, eight pixels at a
-time where the processor has AVX2 and by the same operations, one at a time, where it has not, so that both give the same bytes. Every operation rounds to a byte, where the exact coverage rounds once at the end, so a
+time where the processor has AVX2 and by the same operations, one at a time, where it has not, so that both give the same bytes. A gradient's
+constants for those rows are made once when it is prepared, and the last pixels of a span (a gradient stroke's spans are mostly two
+to eight pixels) are one more block of eight lanes, gathered, weighed and stored under a mask that keeps it inside the span. Every operation rounds to a byte, where the exact coverage rounds once at the end, so a
 picture differs from the exact one by a fraction of a level on the whole (0.4 to 0.7 of 255 a byte on the two showcase
 pictures). A list with a color component outside `[0, 1]` is drawn with doubles, for a byte cannot hold it. The two pictures take
 0.08 and 0.15 s a frame on one thread.
 
-The fast coverage is an integer area and cover per cell, in 8192ths of a pixel, with the cells a row notes kept in a bitset swept
-in order, in bands of up to 1,024 rows. With a fast coverage the accumulator is given room for a band as tall as the window (within 16 MiB), so that the edges are walked once and not once for each band of the few rows a smaller one holds. The points are already 64ths of a pixel, so an edge steps the quotient and remainder of a
+The fast coverage is an integer area and cover per cell, in 8192ths of a pixel, with the blocks of sixteen cells (a line of the
+sums) that a row has touched kept in a bit each and the sweep taking the cells that hold a sum from those blocks, in order, in
+bands of up to 1,024 rows. With a fast coverage the accumulator is given room for a band as tall as the window (within 16 MiB), so that the edges are walked once and not once for each band of the few rows a smaller one holds; a render clears only the first bytes of it that a cover uses, and keeps how many of them are known to be zero. The points are already 64ths of a pixel, so an edge steps the quotient and remainder of a
 row's share and its x at a row boundary is the nearest 64th of the line's, found from the edge's origin, so the cover does not
 depend on where a band or a stripe begins; only the shares of a piece that spans four cells or more are made from a double. The
 compositor blends four pixels at a time with SSE2 where the target has it (the same rounding as the scalar word), and eight with
