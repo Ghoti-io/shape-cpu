@@ -744,16 +744,15 @@ static int gradient_have_avx2(void) {
   return __builtin_cpu_supports("avx2") && gradient_vector_on; /* the answer is made before main: a read, no race */
 }
 
-/** row_f_pixel for eight pixels from @p first: the same operations, the choices made with masks.  @return the pixels done, a multiple of eight. */
-__attribute__((target("avx2"))) static size_t row_f_avx2(const Row_F * c, size_t count, const uint8_t * cov, uint32_t * index) {
+/** row_f_pixel for the eight pixels from @p i: the same operations, the choices made with masks. */
+__attribute__((target("avx2"), always_inline)) static inline __m256i row_f_block(const Row_F * c, size_t i) {
   const __m256 lane = _mm256_set_ps(7.0f, 6.0f, 5.0f, 4.0f, 3.0f, 2.0f, 1.0f, 0.0f);
   const __m256 zero = _mm256_setzero_ps();
   const __m256 ones = _mm256_castsi256_ps(_mm256_set1_epi32(-1));
   const __m256 sign = _mm256_set1_ps(-0.0f);
   const __m256 half_pi = _mm256_set1_ps(ROW_HALF_PI);
   const __m256 pi = _mm256_set1_ps(ROW_PI);
-  size_t i = 0;
-  for (; i + 8u <= count; i += 8) {
+  {
     const __m256 k = _mm256_add_ps(_mm256_set1_ps((float)(int32_t)i), lane);
     __m256 u;
     __m256 none = zero;
@@ -818,11 +817,24 @@ __attribute__((target("avx2"))) static size_t row_f_avx2(const Row_F * c, size_t
     }
     u = _mm256_min_ps(_mm256_max_ps(u, zero), _mm256_set1_ps((float)GSHCPU_RENDER_GRADIENT_TABLE));
     __m256i idx = _mm256_cvttps_epi32(u);
-    idx = _mm256_blendv_epi8(idx, _mm256_set1_epi32(-1), _mm256_castps_si256(none));
-    _mm256_storeu_si256((__m256i *)(void *)(index + i), idx);
+    return _mm256_blendv_epi8(idx, _mm256_set1_epi32(-1), _mm256_castps_si256(none));
   }
-  (void)cov;
+}
+
+/** row_f_block over the whole blocks of eight pixels in @p count.  @return the pixels done, a multiple of eight. */
+__attribute__((target("avx2"))) static size_t row_f_avx2(const Row_F * c, size_t count, uint32_t * index) {
+  size_t i = 0;
+  for (; i + 8u <= count; i += 8) {
+    _mm256_storeu_si256((__m256i *)(void *)(index + i), row_f_block(c, i));
+  }
   return i;
+}
+
+/** The last pixels, fewer than eight, from @p from to @p count: a block whose lanes past the end are not kept. */
+__attribute__((target("avx2"))) static void row_f_avx2_tail(const Row_F * c, size_t from, size_t count, uint32_t * index) {
+  uint32_t lanes[8];
+  _mm256_storeu_si256((__m256i *)(void *)lanes, row_f_block(c, from));
+  memcpy(index + from, lanes, (count - from) * sizeof lanes[0]);
 }
 #endif
 
@@ -838,8 +850,12 @@ void gshcpu_render_gradient_vector(int enable) {
 static void table_row_f(const Row_F * c, size_t count, const uint8_t * cov, uint32_t * index) {
   size_t done = 0;
 #if defined(GRADIENT_AVX2)
-  if (count >= 8u && gradient_have_avx2()) {
-    done = row_f_avx2(c, count, cov, index);
+  if (gradient_have_avx2()) {
+    done = row_f_avx2(c, count, index);
+    if (done < count) {
+      row_f_avx2_tail(c, done, count, index);
+      done = count;
+    }
   }
 #endif
   for (size_t i = done; i < count; i++) {

@@ -364,13 +364,20 @@ void gshcpu_direct8_span_table(unsigned char * row, const uint8_t * table, const
     row += 4u * i;
   }
 #endif
-  for (; i < n; i++, row += 4) {
-    if (index[i] == GSHCPU_RENDER_GRADIENT_NONE || m8[i] == 0) {
-      continue;
+  /* The pixels left (fewer than eight with AVX2): their colors gathered, a color of alpha 0 where nothing is drawn, then composed together. */
+  uint32_t src[8];
+  while (i < n) {
+    const size_t rest = n - i < 8u ? n - i : 8u;
+    for (size_t j = 0; j < rest; j++) {
+      if (index[i + j] == GSHCPU_RENDER_GRADIENT_NONE || m8[i + j] == 0) {
+        src[j] = 0;
+      } else {
+        memcpy(&src[j], table + 4u * (size_t)index[i + j], sizeof src[j]);
+      }
     }
-    uint32_t one;
-    memcpy(&one, table + 4u * (size_t)index[i], sizeof one);
-    gshcpu_direct8_span_pixels(row, &one, m8 + i, 0, 1);
+    gshcpu_direct8_span_pixels(row, src, m8 + i, 0, rest);
+    i += rest;
+    row += 4u * rest;
   }
 }
 
