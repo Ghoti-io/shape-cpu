@@ -511,6 +511,20 @@ void gshcpu_render_geometry_release(GSHCPU_Item_Geometry * g, const GSHGEOM_Allo
  */
 typedef GSHSCENE_Resolved_Stop GSHCPU_Stop;
 
+/**
+ * The constants of the single-precision rows of a gradient padded at both ends (gradient.c), made once when the gradient is prepared:
+ * a row sets only where it starts (x0, y0 or ua0).
+ */
+typedef struct GSHCPU_Row_F {
+  uint32_t kind;
+  int a_zero;        /* radial: a is zero */
+  float x0, y0, dx, dy;
+  float n0, n1, r0, dr, ra, r0dr, r0sq;
+  float ua0, ub;     /* linear: the offset of a pixel is ua0 + ub k, already in table points */
+  float turn, a0, k; /* sweep: the angle's unit, a0, 1 / (a1 - a0) */
+  float first, scale;
+} GSHCPU_Row_F;
+
 /** A gradient prepared for one fill: its inverse map, its kind's constants and its color line. */
 typedef struct GSHCPU_Gradient {
   uint32_t kind;
@@ -529,6 +543,8 @@ typedef struct GSHCPU_Gradient {
   double o_first, o_last, period;
   double inv_period, scale;  /* 1 / period, and the table's points to a unit of the parameter (the fast fill coverage's) */
   double alpha;              /* the paint's alpha multiplier (G12) */
+  double dt_dx;              /* linear: the parameter's step to the next pixel to the right */
+  GSHCPU_Row_F rowf;         /* the constants of the single-precision rows */
 } GSHCPU_Gradient;
 
 /** Make @p count resolved stops, in place, their interpolants (G4). */

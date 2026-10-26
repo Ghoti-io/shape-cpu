@@ -209,6 +209,8 @@ void gshcpu_render_gradient_stops(GSHCPU_Stop * stops, size_t count, uint32_t pr
   }
 }
 
+static void row_f_template(GSHCPU_Gradient * g);
+
 GSHCPU_Result gshcpu_render_gradient_prepare(GSHCPU_Gradient * out, const GSHSCENE_Gradient * g,
     const GSHCPU_Stop * stops, const GSHGEOM_Map * composed, double alpha) {
   memset(out, 0, sizeof *out);
@@ -257,6 +259,9 @@ GSHCPU_Result gshcpu_render_gradient_prepare(GSHCPU_Gradient * out, const GSHSCE
       }
       out->den = approximate(&den);
       out->degenerate = out->den == 0.0;
+      if (!out->degenerate) {
+        out->dt_dx = (out->inv[0] * out->n[0] + out->inv[2] * out->n[1]) / out->den;
+      }
       break;
     }
     case GSHSCENE_GRADIENT_RADIAL: {
@@ -304,6 +309,7 @@ GSHCPU_Result gshcpu_render_gradient_prepare(GSHCPU_Gradient * out, const GSHSCE
   if (out->count >= 2 && out->period == 0.0 && g->extend != GSHSCENE_EXTEND_PAD) {
     out->degenerate = 1;
   }
+  row_f_template(out);
   return GSHCPU_OK;
 }
 
@@ -604,15 +610,7 @@ static inline double angle_fast(const GSHCPU_Gradient * g, double dx, double dy)
  * (row_f_avx2), so that a processor without AVX2 gives the bytes one with it does.  A float holds a row of pixels' offsets to
  * about a millionth, past what the table can tell apart; the first pixel's point is taken in doubles first.
  */
-typedef struct Row_F {
-  uint32_t kind;
-  int a_zero;        /* radial: a is zero */
-  float x0, y0, dx, dy;
-  float n0, n1, r0, dr, ra, r0dr, r0sq;
-  float ua0, ub;     /* linear: the offset of a pixel is ua0 + ub k, already in table points */
-  float turn, a0, k; /* sweep: the angle's unit, a0, 1 / (a1 - a0) */
-  float first, scale;
-} Row_F;
+typedef GSHCPU_Row_F Row_F;
 
 #define ROW_ATAN0 0.9999966347006692f
 #define ROW_ATAN1 -0.3331830289944582f
@@ -626,14 +624,14 @@ typedef struct Row_F {
 #define ROW_TWO_PI 6.283185307179586f
 #define ROW_THREE_HALF_PI 4.71238898038469f
 
-static void row_f_prepare(const GSHCPU_Gradient * g, double px0, double py0, double dpx, double dpy, double t0, double dt, Row_F * c) {
+/** The constants of @p g's rows, in single precision (the per-row ones are set by the row). */
+static void row_f_template(GSHCPU_Gradient * g) {
+  Row_F * c = &g->rowf;
   memset(c, 0, sizeof *c);
   c->kind = g->kind;
   c->a_zero = g->a == 0.0;
-  c->x0 = (float)(px0 - g->p[0]);
-  c->y0 = (float)(py0 - g->p[1]);
-  c->dx = (float)dpx;
-  c->dy = (float)dpy;
+  c->dx = (float)g->inv[0];
+  c->dy = (float)g->inv[2];
   c->n0 = (float)g->n[0];
   c->n1 = (float)g->n[1];
   c->r0 = (float)g->r0;
@@ -641,8 +639,7 @@ static void row_f_prepare(const GSHCPU_Gradient * g, double px0, double py0, dou
   c->ra = (float)g->a;
   c->r0dr = (float)(g->r0 * g->dr);
   c->r0sq = (float)(g->r0 * g->r0);
-  c->ua0 = (float)((t0 - g->o_first) * g->scale + 0.5);
-  c->ub = (float)(dt * g->scale);
+  c->ub = (float)(g->dt_dx * g->scale);
   c->turn = (float)(g->turn / TWO_PI);
   c->a0 = (float)g->a0;
   c->k = (float)(g->a1 != g->a0 ? 1.0 / (g->a1 - g->a0) : 0.0);
@@ -832,9 +829,9 @@ __attribute__((target("avx2"))) static size_t row_f_avx2(const Row_F * c, size_t
 
 /** The last pixels, fewer than eight, from @p from to @p count: a block whose lanes past the end are not kept. */
 __attribute__((target("avx2"))) static void row_f_avx2_tail(const Row_F * c, size_t from, size_t count, uint32_t * index) {
-  uint32_t lanes[8];
-  _mm256_storeu_si256((__m256i *)(void *)lanes, row_f_block(c, from));
-  memcpy(index + from, lanes, (count - from) * sizeof lanes[0]);
+  const __m256i lane = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+  const __m256i valid = _mm256_cmpgt_epi32(_mm256_set1_epi32((int)(count - from)), lane);
+  _mm256_maskstore_epi32((int *)(void *)(index + from), valid, row_f_block(c, from));
 }
 #endif
 
@@ -877,6 +874,28 @@ void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, dou
     return;
   }
   const int padded = g->period > 0.0 && g->extend == GSHSCENE_EXTEND_PAD;
+  if (padded && g->kind == GSHSCENE_GRADIENT_LINEAR && g->dt_dx - g->dt_dx == 0.0) {
+    /* The offset on the line is affine in the pixel: its value at the first center, and a step that is the gradient's. */
+    double px0, py0, t0 = 0.0;
+    gshcpu_render_gradient_unmap(g, qx0, qy, &px0, &py0);
+    (void)gshcpu_render_gradient_param(g, px0, py0, &t0);
+    if (t0 - t0 == 0.0) {
+      Row_F c = g->rowf;
+      c.ua0 = (float)((t0 - g->o_first) * g->scale + 0.5);
+      table_row_f(&c, count, cov, index);
+      return;
+    }
+  }
+  if (padded && g->kind != GSHSCENE_GRADIENT_LINEAR && (g->kind == GSHSCENE_GRADIENT_RADIAL || g->a0 != g->a1)) {
+    /* The gradient-space point is affine in the pixel's x: its value at the first center, and a step that is the map's. */
+    double px0, py0;
+    gshcpu_render_gradient_unmap(g, qx0, qy, &px0, &py0);
+    Row_F c = g->rowf;
+    c.x0 = (float)(px0 - g->p[0]);
+    c.y0 = (float)(py0 - g->p[1]);
+    table_row_f(&c, count, cov, index);
+    return;
+  }
   if (g->kind == GSHSCENE_GRADIENT_LINEAR) {
     /* The parameter is affine in the pixel's x: its value at the first center and its step. */
     double px0, py0, px1, py1, t0 = 0.0, t1 = 0.0;
@@ -885,13 +904,6 @@ void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, dou
     (void)gshcpu_render_gradient_param(g, px0, py0, &t0);
     (void)gshcpu_render_gradient_param(g, px1, py1, &t1);
     const double dt = t1 - t0;
-    if (padded && t0 - t0 == 0.0 && dt - dt == 0.0) {
-      /* The offset on the line is affine in the pixel too: no more than a multiply and an add each. */
-      Row_F c;
-      row_f_prepare(g, 0.0, 0.0, 0.0, 0.0, t0, dt, &c);
-      table_row_f(&c, count, cov, index);
-      return;
-    }
     for (size_t i = 0; i < count; i++) {
       index[i] = cov[i] ? table_index(g, t0 + dt * (double)(int32_t)i) : GSHCPU_RENDER_GRADIENT_NONE;
     }
@@ -903,12 +915,6 @@ void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, dou
   gshcpu_render_gradient_unmap(g, qx0 + 1.0, qy, &px1, &py1);
   const double dpx = px1 - px0;
   const double dpy = py1 - py0;
-  if (padded && (g->kind == GSHSCENE_GRADIENT_RADIAL || g->a0 != g->a1)) {
-    Row_F c;
-    row_f_prepare(g, px0, py0, dpx, dpy, 0.0, 0.0, &c);
-    table_row_f(&c, count, cov, index);
-    return;
-  }
   if (g->kind == GSHSCENE_GRADIENT_RADIAL) {
     for (size_t i = 0; i < count; i++) {
       double t;
