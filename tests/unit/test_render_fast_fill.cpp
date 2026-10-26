@@ -103,6 +103,35 @@ TEST(RenderFastFill, EveryFixtureIsTheSameWithTheVectorKernelsOff) {
   }
 }
 
+// The caller's memory is not zeroed: a render must not read the accumulator before it has cleared what it uses, whatever order the
+// dense and the sparse sweeps come in.  The same fixtures, drawn in memory full of 0xA5, are the pictures of a sink-made block.
+TEST(RenderFastFill, EveryFixtureIsTheSameInTheCallersMemoryWhateverItHolds) {
+  for (size_t i = 0; i < RF_FIXTURE_COUNT; i++) {
+    Picture own = draw(i, GSHCPU_FILL_COVERAGE_FAST, GSHCPU_STROKE_COVERAGE_FAST);
+    Fixture fx(i);
+    GIMG_Raster * raster = rf_raster(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, RF_WIDTH, RF_HEIGHT);
+    ASSERT_NE(raster, nullptr);
+    RasterRef keep(raster);
+    GSHCPU_Limits limits;
+    gshcpu_limits_default(&limits);
+    limits.fill_coverage = GSHCPU_FILL_COVERAGE_FAST;
+    limits.stroke_coverage = GSHCPU_STROKE_COVERAGE_FAST;
+    SinkRef sink(&limits);
+    ReportRef report;
+    GSHSCENE_Target target = target_of(raster, &fx.ctx.target_map);
+    GSHSCENE_Render_Request request = request_of(fx.list, &target, report.report);
+    size_t need = 0;
+    ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &request, &need), GSHSCENE_OK) << RF_FIXTURES[i].name;
+    std::vector<unsigned char> memory(need + 64, 0xA5);
+    request.flags |= GSHSCENE_RENDER_CALLER_MEMORY;
+    request.workspace = (void *)(((uintptr_t)memory.data() + 63u) & ~(uintptr_t)63u);
+    request.workspace_bytes = need;
+    ASSERT_EQ(gshscene_sink_render(sink.sink, &request), own.result) << RF_FIXTURES[i].name;
+    const std::string s = keep.bytes();
+    ASSERT_EQ(std::vector<uint8_t>(s.begin(), s.end()), own.bytes) << RF_FIXTURES[i].name;
+  }
+}
+
 TEST(RenderFastFill, TheFillCoverageIsRefusedPastTheDefinedValues) {
   GSHCPU_Limits limits;
   gshcpu_limits_default(&limits);

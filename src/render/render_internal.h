@@ -861,6 +861,15 @@ GSHCPU_Result gshcpu_render_lean_cover_points(const GSHGEOM_Device_Point * point
 /** The scratch bytes of the lean cover for a rectangle @p width cells wide and a band of @p rows rows. */
 size_t gshcpu_lean_bytes(size_t width, size_t rows);
 
+/**
+ * The bytes from the start of the scratch that the lean cover (gshcpu_render_lean_cover) of a window @p width by @p height in
+ * @p scratch_bytes of it reads and writes, and so the bytes that must be zero when it starts (it leaves them so).
+ */
+size_t gshcpu_lean_cover_extent(size_t width, size_t height, size_t scratch_bytes);
+
+/** gshcpu_lean_cover_extent for the lean fill (gshcpu_render_lean_fill_spans), whose row of coverages lies past this and is not read. */
+size_t gshcpu_lean_fill_extent(size_t width, size_t height, size_t scratch_bytes);
+
 /** The scratch to give the lean cover (and a fill's row of coverages after it) of a window @p width by @p height: as many rows in a band as the window has, within a cap. */
 size_t gshcpu_lean_scratch(size_t width, size_t height);
 

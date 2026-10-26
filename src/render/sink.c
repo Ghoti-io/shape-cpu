@@ -180,7 +180,7 @@ typedef struct Run {
   int fast8;                 /* the fast fill coverage on an 8-bit premultiplied or straight target: the layers are bytes, the root the target itself */
   int direct8;               /* the fast coverage composes straight into the target's bytes (strokes alone, 8-bit premultiplied) */
   GSHCPU_Batch * batch;      /* ... and its strokes are queued and drawn over stripes by several threads (GSHCPU_Limits.threads) */
-  int acc_dirty;             /* the dense sweep leaves the accumulator written (1: the part it uses); the sparse one needs it zero (2: nothing is known of it) */
+  size_t acc_zero;           /* the accumulator's first bytes known to be zero: the caller's memory is not zeroed, the dense sweeps leave theirs written, and a sparse one needs the part it uses zero */
   int caller;                /* CALLER_MEMORY: nothing allocated, so no cache */
   Resolved * resolved;       /* the gradients resolved so far (S17), open addressing on the id */
   GSHCPU_Stop * pool;        /* their stops */
@@ -1144,11 +1144,18 @@ static GSHSCENE_Result paint_coverage(Run * run, const GSHSCENE_Item * item, con
   return GSHSCENE_OK;
 }
 
-/** Make the accumulator zero where the sweeps need it so: all of it at the start, else the part the dense sweeps write. */
-static void acc_clean(Run * run) {
-  if (run->acc_dirty) {
-    memset(run->acc, 0, run->acc_dirty == 2 ? run->layout.acc_bytes : run->layout.acc_exact);
-    run->acc_dirty = 0;
+/**
+ * Make the first @p extent bytes of the accumulator zero, where a sparse sweep needs them so: no more than the sweep uses (a glyph's
+ * stroke does not touch the megabytes a window-tall band would), and what is zero already is not written again.  The sparse sweeps
+ * leave what they used zero.
+ */
+static void acc_clean(Run * run, size_t extent) {
+  if (extent > run->layout.acc_bytes) {
+    extent = run->layout.acc_bytes;
+  }
+  if (run->acc_zero < extent) {
+    memset((unsigned char *)(void *)run->acc + run->acc_zero, 0, extent - run->acc_zero);
+    run->acc_zero = extent;
   }
 }
 
@@ -1219,8 +1226,8 @@ static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t
           rect->x1 - rect->x0 <= 65000 &&
           gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_deposits) <= run->cs->max_deposits) {
         /* The fast fill coverage: the lean cover of every path at once, into the coverage of the rectangle. */
-        acc_clean(run);
         const size_t scratch = run->layout.acc_bytes;
+        acc_clean(run, gshcpu_lean_fill_extent((size_t)(rect->x1 - rect->x0), (size_t)(rect->y1 - rect->y0), scratch));
         if (sp) {
           GSHSCENE_Result begun = painter_begin(&sp->painter, run, sp->item, sp->chain, sp->count, sp->frame, *rect, *whole_rect);
           sp->taken = 1;
@@ -1237,7 +1244,7 @@ static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t
       } else {
         r = gshcpu_render_cover_counted(paths, g.count, item->fill_rule, *rect, walk, out, run->acc, run->cs->max_deposits,
             &cells);
-        run->acc_dirty = 1; /* the dense sweep writes the accumulator band by band and leaves it so */
+        run->acc_zero = 0; /* the dense sweep writes the accumulator band by band and leaves it so */
         run->work += cells;
       }
     }
@@ -1463,12 +1470,12 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
   int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT;
   if (solid && cs->fast && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits)) {
     /* The fast stroke coverage: the lean cover, the pixels of its runs composed like the sparse sweep's. */
-    acc_clean(run);
     double src[4];
     source_of(run, item, frame, src);
     gshcpu_render_stroke_rects(&s, reach, wreach, &rect, &whole);
     const GSHGEOM_Flat_Path * body = gshcpu_render_stroke_cover_path(&s);
     const size_t scratch = run->layout.acc_bytes;
+    acc_clean(run, gshcpu_lean_cover_extent((size_t)(rect.x1 - rect.x0), (size_t)(rect.y1 - rect.y0), scratch));
     if (run->direct8) {
       /* Strokes alone onto an 8-bit premultiplied target: composed in integers straight into its bytes. */
       uint8_t c[4];
@@ -1527,7 +1534,6 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
         return scene_result(fr);
       }
     }
-    acc_clean(run);
     gshcpu_render_stroke_rects(&s, reach, wreach, &rect, &whole);
     if (gshcpu_render_rect_empty(rect)) {
       rect.x1 = rect.x0;
@@ -1535,6 +1541,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
     }
     const GSHGEOM_Flat_Path * body = gshcpu_render_stroke_cover_path(&s);
     const size_t scratch = run->layout.acc_bytes;
+    acc_clean(run, gshcpu_lean_fill_extent((size_t)(rect.x1 - rect.x0), (size_t)(rect.y1 - rect.y0), scratch));
     Painter painter;
     GSHSCENE_Result result = painter_begin(&painter, run, item, chain, count, frame, rect, whole);
     if (result == GSHSCENE_OK && !painter.refused) {
@@ -1558,7 +1565,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
   }
   if (solid && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits)) {
     /* FT-2 (SC8): the sweep gives only the pixels that can be nonzero; the rest the general loop would skip. */
-    acc_clean(run);
+    acc_clean(run, run->layout.acc_exact);
     gshcpu_render_stroke_rects(&s, reach, wreach, &rect, &whole);
     double src[4];
     source_of(run, item, frame, src);
@@ -1588,7 +1595,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
   GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result};
   r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_deposits, run->acc,
       2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS, exact, (cs->tiers & GSHCPU_RENDER_TIER_JOINT) != 0, &buffers, &cov, &rect, &whole, &cells);
-  run->acc_dirty = 1;
+  run->acc_zero = 0;
   run->work += cells + exact_work(run);
   GSHSCENE_Result result;
   if (r == GSHCPU_ERR_LIMIT) {
@@ -2063,7 +2070,7 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
      * the render goes on as one thread does. */
     run->batch = gshcpu_batch_create(&cs->alloc, &cs->executor, (size_t)(L.region.x1 - L.region.x0), run->pixels, run->stride);
   }
-  run->acc_dirty = 2; /* the caller's memory is not zeroed: the sparse sweep clears the accumulator before its first use */
+  run->acc_zero = 0; /* the caller's memory is not zeroed: a sparse sweep clears what it uses before its first use */
   run->caller = caller;
   run->resolved = (Resolved *)(void *)(base + L.at_table);
   run->pool = (GSHCPU_Stop *)(void *)(base + L.at_pool);

@@ -83,6 +83,33 @@ size_t gshcpu_lean_bytes(size_t width, size_t rows) {
   return 64u + rows * stride * sizeof(int32_t) + 8u + rows * bwords * sizeof(uint64_t) + 24u; /* (the first 64: to start the sums on a line) */
 }
 
+/** The rows of the bands of a cover of a window @p width by @p height cells, in a scratch of @p scratch_bytes. */
+static size_t lean_rows(size_t width, size_t height, size_t scratch_bytes) {
+  size_t rows_max = height < LEAN_BAND_MAX ? height : LEAN_BAND_MAX;
+  while (rows_max > (size_t)GSHCPU_RENDER_BAND_ROWS && gshcpu_lean_bytes(width, rows_max) > scratch_bytes) {
+    rows_max /= 2u;
+  }
+  return rows_max;
+}
+
+size_t gshcpu_lean_cover_extent(size_t width, size_t height, size_t scratch_bytes) {
+  if (width == 0 || height == 0 || width > 65000) {
+    return 0;
+  }
+  return gshcpu_lean_bytes(width, lean_rows(width, height, scratch_bytes));
+}
+
+size_t gshcpu_lean_fill_extent(size_t width, size_t height, size_t scratch_bytes) {
+  if (width == 0 || height == 0 || width > 65000) {
+    return 0;
+  }
+  const size_t line_bytes = (width + 63u) & ~(size_t)63u;
+  if (scratch_bytes < line_bytes) {
+    return 0;
+  }
+  return gshcpu_lean_cover_extent(width, height, (scratch_bytes - line_bytes) & ~(size_t)63u);
+}
+
 static void lean_band(Lean_Band * b, void * memory, size_t width, size_t rows) {
   unsigned char * p = (unsigned char *)memory;
   b->stride = (width + 2u + 15u) & ~(size_t)15u;
@@ -458,10 +485,7 @@ static GSHCPU_Result lean_cover(const GSHGEOM_Flat_Path * path, const GSHGEOM_De
   }
   /* The scratch is sized for the sink's widest window, and a stroke's is narrow: as many rows in a band as it holds, so that
    * the edges are walked once for a band of the stroke and not once for every sixteen rows of it. */
-  size_t rows_max = (size_t)height < LEAN_BAND_MAX ? (size_t)height : LEAN_BAND_MAX;
-  while (rows_max > (size_t)GSHCPU_RENDER_BAND_ROWS && gshcpu_lean_bytes((size_t)width, rows_max) > scratch_bytes) {
-    rows_max /= 2u;
-  }
+  const size_t rows_max = lean_rows((size_t)width, (size_t)height, scratch_bytes);
   Lean_Band b;
   lean_band(&b, scratch, (size_t)width, rows_max);
   /* a window and a shift are within the dimension limit, so the difference fits 32 bits: (a conversion from 64 bits is an x87 load on i686) */
@@ -531,10 +555,7 @@ GSHCPU_Result gshcpu_render_lean_fill_spans(const GSHGEOM_Flat_Path * const * pa
   }
   scratch_bytes = (scratch_bytes - line_bytes) & ~(size_t)63u;
   uint8_t * line = (uint8_t *)scratch + scratch_bytes;
-  size_t rows_max = (size_t)height < LEAN_BAND_MAX ? (size_t)height : LEAN_BAND_MAX;
-  while (rows_max > (size_t)GSHCPU_RENDER_BAND_ROWS && gshcpu_lean_bytes((size_t)width, rows_max) > scratch_bytes) {
-    rows_max /= 2u;
-  }
+  const size_t rows_max = lean_rows((size_t)width, (size_t)height, scratch_bytes);
   Lean_Band b;
   lean_band(&b, scratch, (size_t)width, rows_max);
   b.even_odd = even_odd;
