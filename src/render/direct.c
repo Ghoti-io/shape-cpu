@@ -101,6 +101,25 @@ static inline void d8_four(unsigned char * row, const uint8_t * m, __m128i src) 
 #endif
 
 
+/** The first @p rest (1 to 7) bytes of @p m8 as the low bytes of a word, by loads that overlap so that none reaches past them. */
+static inline uint64_t d8_tail_cov(const uint8_t * m8, size_t rest) {
+  if (rest >= 4u) {
+    uint32_t a;
+    uint32_t b;
+    memcpy(&a, m8, sizeof a);
+    memcpy(&b, m8 + rest - 4u, sizeof b);
+    return (uint64_t)a | ((uint64_t)b << (8u * (rest - 4u)));
+  }
+  if (rest >= 2u) {
+    uint16_t a;
+    uint16_t b;
+    memcpy(&a, m8, sizeof a);
+    memcpy(&b, m8 + rest - 2u, sizeof b);
+    return (uint64_t)a | ((uint64_t)b << (8u * (rest - 2u)));
+  }
+  return m8[0];
+}
+
 #if defined(D8_AVX2)
 /** Whether the vector kernels may be used: a test turns them off to compare them with their scalar twins. */
 static int d8_vector_on = 1;
@@ -255,6 +274,37 @@ static inline void d8_four_src(unsigned char * row, const uint32_t * src, const 
 #endif
 
 #if defined(D8_AVX2)
+/** The coverages @p m (eight bytes) as 16-bit lanes in the order the compose below takes its halves. */
+__attribute__((target("avx2"), always_inline)) static inline void d8_avx2_cov(uint64_t m, __m256i * m_lo, __m256i * m_hi) {
+  const __m128i w = _mm_unpacklo_epi8(_mm_cvtsi64_si128((long long)m), _mm_setzero_si128());
+  const __m256i x = _mm256_inserti128_si256(_mm256_castsi128_si256(w), _mm_srli_si128(w, 8), 1);
+  const __m256i mm = _mm256_unpacklo_epi16(x, x);
+  *m_lo = _mm256_unpacklo_epi32(mm, mm);
+  *m_hi = _mm256_unpackhi_epi32(mm, mm);
+}
+
+/** Eight pixels @p px composed with the premultiplied sources @p sp under the coverages @p m_lo, @p m_hi: the pixels they become. */
+__attribute__((target("avx2"), always_inline)) static inline __m256i d8_avx2_compose(__m256i px, __m256i sp, __m256i m_lo, __m256i m_hi) {
+  const __m256i zero = _mm256_setzero_si256();
+  const __m256i k255 = _mm256_set1_epi16(255);
+  const __m256i k80 = _mm256_set1_epi16(0x80);
+  const __m256i e_lo = _mm256_unpacklo_epi8(px, zero);
+  const __m256i e_hi = _mm256_unpackhi_epi8(px, zero);
+  __m256i t = _mm256_add_epi16(_mm256_mullo_epi16(_mm256_unpacklo_epi8(sp, zero), m_lo), k80);
+  const __m256i w_lo = _mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8);
+  t = _mm256_add_epi16(_mm256_mullo_epi16(_mm256_unpackhi_epi8(sp, zero), m_hi), k80);
+  const __m256i w_hi = _mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8);
+  const __m256i keep_lo = _mm256_sub_epi16(k255, _mm256_shufflehi_epi16(_mm256_shufflelo_epi16(w_lo, 0xff), 0xff));
+  const __m256i keep_hi = _mm256_sub_epi16(k255, _mm256_shufflehi_epi16(_mm256_shufflelo_epi16(w_hi, 0xff), 0xff));
+  t = _mm256_add_epi16(_mm256_mullo_epi16(e_lo, keep_lo), k80);
+  __m256i r_lo = _mm256_add_epi16(_mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8), w_lo);
+  t = _mm256_add_epi16(_mm256_mullo_epi16(e_hi, keep_hi), k80);
+  __m256i r_hi = _mm256_add_epi16(_mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8), w_hi);
+  r_lo = _mm256_min_epi16(r_lo, k255);
+  r_hi = _mm256_min_epi16(r_hi, k255);
+  return _mm256_packus_epi16(r_lo, r_hi);
+}
+
 /**
  * Eight pixels at a time, as d8_four_src: the pixels done, a multiple of eight.  The sources are @p src, or the entries of the
  * byte table @p table (four bytes each) at @p index, a pixel whose index is all ones having none.  Eight pixels of full
@@ -262,9 +312,6 @@ static inline void d8_four_src(unsigned char * row, const uint32_t * src, const 
  */
 __attribute__((target("avx2"))) static size_t d8_avx2_src_blocks(unsigned char * row, const uint32_t * src, const uint8_t * table,
     const uint32_t * index, const uint8_t * m8, uint32_t m_const, size_t n) {
-  const __m256i zero = _mm256_setzero_si256();
-  const __m256i k255 = _mm256_set1_epi16(255);
-  const __m256i k80 = _mm256_set1_epi16(0x80);
   size_t i = 0;
   for (; i + 8u <= n; i += 8, row += 32) {
     __m256i sp;
@@ -285,32 +332,33 @@ __attribute__((target("avx2"))) static size_t d8_avx2_src_blocks(unsigned char *
         _mm256_storeu_si256((__m256i *)(void *)row, sp); /* full coverage of opaque sources */
         continue;
       }
-      const __m128i w = _mm_unpacklo_epi8(_mm_cvtsi64_si128((long long)m), _mm_setzero_si128());
-      const __m256i x = _mm256_inserti128_si256(_mm256_castsi128_si256(w), _mm_srli_si128(w, 8), 1);
-      const __m256i mm = _mm256_unpacklo_epi16(x, x);
-      m_lo = _mm256_unpacklo_epi32(mm, mm);
-      m_hi = _mm256_unpackhi_epi32(mm, mm);
+      d8_avx2_cov(m, &m_lo, &m_hi);
     } else {
       m_lo = m_hi = _mm256_set1_epi16((short)m_const);
     }
     const __m256i px = _mm256_loadu_si256((const __m256i *)(const void *)row);
-    const __m256i e_lo = _mm256_unpacklo_epi8(px, zero);
-    const __m256i e_hi = _mm256_unpackhi_epi8(px, zero);
-    __m256i t = _mm256_add_epi16(_mm256_mullo_epi16(_mm256_unpacklo_epi8(sp, zero), m_lo), k80);
-    const __m256i w_lo = _mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8);
-    t = _mm256_add_epi16(_mm256_mullo_epi16(_mm256_unpackhi_epi8(sp, zero), m_hi), k80);
-    const __m256i w_hi = _mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8);
-    const __m256i keep_lo = _mm256_sub_epi16(k255, _mm256_shufflehi_epi16(_mm256_shufflelo_epi16(w_lo, 0xff), 0xff));
-    const __m256i keep_hi = _mm256_sub_epi16(k255, _mm256_shufflehi_epi16(_mm256_shufflelo_epi16(w_hi, 0xff), 0xff));
-    t = _mm256_add_epi16(_mm256_mullo_epi16(e_lo, keep_lo), k80);
-    __m256i r_lo = _mm256_add_epi16(_mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8), w_lo);
-    t = _mm256_add_epi16(_mm256_mullo_epi16(e_hi, keep_hi), k80);
-    __m256i r_hi = _mm256_add_epi16(_mm256_srli_epi16(_mm256_add_epi16(t, _mm256_srli_epi16(t, 8)), 8), w_hi);
-    r_lo = _mm256_min_epi16(r_lo, k255);
-    r_hi = _mm256_min_epi16(r_hi, k255);
-    _mm256_storeu_si256((__m256i *)(void *)row, _mm256_packus_epi16(r_lo, r_hi));
+    _mm256_storeu_si256((__m256i *)(void *)row, d8_avx2_compose(px, sp, m_lo, m_hi));
   }
   return i;
+}
+
+/**
+ * The last @p rest pixels (1 to 7) of a span of table colors in one block: the pixels beyond are neither read nor written, and a
+ * pixel of no color or of no coverage is left as it is.
+ */
+__attribute__((target("avx2"))) static void d8_avx2_table_tail(unsigned char * row, const uint8_t * table, const uint32_t * index,
+    const uint8_t * m8, size_t rest) {
+  const __m256i lane = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+  const __m256i valid = _mm256_cmpgt_epi32(_mm256_set1_epi32((int)rest), lane);
+  const __m256i idx = _mm256_maskload_epi32((const int *)(const void *)index, valid);
+  const __m256i colored = _mm256_andnot_si256(_mm256_cmpeq_epi32(idx, _mm256_set1_epi32(-1)), valid);
+  const __m256i sp = _mm256_mask_i32gather_epi32(_mm256_setzero_si256(), (const int *)(const void *)table, idx, colored, 4);
+  const uint64_t m = d8_tail_cov(m8, rest);
+  __m256i m_lo;
+  __m256i m_hi;
+  d8_avx2_cov(m, &m_lo, &m_hi);
+  const __m256i px = _mm256_maskload_epi32((const int *)(const void *)row, valid);
+  _mm256_maskstore_epi32((int *)(void *)row, valid, d8_avx2_compose(px, sp, m_lo, m_hi));
 }
 #endif
 
@@ -364,7 +412,15 @@ void gshcpu_direct8_span_table(unsigned char * row, const uint8_t * table, const
     row += 4u * i;
   }
 #endif
-  /* The pixels left (fewer than eight with AVX2): their colors gathered, a color of alpha 0 where nothing is drawn, then composed together. */
+#if defined(D8_AVX2)
+  if (d8_have_avx2()) {
+    if (i < n) {
+      d8_avx2_table_tail(row, table, index + i, m8 + i, n - i);
+    }
+    return;
+  }
+#endif
+  /* The pixels left: their colors gathered, a color of alpha 0 where nothing is drawn, then composed together. */
   uint32_t src[8];
   while (i < n) {
     const size_t rest = n - i < 8u ? n - i : 8u;

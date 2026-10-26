@@ -1026,19 +1026,19 @@ static void painter_span8(Painter * p, int64_t y, int64_t x, size_t n, const uin
   uint32_t index[256];
   for (size_t i0 = 0; i0 < n; i0 += 256u) {
     const size_t len = n - i0 < 256u ? n - i0 : 256u;
+    const uint8_t * cov = m8 + i0; /* (copied only to be weighed by the clips) */
     if (clipped) {
-      memcpy(m, m8 + i0, len);
+      memcpy(m, cov, len);
       weigh_row(run, frame, y, x + (int64_t)i0, len, m);
-    } else {
-      memcpy(m, m8 + i0, len);
+      cov = m;
     }
     if (!p->gradient) {
-      gshcpu_direct8_span(&p->d8, y, x + (int64_t)i0, len, m);
+      gshcpu_direct8_span(&p->d8, y, x + (int64_t)i0, len, cov);
       continue;
     }
-    gshcpu_render_gradient_table_row(&p->gr, (double)(int32_t)(x + (int64_t)i0) + 0.5, (double)(int32_t)y + 0.5, len, m, index);
+    gshcpu_render_gradient_table_row(&p->gr, (double)(int32_t)(x + (int64_t)i0) + 0.5, (double)(int32_t)y + 0.5, len, cov, index);
     gshcpu_direct8_span_table(frame->px8 + (size_t)(y - frame->oy) * frame->stride8 + 4u * (size_t)(x + (int64_t)i0 - frame->ox),
-        p->table8, index, m, len);
+        p->table8, index, cov, len);
   }
 }
 
