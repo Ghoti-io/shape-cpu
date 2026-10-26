@@ -183,6 +183,24 @@ TEST(RenderLean, AWindowThatCutsTheShapeAndAShiftThatMovesIt) {
   }
 }
 
+// A window past a thousand cells holds more than one word of the blocks noted in a row (64 blocks of 16 cells), and a shape across the
+// boundary of two words, or of two blocks, has its cells noted in both.
+TEST(RenderLean, AWindowWiderThanOneWordOfBlocks) {
+  const std::vector<std::vector<Poly>> shapes = {
+      {star(7, 1024.0, 20.0, 18.1, 7.3)},
+      {{{1000 * 64 + 5, 4 * 64 + 9}, {1075 * 64 + 33, 6 * 64}, {1040 * 64 + 17, 30 * 64 + 3}}},
+      {regular(41, 1100.5, 22.2, 19.4, 0.3), regular(29, 15.5, 20.2, 12.4, 0.1)},
+      {{{3 * 64, 8 * 64 + 5}, {2380 * 64 + 21, 9 * 64}, {2380 * 64 + 21, 12 * 64 + 40}, {3 * 64, 11 * 64 + 7}}},
+  };
+  for (size_t k = 0; k < shapes.size(); k++) {
+    for (int64_t width : {1160, 2400, 4200}) {
+      Worst w = compare(shapes[k], rect_of(0, 0, width, 44), 0, 0);
+      EXPECT_LE(w.max, 3) << "shape " << k << " width " << width;
+      EXPECT_EQ(w.over, 0u) << "shape " << k << " width " << width;
+    }
+  }
+}
+
 TEST(RenderLean, MoreRowsThanABandAndAnEmptyRectangle) {
   const std::vector<Poly> tall = {{{10 * 64, 2 * 64 + 9}, {40 * 64 + 5, 3 * 64}, {35 * 64, 190 * 64 + 40}, {12 * 64 + 20, 188 * 64}}};
   Worst w = compare(tall, rect_of(0, 0, 50, 200), 0, 0);

@@ -39,16 +39,24 @@
 #include "render_internal.h"
 
 #include <math.h>
+#include <stdint.h>
+#if defined(__SSE2__)
+#include <emmintrin.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
-/** The scratch of a band of @p rows rows of @p width cells, in @p memory: the row flags, the sums and the bits of the cells noted. */
+/**
+ * The scratch of a band of @p rows rows of @p width cells, in @p memory: the sums and the blocks noted.  A block is 16 cells of a row, a
+ * line of the cache (a row starts on one); the blocks an edge touches are a bit each in a word that is hot (a row's few words), and
+ * the sweep finds the cells that hold a sum by looking through the blocks noted.  (A bit a cell was a cold line to every piece of
+ * every edge, and a block of more than a line was lines read for nothing.)
+ */
 typedef struct Lean_Band {
-  uint32_t * n;   /* 1 for a row that has a cell noted */
   int32_t * a;    /* the sums of each row, in 8192ths of a pixel: width + 2 */
-  uint64_t * bit; /* which cells of a row are noted, a bit each: words per row */
-  size_t stride;  /* width + 2 */
-  size_t words;   /* the 64-bit words of the bits of a row */
+  uint64_t * blk; /* which blocks of a row are noted, a bit each: bwords per row */
+  size_t stride;  /* width + 2, to a whole number of blocks */
+  size_t bwords;  /* the 64-bit words of the bits of the blocks of a row */
   int even_odd;   /* the magnitude of a sum is folded, not held at one */
 } Lean_Band;
 
@@ -70,41 +78,45 @@ size_t gshcpu_lean_scratch(size_t width, size_t height) {
 }
 
 size_t gshcpu_lean_bytes(size_t width, size_t rows) {
-  size_t stride = width + 2u;
-  size_t words = (stride + 63u) / 64u;
-  return rows * 4u + 8u + rows * stride * sizeof(float) + 8u + rows * words * sizeof(uint64_t) + 24u;
+  size_t stride = (width + 2u + 15u) & ~(size_t)15u;
+  size_t bwords = ((stride >> 4) + 63u) / 64u;
+  return 64u + rows * stride * sizeof(int32_t) + 8u + rows * bwords * sizeof(uint64_t) + 24u; /* (the first 64: to start the sums on a line) */
 }
 
 static void lean_band(Lean_Band * b, void * memory, size_t width, size_t rows) {
   unsigned char * p = (unsigned char *)memory;
-  b->stride = width + 2u;
-  b->words = (b->stride + 63u) / 64u;
+  b->stride = (width + 2u + 15u) & ~(size_t)15u;
+  b->bwords = ((b->stride >> 4) + 63u) / 64u;
   b->even_odd = 0;
-  b->n = (uint32_t *)(void *)p;
-  p += (rows * 4u + 7u) & ~(size_t)7u;
+  p += (64u - ((uintptr_t)p & 63u)) & 63u;
   b->a = (int32_t *)(void *)p;
-  p += (rows * b->stride * sizeof(float) + 7u) & ~(size_t)7u;
-  b->bit = (uint64_t *)(void *)p;
+  p += (rows * b->stride * sizeof(int32_t) + 7u) & ~(size_t)7u;
+  b->blk = (uint64_t *)(void *)p;
 }
 
-/** Add @p v to cell @p x of row @p y, noting the cell when it is new. */
+/** Note the blocks of cells @p x0 to @p x1 (inclusive) of row @p y. */
+static inline __attribute__((always_inline)) void lean_note(Lean_Band * b, int y, int x0, int x1) {
+  const size_t b0 = (size_t)x0 >> 4;
+  const size_t b1 = (size_t)x1 >> 4;
+  uint64_t * w = b->blk + (size_t)y * b->bwords;
+  if ((b0 >> 6) == (b1 >> 6)) {
+    w[b0 >> 6] |= (UINT64_C(2) << (b1 & 63u)) - (UINT64_C(1) << (b0 & 63u)); /* (at bit 63 the first term wraps to 0, and the difference is the bits from b0 up) */
+    return;
+  }
+  for (size_t k = b0; k <= b1; k++) {
+    w[k >> 6] |= UINT64_C(1) << (k & 63u);
+  }
+}
+
+/** Add @p v to cell @p x of row @p y, with the block noted. */
 static inline void lean_add(Lean_Band * b, int y, int x, int32_t v) {
-  b->n[y] = 1;
-  b->bit[(size_t)y * b->words + ((size_t)x >> 6)] |= (uint64_t)1 << (x & 63);
+  lean_note(b, y, x, x);
   b->a[(size_t)y * b->stride + (size_t)x] += v;
 }
 
-/** Add @p v0 to cell @p x of row @p y and @p v1 to the cell after it: the common case of a piece, whose cells share a word of the set but at a word's last bit. */
+/** Add @p v0 to cell @p x of row @p y and @p v1 to the cell after it: the common case of a piece. */
 static inline void lean_add2(Lean_Band * b, int y, int x, int32_t v0, int32_t v1) {
-  b->n[y] = 1;
-  uint64_t * w = b->bit + (size_t)y * b->words + ((size_t)x >> 6);
-  const unsigned sh = (unsigned)x & 63u;
-  if (sh != 63u) {
-    *w |= (uint64_t)3 << sh;
-  } else {
-    w[0] |= (uint64_t)1 << 63;
-    w[1] |= 1u;
-  }
+  lean_note(b, y, x, x + 1);
   int32_t * a = b->a + (size_t)y * b->stride + (size_t)x;
   a[0] += v0;
   a[1] += v1;
@@ -112,15 +124,7 @@ static inline void lean_add2(Lean_Band * b, int y, int x, int32_t v0, int32_t v1
 
 /** Add the three sums to the cells from @p x of row @p y. */
 static inline void lean_add3(Lean_Band * b, int y, int x, int32_t v0, int32_t v1, int32_t v2) {
-  b->n[y] = 1;
-  uint64_t * w = b->bit + (size_t)y * b->words + ((size_t)x >> 6);
-  const unsigned sh = (unsigned)x & 63u;
-  if (sh <= 61u) {
-    *w |= (uint64_t)7 << sh;
-  } else {
-    w[0] |= (uint64_t)7 << sh;
-    w[1] |= (uint64_t)7 >> (64u - sh);
-  }
+  lean_note(b, y, x, x + 2);
   int32_t * a = b->a + (size_t)y * b->stride + (size_t)x;
   a[0] += v0;
   a[1] += v1;
@@ -214,6 +218,8 @@ static inline __attribute__((always_inline)) void lean_row(Lean_Band * b, int y,
   const double scale = (double)ds / (128.0 * (double)(xb - xa));
   const double half = ds < 0 ? -0.5 : 0.5; /* the cast truncates toward zero: a half of the sum's sign rounds it to the nearest */
   int32_t prev = 0;
+  lean_note(b, y, xai, xbi);
+  int32_t * const row = b->a + (size_t)y * b->stride;
   for (int k = xai; k < xbi; k++) {
     const int u = (k + 1) << 6;
     const int p = xa > (k << 6) ? xa : (k << 6);
@@ -222,10 +228,10 @@ static inline __attribute__((always_inline)) void lean_row(Lean_Band * b, int y,
     const int64_t left = (int64_t)(p - xa) * 128;
     const int64_t inside = (int64_t)(q - p) * (2 * (int64_t)u - p - q);
     const int32_t cum = (int32_t)(lean_dbl(left + inside) * scale + half);
-    lean_add(b, y, k, cum - prev);
+    row[k] += cum - prev;
     prev = cum;
   }
-  lean_add(b, y, xbi, ds - prev);
+  row[xbi] += ds - prev;
 }
 
 /**
@@ -292,12 +298,10 @@ static void lean_edge(Lean_Band * b, int top, int rows, int width, int64_t x0, i
     ya = yb;
     yb += 64;
     y++;
-    q0 += qs;
     r0 += rs;
-    if (r0 >= dd) {
-      r0 -= dd;
-      q0++;
-    }
+    const int64_t carry = r0 >= dd; /* (a data-dependent branch here is wrong about as often as not) */
+    r0 -= carry * dd;
+    q0 += qs + carry;
   }
 }
 
@@ -338,52 +342,80 @@ static inline __attribute__((always_inline)) void lean_fill(uint8_t * p, uint8_t
   }
 }
 
+/** The 16 sums from @p a (a line) that are not zero, a bit each. */
+static inline unsigned lean_nonzero(const int32_t * a) {
+#if defined(__SSE2__)
+  const __m128i zero = _mm_setzero_si128();
+  const __m128i c0 = _mm_cmpeq_epi32(_mm_load_si128((const __m128i *)(const void *)a), zero);
+  const __m128i c1 = _mm_cmpeq_epi32(_mm_load_si128((const __m128i *)(const void *)(a + 4)), zero);
+  const __m128i c2 = _mm_cmpeq_epi32(_mm_load_si128((const __m128i *)(const void *)(a + 8)), zero);
+  const __m128i c3 = _mm_cmpeq_epi32(_mm_load_si128((const __m128i *)(const void *)(a + 12)), zero);
+  const __m128i p = _mm_packs_epi16(_mm_packs_epi32(c0, c1), _mm_packs_epi32(c2, c3));
+  return ~(unsigned)_mm_movemask_epi8(p) & 0xffffu;
+#else
+  unsigned m = 0;
+  for (unsigned i = 0; i < 16u; i++) {
+    m |= (unsigned)(a[i] != 0) << i;
+  }
+  return m;
+#endif
+}
+
 /**
- * Sweep the band's rows: each noted cell and the run after it, handed to @p fn as runs of nonzero coverage.  A cell's run ends at
- * the next noted cell, so a cell is finished when the next one is found (its level is kept until then).
+ * Sweep the band's rows: each cell that holds a sum and the run after it, handed to @p fn as runs of nonzero coverage.  A cell's run ends at
+ * the next such cell, so a cell is finished when the next one is found (its level is kept until then).  (A cell whose sums cancelled holds
+ * zero and is not one: the level after it is the level before it.)
  */
 static void lean_sweep(Lean_Band * b, int rows, int width, int64_t x0, int64_t y0, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx) {
   for (int y = 0; y < rows; y++) {
-    if (!b->n[y]) {
+    uint64_t * blk = b->blk + (size_t)y * b->bwords;
+    size_t any = 0;
+    for (size_t w = 0; w < b->bwords; w++) {
+      any |= blk[w] != 0;
+    }
+    if (!any) {
       continue;
     }
-    b->n[y] = 0;
     int32_t * a = b->a + (size_t)y * b->stride;
-    uint64_t * bit = b->bit + (size_t)y * b->words;
     int32_t acc = 0;
     int from = -1;   /* the first column of the run open, or -1 */
-    int cell = -1;   /* the last noted cell inside the window, whose run is not yet written, or -1 */
+    int cell = -1;   /* the last cell inside the window, whose run is not yet written, or -1 */
     uint8_t level = 0;
-    for (size_t w = 0; w < b->words; w++) {
-      uint64_t v = bit[w];
-      if (!v) {
+    for (size_t w = 0; w < b->bwords; w++) {
+      uint64_t blocks = blk[w];
+      if (!blocks) {
         continue;
       }
-      bit[w] = 0;
+      blk[w] = 0;
       do {
-        const int x = (int)(w << 6) + __builtin_ctzll(v);
-        v &= v - 1u;
-        if (cell >= 0) {
-          const int end = x < width ? x : width;
-          if (level != 0) {
-            if (from < 0) {
-              from = cell;
+        const size_t base = ((w << 6) + (size_t)__builtin_ctzll(blocks)) << 4;
+        blocks &= blocks - 1u;
+        unsigned v = lean_nonzero(a + base);
+        while (v) {
+          const int x = (int)base + __builtin_ctz(v);
+          v &= v - 1u;
+          if (cell >= 0) {
+            const int end = x < width ? x : width;
+            if (level != 0) {
+              if (from < 0) {
+                from = cell;
+              }
+              lean_fill(line + (cell - from), level, (size_t)(end - cell));
+            } else if (from >= 0) {
+              fn(ctx, y0 + y, x0 + from, (size_t)(cell - from), line);
+              from = -1;
             }
-            lean_fill(line + (cell - from), level, (size_t)(end - cell));
-          } else if (from >= 0) {
-            fn(ctx, y0 + y, x0 + from, (size_t)(cell - from), line);
-            from = -1;
+          }
+          acc += a[x];
+          a[x] = 0;
+          if (x < width) {
+            cell = x;
+            level = lean_level(acc, b->even_odd);
+          } else {
+            cell = -1;
           }
         }
-        acc += a[x];
-        a[x] = 0;
-        if (x < width) {
-          cell = x;
-          level = lean_level(acc, b->even_odd);
-        } else {
-          cell = -1;
-        }
-      } while (v);
+      } while (blocks);
     }
     if (cell >= 0) {
       if (level != 0) {
