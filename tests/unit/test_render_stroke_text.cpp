@@ -225,7 +225,7 @@ TEST(RenderStrokeText, ThePaintIsSampledInTheRunsSpaceSoOneGradientSpansTheRunAn
   t.s.held.push_back(gr);
   GSHSCENE_Paint paint{};
   paint.kind = GSHSCENE_PAINT_GRADIENT;
-  paint.gradient = gr;
+  paint.resource = gr;
   paint.rgba[3] = 1.0;
   Params p = pen(2.5, GSHGEOM_STROKE_JOIN_ROUND, GSHGEOM_STROKE_CAP_ROUND);
   GSHGEOM_Map m = translation(0.25, 0.5);
@@ -540,7 +540,7 @@ TEST(RenderStrokeText, CallerMemoryAllocatesNothingReadsNoEntryAndItsWorkspaceIs
   t.s.held.push_back(gr);
   GSHSCENE_Paint paint{};
   paint.kind = GSHSCENE_PAINT_GRADIENT;
-  paint.gradient = gr;
+  paint.resource = gr;
   paint.rgba[3] = 1.0;
   for (int aligned = 0; aligned < 2; aligned++) {
     Params p = pen(2.5, GSHGEOM_STROKE_JOIN_MITER, GSHGEOM_STROKE_CAP_SQUARE);

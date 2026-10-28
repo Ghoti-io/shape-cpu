@@ -552,7 +552,7 @@ static inline GSHSCENE_Paint rf_gradient_paint(const GSHSCENE_Resource * g, doub
   GSHSCENE_Paint p;
   memset(&p, 0, sizeof p);
   p.kind = GSHSCENE_PAINT_GRADIENT;
-  p.gradient = g;
+  p.resource = g;
   p.rgba[3] = alpha;
   return p;
 }

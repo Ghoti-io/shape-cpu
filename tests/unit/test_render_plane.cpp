@@ -187,7 +187,7 @@ TEST(RenderPlane, AGradientIsSampledAsUnderAnyFillAndTheMapMovesOnlyThePaint) {
   s.held.push_back(grad);
   GSHSCENE_Paint paint{};
   paint.kind = GSHSCENE_PAINT_GRADIENT;
-  paint.gradient = grad;
+  paint.resource = grad;
   paint.rgba[3] = 0.75;
   GSHGEOM_Map move;
   gshgeom_map_translate(2, 4.0, 0.0, 0.0, &move);

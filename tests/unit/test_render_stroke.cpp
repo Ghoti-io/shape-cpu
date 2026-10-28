@@ -252,7 +252,7 @@ TEST(RenderStroke, ASingularChainAndAZeroWidthAndADegenerateGradientDrawNothingW
         s.held.push_back(gradient);
         paint = GSHSCENE_Paint{};
         paint.kind = GSHSCENE_PAINT_GRADIENT;
-        paint.gradient = gradient;
+        paint.resource = gradient;
         paint.rgba[3] = 1.0;
         want = GSHSCENE_REASON_GRADIENT_DEGENERATE;
         break;

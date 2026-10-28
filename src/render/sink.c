@@ -255,7 +255,7 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
     GSHSCENE_Gradient gradient;
     if ((item->kind == GSHSCENE_ITEM_FILL || item->kind == GSHSCENE_ITEM_STROKE) &&
         item->paint.kind == GSHSCENE_PAINT_GRADIENT &&
-        gshscene_resource_gradient(item->paint.gradient, &gradient) == GSHSCENE_OK) {
+        gshscene_resource_gradient(item->paint.resource, &gradient) == GSHSCENE_OK) {
       ok = ok && gcu_safe_add_size(*gradients, 1u, gradients) && gcu_safe_add_size(*stops, gradient.stop_count, stops);
       for (size_t k = 0; k < gradient.stop_count && gradient.stops; k++) {
         *wide = *wide || out_of_range(&gradient.stops[k].color);
@@ -918,10 +918,10 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
   }
   GSHSCENE_Gradient g;
   const Resolved * e = NULL;
-  if (gshscene_resource_gradient(item->paint.gradient, &g) != GSHSCENE_OK) {
+  if (gshscene_resource_gradient(item->paint.resource, &g) != GSHSCENE_OK) {
     return GSHSCENE_ERR_INTERNAL;
   }
-  GSHSCENE_Result r = resolved_of(run, item->paint.gradient, &g, &e);
+  GSHSCENE_Result r = resolved_of(run, item->paint.resource, &g, &e);
   if (r != GSHSCENE_OK) {
     return r;
   }
@@ -943,7 +943,7 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
     /* The fast fill coverage takes the color from a table of the line (made once for the paint, and kept for the next). */
     for (size_t k = 0; k < TABLE_SLOTS && !p->table; k++) {
       const Table_Key * key = &run->table_key[k];
-      if (key->used && key->id == gshscene_resource_id(item->paint.gradient) && key->alpha == item->paint.rgba[3] && key->bytes == frame->bytes &&
+      if (key->used && key->id == gshscene_resource_id(item->paint.resource) && key->alpha == item->paint.rgba[3] && key->bytes == frame->bytes &&
           key->space.primaries == frame->space.primaries && key->space.transfer == frame->space.transfer &&
           key->space.gamma == frame->space.gamma) {
         p->table = run->tables + k * (GSHCPU_RENDER_GRADIENT_TABLE + 1u) * 4u;
@@ -953,7 +953,7 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
       size_t k = run->table_next++ % TABLE_SLOTS;
       Table_Key * key = &run->table_key[k];
       key->used = 1;
-      key->id = gshscene_resource_id(item->paint.gradient);
+      key->id = gshscene_resource_id(item->paint.resource);
       key->alpha = item->paint.rgba[3];
       key->bytes = frame->bytes;
       key->space = frame->space;

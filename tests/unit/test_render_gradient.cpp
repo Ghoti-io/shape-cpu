@@ -119,7 +119,7 @@ double rel(double got, double want) {
 GSHSCENE_Paint gradient_paint(const GSHSCENE_Resource * g, double alpha) {
   GSHSCENE_Paint p{};
   p.kind = GSHSCENE_PAINT_GRADIENT;
-  p.gradient = g;
+  p.resource = g;
   p.rgba[3] = alpha;
   return p;
 }

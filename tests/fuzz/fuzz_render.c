@@ -492,7 +492,7 @@ static void paint_of(Input * in, World * w, GSHSCENE_Paint * paint, const GSHSCE
     if (g) {
       paint->kind = GSHSCENE_PAINT_GRADIENT;
       paint->rgba[0] = paint->rgba[1] = paint->rgba[2] = 0.0;
-      paint->gradient = g;
+      paint->resource = g;
       *held = g;
       w->gradients++;
     }
