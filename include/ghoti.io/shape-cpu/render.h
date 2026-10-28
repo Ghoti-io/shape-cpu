@@ -47,12 +47,14 @@
  * is drawn through its face's provider by shape-scene's route, glyph.h, the fast
  * tier wherever the route returns it); every gradient kind and `GRADIENT_SPACES`
  * (color-paint story P2: linear, radial and sweep, each in its stated
- * interpolation space); `STROKE_EXPAND` and no stroke feature native (SC1); no `THREAD_AFFINE` (what it holds
+ * interpolation space); every image filter, edge mode and format and `IMAGE_FILTER_SPACES` (masks-images-patterns story I3, the
+ * Images section below); `STROKE_EXPAND` and no stroke feature native (SC1); no `THREAD_AFFINE` (what it holds
  * across renders, the cache of SC7, is guarded by one lock, so renders on distinct surfaces may run at once) and no
  * `PREPARE`.  Cancel is `BETWEEN_UNITS` (each unit
  * of the list's expansion); the work between two checks is counted in
- * `"cells+points+pixels"` and its bound (SC11) is, for an aligned stroke,
- * `3 max_points + max_deposits + 2 max_bytes + elements * GSHGEOM_STROKE_MAX_DEPTH` of the sink's ::GSHCPU_Limits (each
+ * `"cells+points+pixels+texels"` and its bound (SC11) is, for an aligned stroke,
+ * `3 max_points + max_deposits + 2 max_bytes + elements * GSHGEOM_STROKE_MAX_DEPTH` plus the exact step's bound and
+ * `max_image_work` of the sink's ::GSHCPU_Limits (each
  * at its default when zero; `max_points` defaults to `shape-geometry`'s; `elements` is the most path elements a
  * resource may hold, shape-scene's `max_resource_elements` of the limits the sink was created with).
  *
@@ -485,6 +487,82 @@
  *   render, which allows a difference of one level at an exact tie and none anywhere else.
  *
 
+ * ### Images (masks-images-patterns story I3, IC1 to IC14; shape-scene's IP1 to IP18)
+ *
+ * An image paint is drawn on a fill, on a stroke (the paint sampled in the item's local space, with the stroke's coverage) and
+ * inside a picture.  This sink is the reference the others are measured against (AD-18): the sampling definition below is
+ * normative for it, and a GPU sink's tolerance, a writer's `APPROXIMATED` and a front end's filter mapping rest on what it does.
+ *
+ * - **IC1 What it claims.**  Every filter, every edge mode, every image format (gray, RGB and RGBA at 8, 12 and 16 bits and as
+ *   floats, both alpha forms, and the alpha-only mark) and ::GSHSCENE_CAP_IMAGE_FILTER_SPACES, so an image paint never receives
+ *   the reasons `IMAGE`, `IMAGE_FILTER` or `IMAGE_FILTER_SPACE`.  What it can refuse while drawing is `RESOURCE_LIMIT` (IC9).  The
+ *   work measure is `cells+points+pixels+texels`, and the declared cancel bound includes `max_image_work`: cancellation is
+ *   between units, and one image item can take that long.
+ * - **IC2 The sample, and the region.**  Pixel `(x, y)` takes its value at the device point `q = (x + 1/2, y + 1/2)` for `NEAREST`,
+ *   `LINEAR` and `CUBIC`, and over the device square `[x, x + 1] x [y, y + 1]` for `AREA`, weighted by its coverage and its clips
+ *   as a solid fill's.  One sample or one region a pixel: a damaged render equals the whole render inside the damage.
+ * - **IC3 The chain, the inverse, the filter.**  The chain `T I_1 .. I_k M G` (the paint's map the leaf) is composed once a fill by
+ *   `gshgeom_map_compose_chain` and inverted once as a gradient's is (the 2x2 part scaled by the power of two of its largest entry,
+ *   the determinant an exact sum of exact products rounded once): `p = L^-1 (q - t)`.  The filter is chosen once a fill, by
+ *   `gshgeom_map_stretches_every_direction` of the composed map: `magnify` where it returns true, `minify` otherwise (an exactly
+ *   unit scale minifies).  A composed map whose inverse is not finite or whose determinant rounds to zero is the sink's resource
+ *   limit.  A fill that `gshscene_paint_notice` names (IP11) is skipped.
+ * - **IC4 Decode.**  A sample of `n` bits is `v / (2^n - 1)` by one correctly rounded division, a float is the float widened and
+ *   saturated to `[-2^64, 2^64]`, a straight texel is multiplied by its alpha (one product a channel) and a premultiplied one
+ *   taken as stored: `gshscene_image_decode`'s values bit for bit, read in place by rows and never copied.  Where the filter space
+ *   differs from the image's (IP5) each texel is converted by N2 and N3 (un-premultiplied, decoded, multiplied by the matrix,
+ *   encoded, saturated, premultiplied again), and the filtered value is converted to the layer's space the same way.
+ * - **IC5 Edges.**  A tap is an integer: `floor(u - 1/2)` of a double inside the sampling domain.  `PAD` clamps it into the window,
+ *   `REPEAT` takes the normalized remainder (`((k - lo) % n + n) % n`, never C's signed `%` alone), `REFLECT` the same with `2n` and
+ *   the edge texel repeated, `NONE` is an outside test.  No double is reduced modulo a period, and no texel outside the window is
+ *   read.
+ * - **IC6 The point filters.**  For each channel of the premultiplied value, no fused multiply-add, one rounding an operation.
+ *   `NEAREST` is the texel `floor`.  `LINEAR`: `s = u - 1/2`, `i = floor s`, `f = s - i`, weights `(1 - f, f)`; each of the two
+ *   tap rows `r_j = wx0 P(i, j) + wx1 P(i + 1, j)`, then `wy0 r_0 + wy1 r_1`.  `CUBIC`: the four weights of Mitchell-Netravali
+ *   (`B = C = 1/3`) by Horner's rule, `((21 d - 36) d) d + 16` and `((-7 d + 36) d - 60) d + 32` over 18, `d = f + 1, f, 1 - f,
+ *   2 - f`; each tap row the sum of its four products left to right, then the rows' weighted sum; the result is clamped
+ *   componentwise to the least and greatest of the sixteen taps' same component.
+ * - **IC7 `AREA`.**  The exact mean of the extended image over the preimage of the pixel square, a parallelogram with a corner
+ *   `L^-1 (q_00 - t)` and edges `L^-1 (1, 0)` and `L^-1 (0, 1)`, the same for every pixel.  It is found a row of cells at a time:
+ *   the cells the parallelogram covers entirely in a row form one run, whose texels are summed as a run (the cells past a padded
+ *   window as a count of the edge texel, the whole periods of a repeating axis as that many sums of the window's row, the rest one
+ *   by one), and only the cells its boundary crosses are clipped (the area of the intersection of two convex polygons, by
+ *   Sutherland-Hodgman, in a fixed order).  A parallelogram with axis-aligned edges takes a cell's weight as the product of its
+ *   overlap in x and its overlap in y, and a run of cells it crosses entirely by its row's overlap once.  Sums are compensated
+ *   (Neumaier) and in a fixed order, the row of the window is summed pairwise over blocks of 1024 texels, and the mean is divided
+ *   by the exact area of the parallelogram once, at the end; so the mean is within `2^-40` relative of the exact mean and the same
+ *   on every target.  A constant image gives that constant within the tolerance; a unit-aligned unit square gives the texel exactly.
+ *   The sum of a row of the window is kept for the pixels that follow in a table of 32 rows on the stack, direct-mapped on the
+ *   row: a hit is the same doubles as a miss, and the work a pixel is counted at is the same either way.
+ * - **IC8 To the layer, and the write.**  The filtered value taken to the layer's space is multiplied by the paint's alpha
+ *   multiplier on all four components and applied with `SRC_OVER` weighted by the coverage and the clips (a pixel of `m8 = 0` is
+ *   not touched); one rounding at the write, no dithering.  For an alpha-only image the filter acts on the one number `a'` and the
+ *   source is the tint's straight color (resolved once a fill, converted once to the layer's space) premultiplied by `m a_t a'`.
+ * - **IC9 Limits.**  `max_area_pixel_work` bounds the texels and cells one pixel of `AREA` visits and `max_image_work` the visits
+ *   of one item over what the whole render draws of it, `UINT64_MAX` no cap.  Both bounds are functions of the composed map, the
+ *   window and the rectangle alone, met before any pixel is drawn, so a damage, the caller's memory and the thread change nothing
+ *   about which items are refused.  With `cx` and `cy` the columns and rows of cells a preimage can touch (`ceil` of its extent in
+ *   each axis, plus two), `n` the window's width and `run = min(cx, 3 n)`, a pixel visits at most
+ *   `cy run + 4 (cx + cy) + 8 cx + 2 cy + 8` (the rows' runs, the cells the boundary crosses, the rows that hold a vertex, and
+ *   the rows' own steps); the item's bound is that times the pixels of its whole-render rectangle.  A preimage wider than `2^33`
+ *   texels is past the domain.  Past a bound, past the sampling domain (the whole-render rectangle maps outside `[-2^32, 2^32]`
+ *   texels on an axis) or under a map whose inverse fails, the item is refused while drawing: `RESOURCE_LIMIT`, its block skipped,
+ *   strict stopping with the finished prefix.  `NEAREST`, `LINEAR` and `CUBIC` take at most sixteen taps a pixel and need no limit.
+ *   Each limit passes exactly at its bound and refuses one past it (a test asserts them by the bound).
+ * - **IC10 Tiers (AD-13).**  Each is the general tier's pixels by construction, is counted, and can be forced off by a test:
+ *   *FT-1* an integer translation with a unit linear part is a copy of the texel under the pixel, for `NEAREST`, `LINEAR` and
+ *   `AREA` (`CUBIC` is not one: its weights at a texel's center are 1/18, 8/9 and 1/18); *FT-2* a map with one nonzero entry in each
+ *   row and column (a scale, a mirror, a quarter turn) finds the taps of the coordinate that depends on the pixel's row once for
+ *   the row; *FT-3* an 8-bit sample is decoded through a table of the doubles the division gives.  `AREA` has no separable tier.
+ * - **IC11 Memory.**  An image fill needs nothing in the block beyond a fill's: the image is read in place, and the sampler, the
+ *   decode table (2 KiB) and the row-sum table live in the painter's frame.  Nothing is allocated for an image, with the caller's
+ *   memory or without.  A list that holds an image paint is composited in double layers, never byte layers, since an image's value
+ *   is no one byte color.
+ * - **IC13 Tolerance.**  The sampling primitives equal the image oracle's vectors (shape-scene's installed `image_vectors.h`)
+ *   exactly where the oracle says they are exact and otherwise within the tolerance each vector states; a second engine that clips
+ *   every cell agrees with `AREA`.
+ * - **IC14 Hash and dump.**  `gshcpu_render_hash` and `gshcpu_render_dump` are unchanged.
+ *
  * ### Memory (S9)
  *
  * A render takes one block: the layers (32 bytes a pixel of the region for the
@@ -514,7 +592,7 @@
  * `max_bytes` pixels in all, and lies within ::GSHCPU_MAX_DIMENSION_CEILING
  * pixels of the origin; past either it is ::GSHSCENE_ERR_LIMIT before anything is
  * drawn.  `max_cache_bytes` bounds the stroke cache (SC7); `max_exact_fragments` the pieces of a stroke part in one
- * pixel (UC9).
+ * pixel (UC9); `max_area_pixel_work` and `max_image_work` the visits of the `AREA` filter of an image paint (IC9).
  *
  * ### Hash and dump of a render (AD-21)
  *

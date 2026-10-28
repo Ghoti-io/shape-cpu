@@ -103,7 +103,8 @@ enum {
   OUT_GRADIENT_DRAWN, OUT_GRADIENT_NOTICE, OUT_GRADIENT_LIMIT, OUT_COLOR_LIMIT, OUT_COLOR_AT_BOUND, OUT_BLEND_DRAWN,
   OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_STROKE_RUN_DRAWN, OUT_STROKE_DRAWN, OUT_STROKE_ALIGNED, OUT_STROKE_CACHED,
   OUT_STROKE_SPARSE, OUT_STROKE_NOTICE, OUT_STROKE_EXACT, OUT_STROKE_RUN_TWIN, OUT_STROKE_DUAL,
-  OUT_BUDGET_REFUSED, OUT_BUDGET_SAME, OUT_COUNT
+  OUT_BUDGET_REFUSED, OUT_BUDGET_SAME, OUT_IMAGE_DRAWN, OUT_IMAGE_AREA, OUT_IMAGE_LIMIT, OUT_IMAGE_NOTICE, OUT_IMAGE_TINT,
+  OUT_IMAGE_STROKE, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -120,7 +121,10 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a stroke with cells made exact (UC3)", "a stroked run equal to the stroke of its path (ST11)",
     "a stroke drawn the same by the earlier exact step (the dual render)",
     "an item refused by a tightened crossings budget (UC19)",
-    "a render under a tightened budget or piece cap that refused nothing, the same bytes as the default limits"};
+    "a render under a tightened budget or piece cap that refused nothing, the same bytes as the default limits",
+    "a render with an image paint drawn (IC1)", "an image drawn with the AREA filter (IC7)",
+    "an image item refused for the sink's work or domain limit (IC9)", "an image fill that draws nothing (a notice)",
+    "an alpha-only image drawn with a tint (IP9)", "a stroke painted with an image"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -224,6 +228,10 @@ static void on_progress(void * ctx, const GSHSCENE_Job * job, size_t processed) 
 typedef struct World {
   GSHSCENE_Store * store;            /* where a gradient paint is interned */
   size_t gradients;                  /* gradient fills recorded */
+  size_t images;                     /* fills and strokes recorded with an image paint (IC1) */
+  size_t image_areas;                /* ... whose paint can use the AREA filter */
+  size_t image_tints;                /* ... of an alpha-only image */
+  size_t image_strokes;              /* ... strokes */
   size_t at_bound;                   /* fills recorded with a component at N1's bound, in a gamma space */
   size_t blends;                     /* groups recorded with a blend mode (color-paint story P3) */
   const GSHSCENE_Resource * paths[MAX_PATHS];
@@ -469,7 +477,158 @@ static const GSHSCENE_Resource * gradient_of(Input * in, GSHSCENE_Store * store)
   return res == GSHSCENE_OK ? r : NULL;
 }
 
-/** A fill's paint; a gradient (held in @p held, to be released after the fill) when the bytes ask for one. */
+/**
+ * An image paint from the bytes (masks-images-patterns story I3), or NULL where intern refuses it.  Bytes: the size (1 to 8 each
+ * way), the format (layout, sample type and depth, alpha form, the image's space), the samples, then the window (whole, or a
+ * sub-rectangle), the extend modes and the filters, the filter space, the map (a scale up or down, a turn, a shear, a singular
+ * map, one far past the domain) and its translation, and for an alpha-only image the tint.  The caller holds the reference.
+ */
+static const GSHSCENE_Resource * image_paint_of(Input * in, World * w) {
+  const uint8_t dims = next(in);
+  const uint8_t fmt = next(in);
+  const uint32_t iw = 1u + (dims & 7u);
+  const uint32_t ih = 1u + ((dims >> 3) & 7u);
+  static const unsigned layouts[4] = {1, 3, 4, 1};
+  const unsigned layout = layouts[fmt & 3u];
+  const int alpha_only = (fmt & 3u) == 3u;
+  static const unsigned bit_depths[4] = {8, 12, 16, 32};
+  const unsigned bits = bit_depths[(fmt >> 2) & 3u];
+  GIMG_Pixel_Format format;
+  memset(&format, 0, sizeof format);
+  format.channel_model = layout == 1 ? GIMG_CHANNEL_GRAY : layout == 3 ? GIMG_CHANNEL_RGB : GIMG_CHANNEL_RGBA;
+  format.channel_type = bits == 32 ? GIMG_CHANNEL_FLOAT : GIMG_CHANNEL_UNORM;
+  format.layout = GIMG_LAYOUT_INTERLEAVED;
+  format.channel_count = (uint8_t)layout;
+  for (unsigned i = 0; i < layout; i++) {
+    format.bits_per_channel[i] = (uint8_t)bits;
+  }
+  format.alignment = 1;
+  format.alpha_form = (uint8_t)(layout == 4 ? ((fmt >> 4) & 1 ? GIMG_ALPHA_PREMULTIPLIED : GIMG_ALPHA_STRAIGHT) : GIMG_ALPHA_NONE);
+  GIMG_Raster * raster = NULL;
+  if (gimg_raster_create(iw, ih, &format, GIMG_RASTER_OWNED, NULL, 0, &raster) != GIMG_OK) {
+    return NULL;
+  }
+  unsigned char * base = (unsigned char *)gimg_raster_pixels(raster);
+  const size_t stride = gimg_raster_stride_bytes(raster);
+  const size_t size = bits <= 8 ? 1 : bits <= 16 ? 2 : 4;
+  for (uint32_t y = 0; y < ih; y++) {
+    for (uint32_t x = 0; x < iw; x++) {
+      for (unsigned k = 0; k < layout; k++) {
+        const uint8_t b = next(in);
+        unsigned char * at = base + (size_t)y * stride + ((size_t)x * layout + k) * size;
+        if (bits == 32) {
+          const int is_alpha = (layout == 4 && k == 3) || alpha_only;
+          const float f = is_alpha ? (float)b / 255.0f : (float)((int)(b % 64) - 8) / 16.0f; /* a float color leaves [0, 1]; alpha stays in it (IM3) */
+          memcpy(at, &f, sizeof f);
+        } else {
+          const uint32_t top = (1u << bits) - 1u;
+          const uint32_t q = (uint32_t)(((uint64_t)b * top + 127u) / 255u);
+          if (size == 1) {
+            *at = (unsigned char)q;
+          } else {
+            const uint16_t u = (uint16_t)q;
+            memcpy(at, &u, sizeof u);
+          }
+        }
+      }
+    }
+  }
+  GSHSCENE_Image_Params params;
+  memset(&params, 0, sizeof params);
+  params.space = gradient_space(alpha_only ? 0 : fmt >> 5); /* an alpha-only image has no color, so no space (IM5) */
+  params.flags = alpha_only ? GSHSCENE_IMAGE_ALPHA_ONLY : 0u;
+  const GSHSCENE_Resource * image = NULL;
+  GSHSCENE_Result ir = gshscene_store_intern_image(w->store, raster, &params, &image);
+  gimg_raster_destroy(raster);
+  CHECK(ir == GSHSCENE_OK || ir == GSHSCENE_ERR_OOM || ir == GSHSCENE_ERR_LIMIT);
+  const uint8_t win = next(in);
+  const uint8_t modes = next(in);
+  const uint8_t space_byte = next(in);
+  const uint8_t map_kind = next(in);
+  const uint8_t tx = next(in);
+  const uint8_t ty = next(in);
+  const uint8_t tint_byte = next(in);
+  if (!image) {
+    return NULL;
+  }
+  GSHSCENE_Image_Paint ip;
+  gshscene_image_paint_init(&ip);
+  ip.image = image;
+  if (win % 3 == 1) {
+    ip.window[0] = win % iw;
+    ip.window[1] = (win >> 2) % ih;
+    ip.window[2] = ip.window[0] + 1u + (win >> 4) % (iw - ip.window[0]);
+    ip.window[3] = ip.window[1] + 1u + (win >> 5) % (ih - ip.window[1]);
+  }
+  ip.extend_x = modes & 3u;
+  ip.extend_y = (modes >> 2) & 3u;
+  ip.magnify = (modes >> 4) & 3u;
+  ip.minify = (modes >> 6) & 3u;
+  ip.filter_space = gradient_space(space_byte);
+  const double move[2] = {((double)tx - 64.0) / 4.0, ((double)ty - 64.0) / 4.0};
+  double m[4] = {1.0, 0.0, 0.0, 1.0};
+  switch (map_kind % 8u) {
+    case 1:
+      m[0] = m[3] = 4.5;
+      break;
+    case 2:
+      m[0] = m[3] = 0.37;
+      break;
+    case 3:
+      m[0] = 0.69282032302755092;
+      m[1] = -0.4;
+      m[2] = 0.4;
+      m[3] = 0.69282032302755092;
+      break;
+    case 4:
+      m[3] = 0.0; /* singular: draws nothing (IP11) */
+      break;
+    case 5:
+      m[0] = m[3] = 0x1p-60; /* every pixel far past the domain: refused while drawing (IC9) */
+      break;
+    case 6:
+      m[0] = 7.0;
+      m[3] = 0.3;
+      break;
+    case 7:
+      m[0] = 0.0;
+      m[1] = -2.0;
+      m[2] = 2.0;
+      m[3] = 0.0;
+      break;
+    default:
+      break;
+  }
+  GSHSCENE_Paint tint;
+  memset(&tint, 0, sizeof tint);
+  if (alpha_only) {
+    tint.kind = tint_byte % 3u == 0 ? GSHSCENE_PAINT_SOLID : tint_byte % 3u == 1 ? GSHSCENE_PAINT_FOREGROUND : GSHSCENE_PAINT_PALETTE;
+    tint.rgba[0] = 0.9;
+    tint.rgba[1] = 0.3;
+    tint.rgba[2] = 0.6;
+    tint.rgba[3] = (double)(tint_byte % 5u + 1u) / 5.0;
+    if (tint.kind != GSHSCENE_PAINT_SOLID) {
+      tint.rgba[0] = tint.rgba[1] = tint.rgba[2] = 0.0;
+      tint.entry = tint.kind == GSHSCENE_PAINT_PALETTE ? (tint_byte >> 4) & 1u : 0u; /* a foreground paint's entry is zero */
+    }
+    ip.tint = &tint;
+  }
+  const GSHSCENE_Resource * paint = NULL;
+  const GSHSCENE_Result pr = gshgeom_map_from_matrix(2, m, move, &ip.map) == GSHGEOM_OK
+      ? gshscene_store_intern_image_paint(w->store, &ip, &paint)
+      : GSHSCENE_ERR_INVALID;
+  gshscene_resource_release(image);
+  CHECK(pr == GSHSCENE_OK || pr == GSHSCENE_ERR_OOM || pr == GSHSCENE_ERR_LIMIT);
+  if (pr != GSHSCENE_OK) {
+    return NULL;
+  }
+  w->images++;
+  w->image_areas += ip.magnify == GSHSCENE_IMAGE_FILTER_AREA || ip.minify == GSHSCENE_IMAGE_FILTER_AREA;
+  w->image_tints += alpha_only;
+  return paint;
+}
+
+/** A fill's paint; a gradient or an image paint (held in @p held, to be released after the fill) when the bytes ask for one. */
 static void paint_of(Input * in, World * w, GSHSCENE_Paint * paint, const GSHSCENE_Resource ** held) {
   memset(paint, 0, sizeof *paint);
   paint->kind = GSHSCENE_PAINT_SOLID;
@@ -487,6 +646,15 @@ static void paint_of(Input * in, World * w, GSHSCENE_Paint * paint, const GSHSCE
     paint->space.primaries = GCOL_PRIMARIES_SRGB;
     paint->space.transfer = GCOL_TRANSFER_GAMMA;
     paint->space.gamma = (b & 8) ? 10.0 : 0.1;
+  } else if (b >= 0xF0 && (b & 3) == 3 && w->store) {
+    const GSHSCENE_Resource * ip = image_paint_of(in, w);
+    if (ip) {
+      paint->kind = GSHSCENE_PAINT_IMAGE;
+      paint->rgba[0] = paint->rgba[1] = paint->rgba[2] = 0.0;
+      paint->rgba[3] = (double)(b % 5) / 4.0 + 0.0;
+      paint->resource = ip;
+      *held = ip;
+    }
   } else if (b % 4 == 1 && w->store) {
     const GSHSCENE_Resource * g = gradient_of(in, w->store);
     if (g) {
@@ -558,6 +726,7 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
       w->strokes += (rule & 6) == 6 && fr == GSHSCENE_OK;
       w->run_strokes += (rule & 6) == 6 && fr == GSHSCENE_OK && gshscene_resource_kind(r) == GSHSCENE_RESOURCE_GLYPH_RUN;
       w->aligned += (rule & 6) == 6 && fr == GSHSCENE_OK && w->aligned_style;
+      w->image_strokes += (rule & 6) == 6 && fr == GSHSCENE_OK && paint.kind == GSHSCENE_PAINT_IMAGE;
       if (past) {
         CHECK(fr == GSHSCENE_ERR_LIMIT || fr == GSHSCENE_ERR_OOM); /* N1: never recorded */
         outcomes[OUT_COLOR_LIMIT] += fr == GSHSCENE_ERR_LIMIT;
@@ -837,6 +1006,11 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
       limits.max_exact_crossings = crossings_budget(cancel_byte >> 3);
       break;
     default:
+      if (limit_byte >= 0x80) {
+        /* IC9: the work of an image's AREA filter, a pixel's and an item's, from a few visits to a few thousand. */
+        limits.max_area_pixel_work = 1 + (limit_byte >> 3) % 64 * 3;
+        limits.max_image_work = 1 + (limit_byte >> 5) % 4 * 1500;
+      }
       break;
   }
   const int tightened = (limit_byte & 7) >= 5; /* a limit of the exact step (UC9, UC19) is lowered */
@@ -992,6 +1166,10 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   }
   outcomes[OUT_REFUSED_WHILE_DRAWING] += summary.by_class[GSHSCENE_ENTRY_REFUSED] > 0 && r != GSHSCENE_ERR_OOM;
   outcomes[OUT_GRADIENT_DRAWN] += world.gradients > 0 && r == GSHSCENE_OK;
+  outcomes[OUT_IMAGE_DRAWN] += world.images > 0 && r == GSHSCENE_OK;
+  outcomes[OUT_IMAGE_AREA] += world.image_areas > 0 && r == GSHSCENE_OK;
+  outcomes[OUT_IMAGE_TINT] += world.image_tints > 0 && r == GSHSCENE_OK;
+  outcomes[OUT_IMAGE_STROKE] += world.image_strokes > 0 && r == GSHSCENE_OK;
   outcomes[OUT_COLOR_AT_BOUND] += world.at_bound > 0 && r == GSHSCENE_OK;
   outcomes[OUT_BLEND_DRAWN] += world.blends > 0 && r == GSHSCENE_OK;
   unsigned limit_refused = 0; /* items refused for a resource limit of the sink */
@@ -1009,6 +1187,14 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     CHECK(e.reason != GSHSCENE_REASON_ITEM_KIND && e.reason != GSHSCENE_REASON_STROKE_STYLE);
     /* This sink strokes runs (ST8): the plan never refuses a stroke for its centerline. */
     CHECK(e.reason != GSHSCENE_REASON_STROKE_CENTERLINE);
+    if (world.images > 0 && e.chain_count > 0) {
+      const GSHSCENE_Item * item = NULL;
+      if (gshscene_list_item(list, e.chain[0], &item) == GSHSCENE_OK && (item->kind == GSHSCENE_ITEM_FILL || item->kind == GSHSCENE_ITEM_STROKE) &&
+          item->paint.kind == GSHSCENE_PAINT_IMAGE) {
+        outcomes[OUT_IMAGE_LIMIT] += e.reason == GSHSCENE_REASON_RESOURCE_LIMIT;
+        outcomes[OUT_IMAGE_NOTICE] += e.entry_class == GSHSCENE_ENTRY_NOTICE;
+      }
+    }
     if (e.entry_class == GSHSCENE_ENTRY_NOTICE && world.strokes > 0) {
       const GSHSCENE_Item * item = NULL;
       if (gshscene_list_item(list, e.chain[0], &item) == GSHSCENE_OK && item->kind == GSHSCENE_ITEM_STROKE) {

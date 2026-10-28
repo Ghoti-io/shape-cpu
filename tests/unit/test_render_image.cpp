@@ -39,6 +39,10 @@
 
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <map>
+#include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -402,6 +406,7 @@ TEST(RenderImageVectors, EveryAreaAgreesWithTheOracleWithinTheStatedTolerance) {
   std::printf("area vectors: %u regions, %zu exact (%zu bit for bit); worst error %.3g of its tolerance\n", imagevec::kAreaCount, exact,
       exact_equal, worst);
   EXPECT_GT(exact, 0u);
+  EXPECT_EQ(exact, exact_equal) << "a region the oracle calls exact is the sink's bit for bit";
 }
 
 namespace {
@@ -482,9 +487,19 @@ TEST(RenderImageArea, TheRowsAndRunsAgreeWithAnEveryCellClip) {
     }
     double got[4];
     double want[4];
+    // IC9: the bound of the map whose inverse has these edges is at least the visits of any parallelogram of them.
+    im.inv[0] = ea[0];
+    im.inv[2] = ea[1];
+    im.inv[1] = eb[0];
+    im.inv[3] = eb[1];
+    uint64_t bound = 0;
+    ASSERT_EQ(gshcpu_render_image_area_bound(&im, &bound), 1);
     im.visits = 0;
     gshcpu_render_image_region(&im, origin, ea, eb, got);
     const uint64_t visits = im.visits;
+    ASSERT_LE(visits, bound) << "trial " << trial << ": the bound is no bound; extend " << ex << "," << ey << " window "
+                             << im.x0 << "," << im.y0 << "," << im.x1 << "," << im.y1 << " ea " << ea[0] << "," << ea[1] << " eb "
+                             << eb[0] << "," << eb[1] << " origin " << origin[0] << "," << origin[1];
     naive_area(im, origin, ea, eb, want);
     ASSERT_TRUE(close(got, want, 1e-11)) << "trial " << trial << " extend " << ex << "," << ey << " window " << window[0] << ","
                                          << window[1] << "," << window[2] << "," << window[3];
@@ -675,6 +690,10 @@ TEST(RenderImageTiers, EachTierIsBitEqualToTheGeneralTierAndIsTaken) {
       {"quarter turn", rot90},
       {"rotated 30 degrees", rot30},
       {"sheared", matrix(2, 0.7, 0, 2, 0, 0)},
+      {"sheared the other way", matrix(2, 0, 0.7, 2, 0, 0)},
+      {"unit shear at an integer translation", matrix(1, 0.5, 0, 1, 3, 2)},
+      {"unit shear the other way", matrix(1, 0, 0.5, 1, 3, 2)},
+      {"integer in x, a fraction in y", matrix(1, 0, 0, 1, 3, 0.5)},
   };
   const ih::Fmt formats[] = {ih::fmt(4, false, 8, GIMG_ALPHA_STRAIGHT), ih::fmt(1, false, 8, GIMG_ALPHA_NONE),
       ih::fmt(3, true, 32, GIMG_ALPHA_NONE), ih::fmt(1, false, 8, GIMG_ALPHA_NONE, true)};
@@ -744,6 +763,9 @@ TEST(RenderImageTiers, EachTierIsBitEqualToTheGeneralTierAndIsTaken) {
             into.image_copy += counters.image_copy;
             into.image_separable += counters.image_separable;
             into.image_table += counters.image_table;
+            if (filter == GSHSCENE_IMAGE_FILTER_AREA) {
+              EXPECT_EQ(counters.image_separable, 0u) << "AREA has no separable tier: " << shape.name;
+            }
           }
           renders++;
           ASSERT_EQ(bytes[0], bytes[1]) << shape.name << " filter " << filter << " extend " << extend << " bits " << f.bits;
@@ -760,6 +782,101 @@ TEST(RenderImageTiers, EachTierIsBitEqualToTheGeneralTierAndIsTaken) {
   std::printf("image tiers: %zu renders, %llu fills; copy %llu, separable %llu, table %llu\n", renders,
       (unsigned long long)on_counts.images, (unsigned long long)on_counts.image_copy, (unsigned long long)on_counts.image_separable,
       (unsigned long long)on_counts.image_table);
+}
+
+
+// IC5: a window that starts at the origin is a window, not the whole image (all four zero is the whole): the taps at its edges are
+// the window's.
+TEST(RenderImageEdges, AWindowAtTheOriginIsNotTheWholeImage) {
+  Store s;
+  const ih::Fmt f = ih::fmt(1, false, 8, GIMG_ALPHA_NONE);
+  std::vector<uint32_t> samples;
+  for (uint32_t i = 0; i < 20; i++) {
+    samples.push_back(10 + 11 * i);
+  }
+  const GSHSCENE_Resource * image = ih::intern_image(s.store, 5, 4, f, samples);
+  ASSERT_NE(image, nullptr);
+  s.held.push_back(image);
+  const GSHSCENE_Color_Space own{};
+  GSHSCENE_Color_Space layer = srgb();
+  const uint32_t window[4] = {0, 0, 3, 2};
+  struct Case {
+    uint32_t ex, ey;
+    double u, v;
+    uint32_t texel_x, texel_y;
+  } cases[] = {
+      {GSHSCENE_IMAGE_EXTEND_PAD, GSHSCENE_IMAGE_EXTEND_PAD, 4.5, 3.5, 2, 1},
+      {GSHSCENE_IMAGE_EXTEND_REPEAT, GSHSCENE_IMAGE_EXTEND_REPEAT, 3.5, 2.5, 0, 0},
+      {GSHSCENE_IMAGE_EXTEND_REFLECT, GSHSCENE_IMAGE_EXTEND_REFLECT, 3.5, 2.5, 2, 1},
+  };
+  for (const Case & c : cases) {
+    GSHCPU_Image im;
+    ASSERT_EQ(gshcpu_render_image_open(&im, image, window, c.ex, c.ey, GSHSCENE_IMAGE_FILTER_NEAREST, &own, &layer, &layer), GSHCPU_OK);
+    double got[4];
+    gshcpu_render_image_point(&im, c.u, c.v, got);
+    double want[4];
+    ASSERT_EQ(gshscene_image_decode(image, c.texel_x, c.texel_y, want), GSHSCENE_OK);
+    EXPECT_TRUE(close(got, want, 0.0)) << "extend " << c.ex << "," << c.ey;
+  }
+}
+
+// IC7: a repeating axis sums its whole periods by the window's row, and the sums of rows are kept for the pixels after: a table of 32
+// rows holds none of a window 70 rows tall twice over, so a stale row would be served for another.
+TEST(RenderImageArea, TheRowSumsAreForTheRowAndNotItsSlot) {
+  Store s;
+  const ih::Fmt f = ih::fmt(1, false, 8, GIMG_ALPHA_NONE);
+  std::vector<uint32_t> samples;
+  for (uint32_t i = 0; i < 3u * 70u; i++) {
+    samples.push_back((i * 37u + 5u) % 256u);
+  }
+  const GSHSCENE_Resource * image = ih::intern_image(s.store, 3, 70, f, samples);
+  ASSERT_NE(image, nullptr);
+  s.held.push_back(image);
+  const uint32_t window[4] = {0, 0, 0, 0};
+  const GSHSCENE_Color_Space own{};
+  GSHSCENE_Color_Space layer = srgb();
+  for (uint32_t ey : {(uint32_t)GSHSCENE_IMAGE_EXTEND_PAD, (uint32_t)GSHSCENE_IMAGE_EXTEND_REPEAT}) {
+    GSHCPU_Image im;
+    ASSERT_EQ(gshcpu_render_image_open(&im, image, window, GSHSCENE_IMAGE_EXTEND_REPEAT, ey, GSHSCENE_IMAGE_FILTER_AREA, &own, &layer, &layer),
+        GSHCPU_OK);
+    const double origin[2] = {0.5, 0.25};
+    const double shapes[2][4] = {{60.0, 0.0, 0.0, 140.0}, {60.0, 5.0, -3.0, 138.0}};
+    for (const auto & e : shapes) {
+      const double ea[2] = {e[0], e[1]};
+      const double eb[2] = {e[2], e[3]};
+      double got[4];
+      double want[4];
+      gshcpu_render_image_region(&im, origin, ea, eb, got);
+      naive_area(im, origin, ea, eb, want);
+      EXPECT_TRUE(close(got, want, 1e-12)) << "extend y " << ey << " edges " << e[1] << "," << e[2];
+    }
+  }
+}
+
+// IC9: a preimage wider than the sampling domain has no bound; one as wide as the domain has.
+TEST(RenderImageLimits, APreimageWiderThanTheDomainHasNoBound) {
+  Store s;
+  const ih::Fmt f = ih::fmt(1, false, 8, GIMG_ALPHA_NONE);
+  const GSHSCENE_Resource * image = ih::intern_image(s.store, 2, 2, f, {1, 2, 3, 4});
+  ASSERT_NE(image, nullptr);
+  s.held.push_back(image);
+  const uint32_t window[4] = {0, 0, 0, 0};
+  const GSHSCENE_Color_Space own{};
+  GSHSCENE_Color_Space layer = srgb();
+  GSHCPU_Image im;
+  ASSERT_EQ(gshcpu_render_image_open(&im, image, window, 0, 0, GSHSCENE_IMAGE_FILTER_AREA, &own, &layer, &layer), GSHCPU_OK);
+  uint64_t bound = 0;
+  im.inv[0] = im.inv[3] = 0x1p32; // 2^32 + 0 on each axis
+  im.inv[1] = im.inv[2] = 0.0;
+  EXPECT_EQ(gshcpu_render_image_area_bound(&im, &bound), 1);
+  im.inv[0] = im.inv[3] = 0x1p33;
+  EXPECT_EQ(gshcpu_render_image_area_bound(&im, &bound), 1) << "as wide as the domain";
+  im.inv[0] = 0x1p33;
+  im.inv[3] = 0x1.0000000000001p33;
+  EXPECT_EQ(gshcpu_render_image_area_bound(&im, &bound), 0) << "one step past it, in y";
+  im.inv[0] = 0x1.0000000000001p33;
+  im.inv[3] = 0x1p33;
+  EXPECT_EQ(gshcpu_render_image_area_bound(&im, &bound), 0) << "one step past it, in x";
 }
 
 /* --- the sink's wiring: sample point, chain, filter, conversion, tint, multiplier -------------------------------- */
@@ -1019,6 +1136,177 @@ TEST(RenderImageSink, APastDomainFillIsRefusedAndASingularMapDrawsNothing) {
       EXPECT_EQ(out.seen.touched[i], 0);
     }
   }
+}
+
+// IC3: the target's map is the chain's last: a target that scales and moves composes after the item and the paint.
+TEST(RenderImageSink, TheTargetsMapIsTheChainsLast) {
+  Store s;
+  const ih::Fmt f = ih::fmt(4, false, 8, GIMG_ALPHA_STRAIGHT);
+  std::vector<uint32_t> samples;
+  for (uint32_t i = 0; i < 5u * 4u * 4u; i++) {
+    samples.push_back((i * 53u + 17u) % 256u);
+  }
+  const GSHSCENE_Resource * image = ih::intern_image(s.store, 5, 4, f, samples);
+  ASSERT_NE(image, nullptr);
+  s.held.push_back(image);
+  GSHSCENE_Image_Paint ip;
+  gshscene_image_paint_init(&ip);
+  ip.image = image;
+  ip.map = matrix(4.0, 0.0, 0.0, 4.0, 2.0, 1.0);
+  ip.magnify = GSHSCENE_IMAGE_FILTER_LINEAR;
+  const GSHSCENE_Resource * paint = nullptr;
+  ASSERT_EQ(gshscene_store_intern_image_paint(s.store, &ip, &paint), GSHSCENE_OK);
+  s.held.push_back(paint);
+  GSHSCENE_List * l = s.open();
+  GSHSCENE_Paint p = image_paint_of(paint, 1.0);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(-100, -100, 100, 100), nullptr, GSHGEOM_FILL_NONZERO, &p, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  Render out;
+  GSHGEOM_Map tmap = matrix(2.0, 0.0, 0.0, 2.0, 3.0, 1.0); // T G p = 2 (4 p + (2, 1)) + (3, 1) = 8 p + (7, 3)
+  render_observed(l, 24, 20, &tmap, out);
+  ASSERT_EQ(out.refused, 0u);
+  const uint32_t window[4] = {0, 0, 0, 0};
+  const GSHSCENE_Color_Space own{};
+  GSHSCENE_Color_Space target = srgb();
+  GSHCPU_Image im;
+  ASSERT_EQ(gshcpu_render_image_open(&im, image, window, 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, &own, &target, &target), GSHCPU_OK);
+  Backdrop backdrop(24, 20);
+  for (int64_t y = 0; y < 20; y++) {
+    for (int64_t x = 0; x < 24; x++) {
+      double src[4];
+      gshcpu_render_image_point(&im, ((double)x + 0.5 - 7.0) / 8.0, ((double)y + 0.5 - 3.0) / 8.0, src);
+      double d[4];
+      backdrop.at(x, y, d);
+      gshcpu_render_apply(d, src, 1.0, GSHSCENE_COMPOSITE_SRC_OVER);
+      for (int k = 0; k < 4; k++) {
+        ASSERT_EQ(out.seen.root[4 * ((size_t)y * 24 + (size_t)x) + (size_t)k], d[k]) << x << "," << y << " component " << k;
+      }
+    }
+  }
+}
+
+// IC9: either axis past the sampling domain refuses the fill: a map that is fine in x and far out in y, and the other way.
+TEST(RenderImageLimits, EitherAxisPastTheDomainRefusesTheFill) {
+  Store s;
+  const ih::Fmt f = ih::fmt(1, false, 8, GIMG_ALPHA_NONE);
+  const GSHSCENE_Resource * image = ih::intern_image(s.store, 2, 2, f, {10, 20, 30, 40});
+  ASSERT_NE(image, nullptr);
+  s.held.push_back(image);
+  const GSHGEOM_Map maps[2] = {matrix(1.0, 0.0, 0.0, 0x1p-30, 0.0, 0.0), matrix(0x1p-30, 0.0, 0.0, 1.0, 0.0, 0.0)};
+  for (const GSHGEOM_Map & m : maps) {
+    GSHSCENE_Image_Paint ip;
+    gshscene_image_paint_init(&ip);
+    ip.image = image;
+    ip.map = m;
+    const GSHSCENE_Resource * paint = nullptr;
+    ASSERT_EQ(gshscene_store_intern_image_paint(s.store, &ip, &paint), GSHSCENE_OK);
+    s.held.push_back(paint);
+    GSHSCENE_List * l = s.open();
+    GSHSCENE_Paint p = image_paint_of(paint, 1.0);
+    ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, 24, 20), nullptr, GSHGEOM_FILL_NONZERO, &p, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+    Render out;
+    render_observed(l, 24, 20, nullptr, out);
+    EXPECT_EQ(out.refused, 1u);
+    EXPECT_EQ(out.drawn_reason, (uint32_t)GSHSCENE_REASON_RESOURCE_LIMIT);
+  }
+}
+
+// IC9: the domain is met over what the whole render draws, so a damage that lies inside it refuses what the whole render refuses.
+TEST(RenderImageLimits, ADamagedRenderRefusesWhatTheWholeRefusesPastTheDomain) {
+  Store s;
+  const ih::Fmt f = ih::fmt(1, false, 8, GIMG_ALPHA_NONE);
+  const GSHSCENE_Resource * image = ih::intern_image(s.store, 2, 2, f, {10, 20, 30, 40});
+  ASSERT_NE(image, nullptr);
+  s.held.push_back(image);
+  GSHSCENE_Image_Paint ip;
+  gshscene_image_paint_init(&ip);
+  ip.image = image;
+  ip.map = matrix(0x1p-30, 0, 0, 0x1p-30, 0, 0);
+  const GSHSCENE_Resource * paint = nullptr;
+  ASSERT_EQ(gshscene_store_intern_image_paint(s.store, &ip, &paint), GSHSCENE_OK);
+  s.held.push_back(paint);
+  GSHSCENE_List * l = s.open();
+  GSHSCENE_Paint p = image_paint_of(paint, 1.0);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, 24, 20), nullptr, GSHGEOM_FILL_NONZERO, &p, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  const GSHSCENE_Rect corner = {0, 0, 1, 1}; // a pixel whose own preimage is far inside the domain
+  Limited whole = render_limited(limits, l, 24, 20, nullptr);
+  Limited damaged = render_limited(limits, l, 24, 20, &corner);
+  EXPECT_EQ(whole.refused, 1u);
+  EXPECT_EQ(damaged.refused, 1u);
+}
+
+// IC9, IC10: a list that holds an image is composited in double layers on every target, under the fast coverages too: each image fixture
+// is its committed fast golden on the four formats.
+TEST(RenderImageFast, EveryImageFixtureUnderTheFastCoveragesIsItsGolden) {
+  std::map<std::pair<std::string, std::string>, uint64_t> want;
+  std::ifstream in("tests/corpus/render-fast.hash");
+  std::string line;
+  while (std::getline(in, line)) {
+    std::istringstream words(line);
+    std::string tag, fixture, format, hex;
+    if (words >> tag >> fixture >> format >> hex && tag == "render") {
+      want[{fixture, format}] = std::stoull(hex, nullptr, 16);
+    }
+  }
+  GSHCPU_Limits fast;
+  gshcpu_limits_default(&fast);
+  fast.fill_coverage = GSHCPU_FILL_COVERAGE_FAST;
+  fast.stroke_coverage = GSHCPU_STROKE_COVERAGE_FAST;
+  size_t checked = 0;
+  for (size_t i = 0; i < RF_FIXTURE_COUNT; i++) {
+    if (std::string(RF_FIXTURES[i].name).rfind("image-", 0) != 0) {
+      continue;
+    }
+    for (GSHCPU_Format format : RF_FORMATS) {
+      uint64_t h = 0;
+      ASSERT_EQ(rf_render_with(i, format, &fast, &h, nullptr), GSHSCENE_OK) << RF_FIXTURES[i].name;
+      auto it = want.find({RF_FIXTURES[i].name, gshcpu_format_string(format)});
+      ASSERT_NE(it, want.end()) << RF_FIXTURES[i].name;
+      EXPECT_EQ(h, it->second) << RF_FIXTURES[i].name << " on " << gshcpu_format_string(format);
+      checked++;
+    }
+  }
+  EXPECT_EQ(checked, 24u);
+}
+
+// IC1: a stroke painted with an image is not a solid stroke: under the fast stroke coverage on an 8-bit premultiplied target, where a list
+// of solid strokes alone is composed in integers straight into the target, it takes the image's colors and the exact coverage's bytes.
+TEST(RenderImageSink, AStrokePaintedWithAnImageIsNotComposedAsASolidOne) {
+  std::string bytes[2];
+  for (int fast = 0; fast < 2; fast++) {
+    RF_Ctx c;
+    rf_begin(&c);
+    GSHSCENE_List * l = rf_open(&c);
+    const GSHSCENE_Color_Space none = rf_space((GCOL_Primaries)0, (GCOL_Transfer)0, 0.0);
+    const GSHSCENE_Resource * img = rf_image(&c, 6, 2, 4, 8, GIMG_ALPHA_STRAIGHT, 0, none);
+    static const double line[4] = {2.0, 8.0, 40.0, 8.0};
+    GSHGEOM_Map at = rf_move(0.0, 0.0);
+    rf_stroke(&c, l, rf_polyline(&c, line, 2, 0), rf_pen(&c, 6.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &at,
+        rf_image_paint(&c, img, rf_place(&c, 6.5, 3.0, 0, 5), 1, 0, GSHSCENE_IMAGE_FILTER_NEAREST, GSHSCENE_IMAGE_FILTER_NEAREST, none, NULL, 1.0));
+    rf_close(&c, l);
+    ASSERT_EQ(c.failed, 0);
+    GSHCPU_Limits limits;
+    gshcpu_limits_default(&limits);
+    limits.stroke_coverage = fast ? GSHCPU_STROKE_COVERAGE_FAST : GSHCPU_STROKE_COVERAGE_EXACT;
+    SinkRef sink(&limits);
+    RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, RF_WIDTH, RF_HEIGHT));
+    GSHSCENE_Target t = target_of(r.raster);
+    ReportRef report;
+    GSHSCENE_Render_Request req = request_of(l, &t, report.report);
+    ASSERT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK);
+    bytes[fast] = r.bytes();
+    std::set<std::string> colors;
+    for (uint32_t x = 4; x < 38; x++) {
+      colors.insert(r.pixel(x, 8));
+    }
+    EXPECT_GT(colors.size(), 3u) << "the stroke shows the image's texels, not one color";
+    rf_release(&c);
+  }
+  EXPECT_EQ(bytes[0], bytes[1]);
 }
 
 int main(int argc, char ** argv) {

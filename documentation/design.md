@@ -180,6 +180,49 @@ tolerance of `1e-12` (`GSHCPU_RENDER_GRADIENT_TOLERANCE`); all 343 exact cases a
 point the oracle says draws nothing is drawn as nothing. No dithering: the goldens are bit-identical on every
 target.
 
+### Images (masks-images-patterns story I3)
+
+An image paint is drawn by `src/render/image.c` (the sampler: decode, edge maps, the point filters, the conversions, the tiers)
+and `src/render/image_area.c` (`AREA`), through the painter every fill and stroke shares: `image_begin` in `sink.c` composes the
+chain with the paint's map as the leaf, chooses the filter once for the fill, opens the image in place, inverts the map, refuses
+what is past the domain or the work limits, resolves the tint, and `painter_span` asks the sampler for each pixel's source.
+render.h states the rules (IC1 to IC14); what follows is why they are shaped as they are.
+
+**One definition, hoisted.** The general tier is the definition. FT-1, FT-2 and FT-3 do the same operations in the same order
+with the parts that do not depend on the pixel found once: a copy is the texel (its weights are exactly one and zero), a separable
+map finds the taps of the coordinate that depends on the pixel's row once for the row, an 8-bit decode is a table of the doubles
+the division gives. A gate renders 576 maps, filters, edge modes and formats with the tiers on and off and requires the same
+bytes, with each tier counted and forced off by a test. `CUBIC` is not a copy at an integer translation: Mitchell-Netravali with
+`B = C = 1/3` weighs a texel's center `1/18, 8/9, 1/18`, so a unit-scale cubic draw blurs.
+
+**`AREA` is exact and its work is bounded by the map.** The preimage of a pixel is one parallelogram, translated, so the cells a
+pixel touches have one upper bound for the whole item, a function of the composed map and the window and nothing else. That is
+what lets a refusal be decided before any pixel is drawn, and be the same with a damage, with the caller's memory and on every
+thread. The bound is of the algorithm's visits: a row of cells at a time, the cells the parallelogram covers entirely summed as
+a run (past a padded window as a count of the edge texel, a repeating axis's whole periods as that many sums of the window's row)
+and only the cells its boundary crosses clipped. A row that holds one of the parallelogram's vertices is clipped across, because
+the cross-section of the parallelogram is no longer a trapezoid there: a run found by the cross-sections at the strip's two edges
+would count a cell that the vertex cuts as covered (a defect the second engine found first). The rows themselves are visited
+one by one, so a preimage that spans millions of rows costs millions of steps and is refused by the bound; the story's whole-period
+sums over the other axis (a tile fully inside the parallelogram counted by the window's mean) are not built, and the bound
+says what is.
+
+**A second engine.** The row-and-run algorithm is checked against one that clips every cell of the bounding box, on the oracle's
+352 regions and on 3000 random parallelograms (60000 once, to see the bound hold) across every edge mode on each axis, windows
+and formats. The bound is asserted to be a bound (its visits never pass it) on the same random cases.
+
+**What is kept.** Nothing across renders: the image is read in place, the decode table (2 KiB) and the table of 32 rows' sums
+live in the painter's frame, and a hit in the row-sum table is the same doubles as a miss, with the work counted the same either
+way. The story's cache of window means, held across renders under `max_cache_bytes`, is not built: it would save the pass over a
+row that the per-fill table already saves within a render, at the cost of an eviction rule and a key.
+
+**Layers.** A list that holds an image paint is composited in double layers, not the byte layers the fast fill coverage uses on
+an 8-bit target: an image's value is any filtered texel taken to the layer's space, which a float texel or a gamut conversion
+takes out of `[0, 1]`, and the byte compositor has one source color a fill. (Found by a fixture that crashed the fast probe.)
+
+**Measured.** The oracle's 1906 point vectors: the sink's sampler is within 0.12 of the tolerance each states at worst, and 624
+of 624 exact vectors are bit for bit. Its 352 regions: within 0.001 of the tolerance, 83 of 83 exact bit for bit.
+
 ### Placeholders (color-paint story P5)
 
 Nothing draws a placeholder (shape-scene's list.h, PH1) and the planning pass reports it (PH3), so the sink has no code

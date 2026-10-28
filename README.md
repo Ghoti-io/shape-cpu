@@ -33,9 +33,16 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   `max_exact_crossings` the crossings among them, which is what the time of a pixel grows with; no depth of overlap is a limit).
   A stroke of a glyph run is the stroke of the path that run defines (its glyphs' outlines in the run's space),
   united across the run, unhinted, and cached with the notes of the glyphs it could not draw.
+  Image paints (masks-images-patterns story I3): an image resource sampled by a fill or a stroke with `NEAREST`, `LINEAR`,
+  `CUBIC` (Mitchell-Netravali, clamped) or `AREA` (the exact mean over the pixel's preimage), a window of the image, an edge
+  mode per axis (pad, repeat, reflect, none), a filter space of its own, and a tint on an alpha-only image; every format the
+  scene stores (gray, RGB and RGBA at 8, 12 and 16 bits and as floats). The filter is chosen once for a fill by whether its
+  map stretches every direction. The image is read in place and never copied, and the sink's sampler equals the image oracle's
+  vectors; `GSHCPU_Limits.max_area_pixel_work` and `max_image_work` bound the work of `AREA` before any pixel is drawn.
   `gshcpu_render_hash` and `gshcpu_render_dump` spell a render; the
   fixture set's renders are committed goldens, the same on every target.
-  `examples/render.c` renders a list; `examples/stroke.c` strokes a path and shows the cache serve a translation.
+  `examples/render.c` renders a list; `examples/stroke.c` strokes a path and shows the cache serve a translation;
+  `examples/image.c` draws an image with two filters and checks what each does.
 
 ## Building
 

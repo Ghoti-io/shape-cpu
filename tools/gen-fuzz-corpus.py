@@ -148,6 +148,31 @@ def gradient(kind, values, extend=0, premultiplied=0, space=0, map_byte=0, stops
     return bytes(out)
 
 
+def image(w, h, layout=2, bits=0, premultiplied=0, space=0, samples=None, window=0, modes=0, filter_space=0, map_kind=0,
+          tx=64, ty=64, tint=0):
+    """An image paint's bytes, in fuzz_render.c's image_paint_of order: the size ((w - 1) | (h - 1) << 3), the format (the
+    layout: 0 gray, 1 RGB, 2 RGBA, 3 alpha-only gray; the depth: 0 8 bits, 1 12, 2 16, 3 a float; premultiplied; the image's
+    space), the samples (a byte each, `w h layout` of them), the window byte (1 mod 3 a sub-window), the modes byte (x extend,
+    y extend, magnify and minify filter, two bits each), the filter space, the map (0 identity, 1 x4.5, 2 x0.37, 3 turned, 4
+    singular, 5 far past the domain, 6 anisotropic, 7 a quarter turn), a translation, and the tint's byte (an alpha-only
+    image's: 0 mod 3 solid, 1 foreground, 2 palette)."""
+    count = w * h * (1 if layout == 3 else (1, 3, 4)[layout] if layout < 3 else 1)
+    count = w * h * (1, 3, 4, 1)[layout]
+    if samples is None:
+        samples = bytes((i * 37 + 11) % 256 for i in range(count))
+    return (bytes([(w - 1) | (h - 1) << 3, layout | bits << 2 | premultiplied << 4 | space << 5]) + bytes(samples)
+            + bytes([window, modes, filter_space, map_kind, tx, ty, tint]))
+
+
+def image_fill(pick, picture, map_bytes=b"\x00", rule=0, b=0xF7, style=b""):
+    """A fill whose paint byte (0xF0 or more, 3 mod 4) takes an image paint; the multiplier is b % 5 quarters."""
+    return bytes([0, pick]) + map_bytes + bytes([200, 100, 50, 255, b]) + picture + bytes([rule]) + style
+
+
+def modes(ex=0, ey=0, magnify=1, minify=1):
+    return ex | ey << 2 | magnify << 4 | minify << 6
+
+
 THREE_STOPS = ((2, 4, 250, 10), (6, 3, 20, 240), (10, 4, 10, 30))
 LINEAR = gradient(0, (2, 0, 30, 0, 0, 0), stops=THREE_STOPS)
 RADIAL = gradient(1, (20, 20, 4, 30, 25, 20), extend=1, premultiplied=1, space=1, stops=THREE_STOPS)
@@ -205,6 +230,45 @@ def scripted():
     out["scripted-gradient-notice.bin"] = header(request=STRICT) + body([fill(0), fill(1, gradient=DEGENERATE)])
     out["scripted-gradient-past-bound.bin"] = header() + body([fill(0, gradient=PAST)])
     out["scripted-gradient-domain.bin"] = header(request=DAMAGE) + body([fill(1), fill(0, gradient=OUT_OF_DOMAIN)])
+    # Masks-images-patterns story I3: a paint byte of 0xF0 or more and 3 mod 4 takes an image paint: filters of every kind
+    # (the third and fourth bits of a mode byte pair are the magnify and minify), every edge mode, windows, a filter space,
+    # formats from 8-bit gray to a float RGBA, and maps that magnify, minify, turn and quarter turn.  On both targets, damaged
+    # and in caller memory (the harness requires the same bytes in each, and with every fast tier off).
+    imgs = [image_fill(0, image(5, 4, 2, 0, modes=modes(0, 1, 0, 1), map_kind=1)),
+            image_fill(1, image(6, 5, 1, 1, modes=modes(2, 3, 2, 3), map_kind=3, filter_space=1), ROTATED),
+            group(),
+            image_fill(0, image(3, 3, 0, 2, modes=modes(1, 1, 1, 3), map_kind=2, tx=100, ty=40), b=0xFB),
+            image_fill(1, image(4, 4, 2, 3, premultiplied=1, space=2, modes=modes(3, 0, 1, 1), map_kind=6, window=1 + 3 * 5)),
+            POP,
+            image_fill(0, image(6, 6, 2, 0, modes=modes(0, 0, 3, 3), map_kind=7, filter_space=3), b=0xF3)]
+    out["scripted-images.bin"] = header() + body(imgs)
+    out["scripted-images-float.bin"] = header(target=T64 | 3) + body(imgs)
+    out["scripted-images-damage.bin"] = header(request=DAMAGE | CALLER_MEMORY) + body(imgs)
+    out["scripted-images-damage-float.bin"] = header(target=T64 | 2, request=DAMAGE | CALLER_MEMORY) + body(imgs)
+    # AREA under every edge mode, minified (a scale of 0.37) and at the unit scale: the exact mean, and the work limits
+    # lowered (the limit byte's mode 0 with its high bit set: a pixel's visits from the bits above the mode): refused at 0x80
+    # (49 visits a pixel; a scale of 0.37 needs more), drawn at 0xF8 (94; a unit scale needs 71).
+    areas = [image_fill(0, image(5, 4, 2, 0, modes=modes(e, 3 - e, 3, 3), map_kind=2 if e % 2 else 0)) for e in range(4)]
+    out["scripted-image-area.bin"] = header() + body(areas)
+    out["scripted-image-area-limited.bin"] = header(limit=0x80) + body(areas)
+    out["scripted-image-area-limited-damage.bin"] = header(request=DAMAGE, limit=0x80) + body(areas)
+    out["scripted-image-area-limited-strict.bin"] = header(request=STRICT, limit=0x80) + body(areas)
+    out["scripted-image-area-budget.bin"] = header(limit=0xF8) + body([image_fill(0, image(5, 4, 2, 0, modes=modes(1, 1, 3, 3), map_kind=0))])
+    # A map far past the sampling domain is refused while drawing, the same with a damage; a singular one is a notice.
+    out["scripted-image-domain.bin"] = header(request=DAMAGE) + body([fill(1), image_fill(0, image(3, 3, 2, 0, map_kind=5))])
+    out["scripted-image-notice.bin"] = header(request=STRICT) + body([fill(0), image_fill(1, image(3, 3, 2, 0, map_kind=4))])
+    # An alpha-only image with a solid, a foreground and a palette tint (the list has no palette: the third is refused by the plan).
+    stencils = [image_fill(0, image(4, 3, 3, 0, modes=modes(1, 0, 1, 3), map_kind=1, tint=0)),
+                image_fill(1, image(5, 5, 3, 3, modes=modes(2, 2, 0, 3), map_kind=3, tint=1), ROTATED),
+                image_fill(0, image(3, 2, 3, 1, modes=modes(0, 0, 2, 3), map_kind=1, tint=2))]
+    out["scripted-image-stencils.bin"] = header() + body(stencils)
+    out["scripted-image-stencils-float.bin"] = header(target=T64 | 3, request=CALLER_MEMORY) + body(stencils)
+    # A stroke painted with an image (the paint is sampled in the stroke's local space), with its style, and again from the cache.
+    out["scripted-image-stroke.bin"] = header() + body_with_line(
+        [image_fill(0, image(6, 4, 2, 0, modes=modes(1, 1, 1, 3), map_kind=1), rule=6, style=style(width=3, join=1, cap=1)),
+         image_fill(1, image(3, 3, 1, 0, modes=modes(0, 0, 0, 0), map_kind=0), ROTATED, rule=6), fill(0)])
+    out["scripted-image-stroke-float.bin"] = header(target=T64 | 3, request=DAMAGE) + body_with_line(
+        [image_fill(2, image(4, 4, 2, 1, modes=modes(2, 2, 1, 3), map_kind=3), rule=6, style=style(width=2))])
     # N1 (Corey, 2026-10-21): a solid paint byte of 2 mod 4 with its high bit set takes a component (bit 6: green) at
     # 2^16 or one step past it ((b >> 4) & 3: 0 and 1 at it, 2 and 3 past it) in gamma 10 (bit 3) or gamma 0.1; a
     # group's blend byte of 1 mod 3 with bit 6 set blends in gamma 0.1.  At the bound into a gamma-0.1 group and onto a

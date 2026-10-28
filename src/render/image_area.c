@@ -470,8 +470,9 @@ int gshcpu_render_image_area_bound(const GSHCPU_Image * im, uint64_t * out) {
   const uint64_t n = (uint64_t)(im->x1 - im->x0);
   const uint64_t run = cx < sat_mul(3u, n) ? cx : sat_mul(3u, n); /* a row's run: the window's cells, a whole period's sum, a period's rest */
   uint64_t b = sat_mul(cy, run);
-  b = sat_add(b, sat_mul(2u, sat_add(cx, cy))); /* the cells the boundary crosses */
-  b = sat_add(b, sat_mul(4u, cx)); /* the rows holding a vertex are clipped across */
+  /* A cell clipped is counted once for the clip and once for the texel it is weighed with. */
+  b = sat_add(b, sat_mul(4u, sat_add(cx, cy))); /* the cells the boundary crosses */
+  b = sat_add(b, sat_mul(8u, cx)); /* the rows holding a vertex are clipped across */
   b = sat_add(b, sat_mul(cy, 2u)); /* a row's own bookkeeping, and a rectangle's partial cells */
   *out = sat_add(b, 8u);
   return 1;
