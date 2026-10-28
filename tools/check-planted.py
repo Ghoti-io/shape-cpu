@@ -1338,6 +1338,7 @@ PLANTS += [
     ("ris-stroke-solid", "src", RS, "int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT && item->paint.kind != GSHSCENE_PAINT_IMAGE;", "int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT;", IMT),
     ("ris-clips-unweighed", "src", RS, "      uint32_t m = clipped ? weigh_clips(run, frame->clip_base, run->clip_count, m8[i], px, y) : m8[i];\n      if (m == 0) {\n        continue;\n      }\n      double s[4];", "      uint32_t m = m8[i];\n      if (m == 0) {\n        continue;\n      }\n      double s[4];", IMT),
     ("ris-sample-corner", "src", RS, "gshcpu_render_image_at(&p->im, (double)(int32_t)px + 0.5, (double)(int32_t)y + 0.5, s);", "gshcpu_render_image_at(&p->im, (double)(int32_t)px, (double)(int32_t)y, s);", IMT),
+    ("ris-dash-cap-unread", "src", RS, "    cs->geometry.max_dash_steps = limits->max_dash_steps;\n", "", IMT + ["testRender_limits"]),
     ("ris-notice-image", "src", RS, "gshscene_paint_notice(item, run->maps, count - 1, &run->job->target.map)) {", "0) {", IMT),
 ]
 

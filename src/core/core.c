@@ -76,6 +76,7 @@ void gshcpu_limits_default(GSHCPU_Limits * limits) {
   limits->fill_coverage = GSHCPU_FILL_COVERAGE_EXACT;
   limits->max_area_pixel_work = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_AREA_PIXEL_WORK */
   limits->max_image_work = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK */
+  limits->max_dash_steps = 0; /* the default, shape-geometry's: 4 max_points + 4096 */
 }
 
 GSHCPU_Result gshcpu_limits_for_memory(GSHCPU_Limits * limits, uint64_t bytes) {

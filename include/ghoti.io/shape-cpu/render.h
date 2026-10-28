@@ -592,7 +592,8 @@
  * `max_bytes` pixels in all, and lies within ::GSHCPU_MAX_DIMENSION_CEILING
  * pixels of the origin; past either it is ::GSHSCENE_ERR_LIMIT before anything is
  * drawn.  `max_cache_bytes` bounds the stroke cache (SC7); `max_exact_fragments` the pieces of a stroke part in one
- * pixel (UC9); `max_area_pixel_work` and `max_image_work` the visits of the `AREA` filter of an image paint (IC9).
+ * pixel (UC9); `max_area_pixel_work` and `max_image_work` the visits of the `AREA` filter of an image paint (IC9); `max_dash_steps` the steps of a stroke's dash pattern, which
+ * are not in the work measure but cost a fraction of a microsecond each (shape-geometry refuses a stroke past it before it walks the pattern).
  *
  * ### Hash and dump of a render (AD-21)
  *

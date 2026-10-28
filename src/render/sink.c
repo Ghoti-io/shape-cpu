@@ -2356,6 +2356,9 @@ static GSHCPU_Result sink_make(const GSHCPU_Allocator * alloc, const GSHSCENE_Li
   if (limits && limits->max_points) {
     cs->geometry.max_points = limits->max_points;
   }
+  if (limits) {
+    cs->geometry.max_dash_steps = limits->max_dash_steps;
+  }
   GSHCPU_Result cr = gshcpu_stroke_cache_create(&cs->alloc, limits ? limits->max_cache_bytes : 0, cs->counters, &cs->cache);
   if (cr != GSHCPU_OK) {
     alloc->free_fn(alloc->ctx, cs);

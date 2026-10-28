@@ -219,6 +219,15 @@ typedef struct GSHCPU_Limits {
    * between units, and one image item can take this long.  Read by the sink; the coverage functions ignore it.
    */
   uint64_t max_image_work;
+  /**
+   * The most dash steps the expansion of one stroke visits (shape-geometry's `GSHGEOM_Limits.max_dash_steps`, which this is handed
+   * to): an entry of the dash pattern is a step, whether or not it emits anything, and a step costs a fraction of a microsecond, so
+   * the default (0: `4 max_points + 4096`, 16.8 million at the default `max_points`) can be seconds of work on a short pattern over a
+   * long path.  A stroke that would visit more is refused as ::GSHSCENE_REASON_RESOURCE_LIMIT before the pattern is walked wherever
+   * its lengths show it, and the same with a damage, a cache and the caller's memory.  Lower it where the time a caller can wait is
+   * what matters.  A `uint64_t` whatever the target.  Read by the sink; the coverage functions ignore it.
+   */
+  uint64_t max_dash_steps;
 } GSHCPU_Limits;
 
 /** ::GSHCPU_Limits.fill_coverage: the exact area of a fill (the default). */

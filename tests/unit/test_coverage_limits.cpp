@@ -95,12 +95,15 @@ TEST(CoverageLimits, TheDefaultsAreWhatTheHeaderSays) {
   EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_AREA_PIXEL_WORK, (uint64_t)1 << 20);
   EXPECT_EQ(l.max_image_work, 0u) << "zero is the default, 2^30, for the texels and cells one image item visits (IC9)";
   EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK, (uint64_t)1 << 30);
-  // The same layout on every target: four sizes and eight 64-bit fields, none of it padding the sizes would not.
-  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 8 * sizeof(uint64_t));
+  // The same layout on every target: four sizes and nine 64-bit fields, none of it padding the sizes would not.
+  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 9 * sizeof(uint64_t));
   EXPECT_EQ(offsetof(GSHCPU_Limits, max_area_pixel_work), offsetof(GSHCPU_Limits, fill_coverage) + sizeof(uint64_t))
       << "appended after fill_coverage";
   EXPECT_EQ(offsetof(GSHCPU_Limits, max_image_work), offsetof(GSHCPU_Limits, max_area_pixel_work) + sizeof(uint64_t))
       << "appended after max_area_pixel_work";
+  EXPECT_EQ(l.max_dash_steps, 0u) << "zero is the default, shape-geometry's 4 max_points + 4096 (dash steps)";
+  EXPECT_EQ(offsetof(GSHCPU_Limits, max_dash_steps), offsetof(GSHCPU_Limits, max_image_work) + sizeof(uint64_t))
+      << "appended after max_image_work";
   EXPECT_EQ(offsetof(GSHCPU_Limits, max_exact_crossings), offsetof(GSHCPU_Limits, max_exact_fragments) + sizeof(uint64_t))
       << "appended after max_exact_fragments";
   EXPECT_EQ(offsetof(GSHCPU_Limits, stroke_coverage), offsetof(GSHCPU_Limits, max_exact_crossings) + sizeof(uint64_t))
