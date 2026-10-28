@@ -390,7 +390,7 @@ $(APP_DIR)/examples/%$(EXE_EXTENSION): examples/%.c $(APP_DIR)/$(STATIC_TARGET) 
 .PHONY: clean cloc docs docs-pdf examples coverage check-symbols check-stamps check-aliasing
 .PHONY: run-examples
 .PHONY: check-fp-contract check-edges check-libm check-no-x87 check-gates libver-gen
-.PHONY: check-vectors check-corpus-hash check-planted
+.PHONY: check-vectors check-corpus-hash check-planted test-tsan
 .PHONY: all install test test-quiet test-asan test-valgrind test-valgrind-quiet test-watch uninstall watch
 .PHONY: all-debug install-debug test-debug test-valgrind-debug test-watch-debug uninstall-debug watch-debug
 .PHONY: fuzz fuzz-clean check-fuzz-corpus fuzz-replay
@@ -680,6 +680,7 @@ endif
 ####################################################################
 
 UBSAN_CHECKS := undefined,float-cast-overflow
+SAN_LABEL := ASan+UBSan
 ASAN_UBSAN_FLAGS := -fsanitize=address,$(UBSAN_CHECKS) -fno-sanitize-recover=$(UBSAN_CHECKS) -fno-omit-frame-pointer -g -O1
 COV_BUILD_DIR := ./build/$(BUILD)-cov
 ASAN_BUILD_DIR := ./build/$(BUILD)-asan
@@ -743,16 +744,28 @@ $(ASAN_REPLAY): tests/fuzz/fuzz_render.c tests/fuzz/replay_main.c $(TEST_SUPPORT
 
 test-asan: $(ASAN_TEST_EXECUTABLES) $(ASAN_REPLAY) ## Build with ASan+UBSan and run the tests, and the fuzz replay
 	@for test_exe in $(ASAN_TEST_EXECUTABLES); do \
-		printf '\n### ASan+UBSan %s ###\n\n' "$$(basename $$test_exe)"; \
+		printf '\n### $(SAN_LABEL) %s ###\n\n' "$$(basename $$test_exe)"; \
 		LD_PRELOAD="$(ASAN_RUNTIME)$${LD_PRELOAD:+:$$LD_PRELOAD}" \
 		LD_LIBRARY_PATH="$(ASAN_APP_DIR):$(LIB_INSTALL_PATH)/$(SUITE)$(if $(DEP_LIB_DIRS),:$(DEP_LIB_DIRS))" \
 			$$test_exe --gtest_brief=1 || exit 1; \
 	done
-	@printf '\n### ASan+UBSan fuzz replay ###\n\n'
+	@printf '\n### $(SAN_LABEL) fuzz replay ###\n\n'
 	@LD_PRELOAD="$(ASAN_RUNTIME)$${LD_PRELOAD:+:$$LD_PRELOAD}" \
 		LD_LIBRARY_PATH="$(ASAN_APP_DIR):$(LIB_INSTALL_PATH)/$(SUITE)$(if $(DEP_LIB_DIRS),:$(DEP_LIB_DIRS))" \
 			$(ASAN_REPLAY) $(FUZZ_INPUTS)
-	@printf '\nASan+UBSan suite clean.\n'
+	@printf '\n$(SAN_LABEL) suite clean.\n'
+
+####################################################################
+# ThreadSanitizer, in its own tree: the ASan rules above with the sanitizer swapped
+####################################################################
+
+# The sink's one shared structure is the stroke cache (SC7, one lock) and the executor's stripes (batched strokes); the tests that run
+# threads are test_render_stroke and test_render_lean.  A sub-make over the ASan rules: the same sources, tests and replay, built into
+# build/<BUILD>-tsan with -fsanitize=thread (the runtime is linked in, so none is preloaded).
+TSAN_FLAGS := -fsanitize=thread -fno-omit-frame-pointer -g -O1
+
+test-tsan: ## Build with ThreadSanitizer and run the tests and the fuzz replay
+	@$(MAKE) --no-print-directory test-asan ASAN_BUILD_DIR=./build/$(BUILD)-tsan ASAN_UBSAN_FLAGS='$(TSAN_FLAGS)' ASAN_RUNTIME= SAN_LABEL=TSan
 
 ####################################################################
 # Fuzzing: a list rendered through the sink (CAP-15, AD-19)
