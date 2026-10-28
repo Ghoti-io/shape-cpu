@@ -383,6 +383,10 @@ def scripted():
     # Found by the first libFuzzer soak (story 16): strict, a damage and a small cell cap. The damage-limited render
     # passed and the whole render met the cap outside the damage, so it was refused. Since 2026-10-21 the cap is met
     # over the whole render's region whatever the damage (S4), and the harness requires both to agree.
+    # Found by mutating the image seeds (story I3): under a tightened crossings budget (limit mode 6) the sparse stroke tier painted
+    # the bands before the one that met the budget, and the item was then refused, so it was left part drawn; the general tier
+    # refuses before it paints.  A stroke whose outline could pass the pieces or crossings limit now takes the general tier.
+    out["regression-sparse-partial-under-budget.bin"] = base64.b64decode("PAAABgAiBQICAAAAAAAJAgAAAACqCQkAAAAAAQIJAAAAAAEAAAAAAAAFAwIJAAAAAPMAAAkACQkEAAAAAAAABQIMAAIAAAAAAA//AgAAAAC4AQICAgIJAwkCAAACAQICAgIJAwkCAAACAwAAAMhkMv8CBggAAAEDFMhkMv8CBgACAxTIZDL/AgY=")
     out["regression-strict-cells-outside-damage.bin"] = base64.b64decode(
         "cQsAMplAJm0ZT3ZmwR6Jf2Fd7lDCRLR/QSt6/zbm6uHj7bR6JLZqECw6JO+wOwclMCTHsAvBvaXFi6p+svmrTJ+KgxAuG0woagxRNjJeiGcC"
         "myM9FiyKlJxCJFFWzIkK8SvFqHMplT7Bdyd9VFOqgVUfzMjmgcV+F/qsYJOfKS/fHjRpgYuTPZ9DGeivfs7ibhEb5CtwDwGioZomrmEA7NLX"

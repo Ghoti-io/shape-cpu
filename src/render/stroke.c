@@ -612,8 +612,14 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
 
 /* --- FT-2: the sparse composite --------------------------------------------------------------------------------- */
 
-int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_deposits) {
+int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_deposits, const GSHCPU_Exact * ex) {
   if (!s->drawn || s->meta.present[GSHCPU_STROKE_ALIGNED]) {
+    return 0;
+  }
+  /* The sweep paints a band as it is made, so an item that is refused for its pieces or crossings (UC9, UC19) in a later band would
+   * be left part drawn; the general tier finds the refusal before it paints.  A stroke whose outline could pass either limit takes
+   * the general tier, so a refused stroke draws nothing in every tier.  A function of the outline alone. */
+  if (may_exceed(s, GSHCPU_STROKE_BODY, ex)) {
     return 0;
   }
   const GSHGEOM_Flat_Path * path = part_of(s->outline, GSHCPU_STROKE_BODY);

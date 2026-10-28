@@ -932,7 +932,7 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
  * FT-2 (SC8): whether @p s qualifies for the sparse composite: a single part, and `cells_bound` of its rectangle at
  * most @p max_deposits (so the cap cannot be met and the stroke cannot be refused for its cells).  A function of the outline, the shift and the cap only, never of the damage or the clips.
  */
-int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_deposits);
+int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_deposits, const GSHCPU_Exact * ex);
 
 /** The outline of the body part a cover draws: without the edges that cancel when it has them. */
 const GSHGEOM_Flat_Path * gshcpu_render_stroke_cover_path(const GSHCPU_Stroke * s);

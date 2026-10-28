@@ -223,6 +223,14 @@ takes out of `[0, 1]`, and the byte compositor has one source color a fill. (Fou
 **Measured.** The oracle's 1906 point vectors: the sink's sampler is within 0.12 of the tolerance each states at worst, and 624
 of 624 exact vectors are bit for bit. Its 352 regions: within 0.001 of the tolerance, 83 of 83 exact bit for bit.
 
+### A refused stroke draws nothing in every tier
+
+The sparse stroke tier paints a band of rows as it sweeps it, so a stroke refused for its pieces or crossings (UC9, UC19) in a later
+band would have been left part drawn, where the general tier finds the refusal before it paints anything. A stroke whose outline could
+pass either limit (the function of the outline alone that decides the damage-independence of the refusal) therefore takes the general
+tier; at the default limits that is no stroke a render draws today. Found by mutating the render fuzzer's seeds; the input is
+`regression-sparse-partial-under-budget.bin`.
+
 ### Placeholders (color-paint story P5)
 
 Nothing draws a placeholder (shape-scene's list.h, PH1) and the planning pass reports it (PH3), so the sink has no code
