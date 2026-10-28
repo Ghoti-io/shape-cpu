@@ -91,8 +91,16 @@ TEST(CoverageLimits, TheDefaultsAreWhatTheHeaderSays) {
   EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS, (uint64_t)1 << 25);
   EXPECT_EQ(l.stroke_coverage, GSHCPU_STROKE_COVERAGE_EXACT) << "the exact union is the default; the fast coverage is asked for";
   EXPECT_EQ(GSHCPU_STROKE_COVERAGE_FAST, (uint64_t)1);
-  // The same layout on every target: four sizes and five 64-bit fields, none of it padding the sizes would not.
-  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 6 * sizeof(uint64_t));
+  EXPECT_EQ(l.max_area_pixel_work, 0u) << "zero is the default, 2^20, for the texels and cells one pixel of AREA visits (IC9)";
+  EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_AREA_PIXEL_WORK, (uint64_t)1 << 20);
+  EXPECT_EQ(l.max_image_work, 0u) << "zero is the default, 2^30, for the texels and cells one image item visits (IC9)";
+  EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK, (uint64_t)1 << 30);
+  // The same layout on every target: four sizes and eight 64-bit fields, none of it padding the sizes would not.
+  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 8 * sizeof(uint64_t));
+  EXPECT_EQ(offsetof(GSHCPU_Limits, max_area_pixel_work), offsetof(GSHCPU_Limits, fill_coverage) + sizeof(uint64_t))
+      << "appended after fill_coverage";
+  EXPECT_EQ(offsetof(GSHCPU_Limits, max_image_work), offsetof(GSHCPU_Limits, max_area_pixel_work) + sizeof(uint64_t))
+      << "appended after max_area_pixel_work";
   EXPECT_EQ(offsetof(GSHCPU_Limits, max_exact_crossings), offsetof(GSHCPU_Limits, max_exact_fragments) + sizeof(uint64_t))
       << "appended after max_exact_fragments";
   EXPECT_EQ(offsetof(GSHCPU_Limits, stroke_coverage), offsetof(GSHCPU_Limits, max_exact_crossings) + sizeof(uint64_t))

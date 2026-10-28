@@ -112,6 +112,14 @@ void gshcpu_render_image_texel(const GSHCPU_Image * im, uint32_t x, uint32_t y, 
   decode(im, x, y, out);
 }
 
+/** The texel (@p ix, @p iy) of the window, premultiplied in the filter space (IP5, IC4). */
+void gshcpu_render_image_window_texel(const GSHCPU_Image * im, uint32_t ix, uint32_t iy, double out[4]) {
+  decode(im, ix, iy, out);
+  if (im->convert_in) {
+    gshcpu_render_convert_premultiplied(&im->in, out, out);
+  }
+}
+
 /** The value of the texel tap (@p tx, @p ty) reads, premultiplied in the filter space (IP5, IC4). */
 static inline void texel(const GSHCPU_Image * im, int64_t tx, int64_t ty, double out[4]) {
   const int64_t ix = edge(tx, (int64_t)im->x0, (int64_t)im->x1, im->extend_x);
@@ -126,6 +134,14 @@ static inline void texel(const GSHCPU_Image * im, int64_t tx, int64_t ty, double
   }
 }
 
+int64_t gshcpu_render_image_edge(int64_t k, int64_t lo, int64_t hi, uint32_t mode) {
+  return edge(k, lo, hi, mode);
+}
+
+void gshcpu_render_image_tap(const GSHCPU_Image * im, int64_t tx, int64_t ty, double out[4]) {
+  texel(im, tx, ty, out);
+}
+
 /* --- open, place, source ------------------------------------------------------------------------------------- */
 
 GSHCPU_Result gshcpu_render_image_open(GSHCPU_Image * im, const GSHSCENE_Resource * image, const uint32_t window[4],
@@ -136,9 +152,6 @@ GSHCPU_Result gshcpu_render_image_open(GSHCPU_Image * im, const GSHSCENE_Resourc
       extend_x >= (uint32_t)GSHSCENE_IMAGE_EXTEND_COUNT || extend_y >= (uint32_t)GSHSCENE_IMAGE_EXTEND_COUNT ||
       filter >= (uint32_t)GSHSCENE_IMAGE_FILTER_COUNT) {
     return GSHCPU_ERR_INVALID;
-  }
-  if (filter == (uint32_t)GSHSCENE_IMAGE_FILTER_AREA) {
-    return GSHCPU_ERR_UNSUPPORTED;
   }
   const int whole = !window[0] && !window[1] && !window[2] && !window[3];
   im->x0 = whole ? 0 : window[0];
@@ -182,6 +195,10 @@ GSHCPU_Result gshcpu_render_image_open(GSHCPU_Image * im, const GSHSCENE_Resourc
   im->tint[0] = im->tint[1] = im->tint[2] = 0.0;
   im->tint_alpha = 0.0;
   memset(im->inv, 0, sizeof im->inv);
+  im->visits = 0;
+  for (size_t k = 0; k < GSHCPU_IMAGE_ROW_SUMS; k++) {
+    im->row_sums[k].valid = 0;
+  }
   return GSHCPU_OK;
 }
 
@@ -321,13 +338,23 @@ void gshcpu_render_image_point(const GSHCPU_Image * im, double u, double v, doub
 
 /* --- the pixel (IC8) ------------------------------------------------------------------------------------------ */
 
-void gshcpu_render_image_at(const GSHCPU_Image * im, double qx, double qy, double src[4]) {
-  const double u = qx - im->inv[4];
-  const double v = qy - im->inv[5];
-  const double px = im->inv[0] * u + im->inv[1] * v;
-  const double py = im->inv[2] * u + im->inv[3] * v;
+void gshcpu_render_image_at(GSHCPU_Image * im, double qx, double qy, double src[4]) {
   double f[4];
-  gshcpu_render_image_point(im, px, py, f);
+  if (im->filter == (uint32_t)GSHSCENE_IMAGE_FILTER_AREA) {
+    /* IC2: the pixel square [qx - 1/2, qx + 1/2] x [qy - 1/2, qy + 1/2], its preimage a parallelogram of the same shape for every pixel. */
+    const double u = (qx - 0.5) - im->inv[4];
+    const double v = (qy - 0.5) - im->inv[5];
+    const double origin[2] = {im->inv[0] * u + im->inv[1] * v, im->inv[2] * u + im->inv[3] * v};
+    const double ea[2] = {im->inv[0], im->inv[2]};
+    const double eb[2] = {im->inv[1], im->inv[3]};
+    gshcpu_render_image_region(im, origin, ea, eb, f);
+  } else {
+    const double u = qx - im->inv[4];
+    const double v = qy - im->inv[5];
+    const double px = im->inv[0] * u + im->inv[1] * v;
+    const double py = im->inv[2] * u + im->inv[3] * v;
+    gshcpu_render_image_point(im, px, py, f);
+  }
   if (im->alpha_only) {
     const double k = (im->mult * im->tint_alpha) * f[3];
     src[0] = im->tint[0] * k;

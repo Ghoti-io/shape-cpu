@@ -273,6 +273,387 @@ TEST(RenderImageVectors, EveryPointFilterAgreesWithTheOracleWithinTheStatedToler
   EXPECT_EQ(exact, exact_equal) << "a case the oracle calls exact is the sink's bit for bit";
 }
 
+namespace {
+
+/** The area of a convex polygon clipped to the unit square, by Sutherland-Hodgman, coordinates relative to the cell. */
+double naive_clipped_area(const std::vector<double> & polygon) {
+  std::vector<double> p = polygon;
+  for (int edge = 0; edge < 4 && !p.empty(); edge++) {
+    std::vector<double> q;
+    size_t n = p.size() / 2;
+    for (size_t k = 0; k < n; k++) {
+      double ax = p[2 * k], ay = p[2 * k + 1];
+      double bx = p[2 * ((k + 1) % n)], by = p[2 * ((k + 1) % n) + 1];
+      auto side = [edge](double x, double y) { return edge == 0 ? x : edge == 1 ? 1.0 - x : edge == 2 ? y : 1.0 - y; };
+      double da = side(ax, ay), db = side(bx, by);
+      if (da >= 0.0) {
+        q.push_back(ax);
+        q.push_back(ay);
+      }
+      if ((da >= 0.0) != (db >= 0.0)) {
+        double t = da / (da - db);
+        q.push_back(ax + t * (bx - ax));
+        q.push_back(ay + t * (by - ay));
+      }
+    }
+    p.swap(q);
+  }
+  double a = 0.0;
+  size_t n = p.size() / 2;
+  for (size_t k = 0; k < n; k++) {
+    a += p[2 * k] * p[2 * ((k + 1) % n) + 1] - p[2 * ((k + 1) % n)] * p[2 * k + 1];
+  }
+  return std::fabs(a) / 2.0;
+}
+
+/** AREA by visiting every cell of the bounding box: the second engine the row-and-run algorithm is checked against. */
+void naive_area(GSHCPU_Image & im, const double origin[2], const double ea[2], const double eb[2], double out[4]) {
+  const double px[4] = {origin[0], origin[0] + ea[0], origin[0] + ea[0] + eb[0], origin[0] + eb[0]};
+  const double py[4] = {origin[1], origin[1] + ea[1], origin[1] + ea[1] + eb[1], origin[1] + eb[1]};
+  double minx = px[0], maxx = px[0], miny = py[0], maxy = py[0];
+  for (int k = 1; k < 4; k++) {
+    minx = std::fmin(minx, px[k]);
+    maxx = std::fmax(maxx, px[k]);
+    miny = std::fmin(miny, py[k]);
+    maxy = std::fmax(maxy, py[k]);
+  }
+  double sum[4] = {0, 0, 0, 0};
+  double comp[4] = {0, 0, 0, 0};
+  for (long long cj = (long long)std::floor(miny); cj < (long long)std::ceil(maxy); cj++) {
+    for (long long ci = (long long)std::floor(minx); ci < (long long)std::ceil(maxx); ci++) {
+      std::vector<double> poly;
+      for (int k = 0; k < 4; k++) {
+        poly.push_back(px[k] - (double)ci);
+        poly.push_back(py[k] - (double)cj);
+      }
+      double a = naive_clipped_area(poly);
+      if (a <= 0.0) {
+        continue;
+      }
+      double t[4];
+      gshcpu_render_image_tap(&im, ci, cj, t);
+      for (int k = 0; k < 4; k++) {
+        double term = a * t[k] - comp[k];
+        double next = sum[k] + term;
+        comp[k] = (next - sum[k]) - term;
+        sum[k] = next;
+      }
+    }
+  }
+  const double total = std::fabs(ea[0] * eb[1] - ea[1] * eb[0]);
+  for (int k = 0; k < 4; k++) {
+    out[k] = sum[k] / total;
+  }
+  if (im.convert_out) {
+    gshcpu_render_convert_premultiplied(&im.out, out, out);
+  }
+}
+
+} // namespace
+
+// IC7, IC13: AREA against the oracle's parallelograms: the exact mean, within the stated tolerance (the oracle's own bound where it
+// cannot be exact, 1e-13 where it is dyadic: a sum of many cells may differ in the last digits).
+TEST(RenderImageVectors, EveryAreaAgreesWithTheOracleWithinTheStatedTolerance) {
+  Store s;
+  std::vector<const GSHSCENE_Resource *> images;
+  for (unsigned i = 0; i < imagevec::kImageCount; i++) {
+    images.push_back(vector_image(s.store, imagevec::kImages[i]));
+    ASSERT_NE(images.back(), nullptr) << imagevec::kImages[i].name;
+    s.held.push_back(images.back());
+  }
+  size_t exact = 0;
+  size_t exact_equal = 0;
+  double worst = 0.0;
+  for (unsigned i = 0; i < imagevec::kAreaCount; i++) {
+    const imagevec::Area & a = imagevec::kAreas[i];
+    GSHSCENE_Color_Space layer = space_from(a.layer);
+    GSHSCENE_Color_Space filter_space = space_from(a.filter_space);
+    if (is_zero(layer)) {
+      layer = srgb();
+    }
+    GSHCPU_Image im;
+    const uint32_t window[4] = {(uint32_t)a.window[0], (uint32_t)a.window[1], (uint32_t)a.window[2], (uint32_t)a.window[3]};
+    ASSERT_EQ(gshcpu_render_image_open(&im, images[(size_t)a.image], window, a.extend_x, a.extend_y,
+                  GSHSCENE_IMAGE_FILTER_AREA, &filter_space, &layer, &layer),
+        GSHCPU_OK)
+        << a.name << " (vector " << i << ")";
+    double got[4];
+    gshcpu_render_image_region(&im, a.origin, a.edge_a, a.edge_b, got);
+    const double tolerance = a.tolerance == 0.0 ? 1e-13 : a.tolerance;
+    EXPECT_TRUE(close(got, a.expected, tolerance)) << a.name << " (vector " << i << ")";
+    const double cells = (std::fabs(a.edge_a[0]) + std::fabs(a.edge_b[0]) + 2.0) * (std::fabs(a.edge_a[1]) + std::fabs(a.edge_b[1]) + 2.0);
+    if (cells <= 100000.0) {
+      double second[4];
+      naive_area(im, a.origin, a.edge_a, a.edge_b, second);
+      EXPECT_TRUE(close(second, a.expected, tolerance)) << a.name << " (vector " << i << "): the every-cell engine";
+    }
+    double scale = 1.0;
+    for (int k = 0; k < 4; k++) {
+      scale = std::fmax(scale, std::fabs(a.expected[k]));
+    }
+    for (int k = 0; k < 4; k++) {
+      worst = std::fmax(worst, std::fabs(got[k] - a.expected[k]) / (scale * tolerance));
+    }
+    if (a.tolerance == 0.0) {
+      exact++;
+      exact_equal += got[0] == a.expected[0] && got[1] == a.expected[1] && got[2] == a.expected[2] && got[3] == a.expected[3];
+    }
+  }
+  std::printf("area vectors: %u regions, %zu exact (%zu bit for bit); worst error %.3g of its tolerance\n", imagevec::kAreaCount, exact,
+      exact_equal, worst);
+  EXPECT_GT(exact, 0u);
+}
+
+namespace {
+
+struct Lcg {
+  uint64_t state;
+  uint32_t next() {
+    state = state * 6364136223846793005ull + 1442695040888963407ull;
+    return (uint32_t)(state >> 33);
+  }
+  double unit() { return (double)next() / 2147483648.0; }
+  double between(double lo, double hi) { return lo + (hi - lo) * unit(); }
+};
+
+} // namespace
+
+// IC7: the row-and-run algorithm is the every-cell clip, for every edge mode on both axes, windows, formats and parallelograms,
+// axis-aligned or not, tiny or covering many periods of the window.
+TEST(RenderImageArea, TheRowsAndRunsAgreeWithAnEveryCellClip) {
+  Lcg rng{12345};
+  const ih::Fmt formats[] = {ih::fmt(4, false, 8, GIMG_ALPHA_STRAIGHT), ih::fmt(3, true, 32, GIMG_ALPHA_NONE),
+      ih::fmt(1, false, 8, GIMG_ALPHA_NONE, true), ih::fmt(4, false, 16, GIMG_ALPHA_PREMULTIPLIED)};
+  size_t compared = 0;
+  size_t folded = 0;
+  for (int trial = 0; trial < 3000; trial++) {
+    Store s;
+    const ih::Fmt & f = formats[rng.next() % 4];
+    const uint32_t w = 1 + rng.next() % 7;
+    const uint32_t h = 1 + rng.next() % 7;
+    std::vector<uint32_t> samples((size_t)w * h * f.channels);
+    for (size_t i = 0; i < samples.size(); i++) {
+      if (f.bits == 32) {
+        samples[i] = ih::float_bits((float)(rng.next() % 200) / 64.0f - 1.0f);
+      } else {
+        samples[i] = rng.next() & ((1u << f.bits) - 1u);
+      }
+    }
+    const GSHSCENE_Resource * image = ih::intern_image(s.store, w, h, f, samples);
+    ASSERT_NE(image, nullptr);
+    s.held.push_back(image);
+    uint32_t window[4] = {0, 0, 0, 0};
+    if (rng.next() % 3 == 0 && (w > 1 || h > 1)) {
+      window[0] = rng.next() % w;
+      window[1] = rng.next() % h;
+      window[2] = window[0] + 1 + rng.next() % (w - window[0]);
+      window[3] = window[1] + 1 + rng.next() % (h - window[1]);
+    }
+    const uint32_t ex = rng.next() % 4;
+    const uint32_t ey = rng.next() % 4;
+    const GSHSCENE_Color_Space own{};
+    GSHSCENE_Color_Space layer = srgb();
+    GSHCPU_Image im;
+    ASSERT_EQ(gshcpu_render_image_open(&im, image, window, ex, ey, GSHSCENE_IMAGE_FILTER_AREA, &own, &layer, &layer), GSHCPU_OK);
+    double origin[2] = {rng.between(-9.0, 14.0), rng.between(-9.0, 14.0)};
+    double ea[2];
+    double eb[2];
+    const double span = (rng.next() % 4 == 0) ? 40.0 : 6.0;
+    switch (rng.next() % 3) {
+      case 0: // axis-aligned
+        ea[0] = rng.between(0.05, span) * (rng.next() % 2 ? 1 : -1);
+        ea[1] = 0.0;
+        eb[0] = 0.0;
+        eb[1] = rng.between(0.05, span) * (rng.next() % 2 ? 1 : -1);
+        if (rng.next() % 2) {
+          std::swap(ea[0], eb[0]);
+          std::swap(ea[1], eb[1]);
+        }
+        break;
+      default: // rotated, sheared
+        ea[0] = rng.between(-span, span);
+        ea[1] = rng.between(-span, span);
+        eb[0] = rng.between(-span, span);
+        eb[1] = rng.between(-span, span);
+        break;
+    }
+    if (std::fabs(ea[0] * eb[1] - ea[1] * eb[0]) < 0.02) {
+      continue;
+    }
+    double got[4];
+    double want[4];
+    im.visits = 0;
+    gshcpu_render_image_region(&im, origin, ea, eb, got);
+    const uint64_t visits = im.visits;
+    naive_area(im, origin, ea, eb, want);
+    ASSERT_TRUE(close(got, want, 1e-11)) << "trial " << trial << " extend " << ex << "," << ey << " window " << window[0] << ","
+                                         << window[1] << "," << window[2] << "," << window[3];
+    compared++;
+    folded += visits < (uint64_t)(std::fabs(ea[0]) + std::fabs(eb[0]) + 1) * (uint64_t)(std::fabs(ea[1]) + std::fabs(eb[1]) + 1) / 2;
+  }
+  EXPECT_GT(compared, 2500u);
+  EXPECT_GT(folded, 100u) << "the runs spared cells in a good share of the large cases";
+}
+
+// IC7, IC9: whole periods are summed by the window's row, so a 1x1 image repeated a million times is one texel's value for the
+// visits of the boundary, not of the million.
+TEST(RenderImageArea, WholePeriodsAreSummedNotVisited) {
+  Store s;
+  const ih::Fmt f = ih::fmt(1, false, 8, GIMG_ALPHA_NONE);
+  const GSHSCENE_Resource * one = ih::intern_image(s.store, 1, 1, f, {51});
+  ASSERT_NE(one, nullptr);
+  s.held.push_back(one);
+  const uint32_t window[4] = {0, 0, 0, 0};
+  const GSHSCENE_Color_Space own{};
+  GSHSCENE_Color_Space layer = srgb();
+  GSHCPU_Image im;
+  ASSERT_EQ(gshcpu_render_image_open(&im, one, window, GSHSCENE_IMAGE_EXTEND_REPEAT, GSHSCENE_IMAGE_EXTEND_REPEAT,
+                GSHSCENE_IMAGE_FILTER_AREA, &own, &layer, &layer),
+      GSHCPU_OK);
+  const double origin[2] = {-300.25, 17.5};
+  const double ea[2] = {1000.0, 100.0};
+  const double eb[2] = {-80.0, 1000.0}; // about a million cells
+  double got[4];
+  im.visits = 0;
+  gshcpu_render_image_region(&im, origin, ea, eb, got);
+  EXPECT_NEAR(got[0], 51.0 / 255.0, 1e-13);
+  EXPECT_NEAR(got[3], 1.0, 1e-13);
+  EXPECT_LT(im.visits, 40000u) << "boundary cells and the rows, not the million cells";
+  // The same through a window and a reflect: a 5x3 image's reflected double period.
+  std::vector<uint32_t> samples;
+  for (uint32_t i = 0; i < 15; i++) {
+    samples.push_back((i * 37u + 11u) % 256u);
+  }
+  const GSHSCENE_Resource * five = ih::intern_image(s.store, 5, 3, f, samples);
+  ASSERT_NE(five, nullptr);
+  s.held.push_back(five);
+  ASSERT_EQ(gshcpu_render_image_open(&im, five, window, GSHSCENE_IMAGE_EXTEND_REFLECT, GSHSCENE_IMAGE_EXTEND_REPEAT,
+                GSHSCENE_IMAGE_FILTER_AREA, &own, &layer, &layer),
+      GSHCPU_OK);
+  const double ob[2] = {-33.5, -20.25};
+  const double ea2[2] = {61.0, 9.0};
+  const double eb2[2] = {-7.0, 47.0};
+  double want[4];
+  gshcpu_render_image_region(&im, ob, ea2, eb2, got);
+  naive_area(im, ob, ea2, eb2, want);
+  EXPECT_TRUE(close(got, want, 1e-12));
+}
+
+namespace {
+
+struct Limited {
+  uint32_t refused = 0;
+  uint32_t reason = 0;
+  GSHSCENE_Result result = GSHSCENE_OK;
+  std::string bytes;
+};
+
+/** Render @p list with @p limits on a w by h raster, through @p damage and with @p flags. */
+Limited render_limited(const GSHCPU_Limits & limits, const GSHSCENE_List * list, uint32_t w, uint32_t h,
+    const GSHSCENE_Rect * damage, uint32_t flags = 0) {
+  Limited out;
+  GSHSCENE_Sink * sink = nullptr;
+  EXPECT_EQ(gshcpu_sink_create(nullptr, nullptr, &limits, &sink), GSHCPU_OK);
+  RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, w, h));
+  GSHSCENE_Target t = target_of(r.raster);
+  t.damage = damage;
+  ReportRef report;
+  GSHSCENE_Render_Request req = request_of(list, &t, report.report);
+  req.flags = flags;
+  std::vector<unsigned char> workspace;
+  if (flags & GSHSCENE_RENDER_CALLER_MEMORY) {
+    size_t need = 0;
+    EXPECT_EQ(gshscene_sink_workspace_bytes(sink, &req, &need), GSHSCENE_OK);
+    workspace.resize(need + 64);
+    req.workspace = workspace.data();
+    req.workspace_bytes = need;
+  }
+  out.result = gshscene_sink_render(sink, &req);
+  for (const GSHSCENE_Report_Entry & e : report.entries()) {
+    if (e.entry_class == GSHSCENE_ENTRY_REFUSED) {
+      out.refused++;
+      out.reason = (uint32_t)e.reason;
+    }
+  }
+  out.bytes = r.bytes();
+  EXPECT_EQ(gshscene_sink_destroy(sink), GSHSCENE_OK);
+  return out;
+}
+
+} // namespace
+
+// IC9: each AREA limit passes exactly at its bound and refuses one past it; the bound is a function of the map and the window
+// alone, so the refusal is the same with a damage and with the caller's memory, and nothing of a refused item is drawn.
+TEST(RenderImageLimits, EachBoundPassesExactlyAndOneMoreIsRefused) {
+  Store s;
+  const ih::Fmt f = ih::fmt(4, false, 8, GIMG_ALPHA_STRAIGHT);
+  std::vector<uint32_t> samples;
+  for (uint32_t i = 0; i < 16u * 16u * 4u; i++) {
+    samples.push_back((i * 29u + 3u) % 256u);
+  }
+  const GSHSCENE_Resource * image = ih::intern_image(s.store, 16, 16, f, samples);
+  ASSERT_NE(image, nullptr);
+  s.held.push_back(image);
+  GSHSCENE_Image_Paint ip;
+  gshscene_image_paint_init(&ip);
+  ip.image = image;
+  ip.map = matrix(0.125, 0.0, 0.0, 0.125, 0.0, 0.0);
+  ip.magnify = GSHSCENE_IMAGE_FILTER_AREA;
+  ip.minify = GSHSCENE_IMAGE_FILTER_AREA;
+  const GSHSCENE_Resource * paint = nullptr;
+  ASSERT_EQ(gshscene_store_intern_image_paint(s.store, &ip, &paint), GSHSCENE_OK);
+  s.held.push_back(paint);
+  const uint32_t W = 40;
+  const uint32_t H = 30;
+  GSHSCENE_List * l = s.open();
+  GSHSCENE_Paint p = image_paint_of(paint, 1.0);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, W, H), nullptr, GSHGEOM_FILL_NONZERO, &p, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  // The bound, from the same primitives the sink uses.
+  GSHCPU_Image im;
+  const uint32_t window[4] = {0, 0, 0, 0};
+  const GSHSCENE_Color_Space own{};
+  GSHSCENE_Color_Space layer = srgb();
+  ASSERT_EQ(gshcpu_render_image_open(&im, image, window, 0, 0, GSHSCENE_IMAGE_FILTER_AREA, &own, &layer, &layer), GSHCPU_OK);
+  ASSERT_EQ(gshcpu_render_image_place(&im, &ip.map), 1);
+  uint64_t pixel = 0;
+  ASSERT_EQ(gshcpu_render_image_area_bound(&im, &pixel), 1);
+  EXPECT_GT(pixel, 64u) << "an 8 by 8 preimage is at least its cells";
+  const uint64_t pixels = (uint64_t)W * H;
+  const GSHSCENE_Rect damage = {5, 4, 20, 18};
+  for (uint32_t flags : {0u, (uint32_t)GSHSCENE_RENDER_CALLER_MEMORY}) {
+    for (const GSHSCENE_Rect * d : {(const GSHSCENE_Rect *)nullptr, &damage}) {
+      SCOPED_TRACE(std::string(flags ? "caller memory" : "allocated") + (d ? ", damaged" : ", whole"));
+      GSHCPU_Limits limits;
+      gshcpu_limits_default(&limits);
+      limits.max_area_pixel_work = pixel;
+      limits.max_image_work = pixels * pixel;
+      Limited ok = render_limited(limits, l, W, H, d, flags);
+      EXPECT_EQ(ok.refused, 0u) << "exactly the bounds passes";
+      limits.max_area_pixel_work = pixel - 1;
+      Limited per_pixel = render_limited(limits, l, W, H, d, flags);
+      EXPECT_EQ(per_pixel.refused, 1u) << "one past the per-pixel bound";
+      EXPECT_EQ(per_pixel.reason, (uint32_t)GSHSCENE_REASON_RESOURCE_LIMIT);
+      limits.max_area_pixel_work = pixel;
+      limits.max_image_work = pixels * pixel - 1;
+      Limited per_item = render_limited(limits, l, W, H, d, flags);
+      EXPECT_EQ(per_item.refused, 1u) << "one past the item's bound";
+      EXPECT_EQ(per_item.reason, (uint32_t)GSHSCENE_REASON_RESOURCE_LIMIT);
+      EXPECT_EQ(per_item.bytes, per_pixel.bytes) << "a refused item draws nothing, whichever limit refused it";
+      limits.max_area_pixel_work = UINT64_MAX;
+      limits.max_image_work = UINT64_MAX;
+      Limited uncapped = render_limited(limits, l, W, H, d, flags);
+      EXPECT_EQ(uncapped.refused, 0u);
+      EXPECT_EQ(uncapped.bytes, ok.bytes);
+    }
+  }
+  // Strict stops at the refusal.
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  limits.max_area_pixel_work = pixel - 1;
+  EXPECT_EQ(render_limited(limits, l, W, H, nullptr, GSHSCENE_RENDER_STRICT).result, GSHSCENE_ERR_REFUSED);
+}
+
 /* --- the sink's wiring: sample point, chain, filter, conversion, tint, multiplier -------------------------------- */
 
 namespace {

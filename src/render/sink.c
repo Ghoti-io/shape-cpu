@@ -63,6 +63,8 @@ typedef struct Cpu_Sink {
   GSHCPU_Executor executor;         /* the caller's, or none (run NULL) */
   unsigned tiers;                   /* GSHCPU_RENDER_TIER_*: the tiers that are on */
   size_t elements;                  /* the most path elements a stored resource may hold: SC11's term */
+  uint64_t max_area_pixel_work;     /* IC9: the most texels and cells one pixel of AREA visits */
+  uint64_t max_image_work;          /* IC9: the most one image item visits over the whole render */
 } Cpu_Sink;
 
 /* --- what a render remembers ----------------------------------------------------------------- */
@@ -604,8 +606,8 @@ static uint64_t work_bound(const Cpu_Sink * cs) {
     return UINT64_MAX;
   }
   uint64_t exact = gshcpu_exact_work_bound((uint64_t)cs->max_deposits, points3, (uint64_t)cs->max_dimension, cell3, cs->max_crossings);
-  if (!gcu_safe_add_u64(b, exact, &b)) {
-    return UINT64_MAX;
+  if (!gcu_safe_add_u64(b, exact, &b) || !gcu_safe_add_u64(b, cs->max_image_work, &b)) {
+    return UINT64_MAX; /* IC9: and one image item's texels */
   }
   return b;
 }
@@ -643,15 +645,14 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   for (uint32_t k = GSHSCENE_GRADIENT_LINEAR; k < GSHSCENE_GRADIENT_KIND_COUNT; k++) {
     out->gradient_kinds |= UINT32_C(1) << k;
   }
-  /* IC1: an image paint, the filters this build samples (AREA is not among them yet), every edge mode, every format. */
-  out->image_filters = (UINT32_C(1) << GSHSCENE_IMAGE_FILTER_NEAREST) | (UINT32_C(1) << GSHSCENE_IMAGE_FILTER_LINEAR) |
-      (UINT32_C(1) << GSHSCENE_IMAGE_FILTER_CUBIC);
+  /* IC1: an image paint, every filter, every edge mode, every format, filtered in a space of its own. */
+  out->image_filters = (UINT32_C(1) << GSHSCENE_IMAGE_FILTER_COUNT) - 1u;
   out->image_extends = (UINT32_C(1) << GSHSCENE_IMAGE_EXTEND_COUNT) - 1u;
   out->image_formats = GSHSCENE_IMAGE_FORMAT_ALL;
   out->flags |= GSHSCENE_CAP_IMAGE_FILTER_SPACES;
   out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;
   out->cancel_work_bound = work_bound(cs);
-  out->work_measure = "cells+points+pixels";
+  out->work_measure = "cells+points+pixels+texels";
   return GSHSCENE_OK;
 }
 
@@ -911,15 +912,26 @@ static GSHSCENE_Result image_begin(Painter * p, Run * run, const GSHSCENE_Item *
     p->refused = 1;
     return refuse(run, item, chain, count);
   }
-  uint32_t filter = gshgeom_map_stretches_every_direction(&composed) ? ip.magnify : ip.minify;
-  if (filter == (uint32_t)GSHSCENE_IMAGE_FILTER_AREA) {
-    filter = (uint32_t)GSHSCENE_IMAGE_FILTER_LINEAR; /* not claimed by the caps yet: the plan reported the approximation */
-  }
+  const uint32_t filter = gshgeom_map_stretches_every_direction(&composed) ? ip.magnify : ip.minify;
   if (gshcpu_render_image_open(&p->im, ip.image, ip.window, ip.extend_x, ip.extend_y, filter, &ip.filter_space,
           gshscene_job_target_space(run->job), &frame->space) != GSHCPU_OK ||
       !gshcpu_render_image_place(&p->im, &composed) || !gshcpu_render_image_in_domain(&p->im, whole)) {
     p->refused = 1;
     return refuse(run, item, chain, count);
+  }
+  if (filter == (uint32_t)GSHSCENE_IMAGE_FILTER_AREA) {
+    /* IC9: the bound is a function of the map, the window and the rectangle only, so that no damage, cache or thread changes
+     * what is refused; it is met before any pixel is drawn, over what the whole render draws of the item. */
+    uint64_t pixel = 0;
+    uint64_t item_bound = 0;
+    const uint64_t w = (uint64_t)(whole.x1 - whole.x0);
+    const uint64_t h = (uint64_t)(whole.y1 - whole.y0);
+    if (!gshcpu_render_image_area_bound(&p->im, &pixel) || pixel > run->cs->max_area_pixel_work ||
+        !gcu_safe_mul_u64(w, h, &item_bound) || !gcu_safe_mul_u64(item_bound, pixel, &item_bound) ||
+        item_bound > run->cs->max_image_work) {
+      p->refused = 1;
+      return refuse(run, item, chain, count);
+    }
   }
   double tint[3] = {0.0, 0.0, 0.0};
   double tint_alpha = 0.0;
@@ -1124,6 +1136,7 @@ static void painter_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
   }
   const int clipped = frame->clip_base < run->clip_count;
   if (p->image) {
+    const uint64_t before = p->im.visits;
     for (size_t i = 0; i < n; i++) {
       if (m8[i] == 0) {
         continue;
@@ -1137,6 +1150,7 @@ static void painter_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
       gshcpu_render_image_at(&p->im, (double)(int32_t)px + 0.5, (double)(int32_t)y + 0.5, s);
       painter_pixel(run, frame, px, y, m, s);
     }
+    run->work += p->im.visits - before; /* the texels and cells AREA visited (IC9) */
     return;
   }
   if (!p->gradient) {
@@ -2320,6 +2334,9 @@ static GSHCPU_Result sink_make(const GSHCPU_Allocator * alloc, const GSHSCENE_Li
                                                         : GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS;
   cs->max_crossings = limits && limits->max_exact_crossings ? limits->max_exact_crossings
                                                             : GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS;
+  cs->max_area_pixel_work = limits && limits->max_area_pixel_work ? limits->max_area_pixel_work
+                                                                  : GSHCPU_LIMITS_DEFAULT_MAX_AREA_PIXEL_WORK;
+  cs->max_image_work = limits && limits->max_image_work ? limits->max_image_work : GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK;
   gshgeom_limits_default(&cs->geometry);
   if (limits && limits->max_points) {
     cs->geometry.max_points = limits->max_points;

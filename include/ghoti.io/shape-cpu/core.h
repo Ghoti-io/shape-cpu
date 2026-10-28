@@ -108,6 +108,12 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
  */
 #define GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS ((uint64_t)1 << 20)
 
+/** The default of ::GSHCPU_Limits.max_area_pixel_work: 2^20. */
+#define GSHCPU_LIMITS_DEFAULT_MAX_AREA_PIXEL_WORK ((uint64_t)1 << 20)
+
+/** The default of ::GSHCPU_Limits.max_image_work: 2^30. */
+#define GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK ((uint64_t)1 << 30)
+
 /** The largest ::GSHCPU_Limits.max_exact_crossings the sink accepts: 2^32.  A larger value is refused at sink creation. */
 #define GSHCPU_LIMITS_MAX_EXACT_CROSSINGS ((uint64_t)1 << 32)
 
@@ -198,6 +204,21 @@ typedef struct GSHCPU_Limits {
    * ignore it.
    */
   uint64_t fill_coverage;
+  /**
+   * The most texels and cells the `AREA` filter of an image paint (render.h, IC7, IC9) visits for one pixel: the bound is a
+   * function of the composed map and the window alone, decided before any pixel is drawn, so a damage, a cache and the
+   * caller's memory change nothing about which items are refused.  An item past it is the sink's resource limit,
+   * ::GSHSCENE_REASON_RESOURCE_LIMIT.  0 is ::GSHCPU_LIMITS_DEFAULT_MAX_AREA_PIXEL_WORK (2^20), `UINT64_MAX` no cap.  A
+   * `uint64_t` whatever the target.  Read by the sink; the coverage functions ignore it.
+   */
+  uint64_t max_area_pixel_work;
+  /**
+   * The most texels and cells the `AREA` filter visits for one item over the whole render of it: the pixel bound times the
+   * pixels the item can reach.  Past it the item is refused as above.  0 is ::GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK (2^30),
+   * `UINT64_MAX` no cap.  A `uint64_t` whatever the target.  It enters the sink's declared cancel bound: cancellation is
+   * between units, and one image item can take this long.  Read by the sink; the coverage functions ignore it.
+   */
+  uint64_t max_image_work;
 } GSHCPU_Limits;
 
 /** ::GSHCPU_Limits.fill_coverage: the exact area of a fill (the default). */

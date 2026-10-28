@@ -604,8 +604,21 @@ void gshcpu_render_gradient_vector(int enable);
 /** The inverse of @p f's 2x2 part scaled by the power of two of its largest entry (exact), and its translation: `p = L^-1 (q - t)`. @return 0 where it cannot be formed. */
 int gshcpu_render_map_invert(const GSHGEOM_Map * f, double inv[6]);
 
+/** `a b - c d`, the exact value rounded once (an exact sum of exact products): zero exactly when the value is. */
+double gshcpu_render_det2(double a, double b, double c, double d);
+
 /** The decode of an 8-bit sample the general tier computes, tabulated (FT-3). */
 #define GSHCPU_IMAGE_LUT 256u
+
+/** Rows of an image whose sum over the window is kept for `AREA` under a repeating axis (a direct-mapped table). */
+#define GSHCPU_IMAGE_ROW_SUMS 32u
+
+/** The sum of one row of the window, premultiplied in the filter space (IC7), kept for the next pixel. */
+typedef struct GSHCPU_Image_Row_Sum {
+  int64_t row;
+  int valid;
+  double sum[4];
+} GSHCPU_Image_Row_Sum;
 
 /** An image paint prepared for one fill (IC1 to IC8): the image read in place, the edge modes, the filter chosen, the conversions and the inverse map. */
 typedef struct GSHCPU_Image {
@@ -623,6 +636,8 @@ typedef struct GSHCPU_Image {
   double tint[3];              /* an alpha-only image's tint, straight, in the layer's space */
   double tint_alpha;
   const double * lut;          /* FT-3: the decode of an 8-bit sample, or NULL */
+  uint64_t visits;             /* texels read and cells clipped by `AREA`, counted whether or not a sum was kept (IC9) */
+  GSHCPU_Image_Row_Sum row_sums[GSHCPU_IMAGE_ROW_SUMS];
 } GSHCPU_Image;
 
 /**
@@ -646,8 +661,30 @@ void gshcpu_render_image_source(GSHCPU_Image * im, double m, const double tint[3
 /** IC6: the filtered value at the image-space point (@p u, @p v), premultiplied in the layer's space, no multiplier; `NEAREST`, `LINEAR` or `CUBIC`. */
 void gshcpu_render_image_point(const GSHCPU_Image * im, double u, double v, double out[4]);
 
+/**
+ * IC7: the filtered value of the parallelogram `origin + s ea + t eb`, s and t in [0, 1], in image space: the exact mean of
+ * the extended image over it, premultiplied in the layer's space, no multiplier.  Only for the filter ::GSHSCENE_IMAGE_FILTER_AREA.
+ */
+void gshcpu_render_image_region(GSHCPU_Image * im, const double origin[2], const double ea[2], const double eb[2], double out[4]);
+
+/**
+ * IC9: the most texels and cells one pixel's `AREA` visits under the placed map, a function of the map and the window alone
+ * (the bound the limits are asserted by).  @return 0 where the preimage of a pixel is past the sampling domain, and then
+ * @p out is untouched.
+ */
+int gshcpu_render_image_area_bound(const GSHCPU_Image * im, uint64_t * out);
+
 /** IC8: the source of the pixel whose center is the device point (@p qx, @p qy): premultiplied, in the layer's space, times the multiplier. */
-void gshcpu_render_image_at(const GSHCPU_Image * im, double qx, double qy, double src[4]);
+void gshcpu_render_image_at(GSHCPU_Image * im, double qx, double qy, double src[4]);
+
+/** IC5: the texel index tap @p k reads along the window `[lo, hi)` under @p mode, or -1 for the transparent texel of `NONE`. */
+int64_t gshcpu_render_image_edge(int64_t k, int64_t lo, int64_t hi, uint32_t mode);
+
+/** The value tap (@p tx, @p ty) reads, premultiplied in the filter space (IC4, IC5). */
+void gshcpu_render_image_tap(const GSHCPU_Image * im, int64_t tx, int64_t ty, double out[4]);
+
+/** The texel (@p ix, @p iy) of the window, premultiplied in the filter space (IC4). */
+void gshcpu_render_image_window_texel(const GSHCPU_Image * im, uint32_t ix, uint32_t iy, double out[4]);
 
 /** The texel (@p x, @p y) as IP4 decodes it, read the way the sink reads it; for the gate against ::gshscene_image_decode. */
 void gshcpu_render_image_texel(const GSHCPU_Image * im, uint32_t x, uint32_t y, double out[4]);

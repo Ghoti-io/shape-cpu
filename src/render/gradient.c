@@ -137,6 +137,13 @@ static void grow_square_of_difference(Expansion * x, double a, double b, double 
   grow_product(x, sign * lo, lo);
 }
 
+double gshcpu_render_det2(double a, double b, double c, double d) {
+  Expansion x = {{0.0}, 0};
+  grow_product(&x, a, b);
+  grow_product(&x, -c, d);
+  return approximate(&x);
+}
+
 /* --- the map ----------------------------------------------------------------------------------------------- */
 
 static int is_finite(double x) {
