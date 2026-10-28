@@ -1894,7 +1894,7 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
   }
   if (item->kind == GSHSCENE_ITEM_STROKE
           ? gshscene_stroke_notice(item, run->maps, count - 1, &run->job->target.map)
-          : gshscene_gradient_notice(item, run->maps, count - 1, &run->job->target.map)) {
+          : gshscene_paint_notice(item, run->maps, count - 1, &run->job->target.map)) {
     return GSHSCENE_OK; /* S17, SC4: a gradient fill or a stroke that draws nothing; the plan wrote its notice */
   }
   switch (item->kind) {

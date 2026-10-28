@@ -920,7 +920,7 @@ GRT = ["testRender_gradient"] + RT
 PLANTS += [
     ("rgr-cap-kinds", "src", RS, "  for (uint32_t k = GSHSCENE_GRADIENT_LINEAR; k < GSHSCENE_GRADIENT_KIND_COUNT; k++) {", "  for (uint32_t k = GSHSCENE_GRADIENT_LINEAR; k < GSHSCENE_GRADIENT_SWEEP; k++) {", GRT),
     ("rgr-cap-spaces", "src", RS, "GSHSCENE_CAP_GLYPHS_FROM_FONT | GSHSCENE_CAP_GRADIENT_SPACES;", "GSHSCENE_CAP_GLYPHS_FROM_FONT;", GRT),
-    ("rgr-notice-drawn", "src", RS, '          : gshscene_gradient_notice(item, run->maps, count - 1, &run->job->target.map)) {', '          : 0) {', GRT),
+    ("rgr-notice-drawn", "src", RS, '          : gshscene_paint_notice(item, run->maps, count - 1, &run->job->target.map)) {', '          : 0) {', GRT),
     ("rgr-sample-corner", "src", RS, "(double)(int32_t)x + 0.5, (double)(int32_t)y + 0.5, color)", "(double)(int32_t)x, (double)(int32_t)y, color)", GRT),
     ("rgr-chain-no-gradient-map", "src", RS, "gshgeom_map_compose_chain(run->maps, count + 1, &run->job->target.map, &composed)", "gshgeom_map_compose_chain(run->maps, count, &run->job->target.map, &composed)", GRT),
     ("rgr-chain-no-target", "src", RS, "gshgeom_map_compose_chain(run->maps, count + 1, &run->job->target.map, &composed)", "gshgeom_map_compose_chain(run->maps, count + 1, NULL, &composed)", GRT),

@@ -171,7 +171,7 @@ shape-scene's G1 to G14 are drawn per pixel, normatively as render.h's S11 says:
   G9's angle is `gmath_atan2`, exact on the axes. A `t` past `2^431` (only where G8's `a = 0` sends the root to
   infinity, at the cone's edge) is taken at that end, so no NaN reaches a store and the bits do not depend on a
   target's NaN.
-- **What draws nothing** (G10, G11) is skipped by the plan's own predicate, `gshscene_gradient_notice`; where G8
+- **What draws nothing** (G10, G11) is skipped by the plan's own predicate, `gshscene_paint_notice`; where G8
   gives nothing the pixel is not touched.
 
 Measured against shape-scene's `tests/gradient_vectors.h` (the gradient oracle's 1860 points): the worst error of

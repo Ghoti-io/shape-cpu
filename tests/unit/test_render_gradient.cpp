@@ -229,7 +229,7 @@ TEST(RenderGradientVectors, TheEvaluationAgreesWithTheOracleWithinTheStatedToler
         instances.push_back(map_of(c.chain[k]));
       }
       GSHGEOM_Map target = map_of(c.chain[0]);
-      GSHSCENE_Reason notice = gshscene_gradient_notice(&item, instances.empty() ? nullptr : instances.data(),
+      GSHSCENE_Reason notice = gshscene_paint_notice(&item, instances.empty() ? nullptr : instances.data(),
           instances.size(), &target);
       if (!c.drawn && c.reason == 3) {
         EXPECT_EQ(notice, GSHSCENE_REASON_MAP_NOT_INVERTIBLE) << c.name;

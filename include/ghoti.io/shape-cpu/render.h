@@ -118,7 +118,7 @@
  *   is) has its alpha multiplied by the paint's, is converted per pixel from the
  *   interpolation space into the layer's (N3; untouched when they are equal),
  *   premultiplied and applied with `SRC_OVER`; where G8 gives nothing the pixel
- *   is not touched.  A fill that `gshscene_gradient_notice` names (G10, G11) is
+ *   is not touched.  A fill that `gshscene_paint_notice` names (G10, G11) is
  *   skipped.  A composed map whose inverse is not finite, or whose determinant
  *   rounds to zero, and a fill whose rectangle in the whole render (S4) maps
  *   outside half of G14's sampling domain, are the sink's resource limit: the item
