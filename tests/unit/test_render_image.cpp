@@ -654,6 +654,114 @@ TEST(RenderImageLimits, EachBoundPassesExactlyAndOneMoreIsRefused) {
   EXPECT_EQ(render_limited(limits, l, W, H, nullptr, GSHSCENE_RENDER_STRICT).result, GSHSCENE_ERR_REFUSED);
 }
 
+// IC10: each tier is the general tier's pixels, and is taken: every fill of a corpus of maps, filters, edge modes and formats
+// rendered with the image tiers on and off is the same bytes, and the counters show each tier taken (and none when forced off).
+TEST(RenderImageTiers, EachTierIsBitEqualToTheGeneralTierAndIsTaken) {
+  struct Shape {
+    const char * name;
+    GSHGEOM_Map map;
+  };
+  GSHGEOM_Map rot30;
+  ASSERT_EQ(gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 30.0, &rot30), GSHGEOM_OK);
+  GSHGEOM_Map rot90;
+  ASSERT_EQ(gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 90.0, &rot90), GSHGEOM_OK);
+  const Shape shapes[] = {
+      {"integer translation", matrix(1, 0, 0, 1, 3, -2)},
+      {"half pixel", matrix(1, 0, 0, 1, 0.5, 0.5)},
+      {"scale 3", matrix(3, 0, 0, 3, 1.25, 0.5)},
+      {"scale 0.4", matrix(0.4, 0, 0, 0.4, 2, 1)},
+      {"anisotropic", matrix(5, 0, 0, 0.3, 0, 0)},
+      {"mirror", matrix(-2, 0, 0, 2, 30, 0)},
+      {"quarter turn", rot90},
+      {"rotated 30 degrees", rot30},
+      {"sheared", matrix(2, 0.7, 0, 2, 0, 0)},
+  };
+  const ih::Fmt formats[] = {ih::fmt(4, false, 8, GIMG_ALPHA_STRAIGHT), ih::fmt(1, false, 8, GIMG_ALPHA_NONE),
+      ih::fmt(3, true, 32, GIMG_ALPHA_NONE), ih::fmt(1, false, 8, GIMG_ALPHA_NONE, true)};
+  GSHCPU_Render_Counters on_counts{};
+  GSHCPU_Render_Counters off_counts{};
+  size_t renders = 0;
+  for (const ih::Fmt & f : formats) {
+    for (const Shape & shape : shapes) {
+      for (uint32_t filter = 0; filter < GSHSCENE_IMAGE_FILTER_COUNT; filter++) {
+        for (uint32_t extend : {0u, 1u, 2u, 3u}) {
+          Store s;
+          const uint32_t w = 6;
+          const uint32_t h = 5;
+          std::vector<uint32_t> samples((size_t)w * h * f.channels);
+          for (size_t i = 0; i < samples.size(); i++) {
+            samples[i] = f.bits == 32 ? ih::float_bits((float)((i * 13) % 31) / 30.0f) : (uint32_t)((i * 47 + 5) % 256);
+          }
+          GSHSCENE_Color_Space p3{};
+          p3.primaries = GCOL_PRIMARIES_DISPLAY_P3;
+          p3.transfer = GCOL_TRANSFER_SRGB;
+          const GSHSCENE_Resource * image = ih::intern_image(s.store, w, h, f, samples, f.alpha_only ? GSHSCENE_Color_Space{} : p3);
+          ASSERT_NE(image, nullptr);
+          s.held.push_back(image);
+          GSHSCENE_Paint tint{};
+          tint.kind = GSHSCENE_PAINT_SOLID;
+          tint.rgba[0] = 0.9;
+          tint.rgba[1] = 0.2;
+          tint.rgba[2] = 0.4;
+          tint.rgba[3] = 0.8;
+          GSHSCENE_Image_Paint ip;
+          gshscene_image_paint_init(&ip);
+          ip.image = image;
+          ip.map = shape.map;
+          ip.extend_x = extend;
+          ip.extend_y = (extend + 2) % 4;
+          ip.magnify = filter;
+          ip.minify = filter;
+          if (f.alpha_only) {
+            ip.tint = &tint;
+          } else if (filter % 2) {
+            ip.filter_space = linear_srgb();
+          }
+          const GSHSCENE_Resource * paint = nullptr;
+          ASSERT_EQ(gshscene_store_intern_image_paint(s.store, &ip, &paint), GSHSCENE_OK);
+          s.held.push_back(paint);
+          GSHSCENE_List * l = s.open();
+          GSHSCENE_Paint p = image_paint_of(paint, 0.9);
+          ASSERT_EQ(gshscene_list_fill(l, s.rect(-100, -100, 100, 100), nullptr, GSHGEOM_FILL_NONZERO, &p, 0, 0.0), GSHSCENE_OK);
+          ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+          std::string bytes[2];
+          for (int mode = 0; mode < 2; mode++) {
+            GSHCPU_Render_Counters counters{};
+            GSHSCENE_Sink * sink = nullptr;
+            const unsigned tiers = mode == 0 ? GSHCPU_RENDER_TIERS_ALL
+                                             : GSHCPU_RENDER_TIERS_ALL & ~(GSHCPU_RENDER_TIER_IMAGE_COPY |
+                                                   GSHCPU_RENDER_TIER_IMAGE_SEPARABLE | GSHCPU_RENDER_TIER_IMAGE_TABLE);
+            ASSERT_EQ(gshcpu_render_sink_create_tiered(nullptr, nullptr, nullptr, tiers, &counters, nullptr, nullptr, &sink), GSHCPU_OK);
+            RasterRef r(rf_raster(GSHCPU_FORMAT_RGBAF32_STRAIGHT, 36, 28));
+            GSHSCENE_Target t = target_of(r.raster);
+            ReportRef report;
+            GSHSCENE_Render_Request req = request_of(l, &t, report.report);
+            ASSERT_EQ(gshscene_sink_render(sink, &req), GSHSCENE_OK);
+            ASSERT_EQ(gshscene_sink_destroy(sink), GSHSCENE_OK);
+            bytes[mode] = r.bytes();
+            GSHCPU_Render_Counters & into = mode == 0 ? on_counts : off_counts;
+            into.images += counters.images;
+            into.image_copy += counters.image_copy;
+            into.image_separable += counters.image_separable;
+            into.image_table += counters.image_table;
+          }
+          renders++;
+          ASSERT_EQ(bytes[0], bytes[1]) << shape.name << " filter " << filter << " extend " << extend << " bits " << f.bits;
+        }
+      }
+    }
+  }
+  EXPECT_GT(renders, 500u);
+  EXPECT_GT(on_counts.image_copy, 0u) << "FT-1 is taken";
+  EXPECT_GT(on_counts.image_separable, 0u) << "FT-2 is taken";
+  EXPECT_GT(on_counts.image_table, 0u) << "FT-3 is taken";
+  EXPECT_EQ(off_counts.image_copy + off_counts.image_separable + off_counts.image_table, 0u) << "forced off, none is";
+  EXPECT_EQ(on_counts.images, off_counts.images);
+  std::printf("image tiers: %zu renders, %llu fills; copy %llu, separable %llu, table %llu\n", renders,
+      (unsigned long long)on_counts.images, (unsigned long long)on_counts.image_copy, (unsigned long long)on_counts.image_separable,
+      (unsigned long long)on_counts.image_table);
+}
+
 /* --- the sink's wiring: sample point, chain, filter, conversion, tint, multiplier -------------------------------- */
 
 namespace {

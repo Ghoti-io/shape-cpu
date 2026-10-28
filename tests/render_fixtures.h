@@ -62,6 +62,12 @@
  * | strokes-text | (strokes story S5) runs from the test provider's font, stroked on the general route: a hinted fill with the unhinted stroke over it and the reverse order, translucent glyphs that overlap (one union), a gradient across a run, inside alignment, dashes with round caps, an elliptical pen and a hairline |
  * | strokes-text-outlines | (strokes story S5) runs from outlines, with open subpaths: square-cap dashes, a path-scoped pattern across the glyphs, a wide stroke of a run under a rotation, and a run of one glyph beside a run of two |
  * | strokes-thin-aligned | aligned strokes thinner than two pixels (a square and a circle inside and outside, thin rectangles at fractional offsets, a star under even-odd, a closed subpath beside an open one): the aligned part and the fill's edge lie in every pixel |
+ * | image-filters | (masks-images-patterns story I3) the three point filters magnified, the area filter minified at a fraction and at a half pixel, a unit scale at an integer translation (a copy) and at a half pixel, a map that stretches one way and shrinks the other, and an image turned 30 and 90 degrees |
+ * | image-edges | the four edge modes on x against the four on y over one small image, drawn past its edges |
+ * | image-formats | twelve layouts, alpha forms and sample types (8, 12, 16 bits and floats), and alpha-only images with a solid, a foreground and a palette tint |
+ * | image-spaces | one image filtered in its own space and in linear light, wide-gamut and gamma images on an sRGB target, and a group in linear light holding images in a space of their own |
+ * | image-compose | an image fill in a group (multiply, opacity) under a clip, a star filled with a repeated image, a stroke painted with an image, a picture holding an image fill instanced turned, and a 1 by 1 image repeated a thousand times per pixel |
+ * | image-nothing | a singular map (a notice), a window of an image repeated, a zero alpha multiplier, and one drawn |
  * | blend-out-of-range | blend modes on sources out of range (negative, above 1, the recorded bound 2^16), dodge and burn past their poles, ClipColor with both steps, in a gamma-0.1 parent, nested blending groups, and a blend over the backdrop's transparent pixels |
  */
 
@@ -1585,6 +1591,356 @@ static inline GSHSCENE_List * rf_strokes_thin_aligned(RF_Ctx * c) {
   return l;
 }
 
+/* --- images (masks-images-patterns story I3) ---------------------------------------------------------- */
+
+/**
+ * An image of @p w by @p h generated in code: @p channels samples a texel (1 gray, 3 RGB, 4 RGBA) of @p bits (8, 12, 16, or 32 for
+ * a float), alpha straight, premultiplied or none, alpha-only or not, in @p space.  The samples are a structured pattern (a
+ * coarse checker under a ramp) so that a filter's work shows.
+ */
+static inline const GSHSCENE_Resource * rf_image(RF_Ctx * c, uint32_t w, uint32_t h, unsigned channels, unsigned bits,
+    GIMG_Alpha_Form alpha, int alpha_only, GSHSCENE_Color_Space space) {
+  GIMG_Pixel_Format format;
+  memset(&format, 0, sizeof format);
+  format.channel_model = channels == 1 ? GIMG_CHANNEL_GRAY : channels == 3 ? GIMG_CHANNEL_RGB : GIMG_CHANNEL_RGBA;
+  format.channel_type = bits == 32 ? GIMG_CHANNEL_FLOAT : GIMG_CHANNEL_UNORM;
+  format.layout = GIMG_LAYOUT_INTERLEAVED;
+  format.channel_count = (uint8_t)channels;
+  for (unsigned i = 0; i < channels; i++) {
+    format.bits_per_channel[i] = (uint8_t)bits;
+  }
+  format.alignment = 1;
+  format.alpha_form = (uint8_t)alpha;
+  GIMG_Raster * raster = NULL;
+  rf_check(c, gimg_raster_create(w, h, &format, GIMG_RASTER_OWNED, NULL, 0, &raster) == GIMG_OK);
+  if (!raster) {
+    return NULL;
+  }
+  unsigned char * base = (unsigned char *)gimg_raster_pixels(raster);
+  const size_t stride = gimg_raster_stride_bytes(raster);
+  const size_t size = bits <= 8 ? 1 : bits <= 16 ? 2 : 4;
+  for (uint32_t y = 0; y < h; y++) {
+    for (uint32_t x = 0; x < w; x++) {
+      for (unsigned k = 0; k < channels; k++) {
+        const int checker = ((x / 2u) + (y / 2u)) % 2u;
+        const double ramp = (double)((x * 3u + y * 5u + k * 7u) % 16u) / 15.0;
+        double v = checker ? 0.25 + 0.7 * ramp : 0.9 - 0.6 * ramp;
+        if (k == 3 || alpha_only) {
+          v = 0.3 + 0.7 * (double)((x * 5u + y * 3u) % 8u) / 7.0; /* alpha: never zero, so premultiplied stays a valid pair */
+        } else if (alpha == GIMG_ALPHA_PREMULTIPLIED && channels == 4) {
+          v *= 0.3 + 0.7 * (double)((x * 5u + y * 3u) % 8u) / 7.0;
+        }
+        unsigned char * at = base + (size_t)y * stride + ((size_t)x * channels + k) * size;
+        if (bits == 32) {
+          float f = (float)v;
+          memcpy(at, &f, sizeof f);
+        } else {
+          const uint32_t top = (1u << bits) - 1u;
+          uint32_t q = (uint32_t)(v * (double)top + 0.5);
+          if (bits <= 8) {
+            *at = (unsigned char)q;
+          } else {
+            uint16_t u = (uint16_t)q;
+            memcpy(at, &u, sizeof u);
+          }
+        }
+      }
+    }
+  }
+  GSHSCENE_Image_Params params;
+  memset(&params, 0, sizeof params);
+  params.space = space;
+  params.flags = alpha_only ? GSHSCENE_IMAGE_ALPHA_ONLY : 0u;
+  const GSHSCENE_Resource * r = NULL;
+  rf_check(c, gshscene_store_intern_image(c->store, raster, &params, &r) == GSHSCENE_OK);
+  gimg_raster_destroy(raster);
+  return rf_hold(c, r);
+}
+
+/**
+ * An image paint over the window @p window (`x0, y0, x1, y1` in texels; NULL: the whole image) with its map, extends, filters, filter
+ * space and tint, and the paint of it with @p alpha.
+ */
+static inline GSHSCENE_Paint rf_image_paint_window(RF_Ctx * c, const GSHSCENE_Resource * image, const uint32_t * window,
+    GSHGEOM_Map map, uint32_t ex, uint32_t ey, uint32_t magnify, uint32_t minify, GSHSCENE_Color_Space filter_space,
+    const GSHSCENE_Paint * tint, double alpha) {
+  GSHSCENE_Image_Paint ip;
+  gshscene_image_paint_init(&ip);
+  ip.image = image;
+  if (window) {
+    memcpy(ip.window, window, sizeof ip.window);
+  }
+  ip.map = map;
+  ip.extend_x = ex;
+  ip.extend_y = ey;
+  ip.magnify = magnify;
+  ip.minify = minify;
+  ip.filter_space = filter_space;
+  ip.tint = tint;
+  const GSHSCENE_Resource * r = NULL;
+  rf_check(c, gshscene_store_intern_image_paint(c->store, &ip, &r) == GSHSCENE_OK);
+  rf_hold(c, r);
+  GSHSCENE_Paint p;
+  memset(&p, 0, sizeof p);
+  p.kind = GSHSCENE_PAINT_IMAGE;
+  p.resource = r;
+  p.rgba[3] = alpha;
+  return p;
+}
+
+/** An image paint over the whole image (the image's own filter space unless @p filter_space says one). */
+static inline GSHSCENE_Paint rf_image_paint(RF_Ctx * c, const GSHSCENE_Resource * image, GSHGEOM_Map map, uint32_t ex, uint32_t ey,
+    uint32_t magnify, uint32_t minify, GSHSCENE_Color_Space filter_space, const GSHSCENE_Paint * tint, double alpha) {
+  return rf_image_paint_window(c, image, NULL, map, ex, ey, magnify, minify, filter_space, tint, alpha);
+}
+
+/** The map taking the unit of image space to a box of @p sx by @p sy at (@p tx, @p ty). */
+static inline GSHGEOM_Map rf_place(RF_Ctx * c, double sx, double sy, double tx, double ty) {
+  return rf_affine(c, sx, 0.0, 0.0, sy, tx, ty);
+}
+
+static inline GSHSCENE_List * rf_image_filters(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Color_Space none = rf_space((GCOL_Primaries)0, (GCOL_Transfer)0, 0.0);
+  const GSHSCENE_Resource * img = rf_image(c, 8, 6, 4, 8, GIMG_ALPHA_STRAIGHT, 0, none);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.85, 0.85, 0.9, 1.0), 0, 0.0);
+  /* the three point filters magnified: each texel a block, a blend, a smoothed blend */
+  rf_fill(c, l, rf_rect(c, 1, 1, 17, 13), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 2, 2, 1, 1), 0, 0, GSHSCENE_IMAGE_FILTER_NEAREST, GSHSCENE_IMAGE_FILTER_NEAREST, none, NULL, 1.0), 0, 0.0);
+  rf_fill(c, l, rf_rect(c, 17, 1, 33, 13), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 2, 2, 17, 1), 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_NEAREST, none, NULL, 1.0), 0, 0.0);
+  rf_fill(c, l, rf_rect(c, 33, 1, 47, 13), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 1.75, 2, 33, 1), 0, 0, GSHSCENE_IMAGE_FILTER_CUBIC, GSHSCENE_IMAGE_FILTER_NEAREST, none, NULL, 1.0), 0, 0.0);
+  /* minified by area, at a fraction: the exact mean of the covered texels; and at a half pixel offset */
+  rf_fill(c, l, rf_rect(c, 1, 14, 9, 20), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 1.0, 1.0, 1.5, 14), 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0), 0, 0.0);
+  rf_fill(c, l, rf_rect(c, 10, 14, 14, 18), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 0.4, 0.3, 10, 14), 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0), 0, 0.0);
+  /* a unit scale at an integer translation: a copy; at a half pixel: a mean of two texels */
+  rf_fill(c, l, rf_rect(c, 16, 14, 24, 20), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 1.0, 1.0, 16, 14), 0, 0, GSHSCENE_IMAGE_FILTER_CUBIC, GSHSCENE_IMAGE_FILTER_NEAREST, none, NULL, 1.0), 0, 0.0);
+  rf_fill(c, l, rf_rect(c, 26, 14, 34, 20), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 1.0, 1.0, 26.5, 14.5), 0, 0, GSHSCENE_IMAGE_FILTER_CUBIC, GSHSCENE_IMAGE_FILTER_LINEAR, none, NULL, 1.0), 0, 0.0);
+  /* stretched one way and shrunk the other: it minifies (IP8), blocky along the stretched axis */
+  rf_fill(c, l, rf_rect(c, 36, 14, 47, 20), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 1.4, 0.8, 36, 14), 0, 0, GSHSCENE_IMAGE_FILTER_CUBIC, GSHSCENE_IMAGE_FILTER_NEAREST, none, NULL, 1.0), 0, 0.0);
+  /* turned 30 degrees and quarter turned: the general tier, and the separable one */
+  GSHGEOM_Map turn;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 30.0, &turn);
+  GSHGEOM_Map there = rf_move(10.0, 22.0);
+  GSHGEOM_Map scale = rf_place(c, 2.2, 2.2, 0, 0);
+  GSHGEOM_Map chain[2] = {turn, scale};
+  GSHGEOM_Map composed;
+  gshgeom_map_compose_chain(chain, 2, NULL, &composed);
+  rf_fill(c, l, rf_rect(c, -4, -4, 22, 20), &there, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, composed, 3, 3, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 0.9), 0, 0.0);
+  GSHGEOM_Map quarter;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 90.0, &quarter);
+  GSHGEOM_Map zoom[2] = {quarter, rf_place(c, 2.5, 2.5, 0, 0)};
+  GSHGEOM_Map quarter_scaled;
+  gshgeom_map_compose_chain(zoom, 2, NULL, &quarter_scaled);
+  GSHGEOM_Map place_q = rf_move(40.0, 22.0);
+  rf_fill(c, l, rf_rect(c, -8, -2, 8, 16), &place_q, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, quarter_scaled, 2, 1, GSHSCENE_IMAGE_FILTER_CUBIC, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_image_edges(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Color_Space none = rf_space((GCOL_Primaries)0, (GCOL_Transfer)0, 0.0);
+  const GSHSCENE_Resource * img = rf_image(c, 4, 3, 4, 8, GIMG_ALPHA_STRAIGHT, 0, none);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.9, 0.8, 1.0), 0, 0.0);
+  /* every mode on x against every mode on y: the image placed in the middle of its cell, drawn past its edges */
+  for (uint32_t ey = 0; ey < 4; ey++) {
+    for (uint32_t ex = 0; ex < 4; ex++) {
+      const double x = 1.0 + 11.75 * (double)ex;
+      const double y = 1.0 + 9.75 * (double)ey;
+      GSHSCENE_Paint p = rf_image_paint(c, img, rf_place(c, 2.0, 2.0, x + 3.0, y + 2.0), ex, ey,
+          ex % 2 ? GSHSCENE_IMAGE_FILTER_LINEAR : GSHSCENE_IMAGE_FILTER_NEAREST, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0);
+      rf_fill(c, l, rf_rect(c, x, y, x + 10.5, y + 8.5), NULL, GSHGEOM_FILL_NONZERO, p, 0, 0.0);
+    }
+  }
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_image_formats(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Color_Space none = rf_space((GCOL_Primaries)0, (GCOL_Transfer)0, 0.0);
+  GSHSCENE_Color fg;
+  memset(&fg, 0, sizeof fg);
+  fg.rgba[0] = 0.1;
+  fg.rgba[1] = 0.3;
+  fg.rgba[2] = 0.8;
+  fg.rgba[3] = 1.0;
+  rf_check(c, gshscene_list_set_foreground(l, &fg) == GSHSCENE_OK);
+  GSHSCENE_Color colors[1];
+  memset(colors, 0, sizeof colors);
+  colors[0].rgba[0] = 0.8;
+  colors[0].rgba[1] = 0.2;
+  colors[0].rgba[2] = 0.3;
+  colors[0].rgba[3] = 1.0;
+  const GSHSCENE_Resource * palette = NULL;
+  rf_check(c, gshscene_store_intern_palette(c->store, 1, colors, &palette) == GSHSCENE_OK);
+  rf_hold(c, palette);
+  rf_check(c, gshscene_list_set_palette(l, palette) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.95, 0.85, 1.0), 0, 0.0);
+  struct {
+    unsigned channels, bits;
+    GIMG_Alpha_Form alpha;
+  } formats[] = {
+      {1, 8, GIMG_ALPHA_NONE}, {3, 8, GIMG_ALPHA_NONE}, {4, 8, GIMG_ALPHA_STRAIGHT}, {4, 8, GIMG_ALPHA_PREMULTIPLIED},
+      {1, 12, GIMG_ALPHA_NONE}, {4, 12, GIMG_ALPHA_STRAIGHT}, {3, 16, GIMG_ALPHA_NONE}, {4, 16, GIMG_ALPHA_PREMULTIPLIED},
+      {1, 32, GIMG_ALPHA_NONE}, {3, 32, GIMG_ALPHA_NONE}, {4, 32, GIMG_ALPHA_STRAIGHT}, {4, 32, GIMG_ALPHA_PREMULTIPLIED},
+  };
+  for (size_t i = 0; i < 12; i++) {
+    const double x = 1.0 + 11.75 * (double)(i % 4);
+    const double y = 1.0 + 9.0 * (double)(i / 4);
+    const GSHSCENE_Resource * img = rf_image(c, 5, 4, formats[i].channels, formats[i].bits, formats[i].alpha, 0, none);
+    rf_fill(c, l, rf_rect(c, x, y, x + 10.0, y + 8.0), NULL, GSHGEOM_FILL_NONZERO,
+        rf_image_paint(c, img, rf_place(c, 2.0, 2.0, x, y), 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0),
+        0, 0.0);
+  }
+  /* the alpha-only image with a solid, a foreground and a palette tint (the mark of a stencil) */
+  const GSHSCENE_Resource * mask = rf_image(c, 5, 4, 1, 8, GIMG_ALPHA_NONE, 1, none);
+  GSHSCENE_Paint tint_solid = rf_solid_in(0.9, 0.4, 0.1, 0.9, rf_space(GCOL_PRIMARIES_DISPLAY_P3, GCOL_TRANSFER_SRGB, 0.0));
+  GSHSCENE_Paint tint_fg;
+  memset(&tint_fg, 0, sizeof tint_fg);
+  tint_fg.kind = GSHSCENE_PAINT_FOREGROUND;
+  tint_fg.rgba[3] = 0.8;
+  GSHSCENE_Paint tint_palette;
+  memset(&tint_palette, 0, sizeof tint_palette);
+  tint_palette.kind = GSHSCENE_PAINT_PALETTE;
+  tint_palette.entry = 0;
+  tint_palette.rgba[3] = 1.0;
+  const GSHSCENE_Paint * tints[3] = {&tint_solid, &tint_fg, &tint_palette};
+  for (size_t i = 0; i < 3; i++) {
+    const double x = 1.0 + 11.75 * (double)i;
+    rf_fill(c, l, rf_rect(c, x, 29.0, x + 10.0, 37.0), NULL, GSHGEOM_FILL_NONZERO,
+        rf_image_paint(c, mask, rf_place(c, 2.0, 2.0, x, 29.0), 1, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none,
+            tints[i], 0.9),
+        0, 0.0);
+  }
+  /* a 12-bit alpha-only image, a float one */
+  const GSHSCENE_Resource * mask12 = rf_image(c, 5, 4, 1, 12, GIMG_ALPHA_NONE, 1, none);
+  rf_fill(c, l, rf_rect(c, 36.0, 29.0, 46.0, 37.0), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, mask12, rf_place(c, 2.0, 2.0, 36.0, 29.0), 2, 0, GSHSCENE_IMAGE_FILTER_CUBIC, GSHSCENE_IMAGE_FILTER_AREA, none,
+          &tint_fg, 1.0),
+      0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_image_spaces(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Color_Space none = rf_space((GCOL_Primaries)0, (GCOL_Transfer)0, 0.0);
+  const GSHSCENE_Color_Space srgb = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_SRGB, 0.0);
+  const GSHSCENE_Color_Space lin = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_LINEAR, 0.0);
+  const GSHSCENE_Color_Space p3 = rf_space(GCOL_PRIMARIES_DISPLAY_P3, GCOL_TRANSFER_SRGB, 0.0);
+  const GSHSCENE_Color_Space adobe = rf_space(GCOL_PRIMARIES_ADOBE_RGB, GCOL_TRANSFER_GAMMA, 2.2);
+  const GSHSCENE_Resource * plain = rf_image(c, 6, 5, 4, 8, GIMG_ALPHA_STRAIGHT, 0, srgb);
+  const GSHSCENE_Resource * wide = rf_image(c, 6, 5, 4, 16, GIMG_ALPHA_STRAIGHT, 0, p3);
+  const GSHSCENE_Resource * gamma = rf_image(c, 6, 5, 3, 12, GIMG_ALPHA_NONE, 0, adobe);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.85, 0.9, 1.0), 0, 0.0);
+  /* the same image filtered in its own space and in linear light */
+  rf_fill(c, l, rf_rect(c, 1, 1, 17, 11), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, plain, rf_place(c, 2.6, 2.0, 1, 1), 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0), 0, 0.0);
+  rf_fill(c, l, rf_rect(c, 17, 1, 33, 11), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, plain, rf_place(c, 2.6, 2.0, 17, 1), 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, lin, NULL, 1.0), 0, 0.0);
+  rf_fill(c, l, rf_rect(c, 33, 1, 47, 11), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, plain, rf_place(c, 0.4, 0.4, 33, 1), 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, lin, NULL, 1.0), 0, 0.0);
+  /* wide-gamut and gamma images on an sRGB target */
+  rf_fill(c, l, rf_rect(c, 1, 12, 17, 22), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, wide, rf_place(c, 2.6, 2.0, 1, 12), 0, 0, GSHSCENE_IMAGE_FILTER_CUBIC, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0), 0, 0.0);
+  rf_fill(c, l, rf_rect(c, 17, 12, 33, 22), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, gamma, rf_place(c, 2.6, 2.0, 17, 12), 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, p3, NULL, 0.8), 0, 0.0);
+  /* a group in linear light holds an image of Display P3, filtered in a space of its own */
+  GSHSCENE_Group g = rf_group(0.9, GSHSCENE_COMPOSITE_SRC_OVER);
+  g.blend_space = lin;
+  rf_check(c, gshscene_list_group_push(l, &g, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, 1, 23, 17, 38), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, wide, rf_place(c, 2.6, 3.0, 1, 23), 1, 2, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, adobe, NULL, 1.0), 0, 0.0);
+  rf_fill(c, l, rf_rect(c, 17, 23, 33, 38), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, plain, rf_place(c, 2.6, 3.0, 17, 23), 2, 1, GSHSCENE_IMAGE_FILTER_NEAREST, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_image_compose(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Color_Space none = rf_space((GCOL_Primaries)0, (GCOL_Transfer)0, 0.0);
+  const GSHSCENE_Resource * img = rf_image(c, 6, 5, 4, 8, GIMG_ALPHA_STRAIGHT, 0, none);
+  const GSHSCENE_Resource * one = rf_image(c, 1, 1, 4, 8, GIMG_ALPHA_STRAIGHT, 0, none);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.8, 0.6, 1.0), 0, 0.0);
+  rf_fill(c, l, rf_rect(c, 2, 2, 22, 14), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.5, 0.7, 1.0), 0, 0.0);
+  /* a group of opacity 0.7 in multiply over it holding an image fill, a clip around part of it */
+  GSHSCENE_Group g = rf_group(0.7, GSHSCENE_COMPOSITE_MULTIPLY);
+  rf_check(c, gshscene_list_group_push(l, &g, 0, 0.0) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_clip_push(l, rf_blob(c, 3.0, 3.0, 8.0), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, 2, 2, 24, 16), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 3.5, 3.0, 2, 2), 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  /* a star filled with a repeating image, a stroke painted with one (sampled in the stroke's local space) */
+  rf_fill(c, l, rf_star(c, 36.0, 10.0, 9.0), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 2.0, 2.0, 28, 2), 1, 2, GSHSCENE_IMAGE_FILTER_NEAREST, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 0.95),
+      0, 0.0);
+  static const double zig[12] = {0.0, 4.0, 5.0, 0.0, 10.0, 4.0, 15.0, 0.0, 20.0, 4.0, 25.0, 0.0};
+  GSHGEOM_Map sm = rf_move(2.0, 20.0);
+  rf_stroke(c, l, rf_polyline(c, zig, 6, 0), rf_pen(c, 4.0, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND), &sm,
+      rf_image_paint(c, img, rf_place(c, 4.2, 2.0, 0, 0), 1, 1, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0));
+  /* a picture holding an image fill, instanced turned */
+  GSHSCENE_List * inner = rf_open(c);
+  rf_fill(c, inner, rf_rect(c, 0, 0, 9, 8), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 1.5, 1.6, 0, 0), 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0), 0, 0.0);
+  rf_close(c, inner);
+  const GSHSCENE_Resource * pic = NULL;
+  rf_check(c, gshscene_store_intern_picture(c->store, inner, &pic) == GSHSCENE_OK);
+  rf_hold(c, pic);
+  GSHGEOM_Map turn;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 40.0, &turn);
+  GSHGEOM_Map into = rf_move(14.0, 28.0);
+  GSHGEOM_Map two[2] = {into, turn};
+  GSHGEOM_Map at;
+  gshgeom_map_compose_chain(two, 2, NULL, &at);
+  rf_check(c, gshscene_list_instance(l, pic, &at, 0, 0.0) == GSHSCENE_OK);
+  /* a 1 by 1 image repeated: minified by area it is the texel, however many periods */
+  rf_fill(c, l, rf_rect(c, 30, 24, 46, 38), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, one, rf_place(c, 0.001, 0.001, 30, 24), 1, 1, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0),
+      0, 0.0);
+  /* a damaged corner: a window of the image, the rest of it unseen */
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_image_nothing(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Color_Space none = rf_space((GCOL_Primaries)0, (GCOL_Transfer)0, 0.0);
+  const GSHSCENE_Resource * img = rf_image(c, 4, 4, 4, 8, GIMG_ALPHA_STRAIGHT, 0, none);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.7, 0.9, 0.7, 1.0), 0, 0.0);
+  /* a singular chain draws nothing and is noticed */
+  GSHGEOM_Map flat = rf_affine(c, 1, 0, 0, 0, 0, 0);
+  rf_fill(c, l, rf_rect(c, 2, 2, 20, 12), &flat, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 1, 1, 0, 0), 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0), 0, 0.0);
+  /* a window of the image: the texels of its middle, repeated, and not a texel beside it */
+  const uint32_t middle[4] = {1, 1, 3, 3};
+  rf_fill(c, l, rf_rect(c, 24, 2, 46, 12), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint_window(c, img, middle, rf_place(c, 3.0, 3.0, 24, 2), 1, 1, GSHSCENE_IMAGE_FILTER_NEAREST,
+          GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 1.0),
+      0, 0.0);
+  /* a zero alpha multiplier is a legal paint and draws nothing visible */
+  rf_fill(c, l, rf_rect(c, 2, 16, 20, 26), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 4, 4, 2, 16), 0, 0, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 0.0), 0, 0.0);
+  /* and one that is drawn */
+  rf_fill(c, l, rf_rect(c, 24, 16, 46, 26), NULL, GSHGEOM_FILL_NONZERO,
+      rf_image_paint(c, img, rf_place(c, 5.5, 2.5, 24, 16), 3, 3, GSHSCENE_IMAGE_FILTER_NEAREST, GSHSCENE_IMAGE_FILTER_AREA, none, NULL, 0.6),
+      0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
 typedef struct RF_Fixture {
   const char * name;
   RF_Build build;
@@ -1625,6 +1981,12 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"strokes-thin-aligned", rf_strokes_thin_aligned},
     {"strokes-text", rf_strokes_text},
     {"strokes-text-outlines", rf_strokes_text_outlines},
+    {"image-filters", rf_image_filters},
+    {"image-edges", rf_image_edges},
+    {"image-formats", rf_image_formats},
+    {"image-spaces", rf_image_spaces},
+    {"image-compose", rf_image_compose},
+    {"image-nothing", rf_image_nothing},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

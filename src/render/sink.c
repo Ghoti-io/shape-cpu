@@ -265,6 +265,9 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
     }
     if (item->kind == GSHSCENE_ITEM_FILL || item->kind == GSHSCENE_ITEM_STROKE) {
       *wide = *wide || out_of_range(&item->paint);
+      /* An image's value is any filtered texel taken to the layer's space: a float texel, or a gamut conversion, leaves [0, 1], and
+       * the byte layers' compositor has no source that is not one color; an image is composited into double layers. */
+      *wide = *wide || item->paint.kind == GSHSCENE_PAINT_IMAGE;
     }
     GSHSCENE_Stroke_Style style;
     if (item->kind == GSHSCENE_ITEM_FILL ||
@@ -883,6 +886,7 @@ typedef struct Painter {
   double src[4];             /* a solid paint's source */
   GSHCPU_Gradient gr;
   GSHCPU_Image im;
+  double lut[GSHCPU_IMAGE_LUT];  /* FT-3 */
   GSHCPU_Convert conv;
   const double * table;      /* the gradient's color table, or NULL: evaluated at each pixel */
   GSHCPU_Direct8 d8;         /* fast8: a solid paint's source, and the layer it is composed into */
@@ -953,6 +957,17 @@ static GSHSCENE_Result image_begin(Painter * p, Run * run, const GSHSCENE_Item *
     tint_alpha = color.rgba[3];
   }
   gshcpu_render_image_source(&p->im, item->paint.rgba[3], tint, tint_alpha);
+  const unsigned taken = gshcpu_render_image_tiers(&p->im, run->cs->tiers, p->lut);
+  gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, images));
+  if (taken & GSHCPU_RENDER_TIER_IMAGE_COPY) {
+    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, image_copy));
+  }
+  if (taken & GSHCPU_RENDER_TIER_IMAGE_SEPARABLE) {
+    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, image_separable));
+  }
+  if (taken & GSHCPU_RENDER_TIER_IMAGE_TABLE) {
+    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, image_table));
+  }
   widen(run, frame, rect);
   run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
   return GSHSCENE_OK;

@@ -160,6 +160,9 @@ inline GSHSCENE_List * prefix(const GSHSCENE_List * list, GSHSCENE_Store * store
   GSHSCENE_Color fg;
   gshscene_list_foreground(list, &fg);
   gshscene_list_set_foreground(out, &fg);
+  if (const GSHSCENE_Resource * palette = gshscene_list_palette(list)) {
+    EXPECT_EQ(gshscene_list_set_palette(out, palette), GSHSCENE_OK);
+  }
   size_t clips = 0;
   for (size_t i = 0; i < units; i++) {
     const GSHSCENE_Item * it = nullptr;

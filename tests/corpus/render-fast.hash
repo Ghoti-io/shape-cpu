@@ -138,5 +138,29 @@ render strokes-text-outlines rgba8 5684721424f99eb4
 render strokes-text-outlines rgba8-premultiplied 4b08f5ef56c98357
 render strokes-text-outlines rgbaf32 84151d99ad1e13ab
 render strokes-text-outlines rgbaf32-premultiplied c3dbcd95c397d504
-hash 96abb6dfffee3f2a
-count 136
+render image-filters rgba8 ac89db63aaa03843
+render image-filters rgba8-premultiplied 3466854ba9934898
+render image-filters rgbaf32 93042ac33ca613a3
+render image-filters rgbaf32-premultiplied 14a33e61004e3178
+render image-edges rgba8 1200be928c67e4ac
+render image-edges rgba8-premultiplied a8e01d9aecc6ef43
+render image-edges rgbaf32 38e5a07cbd4917e0
+render image-edges rgbaf32-premultiplied 81b0be32b758833b
+render image-formats rgba8 eb8d0cab537d025b
+render image-formats rgba8-premultiplied 41397b87955c0ff4
+render image-formats rgbaf32 931d377e16f0fec1
+render image-formats rgbaf32-premultiplied ff80e768cf3c184e
+render image-spaces rgba8 7463ed6fe78d0b4d
+render image-spaces rgba8-premultiplied 35a1bbdbb2d00f0e
+render image-spaces rgbaf32 8b9a7371ee12e82d
+render image-spaces rgbaf32-premultiplied 678ea162f1412572
+render image-compose rgba8 5152668fd64e75b1
+render image-compose rgba8-premultiplied 3c56a50d9deacc62
+render image-compose rgbaf32 38f95dac393401f9
+render image-compose rgbaf32-premultiplied 18ee92613bce7b56
+render image-nothing rgba8 76d5d40f08fa1abe
+render image-nothing rgba8-premultiplied bdbe5f9c05c3bfe5
+render image-nothing rgbaf32 d8e56b47c47694dc
+render image-nothing rgbaf32-premultiplied 2c2a5849acde50db
+hash 9d2ccfd60b788f4f
+count 160

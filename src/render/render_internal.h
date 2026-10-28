@@ -610,6 +610,18 @@ double gshcpu_render_det2(double a, double b, double c, double d);
 /** The decode of an 8-bit sample the general tier computes, tabulated (FT-3). */
 #define GSHCPU_IMAGE_LUT 256u
 
+/** The taps one coordinate takes (IC6): the texel index it starts from and the weights of the filter at its fraction. */
+typedef struct GSHCPU_Image_Taps {
+  int64_t i;
+  double w[4];
+} GSHCPU_Image_Taps;
+
+/** How an image is drawn: the general tier, or one of the shapes FT-1 and FT-2 detect. */
+#define GSHCPU_IMAGE_GENERAL 0
+#define GSHCPU_IMAGE_COPY 1
+#define GSHCPU_IMAGE_DIAGONAL 2 /* image u depends on the pixel's x and v on its y */
+#define GSHCPU_IMAGE_ANTI 3     /* image u depends on the pixel's y and v on its x */
+
 /** Rows of an image whose sum over the window is kept for `AREA` under a repeating axis (a direct-mapped table). */
 #define GSHCPU_IMAGE_ROW_SUMS 32u
 
@@ -636,6 +648,12 @@ typedef struct GSHCPU_Image {
   double tint[3];              /* an alpha-only image's tint, straight, in the layer's space */
   double tint_alpha;
   const double * lut;          /* FT-3: the decode of an 8-bit sample, or NULL */
+  unsigned tiers;              /* GSHCPU_RENDER_TIER_*: the image tiers in force */
+  int mode;                    /* GSHCPU_IMAGE_GENERAL, _COPY, _DIAGONAL or _ANTI */
+  int64_t copy_dx, copy_dy;    /* FT-1: the texel under pixel (x, y) is (x - copy_dx, y - copy_dy) */
+  GSHCPU_Image_Taps hoisted;   /* FT-2: the taps of the coordinate that depends on the row */
+  double hoisted_key;          /* ... for the row whose center is this */
+  int hoisted_valid;
   uint64_t visits;             /* texels read and cells clipped by `AREA`, counted whether or not a sum was kept (IC9) */
   GSHCPU_Image_Row_Sum row_sums[GSHCPU_IMAGE_ROW_SUMS];
 } GSHCPU_Image;
@@ -651,6 +669,12 @@ GSHCPU_Result gshcpu_render_image_open(GSHCPU_Image * im, const GSHSCENE_Resourc
 
 /** IC3: place the image under @p composed (`T I_1 .. I_k M G`).  @return 0 where its inverse cannot be formed. */
 int gshcpu_render_image_place(GSHCPU_Image * im, const GSHGEOM_Map * composed);
+
+/**
+ * IC10: find the tier the placed image is drawn by among those of @p tiers that are on, and (FT-3) point the decode at @p lut,
+ * a table of 256 doubles this fills, for an 8-bit image.  @return the `GSHCPU_RENDER_TIER_IMAGE_*` bits taken.
+ */
+unsigned gshcpu_render_image_tiers(GSHCPU_Image * im, unsigned tiers, double lut[GSHCPU_IMAGE_LUT]);
 
 /** IC9: whether every point of the device rectangle @p r maps inside the sampling domain. */
 int gshcpu_render_image_in_domain(const GSHCPU_Image * im, GSHCPU_Rect r);
@@ -706,8 +730,15 @@ void gshcpu_render_image_texel(const GSHCPU_Image * im, uint32_t x, uint32_t y, 
  * three as independent: the control of the gate that holds a thin aligned stroke to the union.
  */
 #define GSHCPU_RENDER_TIER_JOINT 8u
+/** IC10, FT-1: an image drawn at an integer translation is a copy of its texels, for `NEAREST`, `LINEAR` and `AREA`. */
+#define GSHCPU_RENDER_TIER_IMAGE_COPY 16u
+/** IC10, FT-2: an image drawn under a scale, mirror or quarter turn finds the taps of the coordinate that depends on the row once for the row. */
+#define GSHCPU_RENDER_TIER_IMAGE_SEPARABLE 32u
+/** IC10, FT-3: an 8-bit sample is decoded through a table of the doubles the general tier computes. */
+#define GSHCPU_RENDER_TIER_IMAGE_TABLE 64u
 #define GSHCPU_RENDER_TIERS_ALL \
-  (GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE | GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT)
+  (GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE | GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT | \
+      GSHCPU_RENDER_TIER_IMAGE_COPY | GSHCPU_RENDER_TIER_IMAGE_SEPARABLE | GSHCPU_RENDER_TIER_IMAGE_TABLE)
 /** What the general tier is: the coverage (the exact step and UC8), none of the fast tiers. */
 #define GSHCPU_RENDER_TIERS_GENERAL (GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT)
 
@@ -732,6 +763,10 @@ typedef struct GSHCPU_Render_Counters {
   uint64_t exact_distinct_max; /* the most fragments any cell held once pieces and their reverses cancelled (UC13) */
   uint64_t exact_crossings_max; /* the most meetings of any cell (the figure UC19's budget bounds) */
   uint64_t exact_winding_max;   /* the deepest winding any cell met */
+  uint64_t images;           /* fills and strokes of an image paint begun */
+  uint64_t image_copy;       /* ... of them drawn by FT-1, the copy */
+  uint64_t image_separable;  /* ... by FT-2, the taps of the coordinate that depends on the row found once for the row */
+  uint64_t image_table;      /* ... with FT-3, the table of decoded 8-bit samples */
 } GSHCPU_Render_Counters;
 
 /** What identifies an expansion in the cache (SC7). */
