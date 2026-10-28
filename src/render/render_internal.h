@@ -38,6 +38,8 @@
 
 #include <ghoti.io/shape-geometry/flatten.h>
 #include <ghoti.io/shape-geometry/stroke.h>
+#include <ghoti.io/shape-scene/image.h>
+#include <ghoti.io/shape-scene/image_paint.h>
 #include <ghoti.io/shape-scene/list.h>
 #include <ghoti.io/shape-scene/paint.h>
 #include <ghoti.io/shape-scene/resource.h>
@@ -596,6 +598,59 @@ void gshcpu_render_gradient_table_row(const GSHCPU_Gradient * g, double qx0, dou
 
 /** Turn the vector kernel of ::gshcpu_render_gradient_table_row off (0) or on (1, the default): a test's way to compare it with its scalar twin. */
 void gshcpu_render_gradient_vector(int enable);
+
+/* --- images (image.c; masks-images-patterns story I3) -------------------------------------- */
+
+/** The inverse of @p f's 2x2 part scaled by the power of two of its largest entry (exact), and its translation: `p = L^-1 (q - t)`. @return 0 where it cannot be formed. */
+int gshcpu_render_map_invert(const GSHGEOM_Map * f, double inv[6]);
+
+/** The decode of an 8-bit sample the general tier computes, tabulated (FT-3). */
+#define GSHCPU_IMAGE_LUT 256u
+
+/** An image paint prepared for one fill (IC1 to IC8): the image read in place, the edge modes, the filter chosen, the conversions and the inverse map. */
+typedef struct GSHCPU_Image {
+  const unsigned char * rows;  /* the first row; a row is stride bytes after the last */
+  size_t stride;
+  uint32_t width, height, layout, bits;
+  int is_float, straight, alpha_only;
+  uint32_t x0, y0, x1, y1;     /* the window, in texels */
+  uint32_t extend_x, extend_y, filter;
+  int convert_in;              /* the image's space is not the filter space (IP5) */
+  int convert_out;             /* the filter space is not the layer's */
+  GSHCPU_Convert in, out;
+  double inv[6];               /* p = L^-1 (q - t), as ::gshcpu_render_map_invert writes it */
+  double mult;                 /* the paint's alpha multiplier m */
+  double tint[3];              /* an alpha-only image's tint, straight, in the layer's space */
+  double tint_alpha;
+  const double * lut;          /* FT-3: the decode of an 8-bit sample, or NULL */
+} GSHCPU_Image;
+
+/**
+ * Read the image resource @p image for sampling: its window (all zero: the whole image), edge modes and filter, the filter
+ * space (zero: the image's own, which is @p target_space where the image says zero) and the layer's space.
+ * @return ::GSHCPU_OK; ::GSHCPU_ERR_INVALID (not an image, a window past it, an enum out of range); ::GSHCPU_ERR_UNSUPPORTED (a filter this build lacks).
+ */
+GSHCPU_Result gshcpu_render_image_open(GSHCPU_Image * im, const GSHSCENE_Resource * image, const uint32_t window[4],
+    uint32_t extend_x, uint32_t extend_y, uint32_t filter, const GSHSCENE_Color_Space * filter_space,
+    const GSHSCENE_Color_Space * target_space, const GSHSCENE_Color_Space * layer_space);
+
+/** IC3: place the image under @p composed (`T I_1 .. I_k M G`).  @return 0 where its inverse cannot be formed. */
+int gshcpu_render_image_place(GSHCPU_Image * im, const GSHGEOM_Map * composed);
+
+/** IC9: whether every point of the device rectangle @p r maps inside the sampling domain. */
+int gshcpu_render_image_in_domain(const GSHCPU_Image * im, GSHCPU_Rect r);
+
+/** IC8: the alpha multiplier @p m, and for an alpha-only image the tint (straight, in the layer's space) and its alpha. */
+void gshcpu_render_image_source(GSHCPU_Image * im, double m, const double tint[3], double tint_alpha);
+
+/** IC6: the filtered value at the image-space point (@p u, @p v), premultiplied in the layer's space, no multiplier; `NEAREST`, `LINEAR` or `CUBIC`. */
+void gshcpu_render_image_point(const GSHCPU_Image * im, double u, double v, double out[4]);
+
+/** IC8: the source of the pixel whose center is the device point (@p qx, @p qy): premultiplied, in the layer's space, times the multiplier. */
+void gshcpu_render_image_at(const GSHCPU_Image * im, double qx, double qy, double src[4]);
+
+/** The texel (@p x, @p y) as IP4 decodes it, read the way the sink reads it; for the gate against ::gshscene_image_decode. */
+void gshcpu_render_image_texel(const GSHCPU_Image * im, uint32_t x, uint32_t y, double out[4]);
 
 /* --- strokes (stroke.c, stroke_cache.c; strokes story S4) -------------------------------------- */
 

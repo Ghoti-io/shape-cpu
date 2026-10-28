@@ -265,8 +265,9 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
       *wide = *wide || out_of_range(&item->paint);
     }
     GSHSCENE_Stroke_Style style;
-    if (item->kind == GSHSCENE_ITEM_FILL || (item->kind == GSHSCENE_ITEM_STROKE && item->paint.kind == GSHSCENE_PAINT_GRADIENT)) {
-      *other = 1; /* a drawing the 8-bit compositor of the fast coverage does not make: fills, gradients */
+    if (item->kind == GSHSCENE_ITEM_FILL ||
+        (item->kind == GSHSCENE_ITEM_STROKE && (item->paint.kind == GSHSCENE_PAINT_GRADIENT || item->paint.kind == GSHSCENE_PAINT_IMAGE))) {
+      *other = 1; /* a drawing the 8-bit compositor of the fast coverage does not make: fills, gradients, images */
     }
     if (item->kind == GSHSCENE_ITEM_STROKE) {
       *strokes = 1; /* UC9: the exact step's counts and pool */
@@ -642,6 +643,12 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   for (uint32_t k = GSHSCENE_GRADIENT_LINEAR; k < GSHSCENE_GRADIENT_KIND_COUNT; k++) {
     out->gradient_kinds |= UINT32_C(1) << k;
   }
+  /* IC1: an image paint, the filters this build samples (AREA is not among them yet), every edge mode, every format. */
+  out->image_filters = (UINT32_C(1) << GSHSCENE_IMAGE_FILTER_NEAREST) | (UINT32_C(1) << GSHSCENE_IMAGE_FILTER_LINEAR) |
+      (UINT32_C(1) << GSHSCENE_IMAGE_FILTER_CUBIC);
+  out->image_extends = (UINT32_C(1) << GSHSCENE_IMAGE_EXTEND_COUNT) - 1u;
+  out->image_formats = GSHSCENE_IMAGE_FORMAT_ALL;
+  out->flags |= GSHSCENE_CAP_IMAGE_FILTER_SPACES;
   out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;
   out->cancel_work_bound = work_bound(cs);
   out->work_measure = "cells+points+pixels";
@@ -870,14 +877,74 @@ typedef struct Painter {
   Run * run;
   Frame * frame;
   int gradient;
+  int image;                 /* an image paint (IC1 to IC8): im is its sampler */
   int refused;               /* painter_begin refused the item (or the render stops under strict) */
   double src[4];             /* a solid paint's source */
   GSHCPU_Gradient gr;
+  GSHCPU_Image im;
   GSHCPU_Convert conv;
   const double * table;      /* the gradient's color table, or NULL: evaluated at each pixel */
   GSHCPU_Direct8 d8;         /* fast8: a solid paint's source, and the layer it is composed into */
   const uint8_t * table8;    /* fast8: the table as premultiplied bytes, four to a point */
 } Painter;
+
+/**
+ * An image paint made ready (IC1 to IC9): its map composed with the chain by the one composer (AD-24), the filter chosen once
+ * for the fill by IP8 (IC3), the image opened in place, the map inverted, the tint resolved and converted once.  The same
+ * refusals as a gradient's: a composed map that cannot be formed or inverted, or a rectangle (the whole render's) mapped outside
+ * the sampling domain, is the sink's own limit.
+ */
+static GSHSCENE_Result image_begin(Painter * p, Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count,
+    Frame * frame, GSHCPU_Rect rect, GSHCPU_Rect whole) {
+  if (gshcpu_render_rect_empty(whole)) {
+    p->refused = 1; /* nothing of it is in the whole render: nothing to paint, and nothing to report */
+    return GSHSCENE_OK;
+  }
+  GSHSCENE_Image_Paint ip;
+  if (gshscene_resource_image_paint(item->paint.resource, &ip) != GSHSCENE_OK) {
+    return GSHSCENE_ERR_INTERNAL;
+  }
+  GSHGEOM_Map composed;
+  run->maps[count - 1] = item->map;
+  run->maps[count] = ip.map;
+  if (gshgeom_map_compose_chain(run->maps, count + 1, &run->job->target.map, &composed) != GSHGEOM_OK) {
+    p->refused = 1;
+    return refuse(run, item, chain, count);
+  }
+  uint32_t filter = gshgeom_map_stretches_every_direction(&composed) ? ip.magnify : ip.minify;
+  if (filter == (uint32_t)GSHSCENE_IMAGE_FILTER_AREA) {
+    filter = (uint32_t)GSHSCENE_IMAGE_FILTER_LINEAR; /* not claimed by the caps yet: the plan reported the approximation */
+  }
+  if (gshcpu_render_image_open(&p->im, ip.image, ip.window, ip.extend_x, ip.extend_y, filter, &ip.filter_space,
+          gshscene_job_target_space(run->job), &frame->space) != GSHCPU_OK ||
+      !gshcpu_render_image_place(&p->im, &composed) || !gshcpu_render_image_in_domain(&p->im, whole)) {
+    p->refused = 1;
+    return refuse(run, item, chain, count);
+  }
+  double tint[3] = {0.0, 0.0, 0.0};
+  double tint_alpha = 0.0;
+  if (ip.tint) {
+    GSHSCENE_Color color;
+    if (gshscene_paint_resolve(ip.tint, &run->foreground, run->palette, &color) != GSHSCENE_OK) {
+      memset(&color, 0, sizeof color); /* unreachable: the disposition refused it; transparent draws nothing */
+    }
+    GSHSCENE_Color_Space space = color.space;
+    if (gshscene_color_space_is_target(&space)) {
+      space = *gshscene_job_target_space(run->job);
+    }
+    GSHCPU_Convert c;
+    gshcpu_render_convert_prepare(&c, &space, &frame->space);
+    tint[0] = color.rgba[0];
+    tint[1] = color.rgba[1];
+    tint[2] = color.rgba[2];
+    gshcpu_render_convert_straight(&c, tint, tint);
+    tint_alpha = color.rgba[3];
+  }
+  gshcpu_render_image_source(&p->im, item->paint.rgba[3], tint, tint_alpha);
+  widen(run, frame, rect);
+  run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
+  return GSHSCENE_OK;
+}
 
 /**
  * Make the paint of @p item ready to paint @p rect (the pixels of the item that meet what it can reach; @p whole the
@@ -892,6 +959,10 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
   p->table = NULL;
   p->table8 = NULL;
   p->gradient = item->paint.kind == GSHSCENE_PAINT_GRADIENT;
+  p->image = item->paint.kind == GSHSCENE_PAINT_IMAGE;
+  if (p->image) {
+    return image_begin(p, run, item, chain, count, frame, rect, whole);
+  }
   if (!p->gradient) {
     source_of(run, item, frame, p->src);
     if (frame->bytes) {
@@ -1052,6 +1123,22 @@ static void painter_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
     return;
   }
   const int clipped = frame->clip_base < run->clip_count;
+  if (p->image) {
+    for (size_t i = 0; i < n; i++) {
+      if (m8[i] == 0) {
+        continue;
+      }
+      const int64_t px = x + (int64_t)i;
+      uint32_t m = clipped ? weigh_clips(run, frame->clip_base, run->clip_count, m8[i], px, y) : m8[i];
+      if (m == 0) {
+        continue;
+      }
+      double s[4];
+      gshcpu_render_image_at(&p->im, (double)(int32_t)px + 0.5, (double)(int32_t)y + 0.5, s);
+      painter_pixel(run, frame, px, y, m, s);
+    }
+    return;
+  }
   if (!p->gradient) {
     for (size_t i = 0; i < n; i++) {
       if (m8[i] == 0) {
@@ -1467,7 +1554,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
   GSHCPU_Result r;
   uint8_t * cov = run->coverage;
   GSHCPU_Exact * exact = cs->tiers & GSHCPU_RENDER_TIER_EXACT ? run->exact : NULL; /* UC1 to UC11 (off only as a gate's control) */
-  int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT;
+  int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT && item->paint.kind != GSHSCENE_PAINT_IMAGE;
   if (solid && cs->fast && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits)) {
     /* The fast stroke coverage: the lean cover, the pixels of its runs composed like the sparse sweep's. */
     double src[4];

@@ -147,7 +147,7 @@ static int is_finite(double x) {
  * The inverse of @p f's 2x2 part, scaled by the power of two of its largest entry first (exact), and its translation:
  * `p = L^-1 (q - t)`.  @return 0 where the determinant is zero in doubles or an entry is not finite.
  */
-static int invert(const GSHGEOM_Map * f, double inv[6]) {
+int gshcpu_render_map_invert(const GSHGEOM_Map * f, double inv[6]) {
   double m[4] = {f->m[0][0], f->m[0][1], f->m[1][0], f->m[1][1]};
   double largest = 0.0;
   for (int i = 0; i < 4; i++) {
@@ -220,7 +220,7 @@ GSHCPU_Result gshcpu_render_gradient_prepare(GSHCPU_Gradient * out, const GSHSCE
   out->stops = stops;
   out->count = g->stop_count;
   out->alpha = alpha;
-  if (!invert(composed, out->inv)) {
+  if (!gshcpu_render_map_invert(composed, out->inv)) {
     return GSHCPU_ERR_LIMIT;
   }
   if (out->count) {
