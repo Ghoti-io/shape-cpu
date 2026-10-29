@@ -176,6 +176,29 @@ TEST(RenderImageTruncate, ItIsTheCastTowardZeroBelowTheBoundAndAClampBeyond) {
   EXPECT_EQ(gshcpu_render_trunc_i64(NAN), 0);
 }
 
+/* The conversion the other way (the cast is an x87 `fild` on i686): the value itself below 2^51, a clamp beyond. */
+TEST(RenderImageTruncate, TheIntegerAsADoubleIsTheCastBelowTheBoundAndAClampBeyond) {
+  const int64_t fixed[] = {0, 1, -1, 2, -2, 1048575, 1048576, -1048575, -1048576, -1048577, 4294967295ll, 4294967296ll,
+                           -4294967296ll, 8589934592ll, 2251799813685247ll, -2251799813685247ll};
+  for (int64_t v : fixed) {
+    EXPECT_EQ(gshcpu_render_i64_to_double(v), (double)v) << v;
+  }
+  uint64_t state = 0x2545f4914f6cdd1dull;
+  for (int i = 0; i < 200000; i++) {
+    state = state * 6364136223846793005ull + 1442695040888963407ull;
+    const int bits = (int)((state >> 58) % 52u);
+    int64_t v = (int64_t)((state >> 11) & ((1ull << bits) - 1u));
+    if ((state >> 7) & 1u) {
+      v = -v;
+    }
+    ASSERT_EQ(gshcpu_render_i64_to_double(v), (double)v) << v;
+  }
+  EXPECT_EQ(gshcpu_render_i64_to_double((int64_t)1 << 51), 0x1p51 - 1.0);
+  EXPECT_EQ(gshcpu_render_i64_to_double((int64_t)1 << 60), 0x1p51 - 1.0);
+  EXPECT_EQ(gshcpu_render_i64_to_double(-((int64_t)1 << 60)), -(0x1p51 - 1.0));
+  EXPECT_EQ(gshcpu_render_i64_to_double(INT64_MIN), -(0x1p51 - 1.0));
+}
+
 TEST(RenderImageCaps, EveryFormatAndEdgeAndTheFilterSpacesAreClaimed) {
   SinkRef sink;
   for (GSHCPU_Format format : RF_FORMATS) {

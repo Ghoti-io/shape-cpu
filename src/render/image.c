@@ -211,8 +211,8 @@ int gshcpu_render_image_place(GSHCPU_Image * im, const GSHGEOM_Map * composed) {
 }
 
 int gshcpu_render_image_in_domain(const GSHCPU_Image * im, GSHCPU_Rect r) {
-  const double xs[2] = {(double)r.x0, (double)r.x1};
-  const double ys[2] = {(double)r.y0, (double)r.y1};
+  const double xs[2] = {gshcpu_render_i64_to_double(r.x0), gshcpu_render_i64_to_double(r.x1)};
+  const double ys[2] = {gshcpu_render_i64_to_double(r.y0), gshcpu_render_i64_to_double(r.y1)};
   for (int i = 0; i < 2; i++) {
     for (int j = 0; j < 2; j++) {
       const double u = xs[i] - im->inv[4];

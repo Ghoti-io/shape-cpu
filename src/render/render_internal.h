@@ -678,6 +678,24 @@ int gshcpu_render_image_place(GSHCPU_Image * im, const GSHGEOM_Map * composed);
 unsigned gshcpu_render_image_tiers(GSHCPU_Image * im, unsigned tiers, double lut[GSHCPU_IMAGE_LUT]);
 
 /**
+ * @p v as a `double`, for a magnitude below 2^51 (a larger one is clamped to +-(2^51 - 1), the largest the 32-bit high part holds), without a 64-bit-integer-to-double
+ * instruction: on i686 that is an x87 one (fild), which the determinism gate refuses. The value splits into a high part
+ * (`v >> 20`, exact below 2^31 there) and the low 20 bits, each converted through a 32-bit integer (SSE2) and joined by
+ * one exact scale and one exact sum, so the result is the nearest double, which here is the value itself.
+ */
+static inline double gshcpu_render_i64_to_double(int64_t v) {
+  const int64_t limit = ((int64_t)1 << 51) - 1;
+  if (v >= limit) {
+    v = limit;
+  } else if (v <= -limit) {
+    v = -limit;
+  }
+  const int64_t hi = v >> 20; /* floor, so the low part is in [0, 2^20) */
+  const int64_t lo = v - hi * ((int64_t)1 << 20);
+  return (double)(int32_t)hi * 0x1p20 + (double)(int32_t)lo;
+}
+
+/**
  * @p w truncated toward zero, as an `int64_t`, for a magnitude below 2^40 (a larger one is clamped to +-2^40 and a NaN
  * is 0, where the cast is undefined). It is the conversion without a double-to-64-bit-integer instruction: on i686 that
  * is an x87 one, which the determinism gate refuses, so the magnitude splits into 20-bit halves by exact operations and

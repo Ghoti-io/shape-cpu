@@ -148,7 +148,7 @@ static void add_run(GSHCPU_Image * im, Sum * acc, int64_t ia, int64_t ib, int64_
       double t[4];
       if (left > 0) {
         gshcpu_render_image_window_texel(im, im->x0, (uint32_t)ty, t);
-        sum_add_scaled(acc, (double)left, t);
+        sum_add_scaled(acc, gshcpu_render_i64_to_double(left), t);
         im->visits++;
       }
       for (int64_t i = ia > x0 ? ia : x0; i < (ib < x1 ? ib : x1); i++) {
@@ -158,7 +158,7 @@ static void add_run(GSHCPU_Image * im, Sum * acc, int64_t ia, int64_t ib, int64_
       }
       if (right > 0) {
         gshcpu_render_image_window_texel(im, im->x1 - 1u, (uint32_t)ty, t);
-        sum_add_scaled(acc, (double)right, t);
+        sum_add_scaled(acc, gshcpu_render_i64_to_double(right), t);
         im->visits++;
       }
       break;
@@ -179,7 +179,7 @@ static void add_run(GSHCPU_Image * im, Sum * acc, int64_t ia, int64_t ib, int64_
       if (whole > 0) {
         double s[4];
         row_sum(im, ty, s);
-        sum_add_scaled(acc, (double)whole * (im->extend_x == GSHSCENE_IMAGE_EXTEND_REPEAT ? 1.0 : 2.0), s);
+        sum_add_scaled(acc, gshcpu_render_i64_to_double(whole) * (im->extend_x == GSHSCENE_IMAGE_EXTEND_REPEAT ? 1.0 : 2.0), s);
         from = ia + whole * period;
       }
       for (int64_t i = from; i < ib; i++) {
@@ -198,8 +198,8 @@ static double clipped_area(const double * vx, const double * vy, int64_t ci, int
   double py[16];
   int n = 4;
   for (int k = 0; k < 4; k++) {
-    px[k] = vx[k] - (double)ci;
-    py[k] = vy[k] - (double)cj;
+    px[k] = vx[k] - gshcpu_render_i64_to_double(ci);
+    py[k] = vy[k] - gshcpu_render_i64_to_double(cj);
   }
   for (int edge = 0; edge < 4 && n > 0; edge++) {
     double qx[16];
@@ -285,8 +285,8 @@ static void strip_extent(const double * vx, const double * vy, int64_t j, double
       const double ay = py[k];
       const double bx = px[(k + 1) % n];
       const double by = py[(k + 1) % n];
-      const double da = edge == 0 ? ay - (double)j : (double)(j + 1) - ay;
-      const double db = edge == 0 ? by - (double)j : (double)(j + 1) - by;
+      const double da = edge == 0 ? ay - gshcpu_render_i64_to_double(j) : gshcpu_render_i64_to_double(j + 1) - ay;
+      const double db = edge == 0 ? by - gshcpu_render_i64_to_double(j) : gshcpu_render_i64_to_double(j + 1) - by;
       if (da >= 0.0) {
         qx[m] = ax;
         qy[m] = ay;
@@ -338,7 +338,7 @@ static void rectangle(GSHCPU_Image * im, const double * vx, const double * vy, S
   const int64_t rj0 = gshcpu_render_trunc_i64(gmath_floor(yl));
   const int64_t rj1 = gshcpu_render_trunc_i64(gmath_floor(yr)) + (yr > gmath_floor(yr) ? 1 : 0);
   for (int64_t j = rj0; j < rj1; j++) {
-    const double wy = dmin((double)(j + 1), yr) - dmax((double)j, yl);
+    const double wy = dmin(gshcpu_render_i64_to_double(j + 1), yr) - dmax(gshcpu_render_i64_to_double(j), yl);
     if (!(wy > 0.0)) {
       continue;
     }
@@ -357,7 +357,7 @@ static void rectangle(GSHCPU_Image * im, const double * vx, const double * vy, S
         i = fb - 1;
         continue;
       }
-      const double wx = dmin((double)(i + 1), xr) - dmax((double)i, xl);
+      const double wx = dmin(gshcpu_render_i64_to_double(i + 1), xr) - dmax(gshcpu_render_i64_to_double(i), xl);
       if (!(wx > 0.0)) {
         continue;
       }
@@ -385,15 +385,15 @@ static void general(GSHCPU_Image * im, const double * vx, const double * vy, Sum
     // between its two ends at the row's bottom and top are covered entirely.  A row with a vertex in it is clipped cell by cell.
     int vertex_inside = 0;
     for (int k = 0; k < 4; k++) {
-      vertex_inside = vertex_inside || (vy[k] > (double)j && vy[k] < (double)(j + 1));
+      vertex_inside = vertex_inside || (vy[k] > gshcpu_render_i64_to_double(j) && vy[k] < gshcpu_render_i64_to_double(j + 1));
     }
-    if (!vertex_inside && ymin <= (double)j && (double)(j + 1) <= ymax) {
+    if (!vertex_inside && ymin <= gshcpu_render_i64_to_double(j) && gshcpu_render_i64_to_double(j + 1) <= ymax) {
       double l0;
       double r0;
       double l1;
       double r1;
-      cross_section(vx, vy, (double)j, &l0, &r0);
-      cross_section(vx, vy, (double)(j + 1), &l1, &r1);
+      cross_section(vx, vy, gshcpu_render_i64_to_double(j), &l0, &r0);
+      cross_section(vx, vy, gshcpu_render_i64_to_double(j + 1), &l1, &r1);
       xmin = dmin(l0, l1);
       xmax = dmax(r0, r1);
       ra = gshcpu_render_trunc_i64(-gmath_floor(-dmax(l0, l1)));
