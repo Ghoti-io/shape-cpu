@@ -1183,6 +1183,30 @@ TEST(RenderStroke, AStrokeInAnIsolatedGroupCompositesSrcOverAndTheGroupsModeActs
   }
   Drawn strict = render_list(sink.sink, list_with(knock, true), 24, 24, GSHCPU_FORMAT_RGBA8_STRAIGHT, GSHSCENE_RENDER_STRICT);
   EXPECT_EQ(strict.result, GSHSCENE_ERR_REFUSED);
+  // The soft-mask slot names a mask resource (an alpha mask over a picture of one fill); this sink still refuses it.
+  GSHSCENE_List * mask_list = s.open();
+  GSHSCENE_Paint white = solid(1, 1, 1, 1);
+  ASSERT_EQ(gshscene_list_fill(mask_list, path, nullptr, GSHGEOM_FILL_NONZERO, &white, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(mask_list), GSHSCENE_OK);
+  const GSHSCENE_Resource * picture = nullptr;
+  ASSERT_EQ(gshscene_store_intern_picture(s.store, mask_list, &picture), GSHSCENE_OK);
+  GSHSCENE_Mask content{};
+  content.picture = picture;
+  content.mode = GSHSCENE_MASK_ALPHA;
+  const GSHSCENE_Resource * mask = nullptr;
+  ASSERT_EQ(gshscene_store_intern_mask(s.store, &content, &mask), GSHSCENE_OK);
+  GSHSCENE_Group masked = rf_group(1.0, GSHSCENE_COMPOSITE_SRC_OVER);
+  masked.soft_mask = mask;
+  Drawn unmasked = render_list(sink.sink, list_with(masked, true), 24, 24);
+  ASSERT_EQ(unmasked.entries.size(), 1u);
+  EXPECT_EQ(unmasked.entries[0].reason, GSHSCENE_REASON_SOFT_MASK);
+  for (uint8_t a : unmasked.alpha) {
+    EXPECT_EQ(a, 0);
+  }
+  Drawn masked_strict = render_list(sink.sink, list_with(masked, true), 24, 24, GSHCPU_FORMAT_RGBA8_STRAIGHT, GSHSCENE_RENDER_STRICT);
+  EXPECT_EQ(masked_strict.result, GSHSCENE_ERR_REFUSED);
+  s.held.push_back(mask);
+  s.held.push_back(picture);
 }
 
 TEST(RenderStroke, AStrokeOfAGlyphRunIsDrawnAsTheStrokeOfItsCenterline) {
