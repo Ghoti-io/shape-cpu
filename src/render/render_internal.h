@@ -36,6 +36,7 @@
 #include <ghoti.io/shape-cpu/core.h>
 #include <ghoti.io/shape-cpu/render.h>
 
+#include <ghoti.io/math/basic.h>
 #include <ghoti.io/shape-geometry/flatten.h>
 #include <ghoti.io/shape-geometry/stroke.h>
 #include <ghoti.io/shape-scene/image.h>
@@ -675,6 +676,26 @@ int gshcpu_render_image_place(GSHCPU_Image * im, const GSHGEOM_Map * composed);
  * a table of 256 doubles this fills, for an 8-bit image.  @return the `GSHCPU_RENDER_TIER_IMAGE_*` bits taken.
  */
 unsigned gshcpu_render_image_tiers(GSHCPU_Image * im, unsigned tiers, double lut[GSHCPU_IMAGE_LUT]);
+
+/**
+ * @p w truncated toward zero, as an `int64_t`, for a magnitude below 2^40 (a larger one is clamped to +-2^40 and a NaN
+ * is 0, where the cast is undefined). It is the conversion without a double-to-64-bit-integer instruction: on i686 that
+ * is an x87 one, which the determinism gate refuses, so the magnitude splits into 20-bit halves by exact operations and
+ * each half converts through a 32-bit integer (SSE2). Every coordinate of an image paint is far below the bound (the
+ * sampling domain is 2^33 texels).
+ */
+static inline int64_t gshcpu_render_trunc_i64(double w) {
+  const double limit = 0x1p40;
+  if (!(w > -limit && w < limit)) {
+    return w > 0.0 ? (int64_t)1 << 40 : (w < 0.0 ? -((int64_t)1 << 40) : 0);
+  }
+  const int neg = w < 0.0;
+  const double m = neg ? 0.0 - w : w;
+  const double hi = gmath_floor(m * 0x1p-20);
+  const double lo = m - hi * 0x1p20;
+  const int64_t v = ((int64_t)(int32_t)hi << 20) + (int64_t)(int32_t)lo;
+  return neg ? -v : v;
+}
 
 /** IC9: whether every point of the device rectangle @p r maps inside the sampling domain. */
 int gshcpu_render_image_in_domain(const GSHCPU_Image * im, GSHCPU_Rect r);

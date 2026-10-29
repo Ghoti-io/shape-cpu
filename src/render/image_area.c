@@ -330,13 +330,13 @@ static void rectangle(GSHCPU_Image * im, const double * vx, const double * vy, S
   const double xr = dmax(dmax(vx[0], vx[1]), dmax(vx[2], vx[3]));
   const double yl = dmin(dmin(vy[0], vy[1]), dmin(vy[2], vy[3]));
   const double yr = dmax(dmax(vy[0], vy[1]), dmax(vy[2], vy[3]));
-  const int64_t ci0 = (int64_t)gmath_floor(xl);
-  const int64_t ci1 = (int64_t)gmath_floor(xr) + (xr > gmath_floor(xr) ? 1 : 0); /* one past the last */
-  const int64_t fa = (int64_t)(-gmath_floor(-xl));
-  const int64_t fb = (int64_t)gmath_floor(xr);
+  const int64_t ci0 = gshcpu_render_trunc_i64(gmath_floor(xl));
+  const int64_t ci1 = gshcpu_render_trunc_i64(gmath_floor(xr)) + (xr > gmath_floor(xr) ? 1 : 0); /* one past the last */
+  const int64_t fa = gshcpu_render_trunc_i64(-gmath_floor(-xl));
+  const int64_t fb = gshcpu_render_trunc_i64(gmath_floor(xr));
   const int have_run = fb > fa;
-  const int64_t rj0 = (int64_t)gmath_floor(yl);
-  const int64_t rj1 = (int64_t)gmath_floor(yr) + (yr > gmath_floor(yr) ? 1 : 0);
+  const int64_t rj0 = gshcpu_render_trunc_i64(gmath_floor(yl));
+  const int64_t rj1 = gshcpu_render_trunc_i64(gmath_floor(yr)) + (yr > gmath_floor(yr) ? 1 : 0);
   for (int64_t j = rj0; j < rj1; j++) {
     const double wy = dmin((double)(j + 1), yr) - dmax((double)j, yl);
     if (!(wy > 0.0)) {
@@ -373,8 +373,8 @@ static void rectangle(GSHCPU_Image * im, const double * vx, const double * vy, S
 static void general(GSHCPU_Image * im, const double * vx, const double * vy, Sum * acc) {
   const double ymin = dmin(dmin(vy[0], vy[1]), dmin(vy[2], vy[3]));
   const double ymax = dmax(dmax(vy[0], vy[1]), dmax(vy[2], vy[3]));
-  const int64_t j0 = (int64_t)gmath_floor(ymin);
-  const int64_t j1 = (int64_t)gmath_floor(ymax) + (ymax > gmath_floor(ymax) ? 1 : 0);
+  const int64_t j0 = gshcpu_render_trunc_i64(gmath_floor(ymin));
+  const int64_t j1 = gshcpu_render_trunc_i64(gmath_floor(ymax)) + (ymax > gmath_floor(ymax) ? 1 : 0);
   for (int64_t j = j0; j < j1; j++) {
     const int64_t ty = gshcpu_render_image_edge(j, (int64_t)im->y0, (int64_t)im->y1, im->extend_y);
     double xmin;
@@ -396,13 +396,13 @@ static void general(GSHCPU_Image * im, const double * vx, const double * vy, Sum
       cross_section(vx, vy, (double)(j + 1), &l1, &r1);
       xmin = dmin(l0, l1);
       xmax = dmax(r0, r1);
-      ra = (int64_t)(-gmath_floor(-dmax(l0, l1)));
-      rb = (int64_t)gmath_floor(dmin(r0, r1));
+      ra = gshcpu_render_trunc_i64(-gmath_floor(-dmax(l0, l1)));
+      rb = gshcpu_render_trunc_i64(gmath_floor(dmin(r0, r1)));
     } else {
       strip_extent(vx, vy, j, &xmin, &xmax);
     }
-    const int64_t i0 = (int64_t)gmath_floor(xmin);
-    const int64_t i1 = (int64_t)gmath_floor(xmax) + (xmax > gmath_floor(xmax) ? 1 : 0);
+    const int64_t i0 = gshcpu_render_trunc_i64(gmath_floor(xmin));
+    const int64_t i1 = gshcpu_render_trunc_i64(gmath_floor(xmax)) + (xmax > gmath_floor(xmax) ? 1 : 0);
     const int have_run = rb > ra;
     for (int64_t i = i0; i < i1; i++) {
       if (have_run && i >= ra && i < rb) {
@@ -465,8 +465,8 @@ int gshcpu_render_image_area_bound(const GSHCPU_Image * im, uint64_t * out) {
   if (!(ex <= WIDEST && ey <= WIDEST)) {
     return 0; /* past the domain: the preimage of one pixel is wider than the domain is */
   }
-  const uint64_t cx = (uint64_t)gmath_ceil(ex) + 2u; /* the columns of cells the preimage touches, at most */
-  const uint64_t cy = (uint64_t)gmath_ceil(ey) + 2u;
+  const uint64_t cx = (uint64_t)gshcpu_render_trunc_i64(gmath_ceil(ex)) + 2u; /* the columns of cells the preimage touches, at most */
+  const uint64_t cy = (uint64_t)gshcpu_render_trunc_i64(gmath_ceil(ey)) + 2u;
   const uint64_t n = (uint64_t)(im->x1 - im->x0);
   const uint64_t run = cx < sat_mul(3u, n) ? cx : sat_mul(3u, n); /* a row's run: the window's cells, a whole period's sum, a period's rest */
   uint64_t b = sat_mul(cy, run);

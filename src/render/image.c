@@ -248,13 +248,13 @@ static inline double kernel(double d) {
 /** The taps of one coordinate (@p c, in texels) for @p filter: the first texel's index and the weights (IC6). */
 static inline void taps_of(uint32_t filter, double c, GSHCPU_Image_Taps * t) {
   if (filter == (uint32_t)GSHSCENE_IMAGE_FILTER_NEAREST) {
-    t->i = (int64_t)gmath_floor(c);
+    t->i = gshcpu_render_trunc_i64(gmath_floor(c));
     return;
   }
   const double s = c - 0.5;
   const double fl = gmath_floor(s);
   const double f = s - fl;
-  t->i = (int64_t)fl;
+  t->i = gshcpu_render_trunc_i64(fl);
   if (filter == (uint32_t)GSHSCENE_IMAGE_FILTER_LINEAR) {
     t->w[0] = 1.0 - f;
     t->w[1] = f;
@@ -365,7 +365,7 @@ void gshcpu_render_image_at(GSHCPU_Image * im, double qx, double qy, double src[
   if (im->mode == GSHCPU_IMAGE_COPY) {
     /* FT-1: the weights are exactly 1 and 0 (or the pixel's preimage is one cell), so the value is the texel under the pixel. */
     double t[4];
-    texel(im, (int64_t)(qx - 0.5) - im->copy_dx, (int64_t)(qy - 0.5) - im->copy_dy, t);
+    texel(im, gshcpu_render_trunc_i64(qx - 0.5) - im->copy_dx, gshcpu_render_trunc_i64(qy - 0.5) - im->copy_dy, t);
     if (im->convert_out) {
       gshcpu_render_convert_premultiplied(&im->out, t, f);
     } else {
@@ -430,8 +430,8 @@ unsigned gshcpu_render_image_tiers(GSHCPU_Image * im, unsigned tiers, double lut
       im->filter != (uint32_t)GSHSCENE_IMAGE_FILTER_CUBIC) {
     /* CUBIC is not a copy: its weights at a texel's center are 1/18, 8/9 and 1/18 (IC10). */
     im->mode = GSHCPU_IMAGE_COPY;
-    im->copy_dx = (int64_t)a[4];
-    im->copy_dy = (int64_t)a[5];
+    im->copy_dx = gshcpu_render_trunc_i64(a[4]);
+    im->copy_dy = gshcpu_render_trunc_i64(a[5]);
     taken |= GSHCPU_RENDER_TIER_IMAGE_COPY;
   } else if ((tiers & GSHCPU_RENDER_TIER_IMAGE_SEPARABLE) && im->filter != (uint32_t)GSHSCENE_IMAGE_FILTER_AREA) {
     if (a[1] == 0.0 && a[2] == 0.0 && a[0] != 0.0 && a[3] != 0.0) {

@@ -144,6 +144,36 @@ struct Backdrop {
 
 /* --- IC1: what the sink claims -------------------------------------------------------------------------------- */
 
+/* The truncation the image code uses in place of a cast (the cast is an x87 instruction on i686, which the determinism
+ * gate refuses): it is the cast, toward zero, below 2^40, and a clamp and a zero where the cast is undefined. */
+TEST(RenderImageTruncate, ItIsTheCastTowardZeroBelowTheBoundAndAClampBeyond) {
+  const double fixed[] = {0.0,  -0.0, 0.25, -0.25, 0.5,  -0.5, 0.999999999999,   -0.999999999999, 1.0,
+                          -1.0, 1.5,  -1.5, 4294967295.5, -4294967296.5, 1048575.75, -1048576.25, 1099511627775.5,
+                          -1099511627775.5, 8589934592.0, -8589934592.25};
+  for (double w : fixed) {
+    EXPECT_EQ(gshcpu_render_trunc_i64(w), (int64_t)w) << w;
+  }
+  uint64_t state = 0x9e3779b97f4a7c15ull;
+  for (int i = 0; i < 200000; i++) {
+    state = state * 6364136223846793005ull + 1442695040888963407ull;
+    const int shift = (int)((state >> 58) % 41u); /* magnitudes from 2^-1 .. 2^40 */
+    double w = (double)(state >> 11) * 0x1p-53 * std::ldexp(1.0, shift);
+    if ((state >> 7) & 1u) {
+      w = -w;
+    }
+    if (w > -0x1p40 && w < 0x1p40) {
+      ASSERT_EQ(gshcpu_render_trunc_i64(w), (int64_t)w) << w;
+    }
+  }
+  EXPECT_EQ(gshcpu_render_trunc_i64(0x1p40), (int64_t)1 << 40);
+  EXPECT_EQ(gshcpu_render_trunc_i64(-0x1p40), -((int64_t)1 << 40));
+  EXPECT_EQ(gshcpu_render_trunc_i64(1e300), (int64_t)1 << 40);
+  EXPECT_EQ(gshcpu_render_trunc_i64(-1e300), -((int64_t)1 << 40));
+  EXPECT_EQ(gshcpu_render_trunc_i64(INFINITY), (int64_t)1 << 40);
+  EXPECT_EQ(gshcpu_render_trunc_i64(-INFINITY), -((int64_t)1 << 40));
+  EXPECT_EQ(gshcpu_render_trunc_i64(NAN), 0);
+}
+
 TEST(RenderImageCaps, EveryFormatAndEdgeAndTheFilterSpacesAreClaimed) {
   SinkRef sink;
   for (GSHCPU_Format format : RF_FORMATS) {
@@ -1078,6 +1108,51 @@ TEST(RenderImageSink, AStencilIsThePaintOfItsTintTimesTheFilteredAlpha) {
       }
     }
   }
+}
+
+// IC8: a tint "in the target's space" is the target's space whatever space the group it is drawn in works in: the same stencil
+// with the target's space written out (sRGB here) is the same picture.
+TEST(RenderImageSink, ATintInTheTargetsSpaceIsTheTargetsInAGroupOfAnotherSpace) {
+  decltype(Render().seen.root) roots[2];
+  for (int written = 0; written < 2; written++) {
+    Store s;
+    const ih::Fmt f = ih::fmt(1, false, 8, GIMG_ALPHA_NONE, true);
+    const GSHSCENE_Resource * image = ih::intern_image(s.store, 2, 1, f, {255, 128});
+    ASSERT_NE(image, nullptr);
+    s.held.push_back(image);
+    GSHSCENE_Paint tint{};
+    tint.kind = GSHSCENE_PAINT_SOLID;
+    tint.rgba[0] = 0.8;
+    tint.rgba[1] = 0.4;
+    tint.rgba[2] = 0.1;
+    tint.rgba[3] = 1.0;
+    if (written) {
+      tint.space = srgb();
+    }
+    GSHSCENE_Image_Paint ip;
+    gshscene_image_paint_init(&ip);
+    ip.image = image;
+    ip.map = matrix(2, 0, 0, 2, 0, 0);
+    ip.magnify = GSHSCENE_IMAGE_FILTER_NEAREST;
+    ip.tint = &tint;
+    const GSHSCENE_Resource * paint = nullptr;
+    ASSERT_EQ(gshscene_store_intern_image_paint(s.store, &ip, &paint), GSHSCENE_OK);
+    s.held.push_back(paint);
+    GSHSCENE_List * l = s.open();
+    GSHSCENE_Group g = rf_group(1.0, GSHSCENE_COMPOSITE_SRC_OVER);
+    g.blend_space = linear_srgb();
+    GSHSCENE_Paint p = image_paint_of(paint, 1.0);
+    ASSERT_EQ(gshscene_list_group_push(l, &g, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, 4, 2), nullptr, GSHGEOM_FILL_NONZERO, &p, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+    Render out;
+    render_observed(l, 4, 2, nullptr, out);
+    ASSERT_EQ(out.refused, 0u);
+    roots[written] = out.seen.root;
+  }
+  ASSERT_FALSE(roots[0].empty());
+  EXPECT_EQ(roots[0], roots[1]);
 }
 
 // IC9, IP12: a rectangle that maps outside the sampling domain is the sink's resource limit; a singular map is a notice.
