@@ -535,6 +535,19 @@ TEST(RenderStrokeLimits, CellsPastMaxCellsAreTheSinksLimitWholeOrDamaged) {
   Sink under(GSHCPU_RENDER_TIERS_ALL, &at);
   EXPECT_FALSE(render_list(under.sink, l, 24, 24).entries.empty());
   EXPECT_GT(lo, 3u) << "the cells of three parts, not of one";
+  // The three parts composed one at a time (the joint step off) are the same cells against the same cap: the cap is met by
+  // their sum, each part given what the parts before it left, not each given the whole.
+  size_t lo_apart = 1;
+  size_t hi_apart = GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS;
+  while (lo_apart < hi_apart) {
+    size_t mid = lo_apart + (hi_apart - lo_apart) / 2;
+    GSHCPU_Limits probe = limits;
+    probe.max_deposits = mid;
+    Sink s2(GSHCPU_RENDER_TIERS_ALL & ~GSHCPU_RENDER_TIER_JOINT, &probe);
+    Drawn d = render_list(s2.sink, l, 24, 24);
+    (d.entries.empty() ? hi_apart : lo_apart) = d.entries.empty() ? mid : mid + 1;
+  }
+  EXPECT_EQ(lo_apart, lo) << "the sum over the three parts however they are composed";
 }
 
 TEST(RenderStrokeLimits, ADamageRefusesWhatTheWholeRenderRefusesWhereverTheStrokeIs) {
@@ -712,6 +725,73 @@ TEST(RenderStrokeCache, EvictByIdAndDestructionFree) {
     // Destruction (the Sink's) frees what is still held.
   }
   EXPECT_TRUE(t.live.empty()) << "every byte the sink took, the cache's included, is given back";
+  EXPECT_FALSE(t.failed);
+}
+
+// SC7, driven below the sink: an entry a render holds is never evicted to make room (it is skipped, and the next oldest goes),
+// and an entry dropped by id while held is not served again and is freed by the last release.  The entries carry no outline;
+// the cache decides nothing about one.
+TEST(RenderStrokeCache, AnEntryInUseIsNotEvictedForRoomAndOneDroppedWhileHeldIsFreedAtItsRelease) {
+  tracker::Tracker t;
+  GSHGEOM_Allocator alloc = tracker::allocator_for(&t);
+  GSHCPU_Render_Counters counters;
+  std::memset(&counters, 0, sizeof counters);
+  GSHCPU_Stroke_Meta meta;
+  std::memset(&meta, 0, sizeof meta);
+  meta.bytes = 1000;
+  auto key_of = [](uint64_t path) {
+    GSHCPU_Stroke_Key k;
+    std::memset(&k, 0, sizeof k);
+    k.path_id = path;
+    return k;
+  };
+  auto store = [&](GSHCPU_Stroke_Cache * c, uint64_t path) {
+    GSHCPU_Stroke_Key k = key_of(path);
+    void * entry = nullptr;
+    GSHGEOM_Stroke_Outline * held = nullptr;
+    EXPECT_EQ(gshcpu_stroke_cache_store(c, &k, nullptr, &meta, &entry, &held), 1) << "path " << path;
+    return entry;
+  };
+  auto acquire = [&](GSHCPU_Stroke_Cache * c, uint64_t path) -> void * {
+    GSHCPU_Stroke_Key k = key_of(path);
+    void * entry = nullptr;
+    GSHGEOM_Stroke_Outline * outline = nullptr;
+    GSHCPU_Stroke_Meta got;
+    return gshcpu_stroke_cache_acquire(c, &k, &entry, &outline, &got) ? entry : nullptr;
+  };
+  // What one entry accounts for: the meta's bytes and the entry's own.
+  uint64_t need = 0;
+  {
+    GSHCPU_Stroke_Cache * probe = nullptr;
+    ASSERT_EQ(gshcpu_stroke_cache_create(&alloc, 1u << 20, nullptr, &probe), GSHCPU_OK);
+    gshcpu_stroke_cache_release(probe, store(probe, 1));
+    need = gshcpu_stroke_cache_bytes(probe);
+    gshcpu_stroke_cache_destroy(probe);
+  }
+  ASSERT_GT(need, 1000u);
+  GSHCPU_Stroke_Cache * c = nullptr;
+  ASSERT_EQ(gshcpu_stroke_cache_create(&alloc, 2 * need + need / 2, &counters, &c), GSHCPU_OK); // room for two
+  gshcpu_stroke_cache_release(c, store(c, 1));
+  void * pinned = acquire(c, 1); // a render holds the oldest entry
+  ASSERT_NE(pinned, nullptr);
+  gshcpu_stroke_cache_release(c, store(c, 2));
+  gshcpu_stroke_cache_release(c, store(c, 3)); // no room: the oldest is held, so the next oldest goes
+  EXPECT_EQ(counters.cache_evictions, 1u);
+  void * again = acquire(c, 1);
+  EXPECT_NE(again, nullptr) << "the held entry stayed";
+  if (again) {
+    gshcpu_stroke_cache_release(c, again);
+  }
+  EXPECT_EQ(acquire(c, 2), nullptr) << "the entry that was not held went";
+  // Dropped by id while held: gone from the table, alive until released.
+  const uint64_t live_before = t.live.size();
+  gshcpu_stroke_cache_evict(c, 1);
+  EXPECT_EQ(acquire(c, 1), nullptr) << "an entry dropped while held is not served again";
+  EXPECT_EQ(t.live.size(), live_before) << "and not freed under the render that holds it";
+  gshcpu_stroke_cache_release(c, pinned);
+  EXPECT_EQ(t.live.size(), live_before - 1u) << "the last release gives it back";
+  gshcpu_stroke_cache_destroy(c);
+  EXPECT_TRUE(t.live.empty());
   EXPECT_FALSE(t.failed);
 }
 

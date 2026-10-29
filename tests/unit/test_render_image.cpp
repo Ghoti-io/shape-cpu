@@ -167,6 +167,8 @@ TEST(RenderImageTruncate, ItIsTheCastTowardZeroBelowTheBoundAndAClampBeyond) {
   }
   EXPECT_EQ(gshcpu_render_trunc_i64(0x1p40), (int64_t)1 << 40);
   EXPECT_EQ(gshcpu_render_trunc_i64(-0x1p40), -((int64_t)1 << 40));
+  EXPECT_EQ(gshcpu_render_trunc_i64(0x1.8p40), (int64_t)1 << 40) << "between the bound and twice it: clamped, not computed";
+  EXPECT_EQ(gshcpu_render_trunc_i64(-0x1.8p40), -((int64_t)1 << 40));
   EXPECT_EQ(gshcpu_render_trunc_i64(1e300), (int64_t)1 << 40);
   EXPECT_EQ(gshcpu_render_trunc_i64(-1e300), -((int64_t)1 << 40));
   EXPECT_EQ(gshcpu_render_trunc_i64(INFINITY), (int64_t)1 << 40);

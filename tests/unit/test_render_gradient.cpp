@@ -319,6 +319,71 @@ TEST(RenderGradientVectors, TheEvaluationAgreesWithTheOracleWithinTheStatedToler
   EXPECT_GT(drawn, 1000u);
 }
 
+// G9: a pixel center on an axis of a sweep is its exact angle in the table's rows as in the evaluation: a half turn to the
+// left of the center, a quarter below it, three quarters above it, none to the right.  The vectors reach the rows through
+// a share of the points that the closeness allowance can hide, so the four axes are checked on their own.
+TEST(RenderGradientVectors, ATableRowOfASweepIsExactOnItsAxes) {
+  const double identity[4] = {1, 0, 0, 1};
+  const double zero[2] = {0, 0};
+  GSHGEOM_Map map;
+  ASSERT_EQ(gshgeom_map_from_matrix(2, identity, zero, &map), GSHGEOM_OK);
+  std::vector<GSHSCENE_Gradient_Stop> stops(2);
+  stops[0].offset = 0;
+  stops[0].color.kind = GSHSCENE_PAINT_SOLID;
+  stops[0].color.rgba[0] = 1;
+  stops[0].color.rgba[3] = 1;
+  stops[1].offset = 1;
+  stops[1].color.kind = GSHSCENE_PAINT_SOLID;
+  stops[1].color.rgba[2] = 1;
+  stops[1].color.rgba[3] = 1;
+  // The padded sweep's rows are single precision (a vector kernel); the repeated one's are the polynomial arctangent in doubles.
+  for (int variant = 0; variant < 4; variant++) {
+    const uint32_t unit = variant & 1 ? (uint32_t)GSHGEOM_ANGLE_RADIANS : (uint32_t)GSHGEOM_ANGLE_DEGREES;
+    const uint32_t extend = variant & 2 ? (uint32_t)GSHSCENE_EXTEND_REPEAT : (uint32_t)GSHSCENE_EXTEND_PAD;
+    GSHSCENE_Gradient g{};
+    g.kind = GSHSCENE_GRADIENT_SWEEP;
+    g.center[0] = 4.5;
+    g.center[1] = 4.5;
+    g.angle_unit = unit;
+    g.a1 = unit == (uint32_t)GSHGEOM_ANGLE_DEGREES ? 360.0 : 6.283185307179586;
+    g.extend = extend;
+    g.map = map;
+    g.stop_count = stops.size();
+    g.stops = stops.data();
+    std::vector<GSHCPU_Stop> line(2);
+    for (size_t k = 0; k < 2; k++) {
+      line[k].offset = stops[k].offset;
+      for (int j = 0; j < 4; j++) {
+        line[k].rgba[j] = stops[k].color.rgba[j];
+      }
+    }
+    gshcpu_render_gradient_stops(line.data(), line.size(), 0);
+    GSHCPU_Gradient gr;
+    ASSERT_EQ(gshcpu_render_gradient_prepare(&gr, &g, line.data(), &map, 1.0), GSHCPU_OK);
+    std::vector<double> table(4u * (GSHCPU_RENDER_GRADIENT_TABLE + 1u));
+    GSHCPU_Convert same;
+    GSHSCENE_Color_Space space{};
+    gshcpu_render_convert_prepare(&same, &space, &space);
+    gshcpu_render_gradient_table(&gr, &same, table.data());
+    const struct {
+      double x, y, turns;
+    } axes[] = {{1.5, 4.5, 0.5}, {7.5, 4.5, 0.0}, {4.5, 7.5, 0.25}, {4.5, 1.5, 0.75}};
+    for (const auto & a : axes) {
+      const uint8_t covered = 255;
+      uint32_t index = 0;
+      gshcpu_render_gradient_table_row(&gr, a.x, a.y, 1, &covered, &index);
+      ASSERT_LE(index, GSHCPU_RENDER_GRADIENT_TABLE) << a.x << ", " << a.y;
+      const std::string where = "(" + std::to_string(a.x) + ", " + std::to_string(a.y) + "), unit " + std::to_string(unit) +
+          ", extend " + std::to_string(extend);
+      EXPECT_NEAR(table[4u * index + 0u], 1.0 - a.turns, 0.02) << "red at " << where;
+      EXPECT_NEAR(table[4u * index + 2u], a.turns, 0.02) << "blue at " << where;
+      double out[4];
+      ASSERT_EQ(gshcpu_render_gradient_at(&gr, a.x, a.y, out), 1);
+      EXPECT_NEAR(out[2], a.turns, 1e-12) << "the evaluation at " << where;
+    }
+  }
+}
+
 /* --- the sink's wiring: sample point, chain, conversion ---------------------------------------------------------- */
 
 // Every pixel of a fill covering the raster is G12's source at the pixel's center under the chain T M G composed by

@@ -605,6 +605,19 @@ TEST(RenderStrokeText, ALimitOfTheRunRefusesTheWholeItemAndNeverStrokesPartOfIt)
   }
   {
     GSHCPU_Limits limits{};
+    limits.max_points = 4; // past the points of the centerline itself: refused as the item's limit, before any part is made
+    Sink sink(GSHCPU_RENDER_TIERS_ALL, &limits);
+    Drawn d = render_list(sink.sink, l, 30, 24);
+    EXPECT_EQ(d.result, GSHSCENE_OK);
+    ASSERT_EQ(d.entries.size(), 1u);
+    EXPECT_EQ(d.entries[0].entry_class, GSHSCENE_ENTRY_REFUSED);
+    EXPECT_EQ(d.entries[0].reason, GSHSCENE_REASON_RESOURCE_LIMIT);
+    for (uint8_t a : d.alpha) {
+      EXPECT_EQ(a, 0) << "none of the run is drawn";
+    }
+  }
+  {
+    GSHCPU_Limits limits{};
     limits.max_deposits = 30; // cells past the cap
     Sink sink(GSHCPU_RENDER_TIERS_ALL, &limits);
     Drawn d = render_list(sink.sink, l, 30, 24);
@@ -763,6 +776,39 @@ TEST(RenderStrokeText, TheExpansionLiesWithinTheStyleBoundsOfTheGlyphsAndTheWork
   EXPECT_EQ(a.summary.work_max, b.summary.work_max + gshgeom_path_element_count(counted))
       << "the elements of the glyphs' outlines are counted once";
   gshgeom_path_destroy(counted);
+}
+
+// ST9: the elements of a run's centerline are in its work once, as many as the sink's resource limit for elements and no more:
+// a centerline is not a resource, so a limit lower than its elements does not refuse it, and the work states the limit.
+TEST(RenderStrokeText, TheElementsOfARunsCenterlineInTheWorkAreNoMoreThanTheSinksElementLimit) {
+  Text t;
+  const GSHSCENE_Resource * run = t.run(t.face(), 14.0, GSHSCENE_HINT_NONE, {{2, 2.0, 20.0}, {3, 14.0, 22.0}, {1, 26.0, 18.0}});
+  GSHSCENE_Paint paint = solid(0.1, 0.1, 0.1, 1.0);
+  Params p = pen(3.0);
+  GSHGEOM_Map m = translation(0.375, 0.5);
+  const GSHSCENE_List * l = t.stroke(run, p.get(), &m, paint);
+  GSHGEOM_Path * counted = nullptr;
+  ASSERT_EQ(gshscene_glyph_run_centerline(run, nullptr, nullptr, &counted, nullptr), GSHSCENE_OK);
+  const uint64_t elements = gshgeom_path_element_count(counted);
+  gshgeom_path_destroy(counted);
+  const uint64_t limit = elements / 2;
+  ASSERT_GT(limit, 1u);
+  Sink roomy;
+  Drawn whole = render_list(roomy.sink, l, 40, 30);
+  ASSERT_TRUE(whole.entries.empty());
+  GSHSCENE_Limits scene;
+  gshscene_limits_default(&scene);
+  scene.max_resource_elements = limit;
+  GSHSCENE_Sink * sink = nullptr;
+  GSHCPU_Render_Counters counters{};
+  ASSERT_EQ(gshcpu_render_sink_create_tiered(nullptr, &scene, nullptr, GSHCPU_RENDER_TIERS_ALL, &counters, nullptr, nullptr, &sink),
+      GSHCPU_OK);
+  Drawn clamped = render_list(sink, l, 40, 30);
+  EXPECT_EQ(gshscene_sink_destroy(sink), GSHSCENE_OK);
+  ASSERT_TRUE(clamped.entries.empty());
+  EXPECT_EQ(clamped.alpha, whole.alpha) << "the picture is the same";
+  EXPECT_EQ(whole.summary.work_max - clamped.summary.work_max, (elements - limit) * ((uint64_t)GSHGEOM_STROKE_MAX_DEPTH + 1u))
+      << "the work counts the limit's elements, each with the expansion's depth and the glyph outline once";
 }
 
 int main(int argc, char ** argv) {

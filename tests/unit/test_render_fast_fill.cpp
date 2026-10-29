@@ -132,6 +132,70 @@ TEST(RenderFastFill, EveryFixtureIsTheSameInTheCallersMemoryWhateverItHolds) {
   }
 }
 
+// A group's layer is composed into its parent on bytes, one pixel at a time through doubles where the pair is not a plain
+// one (a clip between them, a space of its own, an operator the rows do not do); its opacity is the group's own, once.  The
+// fixtures weigh a stretch of the picture too little to show a wrong opacity in their mean, so each route is drawn alone.
+TEST(RenderFastFill, AGroupOnBytesKeepsItsOpacityOnEveryRoute) {
+  GSHSCENE_Color_Space linear{};
+  linear.primaries = GCOL_PRIMARIES_SRGB;
+  linear.transfer = GCOL_TRANSFER_LINEAR;
+  struct Route {
+    const char * name;
+    bool clipped;
+    bool own_space;
+    uint32_t composite;
+  };
+  const Route routes[] = {
+      {"a clip between the group and its parent", true, false, GSHSCENE_COMPOSITE_SRC_OVER},
+      {"a blend space of its own", false, true, GSHSCENE_COMPOSITE_SRC_OVER},
+      {"an operator that acts outside the group", false, false, GSHSCENE_COMPOSITE_SRC_IN},
+      {"a separable blend mode under a clip", true, false, GSHSCENE_COMPOSITE_MULTIPLY},
+  };
+  for (const Route & route : routes) {
+    for (double opacity : {1.0, 0.5}) {
+      Store s;
+      GSHSCENE_List * l = s.open();
+      GSHSCENE_Paint back = solid(0.2, 0.7, 0.4, 1.0);
+      GSHSCENE_Paint orange = solid(1.0, 0.5, 0.0, 1.0);
+      ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, 24, 20), nullptr, GSHGEOM_FILL_NONZERO, &back, 0, 0.0), GSHSCENE_OK);
+      GSHSCENE_Group g = rf_group(opacity, route.composite);
+      if (route.own_space) {
+        g.blend_space = linear;
+      }
+      if (route.clipped) {
+        ASSERT_EQ(gshscene_list_clip_push(l, s.rect(2, 2, 20, 17), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0), GSHSCENE_OK);
+      }
+      ASSERT_EQ(gshscene_list_group_push(l, &g, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_fill(l, s.rect(4, 4, 16, 14), nullptr, GSHGEOM_FILL_NONZERO, &orange, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+      if (route.clipped) {
+        ASSERT_EQ(gshscene_list_clip_pop(l), GSHSCENE_OK);
+      }
+      ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+      std::vector<uint8_t> pictures[2];
+      for (int fast = 0; fast < 2; fast++) {
+        GSHCPU_Limits limits;
+        gshcpu_limits_default(&limits);
+        limits.fill_coverage = fast ? GSHCPU_FILL_COVERAGE_FAST : GSHCPU_FILL_COVERAGE_EXACT;
+        SinkRef sink(&limits);
+        RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, 24, 20));
+        GSHSCENE_Target t = target_of(r.raster);
+        ReportRef report;
+        GSHSCENE_Render_Request req = request_of(l, &t, report.report);
+        ASSERT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK) << route.name;
+        const std::string bytes = r.bytes();
+        pictures[fast].assign(bytes.begin(), bytes.end());
+      }
+      ASSERT_EQ(pictures[0].size(), pictures[1].size());
+      int worst = 0;
+      for (size_t k = 0; k < pictures[0].size(); k++) {
+        worst = std::max(worst, std::abs((int)pictures[0][k] - (int)pictures[1][k]));
+      }
+      EXPECT_LE(worst, 3) << route.name << ", opacity " << opacity << ": the bytes' route and the doubles' differ by a rounding at most";
+    }
+  }
+}
+
 TEST(RenderFastFill, TheFillCoverageIsRefusedPastTheDefinedValues) {
   GSHCPU_Limits limits;
   gshcpu_limits_default(&limits);
