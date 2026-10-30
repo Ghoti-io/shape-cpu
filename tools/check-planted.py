@@ -1556,6 +1556,8 @@ SURVIVORS = {
         "aligned stroke (a triple overlap), which no test builds",
     "uc14-gap-step-multiplicity": "not seen: needs coincident pieces of one direction at a gap step of a cell that has other "
         "pieces (the mid-gap variant is caught)",
+    "rv-670-lt": "not seen by a plain build: `p <= n` reads one part past the three that both callers pass (an array on the stack), "
+        "which a sanitizer sees and the plant harness does not run",
     "uc15-meeting-depth-rounded": "not seen: needs a meeting whose depth is not a multiple of 1/1024 at a resolution where the "
         "rounding changes a level",
 }
