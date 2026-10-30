@@ -87,6 +87,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** The largest workspace the harness allocates for a caller-memory request. */
+#define FUZZ_WORKSPACE_MAX ((size_t)64 << 20)
+
 #define CHECK(cond) \
   do { \
     if (!(cond)) { \
@@ -1108,6 +1111,12 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     CHECK(q == GSHSCENE_OK || q == GSHSCENE_ERR_LIMIT || q == GSHSCENE_ERR_OOM || (q == GSHSCENE_ERR_INVALID && empty_extent));
     if (q != GSHSCENE_OK) {
       outcomes[OUT_OOM] += q == GSHSCENE_ERR_OOM;
+      goto done;
+    }
+    /* The caller memory a request needs under the default limits can be gigabytes (a 480-byte input asked for 1.7 GB, over libFuzzer's
+     * 2 GB resident limit, and rendering into it took half a minute): the exact-size and one-byte-short checks below are made on
+     * the requests whose workspace is a bounded size, which the limits the header bytes choose give in most inputs. */
+    if (need > FUZZ_WORKSPACE_MAX) {
       goto done;
     }
     /* A byte short first: refused, the target as it was. */
