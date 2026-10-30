@@ -18,8 +18,12 @@ violation by `make check-gates`.
 Device space has its origin at the top-left corner of the top-left pixel, y
 down, and a coordinate is an `int32` count of 1/64 pixel. A device path is
 flattened by `shape-geometry`'s integer flattener (tolerance 1/16 pixel,
-revision 2) into polylines; each subpath is closed (an open one is filled as if
-closed). Every edge deposits two signed numbers into each cell it crosses:
+revision 2 for quadratics and cubics) into polylines; a rational curve (a circle
+or an ellipse, whether written as conics or as an arc) takes `shape-geometry`'s conic
+route (flattener revision 3), which holds it within the tolerance less 0.29 units by a
+proved rule where revision 2 held it to a fixed two units, so a render that fills or
+clips with a circle or an ellipse has the vertices of the new rule and no other render
+moved. Each subpath is closed (an open one is filled as if closed). Every edge deposits two signed numbers into each cell it crosses:
 `cover`, the signed height of the crossing in 26.6 units, and `area`, that
 height times the sum of the crossing's two x positions within the cell. An edge
 is cut at each pixel boundary, the crossing at a boundary rounded once (half
