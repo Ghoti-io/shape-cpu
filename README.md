@@ -60,6 +60,10 @@ Determinism is a requirement, not a hope: every `double` stage builds with
 libm. `make check-gates` shows each of those rules failing on a planted
 violation.
 
+A path resource's primitive tag (a rect, rounded rect or ellipse; shape-scene's `primitive.h`) never changes what is drawn: the sink draws
+a tagged path by its path, `make check-tag-ignored` fails if a source of the renderer reads the tag, and a test renders a tagged path and its
+untagged copy bit for bit alike over every item kind, rule, map and stroke style.
+
 ## License
 
 LGPL-3.0-only. See `COPYING` and `COPYING.LESSER`. Patches are not being

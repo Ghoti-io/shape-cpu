@@ -685,6 +685,16 @@ alone against SC5's formula with constants, the off-centre strip the formula get
 values, over the walk and not the window; no winding as a limit (255, 256, 475, 1024 and deeper); the field `max_exact_fragments` through the sink (validated, defaulted, refused at its bound, damage, strict,
 caller memory).
 
+A primitive tag never changes coverage. A path resource may carry a tag (a rect, a rounded rect or an ellipse, with flips and the
+parameters it was built from; shape-scene's `primitive.h`) that a document writer or an analytic route reads; this sink draws a path
+resource by its path. `test_render_primitives.cpp` renders a tagged path and the untagged resource of the same geometry for every
+primitive (the rect and the ellipse under all four flip pairs, a rounded rect, a circle), six maps (a rotation, a skew, a mirror, a
+stretch, a fractional translation, the identity) and six items (a fill under each rule, a clip, and strokes with each join, cap and
+dash), and requires the bits to be equal; it also requires the flips to change a dashed stroke and nothing else, since the dashes
+begin at the start corner. `tools/check-tag-ignored.sh` is the other half: no source of the renderer names the accessor, the kind
+or the type, and the gate first shows itself failing on a planted call, kind and type. Planted branches that read the tag and
+change a render fail the test (`pt-` in `tools/check-planted.py`).
+
 The sink's tests: shape-scene's conformance suite, installed by shape-scene as
 `<ghoti.io/shape-scene/testing/sink_conformance.h>` and run unchanged
 (`test_render_conformance.cpp`); the gate of S11 against shape-scene's
