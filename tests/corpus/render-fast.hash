@@ -6,14 +6,14 @@ render fill-rules rgba8 0cf4d5c6baa60746
 render fill-rules rgba8-premultiplied a2a2197c70302a0b
 render fill-rules rgbaf32 04512a779b419c7b
 render fill-rules rgbaf32-premultiplied a0cab47719ebb549
-render clip-leaf rgba8 9becfcf0904c7063
-render clip-leaf rgba8-premultiplied 4562f3fffd8a60b5
-render clip-leaf rgbaf32 df1d2a420f7abfee
-render clip-leaf rgbaf32-premultiplied 102c7cf19027710a
-render clip-group rgba8 a6ec14fd6aaadeb0
-render clip-group rgba8-premultiplied e8f12466ce2190d9
-render clip-group rgbaf32 a9a6e5bbc239030d
-render clip-group rgbaf32-premultiplied fd81e0029d5be612
+render clip-leaf rgba8 25bd8d0d6694f6f7
+render clip-leaf rgba8-premultiplied 27ff8ba057f2a71a
+render clip-leaf rgbaf32 5a3acc7049ff9ba6
+render clip-leaf rgbaf32-premultiplied 8e0e8df2e60b27d5
+render clip-group rgba8 583b8926c3a49996
+render clip-group rgba8-premultiplied 288a7ec1786156e3
+render clip-group rgbaf32 c275d8e6ceaee795
+render clip-group rgbaf32-premultiplied 89c9d1415c8af009
 render opacity-group rgba8 5bfce092ab22badb
 render opacity-group rgba8-premultiplied 3d2a38130f8d535f
 render opacity-group rgbaf32 576b01a4ad06f392
@@ -26,14 +26,14 @@ render order rgba8 3ae906f4b1f0f45a
 render order rgba8-premultiplied 7a3c66d434aa0f95
 render order rgbaf32 d19f9b5d8bf9bee6
 render order rgbaf32-premultiplied 7179efb894707b84
-render blend-spaces rgba8 86b5fddc280add8f
-render blend-spaces rgba8-premultiplied 022ca7a5277804f8
-render blend-spaces rgbaf32 762f4fa76c8343ae
-render blend-spaces rgbaf32-premultiplied 954a670f48353741
-render foreground rgba8 ef0348a1a8c59707
-render foreground rgba8-premultiplied e9a17015a4c67bfb
-render foreground rgbaf32 dcae4ca6a767607e
-render foreground rgbaf32-premultiplied f32ab589c5076ee9
+render blend-spaces rgba8 d90c81c209707753
+render blend-spaces rgba8-premultiplied c2d93ad49cae7978
+render blend-spaces rgbaf32 cf1d7cf38a9a7486
+render blend-spaces rgbaf32-premultiplied 591a76785bcd8b61
+render foreground rgba8 f35c3fa99ac0f38f
+render foreground rgba8-premultiplied 6ea8c4613b7e978b
+render foreground rgbaf32 d76475950bc8c3e7
+render foreground rgbaf32-premultiplied 318900128d2001c9
 render picture rgba8 0482db09cd2d46a1
 render picture rgba8-premultiplied 63ac3c517861bbf0
 render picture rgbaf32 37b5b536f3eadb1c
@@ -58,14 +58,14 @@ render gradient-linear rgba8 e1b8dcb8b01ece45
 render gradient-linear rgba8-premultiplied f9efd6f94f25bfa5
 render gradient-linear rgbaf32 5262f83badc150d0
 render gradient-linear rgbaf32-premultiplied 0a5afbdfb7a24e1e
-render gradient-radial rgba8 efa5bd42047eedb4
-render gradient-radial rgba8-premultiplied b446946bcf5fbac3
-render gradient-radial rgbaf32 e1ae9c601854e401
-render gradient-radial rgbaf32-premultiplied 5d38e8bef120b9a4
-render gradient-sweep rgba8 43ec5d79dc3e8eaa
-render gradient-sweep rgba8-premultiplied acdd97733cc52f94
-render gradient-sweep rgbaf32 a4cf6a50f4980bf0
-render gradient-sweep rgbaf32-premultiplied ac0c6157b0dfd53d
+render gradient-radial rgba8 d0d1aa98f816b3f2
+render gradient-radial rgba8-premultiplied 992797f40dc67171
+render gradient-radial rgbaf32 46708215be9d79fb
+render gradient-radial rgbaf32-premultiplied b99052e02cb4a0f2
+render gradient-sweep rgba8 92dd829be599aab6
+render gradient-sweep rgba8-premultiplied 3dc5f63bb7351e64
+render gradient-sweep rgbaf32 7f269b933f80334a
+render gradient-sweep rgbaf32-premultiplied 43348aff91ea83af
 render gradient-paints rgba8 9cb628f55f82410a
 render gradient-paints rgba8-premultiplied 82a41d2a64b88828
 render gradient-paints rgbaf32 1c54bdcd1dd8376e
@@ -162,5 +162,5 @@ render image-nothing rgba8 76d5d40f08fa1abe
 render image-nothing rgba8-premultiplied bdbe5f9c05c3bfe5
 render image-nothing rgbaf32 d8e56b47c47694dc
 render image-nothing rgbaf32-premultiplied 2c2a5849acde50db
-hash 9d2ccfd60b788f4f
+hash 5c104107f44cf7d3
 count 160
