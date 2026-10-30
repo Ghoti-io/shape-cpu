@@ -72,6 +72,12 @@ std::vector<Subject> subjects() {
     rr.r[i] = c[i];
   }
   out.push_back({"rounded rect", rr});
+  for (int f = 1; f < 4; f++) {
+    GSHSCENE_Primitive flipped = rr;
+    flipped.flip_x = f & 1;
+    flipped.flip_y = f >> 1;
+    out.push_back({f == 1 ? "rounded rect flip_x" : f == 2 ? "rounded rect flip_y" : "rounded rect both flips", flipped});
+  }
   GSHSCENE_Primitive circle = ellipse(0, 0);
   circle.rx = 11.5;
   circle.ry = 11.5;
@@ -189,8 +195,8 @@ TEST(RenderPrimitives, ATaggedPathAndItsUntaggedCopyRenderBitForBit) {
       }
     }
   }
-  EXPECT_EQ(renders, 10u * 6u * 6u * 2u);
-  EXPECT_GE(drawn, 10u * 6u * 6u * 9u / 10u) << "the matrix draws something almost everywhere, so equality is not a blank against a blank";
+  EXPECT_EQ(renders, 13u * 6u * 6u * 2u);
+  EXPECT_GE(drawn, 13u * 6u * 6u * 9u / 10u) << "the matrix draws something almost everywhere, so equality is not a blank against a blank";
 }
 
 TEST(RenderPrimitives, TheFlipsMoveADashedStrokeAndAFillIsTheRegionToWithinOneLevel) {
@@ -299,6 +305,75 @@ TEST(RenderPrimitives, ADashBeginsWhereChromiumsDoesForTheCanvasSignCasesOfRectA
     EXPECT_NEAR(y0, c.box[1], 1) << c.what;
     EXPECT_NEAR(x1, c.box[2], 1) << c.what;
     EXPECT_NEAR(y1, c.box[3], 1) << c.what;
+  }
+}
+
+TEST(RenderPrimitives, ARoundedRectDashBeginsWhereChromiumsRoundRectDoesForEachSignCase) {
+  // Canvas roundRect(x, y, w, h, [10, 20, 30, 40]) with the box (40, 30, 200, 120) and each sign case, a 2 px line with one 4 px dash and
+  // a gap of 1e5 at lineDashOffset 0, -10 and -50 (a headless Chrome 156 run; the first dash is 4 px of the path from 0, 10 and 50 px
+  // along it): the bounding box of the pixels above alpha 128.  The radii go to the mirrored corners and, for one negative size, the path
+  // starts after the top-left radius of the box and runs counter-clockwise.  Firefox draws one negative size from the other end of the top
+  // edge and is not what this follows.  The tolerance is one pixel.
+  struct Row {
+    int fx, fy;
+    int box[3][4];
+  };
+  const Row rows[] = {
+      {0, 0, {{50, 29, 53, 30}, {60, 29, 63, 30}, {100, 29, 103, 30}}},
+      {1, 0, {{56, 29, 59, 30}, {47, 32, 49, 34}, {39, 69, 40, 72}}},
+      {0, 1, {{76, 29, 79, 30}, {66, 30, 69, 32}, {40, 57, 42, 60}}},
+      {1, 1, {{70, 29, 73, 30}, {80, 29, 83, 30}, {120, 29, 123, 30}}},
+  };
+  const double offsets[3] = {0.0, -10.0, -50.0};
+  for (const Row & row : rows) {
+    GSHSCENE_Primitive rr{};
+    rr.kind = GSHSCENE_PRIMITIVE_ROUNDED_RECT;
+    rr.flip_x = row.fx;
+    rr.flip_y = row.fy;
+    rr.x = 40;
+    rr.y = 30;
+    rr.w = 200;
+    rr.h = 120;
+    const double radii[4] = {10, 20, 30, 40};
+    for (int i = 0; i < 4; i++) {
+      rr.r[i].rx = radii[i];
+      rr.r[i].ry = radii[i];
+    }
+    for (int k = 0; k < 3; k++) {
+      Pair p(rr);
+      Sink sink;
+      GSHGEOM_Stroke g;
+      gshgeom_stroke_init(&g);
+      static const double dashes[2] = {4.0, 1e5};
+      g.width = 2.0;
+      g.join = GSHGEOM_STROKE_JOIN_MITER;
+      g.cap = GSHGEOM_STROKE_CAP_BUTT;
+      g.dash_count = 2;
+      g.dashes = dashes;
+      g.dash_offset = offsets[k];
+      const GSHSCENE_Resource * style = intern_style(p.s, g);
+      GSHSCENE_Paint white = solid(1, 1, 1, 1);
+      GSHSCENE_List * l = p.s.open();
+      ASSERT_EQ(gshscene_list_stroke(l, p.tagged, style, nullptr, &white, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+      Drawn d = render_list(sink.sink, l, 300, 200);
+      ASSERT_EQ(d.result, GSHSCENE_OK);
+      int x0 = 1000, y0 = 1000, x1 = -1, y1 = -1;
+      for (int y = 0; y < 200; y++) {
+        for (int x = 0; x < 300; x++) {
+          if (d.alpha[(size_t)y * 300 + (size_t)x] > 128) {
+            x0 = std::min(x0, x);
+            y0 = std::min(y0, y);
+            x1 = std::max(x1, x);
+            y1 = std::max(y1, y);
+          }
+        }
+      }
+      EXPECT_NEAR(x0, row.box[k][0], 1) << row.fx << row.fy << " offset " << offsets[k];
+      EXPECT_NEAR(y0, row.box[k][1], 1) << row.fx << row.fy << " offset " << offsets[k];
+      EXPECT_NEAR(x1, row.box[k][2], 1) << row.fx << row.fy << " offset " << offsets[k];
+      EXPECT_NEAR(y1, row.box[k][3], 1) << row.fx << row.fy << " offset " << offsets[k];
+    }
   }
 }
 
