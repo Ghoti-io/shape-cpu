@@ -68,6 +68,15 @@
  * | image-spaces | one image filtered in its own space and in linear light, wide-gamut and gamma images on an sRGB target, and a group in linear light holding images in a space of their own |
  * | image-compose | an image fill in a group (multiply, opacity) under a clip, a star filled with a repeated image, a stroke painted with an image, a picture holding an image fill instanced turned, and a 1 by 1 image repeated a thousand times per pixel |
  * | image-nothing | a singular map (a notice), a window of an image repeated, a zero alpha multiplier, and one drawn |
+ * | mask-alpha | (masks-images-patterns story M2) alpha masks: the identity transfer over a star, translucent and gradient fills, a stroke and a clipped fill, a nested group, partial coverage at the edges |
+ * | mask-luminance | luminance masks: each coefficient set over saturated colors, the picture rendered in linear light and the luminance taken in sRGB, a nonblack backdrop, gray, a color past [0, 1] |
+ * | mask-transfers | an exponential, a table and a stitching transfer on alpha and luminance masks, and a transfer with a nonzero value at 0 |
+ * | mask-outside | the value outside everything the picture draws: an empty picture, partial coverage, a nonzero transfer at 0, a nonblack backdrop |
+ * | mask-acts-on | a mask acting on the opacity and on the shape under source-over, multiply, plus, dest-in, src, src-in, src-out and clear |
+ * | mask-nested | a mask of a mask three deep, a masked group inside an instanced picture, a mask picture holding an instance |
+ * | mask-frames | the placement of a mask: a scale, a translation, a turn, a shear, a swap of the axes, an instance under a map, a singular placement |
+ * | mask-compose | a clip, a mask, an opacity and a blend mode on one group; a masked group in linear light with a mask rendered in Display P3; an unbounded operator on a small group |
+ * | mask-not-a-clip | two abutting halves as an alpha mask (3/4 where they share a pixel) beside the exact union as a clip (whole) |
  * | blend-out-of-range | blend modes on sources out of range (negative, above 1, the recorded bound 2^16), dodge and burn past their poles, ClipColor with both steps, in a gamma-0.1 parent, nested blending groups, and a blend over the backdrop's transparent pixels |
  */
 
@@ -93,7 +102,7 @@ typedef struct RF_Ctx {
   GSHSCENE_Store * store;
   const GSHSCENE_Resource * held[192];
   size_t held_count;
-  GSHSCENE_List * lists[8];
+  GSHSCENE_List * lists[24];
   size_t list_count;
   int failed;
   GSHGEOM_Map target_map; /* the target's map the fixture asks for (the identity for most) */
@@ -1941,6 +1950,438 @@ static inline GSHSCENE_List * rf_image_nothing(RF_Ctx * c) {
   return l;
 }
 
+
+/* --- masks (masks-images-patterns story M2) ------------------------------------------------------ */
+
+/** The picture of the closed list @p inner, held. */
+static inline const GSHSCENE_Resource * rf_picture_of(RF_Ctx * c, GSHSCENE_List * inner) {
+  rf_close(c, inner);
+  const GSHSCENE_Resource * picture = NULL;
+  rf_check(c, gshscene_store_intern_picture(c->store, inner, &picture) == GSHSCENE_OK);
+  return rf_hold(c, picture);
+}
+
+/** A picture of one fill of @p path in @p paint. */
+static inline const GSHSCENE_Resource * rf_picture_fill(RF_Ctx * c, const GSHSCENE_Resource * path, GSHSCENE_Paint paint) {
+  GSHSCENE_List * inner = rf_open(c);
+  rf_fill(c, inner, path, NULL, GSHGEOM_FILL_NONZERO, paint, 0, 0.0);
+  return rf_picture_of(c, inner);
+}
+
+/** A mask over @p picture in @p mode, acting on @p acts_on, with the identity transfer; the caller sets the rest and interns. */
+static inline GSHSCENE_Mask rf_mask_of(const GSHSCENE_Resource * picture, uint32_t mode, uint32_t acts_on) {
+  GSHSCENE_Mask m;
+  memset(&m, 0, sizeof m);
+  m.picture = picture;
+  m.mode = mode;
+  m.acts_on = acts_on;
+  return m;
+}
+
+static inline const GSHSCENE_Resource * rf_mask_intern(RF_Ctx * c, const GSHSCENE_Mask * m) {
+  const GSHSCENE_Resource * r = NULL;
+  rf_check(c, gshscene_store_intern_mask(c->store, m, &r) == GSHSCENE_OK);
+  return rf_hold(c, r);
+}
+
+/** A masked group of @p opacity and @p composite holding one fill of @p path in @p paint, the mask placed by @p placement (or NULL). */
+static inline void rf_masked(RF_Ctx * c, GSHSCENE_List * l, const GSHSCENE_Resource * mask, double opacity, uint32_t composite,
+    const GSHGEOM_Map * placement, const GSHSCENE_Resource * path, GSHSCENE_Paint paint) {
+  GSHSCENE_Group g = rf_group(opacity, composite);
+  g.soft_mask = mask;
+  if (placement) {
+    g.soft_mask_map = *placement;
+  }
+  rf_check(c, gshscene_list_group_push(l, &g, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, path, NULL, GSHGEOM_FILL_NONZERO, paint, 0, 0.0);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+}
+
+static inline GSHSCENE_List * rf_mask_alpha(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  /* A star as the mask: its edges are partial coverage, so the mask's value is a coverage and not 0 and 1. */
+  const GSHSCENE_Resource * star = rf_picture_fill(c, rf_star(c, 8.0, 9.0, 7.5), rf_solid(1.0, 1.0, 1.0, 1.0));
+  GSHSCENE_Mask m = rf_mask_of(star, GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+  GSHGEOM_Map at1 = rf_move(1.0, 1.0);
+  rf_masked(c, l, rf_mask_intern(c, &m), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &at1, rf_rect(c, 1, 1, 17, 19), rf_solid(0.9, 0.1, 0.2, 1.0));
+  /* A translucent fill and a gradient fading to nothing in the picture. */
+  GSHSCENE_Gradient_Stop stops[2] = {rf_stop(0.0, rf_solid(1, 1, 1, 1.0)), rf_stop(1.0, rf_solid(1, 1, 1, 0.0))};
+  const GSHSCENE_Resource * fade = rf_gradient(c, rf_linear(0, 0, 14, 0, 0, 0, GSHSCENE_EXTEND_PAD), stops, 2);
+  GSHSCENE_List * pl = rf_open(c);
+  rf_fill(c, pl, rf_rect(c, 0, 0, 14, 8), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1, 1, 1, 0.5), 0, 0.0);
+  rf_fill(c, pl, rf_rect(c, 0, 8, 14, 18), NULL, GSHGEOM_FILL_NONZERO, rf_gradient_paint(fade, 1.0), 0, 0.0);
+  m = rf_mask_of(rf_picture_of(c, pl), GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+  GSHGEOM_Map at2 = rf_move(18.0, 1.0);
+  rf_masked(c, l, rf_mask_intern(c, &m), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &at2, rf_rect(c, 18, 1, 32, 19), rf_solid(0.1, 0.3, 0.9, 1.0));
+  /* A stroke with round caps, and a fill inside a clip, as the mask. */
+  GSHSCENE_List * sl = rf_open(c);
+  static const double zig[8] = {1.0, 3.0, 6.0, 12.0, 10.0, 3.0, 14.0, 12.0};
+  rf_stroke(c, sl, rf_polyline(c, zig, 4, 0), rf_pen(c, 3.0, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND), NULL,
+      rf_solid(1, 1, 1, 1.0));
+  rf_check(c, gshscene_list_clip_push(sl, rf_blob(c, 2.0, 2.0, 4.0), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, sl, rf_rect(c, 0, 0, 16, 16), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1, 1, 1, 0.8), 0, 0.0);
+  rf_check(c, gshscene_list_clip_pop(sl) == GSHSCENE_OK);
+  m = rf_mask_of(rf_picture_of(c, sl), GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+  GSHGEOM_Map at3 = rf_move(33.0, 1.0);
+  rf_masked(c, l, rf_mask_intern(c, &m), 0.9, GSHSCENE_COMPOSITE_SRC_OVER, &at3, rf_rect(c, 33, 1, 47, 19), rf_solid(0.2, 0.7, 0.3, 1.0));
+  /* A nested group in the picture. */
+  GSHSCENE_List * gl = rf_open(c);
+  GSHSCENE_Group inner = rf_group(0.5, GSHSCENE_COMPOSITE_SRC_OVER);
+  rf_check(c, gshscene_list_group_push(gl, &inner, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, gl, rf_rect(c, 0, 0, 12, 12), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1, 1, 1, 1.0), 0, 0.0);
+  rf_fill(c, gl, rf_rect(c, 6, 6, 18, 18), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1, 1, 1, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_group_pop(gl) == GSHSCENE_OK);
+  m = rf_mask_of(rf_picture_of(c, gl), GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+  GSHGEOM_Map at4 = rf_move(2.0, 21.0);
+  rf_masked(c, l, rf_mask_intern(c, &m), 0.7, GSHSCENE_COMPOSITE_SRC_OVER, &at4, rf_rect(c, 2, 21, 22, 39), rf_solid(0.7, 0.2, 0.8, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_mask_luminance(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  /* A picture of a saturated red, green and blue square and a mid gray: each coefficient set weighs them differently. */
+  GSHSCENE_List * pl = rf_open(c);
+  rf_fill(c, pl, rf_rect(c, 0, 0, 5, 8), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1, 0, 0, 1.0), 0, 0.0);
+  rf_fill(c, pl, rf_rect(c, 5, 0, 10, 8), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0, 1, 0, 1.0), 0, 0.0);
+  rf_fill(c, pl, rf_rect(c, 0, 8, 5, 16), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0, 0, 1, 1.0), 0, 0.0);
+  rf_fill(c, pl, rf_rect(c, 5, 8, 10, 16), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.5, 0.5, 0.5, 0.8), 0, 0.0);
+  const GSHSCENE_Resource * picture = rf_picture_of(c, pl);
+  for (uint32_t k = 0; k < GSHSCENE_MASK_COEFF_COUNT; k++) {
+    GSHSCENE_Mask m = rf_mask_of(picture, GSHSCENE_MASK_LUMINANCE, GSHSCENE_MASK_ACTS_ON_OPACITY);
+    m.coefficients = k;
+    const double x = 1.0 + 11.5 * (double)k;
+    GSHGEOM_Map at = rf_move(x, 1.0);
+    rf_masked(c, l, rf_mask_intern(c, &m), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &at, rf_rect(c, x, 1, x + 10, 17), rf_solid(0.1, 0.1, 0.1, 1.0));
+  }
+  /* The picture rendered in linear light and its luminance taken in sRGB, over a mid gray backdrop, against the same in sRGB. */
+  GSHSCENE_List * ol = rf_open(c);
+  rf_fill(c, ol, rf_rect(c, 0, 0, 10, 8), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.3, 0.1, 0.5), 0, 0.0);
+  rf_fill(c, ol, rf_rect(c, 3, 2, 10, 14), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.4, 0.9, 0.5), 0, 0.0);
+  rf_fill(c, ol, rf_rect(c, 0, 10, 10, 16), NULL, GSHGEOM_FILL_NONZERO, rf_solid(-0.25, 1.5, 0.5, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * overlap = rf_picture_of(c, ol);
+  for (int kind = 0; kind < 3; kind++) {
+    GSHSCENE_Mask m = rf_mask_of(overlap, GSHSCENE_MASK_LUMINANCE, GSHSCENE_MASK_ACTS_ON_OPACITY);
+    if (kind == 0) {
+      m.render_space = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_LINEAR, 0.0);
+      m.space = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_SRGB, 0.0);
+    } else if (kind == 1) {
+      m.render_space = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_SRGB, 0.0);
+      m.space = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_LINEAR, 0.0);
+    } else {
+      m.backdrop[0] = 0.5;
+      m.backdrop[1] = 0.5;
+      m.backdrop[2] = 0.5;
+      m.coefficients = GSHSCENE_MASK_COEFF_LUM;
+      m.space = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_SRGB, 0.0);
+      m.backdrop_space = m.space;
+    }
+    const double x = 1.0 + 15.0 * (double)kind;
+    GSHGEOM_Map at = rf_move(x, 21.0);
+    rf_masked(c, l, rf_mask_intern(c, &m), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &at, rf_rect(c, x, 21, x + 10, 37), rf_solid(0.9, 0.9, 0.2, 1.0));
+  }
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_mask_transfers(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  GSHSCENE_Gradient_Stop stops[2] = {rf_stop(0.0, rf_solid(1, 1, 1, 0.0)), rf_stop(1.0, rf_solid(1, 1, 1, 1.0))};
+  const GSHSCENE_Resource * ramp = rf_gradient(c, rf_linear(0, 0, 10, 0, 0, 0, GSHSCENE_EXTEND_PAD), stops, 2);
+  const GSHSCENE_Resource * picture = rf_picture_fill(c, rf_rect(c, 0, 0, 10, 14), rf_gradient_paint(ramp, 1.0));
+  static const double table[4] = {0.0, 0.8, 0.2, 1.0};
+  static const double fine[3] = {0.1, 0.5, 0.9};
+  GSHSCENE_Transfer_Piece pieces[3];
+  memset(pieces, 0, sizeof pieces);
+  pieces[0].lo = 0.0;
+  pieces[0].hi = 0.3;
+  pieces[0].e0 = 0.0;
+  pieces[0].e1 = 1.0;
+  pieces[0].leaf_kind = GSHSCENE_TRANSFER_IDENTITY;
+  pieces[1].lo = 0.3;
+  pieces[1].hi = 0.7;
+  pieces[1].e0 = 0.0;
+  pieces[1].e1 = 1.0;
+  pieces[1].leaf_kind = GSHSCENE_TRANSFER_EXPONENTIAL;
+  pieces[1].c0 = 0.2;
+  pieces[1].c1 = 0.9;
+  pieces[1].n = 2.5;
+  pieces[2].lo = 0.7;
+  pieces[2].hi = 1.0;
+  pieces[2].e0 = 1.0;
+  pieces[2].e1 = 0.0;
+  pieces[2].leaf_kind = GSHSCENE_TRANSFER_TABLE;
+  pieces[2].sample_count = 3;
+  pieces[2].samples = fine;
+  for (int k = 0; k < 8; k++) {
+    GSHSCENE_Mask m = rf_mask_of(picture, k % 2 ? GSHSCENE_MASK_LUMINANCE : GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+    switch (k / 2) {
+      case 0:
+        m.transfer.kind = GSHSCENE_TRANSFER_EXPONENTIAL;
+        m.transfer.c0 = 0.0;
+        m.transfer.c1 = 1.0;
+        m.transfer.n = 2.0;
+        break;
+      case 1:
+        m.transfer.kind = GSHSCENE_TRANSFER_TABLE;
+        m.transfer.sample_count = 4;
+        m.transfer.samples = table;
+        break;
+      case 2:
+        m.transfer.kind = GSHSCENE_TRANSFER_STITCHING;
+        m.transfer.piece_count = 3;
+        m.transfer.pieces = pieces;
+        break;
+      default:
+        m.transfer.kind = GSHSCENE_TRANSFER_EXPONENTIAL; /* a value at 0: the outside value is 0.3, everywhere the picture is not */
+        m.transfer.c0 = 0.3;
+        m.transfer.c1 = 0.9;
+        m.transfer.n = 0.5;
+        break;
+    }
+    const double x = 1.0 + 11.5 * (double)(k % 4);
+    const double y = 1.0 + 19.0 * (double)(k / 4);
+    GSHGEOM_Map at = rf_move(x + 0.5, y);
+    rf_masked(c, l, rf_mask_intern(c, &m), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &at, rf_rect(c, x, y, x + 11, y + 15), rf_solid(0.2, 0.2, 0.9, 1.0));
+  }
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_mask_outside(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.9, 0.8, 1.0), 0, 0.0);
+  /* An empty picture: the mask is its outside value everywhere. */
+  const GSHSCENE_Resource * empty = rf_picture_of(c, rf_open(c));
+  static const double half[2] = {0.5, 0.5};
+  for (int k = 0; k < 3; k++) {
+    GSHSCENE_Mask m = rf_mask_of(empty, k == 2 ? GSHSCENE_MASK_LUMINANCE : GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+    if (k == 1) {
+      m.transfer.kind = GSHSCENE_TRANSFER_TABLE; /* TR(0) = 0.5 */
+      m.transfer.sample_count = 2;
+      m.transfer.samples = half;
+    } else if (k == 2) {
+      m.backdrop[0] = 0.25;
+      m.backdrop[1] = 0.5;
+      m.backdrop[2] = 1.0;
+    }
+    const double x = 1.0 + 15.5 * (double)k;
+    rf_masked(c, l, rf_mask_intern(c, &m), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL, rf_rect(c, x, 1, x + 13, 12), rf_solid(0.1, 0.5, 0.2, 1.0));
+  }
+  /* A picture that covers part of the group: the mask is the picture inside it and the outside value elsewhere, the transfer's
+   * nonzero value at 0 and a nonblack backdrop in a luminance mask. */
+  const GSHSCENE_Resource * part = rf_picture_fill(c, rf_rect(c, 3, 3, 9, 9), rf_solid(0.2, 0.2, 0.2, 1.0));
+  for (int k = 0; k < 3; k++) {
+    GSHSCENE_Mask m = rf_mask_of(part, k == 0 ? GSHSCENE_MASK_ALPHA : GSHSCENE_MASK_LUMINANCE, GSHSCENE_MASK_ACTS_ON_OPACITY);
+    if (k == 1) {
+      m.backdrop[0] = m.backdrop[1] = m.backdrop[2] = 1.0;
+    } else if (k == 2) {
+      m.transfer.kind = GSHSCENE_TRANSFER_TABLE;
+      m.transfer.sample_count = 2;
+      m.transfer.samples = half;
+      m.backdrop[0] = 0.6;
+    }
+    const double x = 1.0 + 15.5 * (double)k;
+    GSHGEOM_Map at = rf_move(x + 1.0, 15.0);
+    rf_masked(c, l, rf_mask_intern(c, &m), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &at, rf_rect(c, x, 14, x + 13, 26), rf_solid(0.8, 0.1, 0.3, 1.0));
+  }
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_mask_acts_on(RF_Ctx * c) {
+  static const uint32_t ops[8] = {GSHSCENE_COMPOSITE_SRC_OVER, GSHSCENE_COMPOSITE_MULTIPLY, GSHSCENE_COMPOSITE_PLUS,
+      GSHSCENE_COMPOSITE_DEST_IN, GSHSCENE_COMPOSITE_SRC, GSHSCENE_COMPOSITE_SRC_IN, GSHSCENE_COMPOSITE_SRC_OUT,
+      GSHSCENE_COMPOSITE_CLEAR};
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.75, 0.1, 0.5, 0.9), 0, 0.0);
+  /* The mask: half a pixel's worth of translucence and a triangle of full value. */
+  GSHSCENE_List * pl = rf_open(c);
+  rf_fill(c, pl, rf_rect(c, 0, 0, 11, 9), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1, 1, 1, 0.5), 0, 0.0);
+  static const double tri[6] = {0.5, 0.5, 10.5, 0.5, 0.5, 8.5};
+  rf_fill(c, pl, rf_polyline(c, tri, 3, 1), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1, 1, 1, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * picture = rf_picture_of(c, pl);
+  for (int k = 0; k < 16; k++) {
+    GSHSCENE_Mask m = rf_mask_of(picture, GSHSCENE_MASK_ALPHA, k < 8 ? GSHSCENE_MASK_ACTS_ON_OPACITY : GSHSCENE_MASK_ACTS_ON_SHAPE);
+    const double x = 0.5 + 12.0 * (double)(k % 4);
+    const double y = 0.5 + 10.0 * (double)(k / 4);
+    /* Each cell is clipped, so that an unbounded operator acts inside its own cell only (N8). */
+    rf_check(c, gshscene_list_clip_push(l, rf_rect(c, x, y, x + 11, y + 9), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+    GSHGEOM_Map at = rf_move(x, y);
+    rf_masked(c, l, rf_mask_intern(c, &m), 0.9, ops[k % 8], &at, rf_rect(c, x + 1, y + 1, x + 10, y + 8), rf_solid(0.2, 0.7, 0.9, 0.95));
+    rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+  }
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_mask_nested(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  /* Three masks one inside the other: each level's picture is a group of a wider fill masked by the level below. */
+  const GSHSCENE_Resource * level = rf_picture_fill(c, rf_star(c, 10.0, 10.5, 9.0), rf_solid(1, 1, 1, 1.0));
+  for (int depth = 1; depth <= 3; depth++) {
+    GSHSCENE_Mask m = rf_mask_of(level, GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+    GSHSCENE_List * up = rf_open(c);
+    GSHSCENE_Group g = rf_group(1.0 - 0.1 * (double)depth, GSHSCENE_COMPOSITE_SRC_OVER);
+    g.soft_mask = rf_mask_intern(c, &m);
+    rf_check(c, gshscene_list_group_push(up, &g, 0, 0.0) == GSHSCENE_OK);
+    rf_fill(c, up, rf_rect(c, 0, 0, 20, 20 - depth), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1, 1, 1, 1.0), 0, 0.0);
+    rf_check(c, gshscene_list_group_pop(up) == GSHSCENE_OK);
+    level = rf_picture_of(c, up);
+  }
+  GSHSCENE_Mask outer = rf_mask_of(level, GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+  GSHGEOM_Map at = rf_move(1.0, 1.0);
+  rf_masked(c, l, rf_mask_intern(c, &outer), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &at, rf_rect(c, 1, 1, 21, 21), rf_solid(0.9, 0.4, 0.1, 1.0));
+  /* A masked group inside an instanced picture, the instance turned. */
+  GSHSCENE_Mask small = rf_mask_of(rf_picture_fill(c, rf_rect(c, 0, 0, 6, 12), rf_solid(1, 1, 1, 1.0)), GSHSCENE_MASK_ALPHA,
+      GSHSCENE_MASK_ACTS_ON_OPACITY);
+  GSHSCENE_List * inner = rf_open(c);
+  rf_masked(c, inner, rf_mask_intern(c, &small), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL, rf_rect(c, 0, 0, 12, 12), rf_solid(0.1, 0.5, 0.9, 1.0));
+  const GSHSCENE_Resource * pic = rf_picture_of(c, inner);
+  GSHGEOM_Map turn;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 25.0, &turn);
+  GSHGEOM_Map into = rf_move(34.0, 4.0);
+  GSHGEOM_Map two[2] = {into, turn};
+  GSHGEOM_Map placed;
+  gshgeom_map_compose_chain(two, 2, NULL, &placed);
+  rf_check(c, gshscene_list_instance(l, pic, &placed, 0, 0.0) == GSHSCENE_OK);
+  /* A mask whose picture holds an instance of another picture. */
+  GSHSCENE_List * host = rf_open(c);
+  GSHGEOM_Map shift = rf_move(2.0, 2.0);
+  rf_check(c, gshscene_list_instance(host, rf_picture_fill(c, rf_rect(c, 0, 0, 8, 6), rf_solid(1, 1, 1, 1.0)), &shift, 0, 0.0) == GSHSCENE_OK);
+  GSHSCENE_Mask via = rf_mask_of(rf_picture_of(c, host), GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+  GSHGEOM_Map at2 = rf_move(4.0, 26.0);
+  rf_masked(c, l, rf_mask_intern(c, &via), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &at2, rf_rect(c, 4, 26, 16, 36), rf_solid(0.3, 0.8, 0.4, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_mask_frames(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.85, 0.9, 0.95, 1.0), 0, 0.0);
+  /* One mask, a square with a notch, placed five ways by the group: a handle, so one mask serves them all. */
+  GSHSCENE_List * pl = rf_open(c);
+  rf_fill(c, pl, rf_rect(c, 0, 0, 8, 8), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1, 1, 1, 1.0), 0, 0.0);
+  static const double notch[6] = {2.0, 0.0, 6.0, 0.0, 4.0, 4.0};
+  rf_fill(c, pl, rf_polyline(c, notch, 3, 1), NULL, GSHGEOM_FILL_EVEN_ODD, rf_solid(1, 1, 1, 1.0), 0, 0.0);
+  GSHSCENE_Mask m = rf_mask_of(rf_picture_of(c, pl), GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+  const GSHSCENE_Resource * mask = rf_mask_intern(c, &m);
+  GSHGEOM_Map turn;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 20.0, &turn);
+  GSHGEOM_Map placements[5];
+  GSHGEOM_Map chain[2] = {rf_move(0.0, 0.0), turn};
+  /* Each cell is a fill 8 wide and 14 tall at (1 + 9 k, 1); the mask's 8 by 8 square is put over it five ways. */
+  placements[0] = rf_affine(c, 1.0, 0.0, 0.0, 1.75, 1.0, 1.0);
+  placements[1] = rf_affine(c, 1.0, 0.0, 0.0, 1.0, 10.0, 1.0);
+  chain[0] = rf_move(21.0, 1.0);
+  gshgeom_map_compose_chain(chain, 2, NULL, &placements[2]);
+  placements[3] = rf_affine(c, 1.0, 0.5, 0.0, 1.75, 28.0, 1.0);
+  placements[4] = rf_affine(c, 0.0, 1.0, 1.75, 0.0, 37.0, 1.0);
+  for (int k = 0; k < 5; k++) {
+    const double x = 1.0 + 9.0 * (double)k;
+    rf_masked(c, l, mask, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &placements[k], rf_rect(c, x, 1, x + 8, 15), rf_solid(0.8 - 0.1 * (double)k, 0.2 * (double)k, 0.5, 0.95));
+  }
+  /* A singular placement: every item of the picture is degenerate, and the group is held to the mask's outside value, here 0.4. */
+  GSHSCENE_Mask flat = rf_mask_of(m.picture, GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+  flat.transfer.kind = GSHSCENE_TRANSFER_EXPONENTIAL;
+  flat.transfer.c0 = 0.4;
+  flat.transfer.c1 = 0.4;
+  flat.transfer.n = 1.0;
+  GSHGEOM_Map singular = rf_affine(c, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  rf_masked(c, l, rf_mask_intern(c, &flat), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &singular, rf_rect(c, 2, 18, 22, 28), rf_solid(0.1, 0.1, 0.8, 1.0));
+  /* An instance of a picture holding a masked group, under a map: the chain of maps reaches the mask. */
+  GSHSCENE_List * inner = rf_open(c);
+  GSHGEOM_Map in_place = rf_move(1.0, 1.0);
+  rf_masked(c, inner, mask, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &in_place, rf_rect(c, 0, 0, 10, 10), rf_solid(0.9, 0.5, 0.0, 1.0));
+  const GSHSCENE_Resource * pic = rf_picture_of(c, inner);
+  GSHGEOM_Map scale = rf_affine(c, 1.5, 0.0, 0.0, 1.5, 26.0, 18.0);
+  rf_check(c, gshscene_list_instance(l, pic, &scale, 0, 0.0) == GSHSCENE_OK);
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_mask_compose(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Color_Space linear = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_LINEAR, 0.0);
+  const GSHSCENE_Color_Space p3 = rf_space(GCOL_PRIMARIES_DISPLAY_P3, GCOL_TRANSFER_SRGB, 0.0);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.85, 0.4, 1.0), 0, 0.0);
+  rf_fill(c, l, rf_rect(c, 4, 4, 30, 20), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.4, 0.8, 0.9), 0, 0.0);
+  GSHSCENE_Gradient_Stop stops[2] = {rf_stop(0.0, rf_solid(1, 1, 1, 1.0)), rf_stop(1.0, rf_solid(0, 0, 0, 1.0))};
+  const GSHSCENE_Resource * ramp = rf_gradient(c, rf_linear(0, 0, 0, 20, 0, 0, GSHSCENE_EXTEND_PAD), stops, 2);
+  GSHSCENE_Mask lum = rf_mask_of(rf_picture_fill(c, rf_rect(c, 0, 0, 24, 20), rf_gradient_paint(ramp, 1.0)), GSHSCENE_MASK_LUMINANCE,
+      GSHSCENE_MASK_ACTS_ON_OPACITY);
+  /* A clip, a mask, an opacity and a blend mode on one group: the product, then the composite. */
+  rf_check(c, gshscene_list_clip_push(l, rf_blob(c, 3.0, 2.0, 10.0), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  GSHGEOM_Map at = rf_move(3.0, 3.0);
+  GSHSCENE_Group g = rf_group(0.8, GSHSCENE_COMPOSITE_MULTIPLY);
+  g.soft_mask = rf_mask_intern(c, &lum);
+  g.soft_mask_map = at;
+  rf_check(c, gshscene_list_group_push(l, &g, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, 3, 3, 27, 23), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.3, 0.2, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+  /* A group that blends in linear light, with a mask rendered in Display P3 and its luminance taken in P3. */
+  GSHSCENE_Mask wide = rf_mask_of(rf_picture_fill(c, rf_star(c, 8.0, 8.0, 7.5), rf_solid_in(0.9, 0.2, 0.1, 0.9, p3)),
+      GSHSCENE_MASK_LUMINANCE, GSHSCENE_MASK_ACTS_ON_OPACITY);
+  wide.render_space = p3;
+  wide.coefficients = GSHSCENE_MASK_COEFF_SPACE_Y;
+  GSHSCENE_Group lg = rf_group(1.0, GSHSCENE_COMPOSITE_SRC_OVER);
+  lg.blend_space = linear;
+  lg.soft_mask = rf_mask_intern(c, &wide);
+  GSHGEOM_Map at2 = rf_move(31.0, 2.0);
+  lg.soft_mask_map = at2;
+  rf_check(c, gshscene_list_group_push(l, &lg, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, 31, 2, 47, 18), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.8, 0.3, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  /* An unbounded operator on a small group, masked: the mask is drawn over the whole of the clip's reach. */
+  GSHSCENE_Mask half = rf_mask_of(rf_picture_fill(c, rf_rect(c, 0, 0, 7, 12), rf_solid(1, 1, 1, 0.6)), GSHSCENE_MASK_ALPHA,
+      GSHSCENE_MASK_ACTS_ON_SHAPE);
+  rf_check(c, gshscene_list_clip_push(l, rf_rect(c, 4, 24, 22, 38), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  GSHGEOM_Map at3 = rf_move(8.0, 25.0);
+  rf_masked(c, l, rf_mask_intern(c, &half), 1.0, GSHSCENE_COMPOSITE_DEST_IN, &at3, rf_rect(c, 10, 26, 14, 30), rf_solid(1, 1, 1, 1.0));
+  rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+  /* PDF's soft mask: a luminosity mask with a backdrop colour and a stitched transfer, on the shape. */
+  GSHSCENE_Mask pdf = rf_mask_of(rf_picture_fill(c, rf_circle(c, 6.0), rf_solid(0.8, 0.8, 0.8, 1.0)), GSHSCENE_MASK_LUMINANCE,
+      GSHSCENE_MASK_ACTS_ON_SHAPE);
+  pdf.coefficients = GSHSCENE_MASK_COEFF_LUM;
+  pdf.backdrop[0] = 0.2;
+  pdf.backdrop[1] = 0.2;
+  pdf.backdrop[2] = 0.2;
+  pdf.transfer.kind = GSHSCENE_TRANSFER_EXPONENTIAL;
+  pdf.transfer.c0 = 0.0;
+  pdf.transfer.c1 = 1.0;
+  pdf.transfer.n = 1.8;
+  GSHGEOM_Map at4 = rf_move(36.0, 30.0);
+  rf_masked(c, l, rf_mask_intern(c, &pdf), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &at4, rf_rect(c, 26, 22, 46, 39), rf_solid(0.6, 0.1, 0.5, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_mask_not_a_clip(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.9, 0.9, 1.0), 0, 0.0);
+  /* Two shapes that abut at x = 7.5, half-covering the pixel they share, as the pieces of an alpha mask: 3/4 there. */
+  GSHSCENE_List * pl = rf_open(c);
+  rf_fill(c, pl, rf_rect(c, 0, 0, 7.5, 10), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1, 1, 1, 1.0), 0, 0.0);
+  rf_fill(c, pl, rf_rect(c, 7.5, 0, 15, 10), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1, 1, 1, 1.0), 0, 0.0);
+  GSHSCENE_Mask m = rf_mask_of(rf_picture_of(c, pl), GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+  GSHGEOM_Map at = rf_move(2.0, 2.0);
+  rf_masked(c, l, rf_mask_intern(c, &m), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &at, rf_rect(c, 2, 2, 17, 12), rf_solid(0.8, 0.0, 0.0, 1.0));
+  /* The exact union of the same two shapes as one clip: whole where they meet. */
+  rf_check(c, gshscene_list_clip_push(l, rf_rect(c, 2, 16, 17, 26), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, 2, 16, 17, 26), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.0, 0.0, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+  /* The same two shapes at a quarter-pixel seam, rotated: the identity holds along an edge that is not on the grid. */
+  GSHGEOM_Map turn;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 12.0, &turn);
+  GSHGEOM_Map chain[2] = {rf_move(30.0, 3.0), turn};
+  GSHGEOM_Map placed;
+  gshgeom_map_compose_chain(chain, 2, NULL, &placed);
+  rf_masked(c, l, rf_mask_intern(c, &m), 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &placed, rf_rect(c, 26, 0, 46, 22), rf_solid(0.0, 0.0, 0.8, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
 typedef struct RF_Fixture {
   const char * name;
   RF_Build build;
@@ -1987,6 +2428,15 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"image-spaces", rf_image_spaces},
     {"image-compose", rf_image_compose},
     {"image-nothing", rf_image_nothing},
+    {"mask-alpha", rf_mask_alpha},
+    {"mask-luminance", rf_mask_luminance},
+    {"mask-transfers", rf_mask_transfers},
+    {"mask-outside", rf_mask_outside},
+    {"mask-acts-on", rf_mask_acts_on},
+    {"mask-nested", rf_mask_nested},
+    {"mask-frames", rf_mask_frames},
+    {"mask-compose", rf_mask_compose},
+    {"mask-not-a-clip", rf_mask_not_a_clip},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

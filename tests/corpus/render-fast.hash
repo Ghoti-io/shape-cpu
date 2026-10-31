@@ -162,5 +162,41 @@ render image-nothing rgba8 76d5d40f08fa1abe
 render image-nothing rgba8-premultiplied bdbe5f9c05c3bfe5
 render image-nothing rgbaf32 d8e56b47c47694dc
 render image-nothing rgbaf32-premultiplied 2c2a5849acde50db
-hash 5c104107f44cf7d3
-count 160
+render mask-alpha rgba8 ff4f1ed29c392239
+render mask-alpha rgba8-premultiplied 635670afc275f4db
+render mask-alpha rgbaf32 1915b35d2116f9d3
+render mask-alpha rgbaf32-premultiplied 3f0ce4b1452ba041
+render mask-luminance rgba8 9a0f9f16463c5283
+render mask-luminance rgba8-premultiplied 38f314e5e26c7dde
+render mask-luminance rgbaf32 cf21bea291efc21c
+render mask-luminance rgbaf32-premultiplied 09ef4fc3a6308d73
+render mask-transfers rgba8 0dd5eab5cee0f733
+render mask-transfers rgba8-premultiplied 684a6fb6aca84737
+render mask-transfers rgbaf32 f88c8e2ea00a29d2
+render mask-transfers rgbaf32-premultiplied 5036cf0a52c34690
+render mask-outside rgba8 fb38afda3c38cfb2
+render mask-outside rgba8-premultiplied 225aa46c0a5506ad
+render mask-outside rgbaf32 a14972359349798e
+render mask-outside rgbaf32-premultiplied 97f805894c471dc1
+render mask-acts-on rgba8 244a5b65a8867f33
+render mask-acts-on rgba8-premultiplied 4f832fe9438f0380
+render mask-acts-on rgbaf32 fd5d40b9b9ee854b
+render mask-acts-on rgbaf32-premultiplied 6485f6e3205f0dce
+render mask-nested rgba8 2d85c11c9ef93387
+render mask-nested rgba8-premultiplied ece8eb9c95943794
+render mask-nested rgbaf32 2aa8af08262cb41b
+render mask-nested rgbaf32-premultiplied 74266c915bed264e
+render mask-frames rgba8 b624aaa53b6db7a3
+render mask-frames rgba8-premultiplied 11bbde09d5dfadb0
+render mask-frames rgbaf32 fe01919473607a31
+render mask-frames rgbaf32-premultiplied aab976c9269a78e6
+render mask-compose rgba8 21fe248f6e025311
+render mask-compose rgba8-premultiplied a99704672e5016da
+render mask-compose rgbaf32 6e7c5ddfb19277e8
+render mask-compose rgbaf32-premultiplied c0315b3a74564eef
+render mask-not-a-clip rgba8 7ae1ba9276eec1db
+render mask-not-a-clip rgba8-premultiplied 8578fcb66c0200bc
+render mask-not-a-clip rgbaf32 5b9e3bcd0d782c79
+render mask-not-a-clip rgbaf32-premultiplied 03c3bae21d15e8ea
+hash 7e9bacc35e7115da
+count 196

@@ -42,6 +42,7 @@
 #include <ghoti.io/shape-scene/image.h>
 #include <ghoti.io/shape-scene/image_paint.h>
 #include <ghoti.io/shape-scene/list.h>
+#include <ghoti.io/shape-scene/mask.h>
 #include <ghoti.io/shape-scene/paint.h>
 #include <ghoti.io/shape-scene/resource.h>
 #include <ghoti.io/shape-scene/sink.h>
@@ -112,6 +113,37 @@ void gshcpu_render_composite_row(uint32_t op, double opacity, const double * src
 
 /** N4: nonzero for an operator with `op(0, D) = D` for every `D` (every blend mode, B3). */
 int gshcpu_render_bounded(uint32_t op);
+
+/* --- masks (mask.c; masks-images-patterns story M2) -------------------------------------------- */
+
+/**
+ * A mask made ready for one masked group's pop (render.h, MC3): the waist's coefficients and spaces resolved once
+ * (::gshscene_mask_resolve), the backdrop in the luminance space, and the conversion of the mask frame's space into it.
+ * The value of every pixel of the pop is ::gshcpu_render_mask_value on this.
+ */
+typedef struct GSHCPU_Mask_Eval {
+  const GSHSCENE_Resource * mask;  /* the transfer is the waist's: ::gshscene_mask_transfer */
+  int alpha;                       /* ::GSHSCENE_MASK_ALPHA: the value is the picture's alpha */
+  int identity;                    /* the transfer is the identity (FT-M2 may skip the call) */
+  int shape;                       /* the value acts on the shape (::GSHSCENE_MASK_ACTS_ON_SHAPE), not the opacity */
+  double k[3];                     /* MK3, as the waist resolves them */
+  double backdrop[3];              /* the backdrop converted into the luminance space (N3) */
+  GSHSCENE_Color_Space frame_space; /* R: the space of the mask frame */
+  GSHCPU_Convert to_l;             /* R to L */
+} GSHCPU_Mask_Eval;
+
+/**
+ * Make @p mask ready for a group that composites into a layer whose blend space is @p enclosing (a concrete space).
+ *
+ * @return 1; 0 where the waist cannot resolve it (a mask that is not one: the plan refused what it could not draw).
+ */
+int gshcpu_render_mask_prepare(GSHCPU_Mask_Eval * e, const GSHSCENE_Resource * mask, const GSHSCENE_Color_Space * enclosing);
+
+/**
+ * MC3: the mask's value `v` in `[0, 1]` for the premultiplied pixel @p g of the mask frame (in the frame's space), in `double`.
+ * @p identity_tier: skip the transfer's call for an identity transfer (FT-M2); the result is the same bit for bit.
+ */
+double gshcpu_render_mask_value(const GSHCPU_Mask_Eval * e, const double g[4], int identity_tier);
 
 /** B1: nonzero for a blend mode (13 to 27). */
 int gshcpu_render_blends(uint32_t op);
@@ -775,9 +807,14 @@ void gshcpu_render_image_texel(const GSHCPU_Image * im, uint32_t x, uint32_t y, 
 #define GSHCPU_RENDER_TIER_IMAGE_SEPARABLE 32u
 /** IC10, FT-3: an 8-bit sample is decoded through a table of the doubles the general tier computes. */
 #define GSHCPU_RENDER_TIER_IMAGE_TABLE 64u
+/** MC8, FT-M1: a pixel of a masked group's pop outside the mask frame's dirty rectangle takes the mask's outside value (MK5), found once for the pop. */
+#define GSHCPU_RENDER_TIER_MASK_OUTSIDE 128u
+/** MC8, FT-M2: an identity transfer is not called (the clamp remains). */
+#define GSHCPU_RENDER_TIER_MASK_IDENTITY 256u
 #define GSHCPU_RENDER_TIERS_ALL \
   (GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE | GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT | \
-      GSHCPU_RENDER_TIER_IMAGE_COPY | GSHCPU_RENDER_TIER_IMAGE_SEPARABLE | GSHCPU_RENDER_TIER_IMAGE_TABLE)
+      GSHCPU_RENDER_TIER_IMAGE_COPY | GSHCPU_RENDER_TIER_IMAGE_SEPARABLE | GSHCPU_RENDER_TIER_IMAGE_TABLE | \
+      GSHCPU_RENDER_TIER_MASK_OUTSIDE | GSHCPU_RENDER_TIER_MASK_IDENTITY)
 /** What the general tier is: the coverage (the exact step and UC8), none of the fast tiers. */
 #define GSHCPU_RENDER_TIERS_GENERAL (GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT)
 
@@ -806,6 +843,10 @@ typedef struct GSHCPU_Render_Counters {
   uint64_t image_copy;       /* ... of them drawn by FT-1, the copy */
   uint64_t image_separable;  /* ... by FT-2, the taps of the coordinate that depends on the row found once for the row */
   uint64_t image_table;      /* ... with FT-3, the table of decoded 8-bit samples */
+  uint64_t masks;            /* masked groups composited (MC2: a mask frame rendered and its value found for each pixel) */
+  uint64_t mask_outside;     /* ... of them with a pixel that took FT-M1, the outside value */
+  uint64_t mask_identity;    /* ... of them whose transfer is the identity and not called (FT-M2) */
+  uint64_t mask_pixels;      /* the pixels the masks were drawn over: the pop regions P (MC2), added up */
 } GSHCPU_Render_Counters;
 
 /** What identifies an expansion in the cache (SC7). */

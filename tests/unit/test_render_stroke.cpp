@@ -1172,7 +1172,7 @@ TEST(RenderStroke, AStrokeInAnIsolatedGroupCompositesSrcOverAndTheGroupsModeActs
   GSHSCENE_Group multiply = rf_group(1.0, GSHSCENE_COMPOSITE_MULTIPLY);
   Drawn blended = render_list(sink.sink, list_with(multiply, true), 24, 24);
   EXPECT_EQ(blended.alpha, bare.alpha);
-  // A knockout, non-isolated or soft-masked group is refused by this sink as before, and the stroke inside is skipped.
+  // A knockout or non-isolated group is refused by this sink as before, and the stroke inside is skipped.
   GSHSCENE_Group knock = rf_group(1.0, GSHSCENE_COMPOSITE_SRC_OVER);
   knock.knockout = 1;
   Drawn refused = render_list(sink.sink, list_with(knock, true), 24, 24);
@@ -1183,10 +1183,11 @@ TEST(RenderStroke, AStrokeInAnIsolatedGroupCompositesSrcOverAndTheGroupsModeActs
   }
   Drawn strict = render_list(sink.sink, list_with(knock, true), 24, 24, GSHCPU_FORMAT_RGBA8_STRAIGHT, GSHSCENE_RENDER_STRICT);
   EXPECT_EQ(strict.result, GSHSCENE_ERR_REFUSED);
-  // The soft-mask slot names a mask resource (an alpha mask over a picture of one fill); this sink still refuses it.
+  // The soft-mask slot names a mask resource (an alpha mask over a picture of one fill of the left half of the raster): this sink
+  // draws it (masks story M2), and the stroke inside the group is held to the half the mask covers.
   GSHSCENE_List * mask_list = s.open();
   GSHSCENE_Paint white = solid(1, 1, 1, 1);
-  ASSERT_EQ(gshscene_list_fill(mask_list, path, nullptr, GSHGEOM_FILL_NONZERO, &white, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(mask_list, s.rect(0, 0, 12, 24), nullptr, GSHGEOM_FILL_NONZERO, &white, 0, 0.0), GSHSCENE_OK);
   ASSERT_EQ(gshscene_list_close(mask_list), GSHSCENE_OK);
   const GSHSCENE_Resource * picture = nullptr;
   ASSERT_EQ(gshscene_store_intern_picture(s.store, mask_list, &picture), GSHSCENE_OK);
@@ -1197,14 +1198,17 @@ TEST(RenderStroke, AStrokeInAnIsolatedGroupCompositesSrcOverAndTheGroupsModeActs
   ASSERT_EQ(gshscene_store_intern_mask(s.store, &content, &mask), GSHSCENE_OK);
   GSHSCENE_Group masked = rf_group(1.0, GSHSCENE_COMPOSITE_SRC_OVER);
   masked.soft_mask = mask;
-  Drawn unmasked = render_list(sink.sink, list_with(masked, true), 24, 24);
-  ASSERT_EQ(unmasked.entries.size(), 1u);
-  EXPECT_EQ(unmasked.entries[0].reason, GSHSCENE_REASON_SOFT_MASK);
-  for (uint8_t a : unmasked.alpha) {
-    EXPECT_EQ(a, 0);
+  Drawn drawn = render_list(sink.sink, list_with(masked, true), 24, 24);
+  EXPECT_TRUE(drawn.entries.empty()) << "a masked group is neither refused nor approximated";
+  bool any = false;
+  for (size_t i = 0; i < drawn.alpha.size(); i++) {
+    const bool left = (i % 24) < 12;
+    EXPECT_EQ(drawn.alpha[i], left ? bare.alpha[i] : 0) << i << ": whole pixels of the mask weigh 1 and 0 exactly";
+    any = any || (left && bare.alpha[i] != 0);
   }
+  EXPECT_TRUE(any);
   Drawn masked_strict = render_list(sink.sink, list_with(masked, true), 24, 24, GSHCPU_FORMAT_RGBA8_STRAIGHT, GSHSCENE_RENDER_STRICT);
-  EXPECT_EQ(masked_strict.result, GSHSCENE_ERR_REFUSED);
+  EXPECT_EQ(masked_strict.result, GSHSCENE_OK);
   s.held.push_back(mask);
   s.held.push_back(picture);
 }

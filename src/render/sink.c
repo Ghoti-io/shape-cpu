@@ -27,6 +27,9 @@
  * the target once at the end (S11).  The planning pass is the contract layer's;
  * this file decides each unit with the same predicate, skips what was refused,
  * and adds only what it finds while drawing (its resource limits).
+ *
+ * A masked group (render.h, MC1 to MC10) is composited at its pop: the walk of the mask's picture into one more layer over
+ * the pop's region (mask_pass), the value of the mask at each pixel (mask.c), and the pop's composite weighed by it.
  */
 
 #include <ghoti.io/shape-cpu/macros.h>
@@ -151,6 +154,33 @@ typedef struct Layout {
   size_t fixed;              /* the bytes before the items' arena, the alignment slack included */
 } Layout;
 
+/**
+ * What a render of a list with a masked group keeps beside its Run (MC5, MC9): carved from the render's memory only then, directly
+ * after the Run, so that a list with no masked group has the memory it had before masks.
+ */
+typedef struct Mask_Frame {
+  GSHCPU_Rect whole_dirty;   /* the pixels the whole render's units reach of this layer: Frame.dirty without the damage (MC6) */
+  size_t push;               /* the index of the group's push in its list: the chain of the mask's items names it (MK9) */
+} Mask_Frame;
+
+typedef struct Mask_State {
+  GSHCPU_Rect window;        /* the pixels the units reach: the region, or in a mask pass the pop region P (MC2) */
+  GSHCPU_Rect whole_window;  /* the same in the whole render: the whole region, or in a mask pass the whole render's P */
+  Mask_Frame * frames;       /* one for each frame, the root's too */
+  size_t * chain;            /* the chain of a mask's item: the group's, the push's index, the item's in its picture */
+  unsigned char * walk;      /* the walks of the pictures of the masks being drawn, one on another */
+  size_t walk_bytes;
+  size_t walk_used;
+} Mask_State;
+
+/** The sizes of that area, and where its parts lie in it (from its start). */
+typedef struct Mask_Layout {
+  size_t bytes;              /* 0 when no group in the list has a mask */
+  size_t walk;               /* the most the nested walks of masks' pictures take */
+  size_t at;                 /* where the area starts, from the Run: directly after it */
+  size_t at_frames, at_chain, at_walk;
+} Mask_Layout;
+
 typedef struct Run {
   Cpu_Sink * cs;
   GSHSCENE_Job * job;
@@ -181,6 +211,7 @@ typedef struct Run {
   int straight8;             /* ... and the target is straight alpha: its root is a byte layer of its own, loaded and stored */
   int fast8;                 /* the fast fill coverage on an 8-bit premultiplied or straight target: the layers are bytes, the root the target itself */
   int direct8;               /* the fast coverage composes straight into the target's bytes (strokes alone, 8-bit premultiplied) */
+  int masked;                /* the list holds a masked group: a Mask_State follows the Run (it takes the Run's padding, so a list with no mask lays out as it did) */
   GSHCPU_Batch * batch;      /* ... and its strokes are queued and drawn over stripes by several threads (GSHCPU_Limits.threads) */
   size_t acc_zero;           /* the accumulator's first bytes known to be zero: the caller's memory is not zeroed, the dense sweeps leave theirs written, and a sparse one needs the part it uses zero */
   int caller;                /* CALLER_MEMORY: nothing allocated, so no cache */
@@ -203,6 +234,14 @@ typedef struct Run {
   size_t groups_open;
   uint64_t work;
 } Run;
+
+/** The Run's size rounded to the carve alignment: where the mask area starts when the list has one. */
+#define RUN_BYTES ((sizeof(Run) + (CARVE_ALIGN - 1u)) & ~(size_t)(CARVE_ALIGN - 1u))
+
+/** The Mask_State of a render whose list holds a masked group (run->masked). */
+static Mask_State * ms_of(const Run * run) {
+  return (Mask_State *)(void *)((unsigned char *)(void *)(Run *)run + RUN_BYTES);
+}
 
 /* --- sizes ------------------------------------------------------------------------------------ */
 
@@ -232,6 +271,37 @@ static size_t mul3(size_t a, size_t b, size_t c) {
 }
 
 /**
+ * What drawing a picture needs of the layout (MC5): the most groups and clips open at once inside it, its gradient fills and
+ * their stops, what kinds of item it holds, and the most walk memory the pictures of the masks inside it take.
+ */
+typedef struct Need {
+  size_t groups, clips, gradients, stops, walk;
+  int aligned, strokes, other, wide, ok;
+} Need;
+
+/** The needs of the pictures of masks already found, by the picture's id: a picture shared by many masks is counted once. */
+#define NEST_MEMO 64u
+
+typedef struct Nest_Memo {
+  uint64_t id[NEST_MEMO];
+  Need need[NEST_MEMO];
+  size_t used;
+} Nest_Memo;
+
+/** One counting walk: the memo it shares with the walks of the masks' pictures, and what it finds of masks. */
+typedef struct Nest {
+  Nest_Memo * memo;
+  size_t walk;               /* the most walk memory the pictures of masks, one in another, take at one pop */
+  int masked;                /* a group in the list has a mask */
+} Nest;
+
+/** @p a plus @p b, saturating at SIZE_MAX. */
+static size_t sat_add(size_t a, size_t b) {
+  size_t r;
+  return gcu_safe_add_size(a, b, &r) ? r : SIZE_MAX;
+}
+
+/**
  * The most groups and clips open at once in @p list's expansion, a picture's counting where it is drawn; and its
  * gradient fills and their stops added to @p gradients and @p stops (0 when a sum would overflow).
  */
@@ -242,7 +312,41 @@ static int out_of_range(const GSHSCENE_Paint * paint) {
 }
 
 static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops,
-    int * aligned, int * strokes, int * other, int * wide) {
+    int * aligned, int * strokes, int * other, int * wide, Nest * nest);
+
+/**
+ * The needs of the picture of @p mask (MC5), drawn into the mask's frame at a pop: the groups and clips its own units open
+ * (a masked group inside it, one mask frame deeper, counted by the walk of the picture), its gradients and strokes, and the
+ * walk memory of the masks inside it.  Found once for a picture: the memo holds the first NEST_MEMO, and a picture past them
+ * is counted again where it is used (the same numbers, only more time).
+ */
+static int mask_need(const GSHSCENE_Resource * mask, Need * out, Nest * nest) {
+  GSHSCENE_Mask m;
+  memset(out, 0, sizeof *out);
+  if (gshscene_resource_mask(mask, &m) != GSHSCENE_OK) {
+    return 0;
+  }
+  const uint64_t id = gshscene_resource_id(m.picture);
+  for (size_t i = 0; i < nest->memo->used; i++) {
+    if (nest->memo->id[i] == id) {
+      *out = nest->memo->need[i];
+      return out->ok;
+    }
+  }
+  Nest sub = {nest->memo, 0, 0};
+  out->ok = nesting(gshscene_resource_picture(m.picture), &out->groups, &out->clips, &out->gradients, &out->stops, &out->aligned,
+      &out->strokes, &out->other, &out->wide, &sub);
+  out->walk = sub.walk;
+  if (nest->memo->used < NEST_MEMO) {
+    nest->memo->id[nest->memo->used] = id;
+    nest->memo->need[nest->memo->used] = *out;
+    nest->memo->used++;
+  }
+  return out->ok;
+}
+
+static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops,
+    int * aligned, int * strokes, int * other, int * wide, Nest * nest) {
   size_t g = 0;
   size_t c = 0;
   size_t most_g = 0;
@@ -284,6 +388,27 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
     switch (item->kind) {
       case GSHSCENE_ITEM_GROUP_PUSH:
         g++;
+        if (item->group.soft_mask) {
+          /* MC5: at this group's pop its mask is drawn into one more layer, and everything the picture needs while it is drawn
+           * is open with it: the groups and clips of the picture (a masked group inside it, one more again), its gradients
+           * and strokes.  The layers are doubles: a mask is not a byte layer (MC8, the tiers' note). */
+          Need pn;
+          ok = mask_need(item->group.soft_mask, &pn, nest) && ok;
+          nest->masked = 1;
+          *wide = 1;
+          most_g = sat_add(sat_add(g, 1u), pn.groups) > most_g ? sat_add(sat_add(g, 1u), pn.groups) : most_g;
+          most_c = sat_add(c, pn.clips) > most_c ? sat_add(c, pn.clips) : most_c;
+          ok = ok && gcu_safe_add_size(*gradients, pn.gradients, gradients) && gcu_safe_add_size(*stops, pn.stops, stops);
+          *aligned = *aligned || pn.aligned;
+          *strokes = *strokes || pn.strokes;
+          *other = *other || pn.other;
+          *wide = *wide || pn.wide;
+          GSHSCENE_Mask m;
+          if (gshscene_resource_mask(item->group.soft_mask, &m) == GSHSCENE_OK) {
+            const size_t here = sat_add(gshscene_expansion_bytes(gshscene_resource_picture(m.picture)), pn.walk);
+            nest->walk = here > nest->walk ? here : nest->walk;
+          }
+        }
         break;
       case GSHSCENE_ITEM_GROUP_POP:
         g--;
@@ -297,7 +422,7 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
       case GSHSCENE_ITEM_INSTANCE: {
         size_t ig = 0;
         size_t ic = 0;
-        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops, aligned, strokes, other, wide) && ok;
+        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops, aligned, strokes, other, wide, nest) && ok;
         most_g = g + ig > most_g ? g + ig : most_g;
         most_c = c + ic > most_c ? c + ic : most_c;
         break;
@@ -333,9 +458,15 @@ static GSHCPU_Rect whole_of(const GSHSCENE_Target * target) {
   return region_of(&whole);
 }
 
-/** Lay out a render of @p list on @p target; ::GSHCPU_ERR_LIMIT past a limit or when a size overflows. */
-static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, const GSHSCENE_Target * target, Layout * L) {
+/**
+ * Lay out a render of @p list on @p target; ::GSHCPU_ERR_LIMIT past a limit or when a size overflows.  @p M gets the mask area
+ * (MC5) when a group in the list, or in a picture it draws, has a mask; the groups and clips @p L holds count the frames and
+ * the clips of the masks' pictures, and `L->fixed` the area.  A list with no masked group lays out as it did before masks (MC9).
+ */
+static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, const GSHSCENE_Target * target, Layout * L,
+    Mask_Layout * M) {
   memset(L, 0, sizeof *L);
+  memset(M, 0, sizeof *M);
   L->region = region_of(target);
   L->whole = whole_of(target);
   L->width = (size_t)(L->region.x1 - L->region.x0);
@@ -350,8 +481,23 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
   }
   L->walk = gshscene_expansion_bytes(list);
   L->levels = L->walk / (sizeof(const GSHSCENE_List *) + sizeof(size_t));
-  if (!nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned, &L->strokes, &L->other, &L->wide)) {
+  Nest_Memo memo;
+  memo.used = 0;
+  Nest nest = {&memo, 0, 0};
+  if (!nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned, &L->strokes, &L->other, &L->wide, &nest)) {
     return GSHCPU_ERR_LIMIT;
+  }
+  if (nest.masked) {
+    /* MC5: the area after the Run: the state, a frame record for each layer, the chain of a mask's item, and the walks of the
+     * pictures of the masks being drawn, one on another. */
+    size_t at = 0;
+    size_t state;
+    M->walk = nest.walk;
+    if (!place(&at, sizeof(Mask_State), &state) || !place(&at, mul3(L->groups + 1u, sizeof(Mask_Frame), 1), &M->at_frames) ||
+        !place(&at, mul3(L->levels + 1u, sizeof(size_t), 1), &M->at_chain) || !place(&at, M->walk, &M->at_walk)) {
+      return GSHCPU_ERR_LIMIT;
+    }
+    M->bytes = at;
   }
   /* UC9: the walk of a stroke is as wide as the whole render's region at most. */
   {
@@ -391,7 +537,7 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
   }
   size_t at = 0;
   size_t ignored;
-  int ok = place(&at, sizeof(Run), &ignored) && place(&at, L->walk, &L->at_walk) &&
+  int ok = place(&at, sizeof(Run), &ignored) && place(&at, M->bytes, &M->at) && place(&at, L->walk, &L->at_walk) &&
       place(&at, mul3(L->levels + 2u, sizeof(GSHGEOM_Map), 1), &L->at_maps) &&
       place(&at, mul3(L->levels, sizeof(size_t), 1), &L->at_stop) &&
       place(&at, mul3(L->groups + 1u, sizeof(Frame), 1), &L->at_frames) &&
@@ -452,11 +598,100 @@ static int skip_step(Skip * s, const GSHSCENE_Item * item, size_t count) {
 /* --- the geometry of the items, measured (S9) --------------------------------------------------- */
 
 /**
+ * What one fill, clip push or stroke takes of the arena (the item's geometry), at chain length @p count with the enclosing
+ * instances' maps in @p maps.  Anything else takes none.  ::GSHCPU_ERR_OOM where the arena is out.
+ */
+static GSHCPU_Result measure_one(const Cpu_Sink * cs, const GSHSCENE_Target * target, const GSHSCENE_Item * item,
+    GSHGEOM_Map * maps, size_t count, GSHCPU_Arena * arena, size_t * peak) {
+  if (item->kind == GSHSCENE_ITEM_STROKE) {
+    /* A stroke that is drawn is expanded once through the arena (no cache under CALLER_MEMORY: SC7); its expansion
+     * is what an item's geometry is for a fill, so the caller's memory holds the most any item takes. */
+    if (gshscene_stroke_notice(item, maps, count - 1, &target->map)) {
+      return GSHCPU_OK; /* a stroke that draws nothing */
+    }
+    GSHGEOM_Map composed;
+    maps[count - 1] = item->map;
+    if (gshgeom_map_compose_chain(maps, count, &target->map, &composed) != GSHGEOM_OK) {
+      return GSHCPU_OK;
+    }
+    GSHCPU_Stroke st;
+    gshcpu_render_arena_reset(arena);
+    arena->peak = 0;
+    /* A run's centerline, its glyphs' outlines and its notes are allocated here in the order the drawing takes them
+     * (ST8), so the memory asked for is exact. */
+    GSHCPU_Result sr = gshcpu_render_stroke_open(NULL, &arena->self, &cs->geometry, item, &composed, &st);
+    if (sr == GSHCPU_OK) {
+      gshcpu_render_stroke_close(NULL, &st);
+    }
+    if (sr == GSHCPU_ERR_OOM) {
+      return sr;
+    }
+    *peak = arena->peak > *peak ? arena->peak : *peak;
+    return GSHCPU_OK;
+  }
+  if (item->kind != GSHSCENE_ITEM_FILL && item->kind != GSHSCENE_ITEM_CLIP_PUSH) {
+    return GSHCPU_OK;
+  }
+  if (gshscene_resource_kind(item->resource) == GSHSCENE_RESOURCE_PLANE) {
+    return GSHCPU_OK; /* a plane has no geometry: it takes nothing from the arena */
+  }
+  GSHCPU_Item_Geometry g;
+  gshcpu_render_arena_reset(arena);
+  arena->peak = 0;
+  GSHCPU_Result r = gshcpu_render_geometry(item, maps, count - 1, &target->map, &arena->self, &cs->geometry, &g);
+  gshcpu_render_geometry_release(&g, &arena->self);
+  if (r == GSHCPU_ERR_OOM) {
+    return r;
+  }
+  *peak = arena->peak > *peak ? arena->peak : *peak;
+  return GSHCPU_OK;
+}
+
+/** The units of the picture of @p group's mask (MC5), at the chain length @p n of the group, as measure_items measures the list's. */
+static GSHCPU_Result measure_mask(const Cpu_Sink * cs, const GSHSCENE_Target * target, unsigned char * area, const Mask_Layout * M,
+    const GSHSCENE_Item * group, GSHGEOM_Map * maps, size_t n, GSHCPU_Arena * arena, size_t * peak, size_t used) {
+  GSHSCENE_Mask m;
+  if (gshscene_resource_mask(group->group.soft_mask, &m) != GSHSCENE_OK) {
+    return GSHCPU_ERR_INTERNAL;
+  }
+  const GSHSCENE_List * picture = gshscene_resource_picture(m.picture);
+  const size_t bytes = gshscene_expansion_bytes(picture);
+  GSHSCENE_Expansion walk;
+  if (used > M->walk || bytes > M->walk - used ||
+      gshscene_expansion_init(&walk, picture, area + M->at_walk + used, bytes) != GSHSCENE_OK) {
+    return GSHCPU_ERR_INTERNAL;
+  }
+  maps[n - 1] = group->group.soft_mask_map; /* MK6: the chain of the mask's items ends in the group's placement */
+  const GSHSCENE_Item * item;
+  const size_t * chain;
+  size_t m_count;
+  while (gshscene_expansion_next(&walk, &item, &chain, &m_count)) {
+    (void)chain;
+    const size_t count = n + m_count;
+    GSHCPU_Result r;
+    if (item->kind == GSHSCENE_ITEM_INSTANCE) {
+      maps[count - 1] = item->map;
+      continue;
+    }
+    if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && item->group.soft_mask) {
+      r = measure_mask(cs, target, area, M, item, maps, count, arena, peak, used + bytes);
+    } else {
+      r = measure_one(cs, target, item, maps, count, arena, peak);
+    }
+    if (r != GSHCPU_OK) {
+      return r;
+    }
+  }
+  return GSHCPU_OK;
+}
+
+/**
  * Convert every fill and clip push of the expansion of @p list once, through @p arena (reset for each), and give
- * the most one took.  @p memory holds the walk and the maps (at the layout's offsets from it).
+ * the most one took, the items of the pictures of masks too (MC5).  @p memory holds the area of the masks, the walk and the maps
+ * (at the layout's offsets from it).
  */
 static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * list, const GSHSCENE_Target * target,
-    const Layout * L, unsigned char * memory, GSHCPU_Arena * arena, size_t * peak) {
+    const Layout * L, const Mask_Layout * M, unsigned char * memory, GSHCPU_Arena * arena, size_t * peak) {
   GSHSCENE_Expansion walk;
   GSHGEOM_Map * maps = (GSHGEOM_Map *)(void *)(memory + L->at_maps);
   if (gshscene_expansion_init(&walk, list, memory + L->at_walk, L->walk) != GSHSCENE_OK) {
@@ -468,51 +703,19 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
   *peak = 0;
   while (gshscene_expansion_next(&walk, &item, &chain, &count)) {
     (void)chain;
+    GSHCPU_Result r;
     if (item->kind == GSHSCENE_ITEM_INSTANCE) {
       maps[count - 1] = item->map;
       continue;
     }
-    if (item->kind == GSHSCENE_ITEM_STROKE) {
-      /* A stroke that is drawn is expanded once through the arena (no cache under CALLER_MEMORY: SC7); its expansion
-       * is what an item's geometry is for a fill, so the caller's memory holds the most any item takes. */
-      if (gshscene_stroke_notice(item, maps, count - 1, &target->map)) {
-        continue; /* a stroke that draws nothing */
-      }
-      GSHGEOM_Map composed;
-      maps[count - 1] = item->map;
-      if (gshgeom_map_compose_chain(maps, count, &target->map, &composed) != GSHGEOM_OK) {
-        continue;
-      }
-      GSHCPU_Stroke st;
-      gshcpu_render_arena_reset(arena);
-      arena->peak = 0;
-      /* A run's centerline, its glyphs' outlines and its notes are allocated here in the order the drawing takes them
-       * (ST8), so the memory asked for is exact. */
-      GSHCPU_Result sr = gshcpu_render_stroke_open(NULL, &arena->self, &cs->geometry, item, &composed, &st);
-      if (sr == GSHCPU_OK) {
-        gshcpu_render_stroke_close(NULL, &st);
-      }
-      if (sr == GSHCPU_ERR_OOM) {
-        return sr;
-      }
-      *peak = arena->peak > *peak ? arena->peak : *peak;
-      continue;
+    if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && item->group.soft_mask) {
+      r = measure_mask(cs, target, memory + M->at, M, item, maps, count, arena, peak, 0);
+    } else {
+      r = measure_one(cs, target, item, maps, count, arena, peak);
     }
-    if (item->kind != GSHSCENE_ITEM_FILL && item->kind != GSHSCENE_ITEM_CLIP_PUSH) {
-      continue;
-    }
-    if (gshscene_resource_kind(item->resource) == GSHSCENE_RESOURCE_PLANE) {
-      continue; /* a plane has no geometry: it takes nothing from the arena */
-    }
-    GSHCPU_Item_Geometry g;
-    gshcpu_render_arena_reset(arena);
-    arena->peak = 0;
-    GSHCPU_Result r = gshcpu_render_geometry(item, maps, count - 1, &target->map, &arena->self, &cs->geometry, &g);
-    gshcpu_render_geometry_release(&g, &arena->self);
-    if (r == GSHCPU_ERR_OOM) {
+    if (r != GSHCPU_OK) {
       return r;
     }
-    *peak = arena->peak > *peak ? arena->peak : *peak;
   }
   return GSHCPU_OK;
 }
@@ -526,7 +729,8 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
  */
 static GSHCPU_Result need_of(const Cpu_Sink * cs, const GSHSCENE_Render_Request * request, size_t * out) {
   Layout L;
-  GSHCPU_Result r = layout(cs, request->list, request->target, &L);
+  Mask_Layout M;
+  GSHCPU_Result r = layout(cs, request->list, request->target, &L, &M);
   if (r != GSHCPU_OK) {
     return r;
   }
@@ -540,7 +744,7 @@ static GSHCPU_Result need_of(const Cpu_Sink * cs, const GSHSCENE_Render_Request 
     unsigned char * base = (unsigned char *)(((uintptr_t)request->workspace + (CARVE_ALIGN - 1u)) &
         ~(uintptr_t)(CARVE_ALIGN - 1u));
     gshcpu_render_arena_init(&arena, base + L.at_items, request->workspace_bytes - L.fixed);
-    r = measure_items(cs, request->list, request->target, &L, base, &arena, &peak);
+    r = measure_items(cs, request->list, request->target, &L, &M, base, &arena, &peak);
     if (r == GSHCPU_OK) {
       return gcu_safe_add_size(L.fixed, peak, out) ? GSHCPU_OK : GSHCPU_ERR_LIMIT;
     }
@@ -557,7 +761,7 @@ static GSHCPU_Result need_of(const Cpu_Sink * cs, const GSHSCENE_Render_Request 
   }
   unsigned char * base = (unsigned char *)(((uintptr_t)scratch + (CARVE_ALIGN - 1u)) & ~(uintptr_t)(CARVE_ALIGN - 1u));
   gshcpu_render_arena_measure(&arena, &cs->alloc);
-  r = measure_items(cs, request->list, request->target, &L, base, &arena, &peak);
+  r = measure_items(cs, request->list, request->target, &L, &M, base, &arena, &peak);
   cs->alloc.free_fn(cs->alloc.ctx, scratch);
   if (r != GSHCPU_OK) {
     return r;
@@ -653,6 +857,10 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   out->image_extends = (UINT32_C(1) << GSHSCENE_IMAGE_EXTEND_COUNT) - 1u;
   out->image_formats = GSHSCENE_IMAGE_FORMAT_ALL;
   out->flags |= GSHSCENE_CAP_IMAGE_FILTER_SPACES;
+  /* MC1: a masked group, every mode, transfer, coefficient set and space the waist defines, and both things a mask acts on.  A
+   * masked group that is also non-isolated or knockout is refused first, by the flags this sink does not claim. */
+  out->flags |= GSHSCENE_CAP_GROUP_SOFT_MASK;
+  out->mask_native = GSHSCENE_MASK_NATIVE_ALL;
   out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;
   out->cancel_work_bound = work_bound(cs);
   out->work_measure = "cells+points+pixels+texels";
@@ -777,6 +985,19 @@ static void widen(Run * run, Frame * f, GSHCPU_Rect r) {
   f->dirty = grown;
 }
 
+/**
+ * widen, and in a render whose list holds a masked group note the rectangle the whole render reaches of this layer (@p whole:
+ * the item's rectangle met with the whole render's region, whatever the damage), which is what decides whether the whole render
+ * would draw a masked group's mask (MC6).
+ */
+static void widen_w(Run * run, Frame * f, GSHCPU_Rect r, GSHCPU_Rect whole) {
+  widen(run, f, r);
+  if (run->masked && !gshcpu_render_rect_empty(whole)) {
+    Mask_Frame * mf = &ms_of(run)->frames[f - run->frames];
+    mf->whole_dirty = gshcpu_render_rect_join(mf->whole_dirty, whole);
+  }
+}
+
 /** Whether (x, y) lies in @p r. */
 static int inside(GSHCPU_Rect r, int64_t x, int64_t y) {
   return x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1;
@@ -788,9 +1009,14 @@ static uint32_t clip_at(const Clip * clip, int64_t x, int64_t y) {
   return clip->coverage[(size_t)(y - clip->rect.y0) * w + (size_t)(x - clip->rect.x0)];
 }
 
-/** The pixels the clips in force in the innermost group allow (N9): the region meet their rectangles. */
+/** The pixels the units of this walk may reach: the region, or inside a mask pass the pop region of the masked group (MC2). */
+static GSHCPU_Rect window_of(const Run * run) {
+  return run->masked ? ms_of(run)->window : run->layout.region;
+}
+
+/** The pixels the clips in force in the innermost group allow (N9): the window meet their rectangles. */
 static GSHCPU_Rect reach_of(const Run * run, size_t from, size_t to) {
-  GSHCPU_Rect r = run->layout.region;
+  GSHCPU_Rect r = window_of(run);
   for (size_t i = from; i < to; i++) {
     r = gshcpu_render_rect_meet(r, run->clips[i].rect);
   }
@@ -968,7 +1194,7 @@ static GSHSCENE_Result image_begin(Painter * p, Run * run, const GSHSCENE_Item *
   if (taken & GSHCPU_RENDER_TIER_IMAGE_TABLE) {
     gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, image_table));
   }
-  widen(run, frame, rect);
+  widen_w(run, frame, rect, whole);
   run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
   return GSHSCENE_OK;
 }
@@ -1006,7 +1232,7 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
       p->d8.dy = -frame->oy;
       gshcpu_direct8_color(&p->d8, c);
     }
-    widen(run, frame, rect);
+    widen_w(run, frame, rect, whole);
     run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
     return GSHSCENE_OK;
   }
@@ -1034,7 +1260,7 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
     return refuse(run, item, chain, count);
   }
   gshcpu_render_convert_prepare(&p->conv, &e->space, &frame->space);
-  widen(run, frame, rect);
+  widen_w(run, frame, rect, whole);
   const uint64_t area = (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
   run->work += area;
   if (run->cs->fast_fill && run->tables) {
@@ -1627,7 +1853,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
       Sparse8 sp8 = {&painter, s.shift_x, s.shift_y};
       r = gshcpu_render_lean_cover(body, s.shift_x, s.shift_y, rect, run->acc, scratch, run->coverage, sparse8_span, &sp8);
     } else {
-      widen(run, frame, rect);
+      widen_w(run, frame, rect, whole);
       Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
       r = gshcpu_render_lean_cover(body, s.shift_x, s.shift_y, rect, run->acc, scratch, run->coverage, sparse_span, &sp);
     }
@@ -1685,7 +1911,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
     gshcpu_render_stroke_rects(&s, reach, wreach, &rect, &whole);
     double src[4];
     source_of(run, item, frame, src);
-    widen(run, frame, rect);
+    widen_w(run, frame, rect, whole);
     Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
     GSHCPU_Rect drawn;
     GSHCPU_Rect counted;
@@ -1759,7 +1985,7 @@ static GSHSCENE_Result clip_push(Run * run, const GSHSCENE_Item * item, const si
   return GSHSCENE_OK;
 }
 
-static void group_push(Run * run, const GSHSCENE_Item * item) {
+static void group_push(Run * run, const GSHSCENE_Item * item, size_t index) {
   const Frame * parent = &run->frames[run->top];
   Frame * f = &run->frames[++run->top];
   f->layer = run->layers + (run->top - 1u) * run->layout.pixels * 4u; /* made ready as it is drawn on (widen) */
@@ -1774,6 +2000,11 @@ static void group_push(Run * run, const GSHSCENE_Item * item) {
   f->oy = run->layout.region.y0;
   run->groups_open++;
   run->work += run->layout.pixels;
+  if (run->masked) {
+    Mask_Frame * mf = &ms_of(run)->frames[run->top];
+    memset(&mf->whole_dirty, 0, sizeof mf->whole_dirty);
+    mf->push = index;
+  }
 }
 
 /** The pixel (x, y) of @p f's layer, in bytes (fast8). */
@@ -1932,7 +2163,183 @@ static GSHSCENE_Result group_pop8(Run * run) {
   return GSHSCENE_OK;
 }
 
-static GSHSCENE_Result group_pop(Run * run) {
+static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count);
+
+/**
+ * MC2: draw the picture of the mask of the group being popped into one more layer, over the pop region @p window (the
+ * pixels the pop composites) and under the chain of maps `T I_1 ... I_k Q` (MK6), and leave the layer as the innermost frame.
+ *
+ * The units are the picture's, walked by a second expansion and gone through as any unit is; their chain is the group's, the
+ * index of its push and the unit's own in the picture (MK9), so a refusal inside the picture names it.  A unit whose rectangle
+ * misses the window draws nothing (reach), and its limits are met over the whole render's region (MC6: @p whole_window is only
+ * what decides, in a nested pass, whether a masked group's own mask would be drawn in the whole render).  The clips in force
+ * around the group are not in force inside (MK6): the frame's clip base is the clip count here.  Cancel is checked between the
+ * units, and the work of each is added to the pop's (MC7).
+ */
+static GSHSCENE_Result mask_pass(Run * run, const GSHCPU_Mask_Eval * me, const size_t * chain, size_t count, GSHCPU_Rect window,
+    GSHCPU_Rect whole_window) {
+  Mask_State * ms = ms_of(run);
+  const Frame * group = &run->frames[run->top];
+  Mask_Frame * mfs = ms->frames;
+  GSHSCENE_Mask mask;
+  if (gshscene_resource_mask(group->group.soft_mask, &mask) != GSHSCENE_OK) {
+    return GSHSCENE_ERR_INTERNAL;
+  }
+  const GSHSCENE_List * picture = gshscene_resource_picture(mask.picture);
+  const size_t bytes = gshscene_expansion_bytes(picture);
+  GSHSCENE_Expansion walk;
+  if (ms->walk_used > ms->walk_bytes || bytes > ms->walk_bytes - ms->walk_used ||
+      gshscene_expansion_init(&walk, picture, ms->walk + ms->walk_used, bytes) != GSHSCENE_OK) {
+    return GSHSCENE_ERR_INTERNAL; /* unreachable: the layout counts every walk a pop can have open */
+  }
+  /* The chain: the group's, its push's index in place of its pop's, then the item's in the picture. */
+  memmove(ms->chain, chain, (count - 1u) * sizeof *chain); /* (a mask inside a mask pass names its chain in this same array) */
+  ms->chain[count - 1u] = mfs[run->top].push;
+  run->maps[count - 1u] = group->group.soft_mask_map;
+  /* The mask's frame: an isolated layer in R that starts at (0, 0, 0, 0) (N6), made ready as the units reach it (widen). */
+  Frame * f = &run->frames[++run->top];
+  memset(f, 0, sizeof *f);
+  f->layer = run->layers + (run->top - 1u) * run->layout.pixels * 4u;
+  f->space = me->frame_space;
+  f->group.opacity = 1.0;
+  f->group.composite = GSHSCENE_COMPOSITE_SRC_OVER;
+  f->group.isolation = GSHSCENE_ISOLATION_ISOLATED;
+  f->clip_base = run->clip_count;
+  memset(&mfs[run->top].whole_dirty, 0, sizeof mfs[run->top].whole_dirty);
+  const GSHCPU_Rect saved_window = ms->window;
+  const GSHCPU_Rect saved_whole = ms->whole_window;
+  const Skip saved_skip = run->skip;
+  memset(&run->skip, 0, sizeof run->skip);
+  ms->window = window;
+  ms->whole_window = whole_window;
+  ms->walk_used += bytes;
+  const GSHSCENE_Item * item;
+  const size_t * inner;
+  size_t depth;
+  GSHSCENE_Result result = GSHSCENE_OK;
+  while (result == GSHSCENE_OK && gshscene_expansion_next(&walk, &item, &inner, &depth)) {
+    memcpy(ms->chain + count, inner, depth * sizeof *inner);
+    run->work = 0;
+    result = unit(run, item, ms->chain, count + depth);
+    gshscene_job_work(run->job, run->work);
+    run->work = 0;
+    if (result == GSHSCENE_OK && gshscene_job_checkpoint(run->job)) {
+      result = GSHSCENE_ERR_CANCELLED;
+    }
+  }
+  ms->walk_used -= bytes;
+  ms->window = saved_window;
+  ms->whole_window = saved_whole;
+  run->skip = saved_skip;
+  return result;
+}
+
+/**
+ * The pop of a masked group (MC2 to MC4, MC6 to MC8): the mask is drawn over the pop region @p region, when the whole
+ * render (@p whole) would have drawn it, and each pixel's composite is weighed by the mask's value there: the opacity
+ * source becomes `o v`, or the shape `m8 / 255` becomes `(m8 / 255) v`, and nothing else is changed.
+ */
+static GSHSCENE_Result group_pop_masked(Run * run, const size_t * chain, size_t count, GSHCPU_Rect region, GSHCPU_Rect whole) {
+  const size_t top = run->top;
+  Frame * f = &run->frames[top];
+  Frame * parent = &run->frames[top - 1u];
+  if (gshcpu_render_rect_empty(whole)) {
+    run->top--;
+    run->groups_open--;
+    return GSHSCENE_OK; /* the whole render composites nothing of this group, and draws no mask for it */
+  }
+  GSHCPU_Mask_Eval me;
+  if (!gshcpu_render_mask_prepare(&me, f->group.soft_mask, &parent->space)) {
+    return GSHSCENE_ERR_INTERNAL; /* unreachable: the plan refused a mask the waist cannot resolve */
+  }
+  GSHSCENE_Result r = mask_pass(run, &me, chain, count, region, whole);
+  if (r != GSHSCENE_OK) {
+    return r;
+  }
+  const Frame * mf = &run->frames[top + 1u];
+  run->top = top; /* the mask frame is released at the end of the pop: nothing below reads another */
+  const uint32_t op = f->group.composite;
+  const int bounded = gshcpu_render_bounded(op);
+  GSHCPU_Convert c;
+  gshcpu_render_convert_prepare(&c, &f->space, &parent->space);
+  const double o = f->group.opacity;
+  static const double zero[4] = {0.0, 0.0, 0.0, 0.0};
+  widen(run, parent, region);
+  const unsigned tiers = run->cs->tiers;
+  const int outside_tier = (tiers & GSHCPU_RENDER_TIER_MASK_OUTSIDE) != 0;
+  const int identity_tier = (tiers & GSHCPU_RENDER_TIER_MASK_IDENTITY) != 0 && me.identity;
+  int have_outside = 0;
+  int took_outside = 0;
+  int evaluated = 0;
+  double v_outside = 0.0;
+  for (int64_t y = region.y0; y < region.y1; y++) {
+    for (int64_t x = region.x0; x < region.x1; x++) {
+      uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);
+      if (m8 == 0) {
+        continue;
+      }
+      size_t p = at(run, x, y);
+      double v;
+      evaluated = 1;
+      if (inside(mf->dirty, x, y)) {
+        v = gshcpu_render_mask_value(&me, &mf->layer[4u * p], identity_tier);
+      } else if (outside_tier) {
+        /* FT-M1: the mask frame is (0, 0, 0, 0) here, so the value is MK5's, found once for the pop with the same code. */
+        if (!have_outside) {
+          v_outside = gshcpu_render_mask_value(&me, zero, identity_tier);
+          have_outside = 1;
+        }
+        v = v_outside;
+        took_outside = 1;
+      } else {
+        v = gshcpu_render_mask_value(&me, zero, identity_tier);
+      }
+      double s[4];
+      gshcpu_render_convert_premultiplied(&c, inside(f->dirty, x, y) ? &f->layer[4u * p] : zero, s);
+      double weight = (double)m8 / 255.0;
+      if (me.shape) {
+        weight = weight * v; /* MC4: the shape is weighed by v, the opacity as it was */
+        for (int i = 0; i < 4; i++) {
+          s[i] = o * s[i];
+        }
+      } else {
+        const double ov = o * v; /* MC4: the opacity source is o v */
+        for (int i = 0; i < 4; i++) {
+          s[i] = ov * s[i];
+        }
+      }
+      if (bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0) {
+        continue;
+      }
+      if (!gshcpu_render_apply(&parent->layer[4u * p], s, weight, op)) {
+        return GSHSCENE_ERR_INTERNAL; /* unreachable: the planning pass refuses an operator the caps do not claim */
+      }
+      if (run->top == 1u) {
+        run->touched[p] = 1;
+      }
+    }
+  }
+  if (!gshcpu_render_rect_empty(region)) {
+    /* The pop's pixels, and the value found for each (MC7). */
+    run->work += 2u * (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0);
+  }
+  gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, masks));
+  if (!gshcpu_render_rect_empty(region)) {
+    gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_pixels),
+        (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0));
+  }
+  if (took_outside) {
+    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_outside));
+  }
+  if (identity_tier && evaluated) {
+    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_identity));
+  }
+  run->top--;
+  run->groups_open--;
+  return GSHSCENE_OK;
+}
+
+static GSHSCENE_Result group_pop(Run * run, const size_t * chain, size_t count) {
   if (run->fast8) {
     return group_pop8(run);
   }
@@ -1942,8 +2349,21 @@ static GSHSCENE_Result group_pop(Run * run) {
   int bounded = gshcpu_render_bounded(op);
   /* A bounded operator changes nothing where the group drew nothing (N4); an unbounded one acts wherever it is
    * weighed above zero (N8). */
-  GSHCPU_Rect region = bounded ? f->dirty : run->layout.region;
+  GSHCPU_Rect region = bounded ? f->dirty : window_of(run);
   region = gshcpu_render_rect_meet(region, reach_of(run, parent->clip_base, f->clip_base));
+  if (run->masked) {
+    /* MC6: the same in the whole render, which decides whether a mask is drawn at all, so that what a damaged render refuses
+     * inside a mask is what the whole render refuses. */
+    Mask_Frame * frames = ms_of(run)->frames;
+    GSHCPU_Rect whole = bounded ? frames[run->top].whole_dirty : ms_of(run)->whole_window;
+    whole = gshcpu_render_rect_meet(whole, whole_reach_of(run, parent->clip_base, f->clip_base));
+    if (!gshcpu_render_rect_empty(whole)) {
+      frames[run->top - 1u].whole_dirty = gshcpu_render_rect_join(frames[run->top - 1u].whole_dirty, whole);
+    }
+    if (f->group.soft_mask) {
+      return group_pop_masked(run, chain, count, region, whole);
+    }
+  }
   GSHCPU_Convert c;
   gshcpu_render_convert_prepare(&c, &f->space, &parent->space);
   const double o = f->group.opacity;
@@ -2024,10 +2444,10 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
       run->clip_count--;
       return GSHSCENE_OK;
     case GSHSCENE_ITEM_GROUP_PUSH:
-      group_push(run, item);
+      group_push(run, item, chain[count - 1u]);
       return GSHSCENE_OK;
     case GSHSCENE_ITEM_GROUP_POP:
-      return group_pop(run);
+      return group_pop(run, chain, count);
     case GSHSCENE_ITEM_INSTANCE:
       run->maps[count - 1] = item->map;
       return GSHSCENE_OK;
@@ -2117,7 +2537,8 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   const GSHSCENE_Render_Request * request = gshscene_job_request(job);
   const GSHSCENE_Target * target = request->target;
   Layout L;
-  GSHCPU_Result lr = layout(cs, request->list, target, &L);
+  Mask_Layout M;
+  GSHCPU_Result lr = layout(cs, request->list, target, &L, &M);
   if (lr != GSHCPU_OK) {
     return scene_result(lr);
   }
@@ -2162,6 +2583,20 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
     run->cov_result = base + L.at_cov_result;
   }
   run->acc = (int64_t *)(void *)(base + L.at_acc);
+  run->masked = M.bytes != 0;
+  if (run->masked) {
+    /* MC5: the area after the Run (layout): the window every unit is held to starts as the region. */
+    Mask_State * ms = ms_of(run);
+    unsigned char * area = base + M.at;
+    ms->window = L.region;
+    ms->whole_window = L.whole;
+    ms->frames = (Mask_Frame *)(void *)(area + M.at_frames);
+    ms->chain = (size_t *)(void *)(area + M.at_chain);
+    ms->walk = area + M.at_walk;
+    ms->walk_bytes = M.walk;
+    ms->walk_used = 0;
+    memset(ms->frames, 0, (L.groups + 1u) * sizeof *ms->frames);
+  }
   if (L.strokes) {
     size_t width = (size_t)(L.whole.x1 - L.whole.x0);
     gshcpu_exact_init(&run->exact[0], base + L.at_exact, width, cs->max_exact, L.aligned ? 3 : 1);
