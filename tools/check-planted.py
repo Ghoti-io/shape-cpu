@@ -98,6 +98,15 @@ Story 13b, the sink (src/render):
               generated candidates for cover.c and sink.c, whose lines have moved since the last sweep (503 anchors in
               render-plants.json did not match before this story), are to be regenerated with tools/gen-render-plants.py,
               which now also reads exact.c and stroke.c, and swept again
+  rm-         masks story M2, by hand, for each rule and branch of the soft mask in the sink (render.h, MC1 to MC9): the value
+              (mask.c: the mode, what it acts on, the transfer's skip, the coefficients, the backdrop's conversion and weight,
+              the picture's conversion into the luminance space, the luminance of the straight color, a dropped clamp, the
+              frame's space), the pop (the opacity and the shape weighed, the skip of a zero source), the claims, where and
+              when the mask is drawn (over the group's rectangle or the whole region, the clips around the group in force in it,
+              the placement, the frame's release, the chain naming the pop, the walk's memory), the limits (cells counted over
+              the pop region, the whole render's pop region taken from the damage, a child's pop not joined into its parent's),
+              the layout (the mask frame, the picture's clips, gradients, strokes, nested walks and records, the measure), cancel
+              and work, the two tiers and their counters, and what a list with no mask pays
   rc- rv- rg- generated (tools/gen-render-plants.py; tools/render-plants.json
   ra- rh- rs- holds the ones caught): every comparison, logical operator,
               condition, statement, hash width, printed width, output letter and
@@ -321,6 +330,29 @@ sink whose element limit is below its centerline's) and ``sc8-sparse-quiet-value
 program: the column before a quiet stretch is cleared as it is read); ``r-caps-kinds-grown`` claims the item kind that follows
 the last one the sink draws (its old one had become STROKE).  The ones still not seen are in SURVIVORS below, each with what a
 case for it needs; the gate prints them as "known" and fails if one is caught.
+
+The soft mask (2026-10-31) added mask.c and changed sink.c (the layout and the measure, the walk of a mask's picture, the masked
+pop), which moved every line the generated plants of sink.c name: the 643 held entries were dropped and sink.c's candidates made
+again with mask.c's (1484 and 28), and swept in ghoti-build:gcc16 on a 32-thread build host with ``PLANT_ALL_TESTS=1``, together with
+the hand plants of the mask pass (``rm-``) and the five hand plants of the group pop the new code had re-anchored.  Of the 1512
+generated candidates 310 do not compile, 922 are caught (now held, 903 of sink.c's and 19 of mask.c's) and 280 survive, the kinds
+listed above; every hand plant is caught.  The first sweep left eighteen of the hand plants standing (eleven did not compile for an
+unused variable, seven were not seen) and showed three generated ones that no test had asked about: a cancel inside the mask pass
+(``rs-2227-del``: the cancel test of the first draft was cancelled between the main walk's units and never reached the pass), an
+instance's map in the measure of a mask's picture (``rs-673-del``) and the pop that closes a group which draws nothing
+(``rs-2248-del``); each has a test since and is held.  Of the survivors on the lines of the soft mask (16 of sink.c's 280 and 9 of
+mask.c's 28) none can change a result: the memo's insertion (``rs-341-del``, ``rs-343-del``: it changes the time of a count and not
+the number), the guards of the nested walks' memory that the layout makes unreachable (``rs-660-gt``, ``rs-2191-gt``), the three group
+fields set on the mask frame and its whole-render rectangle (``rs-2204-del`` to ``rs-2206-del``, ``rs-2208-del``: the frame is
+never popped, and nothing reads them), the clearing of the skip state and of the work at the start of a pass (``rs-2212-del``,
+``rs-2222-del``: both are clear already), the flag that caches the outside value (``rs-2290-del``), the comparisons that are ties of a
+maximum (``rs-396-and``, ``rs-399-gt``, ``rs-400-gt``, ``rs-409-gt``), the clear of the frame records (``rs-2602-del``: read before
+written only by a branch on uninitialized memory, which a Valgrind run sees and the plant build is not run under), a
+loop bound in mask.c that only reads or writes one past a three-element array (``rq-56-lt``, ``rq-78-lt``), the
+clamp's ties at 0 and 1 (``rq-41-gt``, ``rq-41-gt2``), the clearing of an evaluator every field of which is then set
+(``rq-47-del``), and four statements of the value whose deletion leaves a local uninitialized (``rq-71-del``, ``rq-76-del``,
+``rq-79-del``, ``rq-81-del``: undefined behavior that a sanitizer sees; the hand plants ``rm-picture-not-converted-into-l``,
+``rm-backdrop-ignored`` and ``rm-luminance-clamp-dropped`` are the same defects written so that they compile to a value).
 
 Run by ``make check-planted`` from the library directory, with the build's
 flags in the PLANT_* environment variables.

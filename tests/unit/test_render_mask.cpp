@@ -766,10 +766,9 @@ TEST(RenderMask, TheNoticesOfAMaskPicturesItemsAreTheirPlansAndNotTheSinks) {
   }
 }
 
-// MC7: cancel is checked between the mask's units.  A token set after the unit before the pop stops the render at the first
-// check inside the pass: the mask's second unit is never gone through (it would have been refused, and said so), the group
-// is not composited, and the declared work bound holds.
-TEST(RenderMask, ACancelDuringTheMaskStopsBetweenItsUnits) {
+// MC7: a cancel set before a masked group's pop (after the unit before it) stops the render there: the prefix is drawn, the group
+// is not composited, no unit of its mask is gone through, and the declared work bound holds.
+TEST(RenderMask, ACancelBeforeAMaskedPopLeavesThePrefixAndDrawsNoMask) {
   Scene s;
   GSHGEOM_Path * p = nullptr;
   gshgeom_path_create(nullptr, nullptr, 2, &p);
@@ -1204,6 +1203,8 @@ TEST(RenderMask, AMaskedGroupThatDrawsNothingDrawsNoMask) {
   ASSERT_EQ(d.result, GSHSCENE_OK);
   EXPECT_EQ(d.counters.masks, 1u) << "the group that draws nothing has no mask drawn for it";
   EXPECT_EQ(d.counters.mask_pixels, 8u * 8u);
+  EXPECT_EQ(d.summary.units_done, d.summary.units_processed) << "and its pop closes the group: every unit is in the target";
+  EXPECT_EQ(d.summary.units_done, 6u);
 }
 
 // MC6, MC2: a masked group inside a mask's picture is drawn when the whole render would draw it, which is decided by the whole
@@ -1250,6 +1251,140 @@ TEST(RenderMask, AMaskedGroupInsideAMaskIsDrawnOnlyWhereTheWholeRenderDrawsIt) {
     EXPECT_EQ(d.count(GSHSCENE_ENTRY_REFUSED), 0u) << "the inner mask is not drawn, so nothing in it is refused (window " << win.x0 << "," << win.y0 << ")";
     EXPECT_EQ(d.counters.masks, 1u) << "only the outer mask, drawn whenever the whole render would draw it (over an empty window where the damage holds none of the group)";
   }
+}
+
+namespace {
+
+/** An allocator that sets a cancel token on its @c at th call: a cancel that lands where the test chooses, inside the mask pass. */
+struct CancelAt {
+  long calls = 0;
+  long at = -1;
+  GSHSCENE_Cancel * token = nullptr;
+  void count() {
+    if (calls++ == at) {
+      gshscene_cancel_set(token);
+    }
+  }
+};
+
+void * ca_malloc(void * ctx, size_t n) {
+  ((CancelAt *)ctx)->count();
+  return std::malloc(n ? n : 1);
+}
+
+void * ca_calloc(void * ctx, size_t k, size_t n) {
+  ((CancelAt *)ctx)->count();
+  return std::calloc(k ? k : 1, n ? n : 1);
+}
+
+void * ca_realloc(void * ctx, void * old, size_t n) {
+  ((CancelAt *)ctx)->count();
+  return std::realloc(old, n ? n : 1);
+}
+
+void ca_free(void *, void * p) {
+  std::free(p);
+}
+
+} // namespace
+
+// MC7: cancel is checked between the mask's units.  The mask's picture holds a stroke of a long polyline (a unit whose work is
+// the most of any) and then a fill the sink refuses (more points than its cap).  A token set while the stroke is drawn stops
+// the pass at the check after it: the second unit is never gone through (the refusal it would report is absent), the group is
+// not composited, and the work counted is the stroke's: that landing exists, for some call of the allocator, and without the
+// check there is none.
+TEST(RenderMask, ACancelInsideTheMaskPassStopsBetweenItsUnits) {
+  Scene s;
+  std::vector<double> zigzag, huge;
+  for (int i = 0; i < 300; i++) {
+    zigzag.push_back(0.5 + 23.0 * (double)i / 299.0);
+    zigzag.push_back(i % 2 ? 2.0 : 22.0);
+  }
+  for (int i = 0; i < 6000; i++) {
+    huge.push_back(12.0 + 11.0 * std::cos(0.001 * (double)i));
+    huge.push_back(12.0 + 11.0 * std::sin(0.001 * (double)i * 7.0));
+  }
+  GSHSCENE_Stroke_Style st;
+  gshscene_stroke_style_init(&st);
+  st.width = 1.5;
+  const GSHSCENE_Resource * style = nullptr;
+  ASSERT_EQ(gshscene_store_intern_stroke_style(s.store, &st, &style), GSHSCENE_OK);
+  s.held.push_back(style);
+  GSHSCENE_Paint w = white();
+  GSHSCENE_List * alone = s.open();
+  const GSHSCENE_Resource * line = s.polygon(zigzag);
+  ASSERT_EQ(gshscene_list_stroke(alone, line, style, nullptr, &w, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(alone), GSHSCENE_OK);
+  GSHSCENE_List * pl = s.open();
+  ASSERT_EQ(gshscene_list_stroke(pl, line, style, nullptr, &w, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(pl, s.polygon(huge), nullptr, GSHGEOM_FILL_NONZERO, &w, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(pl, s.rect(0, 0, 4, 4), nullptr, GSHGEOM_FILL_NONZERO, &w, 0, 0.0), GSHSCENE_OK);
+  GSHSCENE_List * l = s.masked_fill(s.alpha_mask(s.picture(pl)), s.rect(0, 0, 24, 24), red());
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  limits.max_points = 4000;
+  Options base;
+  base.limits = &limits;
+  Draw stroke_alone = draw(alone, 24, 24, base);
+  ASSERT_EQ(stroke_alone.result, GSHSCENE_OK);
+  Draw full = draw(l, 24, 24, base);
+  ASSERT_EQ(full.result, GSHSCENE_OK);
+  ASSERT_EQ(full.count(GSHSCENE_ENTRY_REFUSED, GSHSCENE_REASON_RESOURCE_LIMIT), 1u) << "the second unit of the mask is refused";
+  int landed = 0;
+  for (long k = 0; k < 400; k++) {
+    GSHSCENE_Cancel cancel;
+    gshscene_cancel_init(&cancel);
+    CancelAt at;
+    at.at = k;
+    at.token = &cancel;
+    GSHSCENE_Allocator alloc;
+    alloc.ctx = &at;
+    alloc.malloc_fn = ca_malloc;
+    alloc.calloc_fn = ca_calloc;
+    alloc.realloc_fn = ca_realloc;
+    alloc.free_fn = ca_free;
+    Options opt = base;
+    opt.alloc = &alloc;
+    opt.cancel = &cancel;
+    Draw d = draw(l, 24, 24, opt);
+    if (d.result == GSHSCENE_ERR_CANCELLED && d.count(GSHSCENE_ENTRY_REFUSED) == 0 && d.counters.masks == 0 &&
+        d.summary.work_max >= stroke_alone.summary.work_max) {
+      landed++;
+    }
+  }
+  EXPECT_GT(landed, 0) << "a cancel inside the first unit of the mask stops the pass before its second unit";
+}
+
+// MC5: the arena is sized with the chain of maps of the mask's items: a picture instanced under a large scale inside a mask's
+// picture flattens to many more points than the same curve at unit scale, and the need counts them.
+TEST(RenderMask, TheArenaIsSizedUnderTheMapsOfAnInstanceInsideTheMasksPicture) {
+  Scene s;
+  GSHGEOM_Path * p = nullptr;
+  gshgeom_path_create(nullptr, nullptr, 2, &p);
+  const double k = 0.5522847498307936 * 2.0;
+  gshgeom_path_move_to(p, GSHGEOM_Point{2.0, 0.0, 0});
+  gshgeom_path_cubic_to(p, GSHGEOM_Point{2.0, k, 0}, GSHGEOM_Point{k, 2.0, 0}, GSHGEOM_Point{0.0, 2.0, 0});
+  gshgeom_path_cubic_to(p, GSHGEOM_Point{-k, 2.0, 0}, GSHGEOM_Point{-2.0, k, 0}, GSHGEOM_Point{-2.0, 0.0, 0});
+  gshgeom_path_cubic_to(p, GSHGEOM_Point{-2.0, -k, 0}, GSHGEOM_Point{-k, -2.0, 0}, GSHGEOM_Point{0.0, -2.0, 0});
+  gshgeom_path_cubic_to(p, GSHGEOM_Point{k, -2.0, 0}, GSHGEOM_Point{2.0, -k, 0}, GSHGEOM_Point{2.0, 0.0, 0});
+  gshgeom_path_close(p);
+  const GSHSCENE_Resource * circle = s.picture_of(s.path(p), white());
+  GSHSCENE_List * pl = s.open();
+  GSHGEOM_Map big = scale(5.0, 5.0);
+  GSHGEOM_Map into = translate(12.0, 12.0);
+  GSHGEOM_Map placed;
+  GSHGEOM_Map two[2] = {into, big};
+  ASSERT_EQ(gshgeom_map_compose_chain(two, 2, nullptr, &placed), GSHGEOM_OK);
+  ASSERT_EQ(gshscene_list_instance(pl, circle, &placed, 0, 0.0), GSHSCENE_OK);
+  GSHSCENE_List * l = s.masked_fill(s.alpha_mask(s.picture(pl)), s.rect(0, 0, 24, 24), red());
+  Draw ref = draw(l, 24, 24);
+  Options caller;
+  caller.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+  Draw out = draw(l, 24, 24, caller);
+  ASSERT_EQ(ref.result, GSHSCENE_OK);
+  EXPECT_EQ(out.result, GSHSCENE_OK) << "the exact memory holds the circle flattened at the instance's scale";
+  EXPECT_EQ(out.bytes, ref.bytes);
+  EXPECT_GT(ref.at8(12, 12, 3), 0u);
 }
 
 int main(int argc, char ** argv) {
