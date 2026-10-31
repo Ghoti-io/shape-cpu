@@ -227,6 +227,65 @@ takes out of `[0, 1]`, and the byte compositor has one source color a fill. (Fou
 **Measured.** The oracle's 1906 point vectors: the sink's sampler is within 0.12 of the tolerance each states at worst, and 624
 of 624 exact vectors are bit for bit. Its 352 regions: within 0.001 of the tolerance, 83 of 83 exact bit for bit.
 
+### Masks (MC1 to MC10)
+
+A group whose soft-mask slot names a mask is composited at its pop with the mask's value weighing each pixel (the rules are in
+`render.h`; the meaning of a mask, MK1 to MK14, is shape-scene's). The decisions that shape the code:
+
+**The mask is drawn at the pop, over the pop region.** The only moment the sink knows which pixels will be composited is the
+pop, so the mask's picture is walked then, by an expansion of its own, into one extra layer and over those pixels only. A small
+masked icon on a large target pays for the icon, a mask outside the group's bounds is never drawn, and the frame is live only
+while the pop runs, so masks nested to a depth cost that depth along one path. The walk is the main walk's units
+(`unit()` is called on the picture's items with a chain that names the group's push and the item in the picture), restricted by
+a **window** that every reach (the rectangle an item may draw in) is met with: the region in the main walk, the pop region in a
+mask pass. Nothing else in the sink knows it is drawing a mask.
+
+**The value is the waist's, with no rounding.** `gshcpu_render_mask_value` (`mask.c`) orders MK2's arithmetic in `double`
+and calls `gshscene_mask_resolve` and `gshscene_mask_transfer` for everything else: the coefficients, the spaces, the transfer.
+The sink holds no transfer evaluator and no table. The value meets the pop's composite unrounded, and the pop is the pop of any
+group: `apply` with the source scaled by `o v`, or the weight `(m8 / 255) v` for a mask on the shape. With `v = 1` the products
+are `o` and `m8 / 255` exactly, so a mask of value one is the same bits as no mask (a test says so for both acts-on, four
+operators and every format). A pixel whose weight is zero under `SHAPE` is still composited and marked touched, as `apply`
+with a zero weight is the identity on the value, so the rule needs no case of its own; the oracle states the same.
+
+**A mask list is composited in double layers.** The fast fill coverage holds the layers of an 8-bit target as bytes; a mask
+quantized to 8 bits between its layer and the write would not be the mask, and an 8-bit conversion table is a second source of
+error in a value the oracle bounds to `1e-12`. A list holding a masked group is therefore drawn with double layers, as one holding
+an image paint is (the fast coverages of fills and strokes still apply to the items), and the byte tiers are off for it.
+
+**Limits are the whole render's.** The cell cap is met over an item's rectangle met with the whole render's region, whatever
+the damage (S4). A mask's pop region depends on the group's dirty rectangle, which a damaged render knows only in part, so the
+cap for an item in a mask picture could not be taken over `P` without making a refusal depend on what was drawn around it.
+The cap is therefore taken as for any item (over the whole region), and that over-counts for a small group, deliberately: the
+bound is the safe side, and deterministic. What also has to match is whether the mask is drawn at all: the whole render draws it
+when its pop region is not empty, which a damaged render cannot tell from its own dirty rectangle (the group's items outside
+the damage draw nothing there). Each layer therefore carries a second rectangle, the pixels the whole render's units reach of
+it (the same `widen` calls, with the whole render's rectangle of each item), kept only in a list that holds a mask. A damaged
+render draws a mask whenever the whole render would, over an empty window if its own pop region is empty, and so refuses
+what the whole render refuses and reports the same entries (a test finds the least cap the whole render passes and requires every
+window, including one that holds none of the group, to meet the same cap).
+
+**Memory is counted as groups are, and a list with no mask is laid out as before.** The layout adds, at each masked group,
+the mask frame and everything the picture needs while it is drawn (its groups and clips, its gradients and strokes, and a
+masked group inside it one frame deeper), found once for a picture by a memo of the pictures seen (a hostile list of more
+distinct pictures than the memo holds is counted again where used: slower, never different). The walks of the pictures of
+masks being drawn are stacked in one area, the frame records and the chain of a unit beside them. That area is carved after the
+`Run`, directly, and only when the list has a mask, and the flag that says so takes padding the `Run` already had: the
+need for memory, the work counts and the units of every fixture from before masks are unchanged (a test pins them).
+
+**Cancel between the mask's units.** The pass reports each unit's work to the job and checks the token after it, so the
+declared bound is still the worst single unit's, a unit of the mask or the pop's composite (two passes over its region: the
+visit and the value). The expansion count and the progress units do not count a mask's units, so no other sink's contract changes.
+
+**Two tiers, each the general formula with something folded.** A pixel outside the mask frame's dirty rectangle has the layer
+`(0, 0, 0, 0)`, so its value is one constant per pop, found by the same function on zeros; an identity transfer is not called.
+The test forces each off and compares every mask fixture on all four formats bit for bit, and counts each taken on the corpus.
+
+**Measured.** The render-level vector gate (246 cases on four formats, from a generator that restates the rules in exact
+rationals and shares nothing with the library or with shape-scene's oracle): worst error before the write 1.1e-16 against the
+`1e-12` bound, 204 stored values exact; nine fixtures add 72 goldens (36 exact, 36 under the fast coverages) and move no earlier
+one. On the corpus the 60 masked pops took FT-M1 in 29 and FT-M2 in 48.
+
 ### A refused stroke draws nothing in every tier
 
 The sparse stroke tier paints a band of rows as it sweeps it, so a stroke refused for its pieces or crossings (UC9, UC19) in a later

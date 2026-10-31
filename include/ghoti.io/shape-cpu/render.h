@@ -39,8 +39,9 @@
  * (`ITEM_KIND`) and never reaches the sink; the composite operators it
  * composites, named one by one (the twelve Porter-Duff operators, `PLUS` and the
  * fifteen blend modes of color-paint story P3; an operator past them is refused
- * by the planning pass, never drawn as another); none of PDF's group fields
- * (non-isolated, knockout, a soft mask: shape-scene's T1 to T7), so the planning
+ * by the planning pass, never drawn as another); a soft mask, every mode, transfer, coefficient set and space
+ * of it (`GROUP_SOFT_MASK` and every `GSHSCENE_MASK_NATIVE_*` bit, MC1); and none of PDF's other group fields
+ * (non-isolated, knockout: shape-scene's T1 to T7), so the planning
  * pass refuses a group that sets one (S19);
  * `CAN_BLOCK` (it completes inside `begin`), `CALLER_MEMORY`, `CLIP_AA`,
  * `BLEND_SPACES`, `READBACK` and `GLYPHS_FROM_FONT` (story 14a: a run from a font
@@ -271,8 +272,8 @@
  *   own rectangle (and by `max_deposits`), the sweep hands over a row at a time only the pixels that can be nonzero.  It
  *   is detected as a *solid hairline* (device width 1) or a *plain solid stroke* (any other width), each counted.
  * - **SC9 Groups and order.**  A stroke is one unit of its sequence.  In an isolated group it composites `SRC_OVER`
- *   into the group's layer and the group's blend mode acts at its pop.  A non-isolated, knockout or soft-masked group is
- *   refused as before, and the strokes inside are skipped.
+ *   into the group's layer and the group's blend mode acts at its pop.  A non-isolated or knockout group is
+ *   refused as before, and the strokes inside are skipped; a soft-masked group is drawn (MC1).
  * - **SC10 The test sink.**  shape-scene's test sink states, for a stroke whose centerline is a path, the hash of the
  *   outline this sink draws on a raster target (`outline=` of its `K` record): the canonical expansion of SC3.
  * - **SC11 Work and cancel.**  A stroke counts the points of its parts, the cell deposits, two passes over its pixels
@@ -563,14 +564,86 @@
  *   every cell agrees with `AREA`.
  * - **IC14 Hash and dump.**  `gshcpu_render_hash` and `gshcpu_render_dump` are unchanged.
  *
+ * ### Masks (MC1 to MC10; shape-scene's MK1 to MK14)
+ *
+ * A group whose soft-mask slot names a mask is composited at its pop with the mask's value at each pixel weighing the
+ * composite.  The mask's meaning (what its value is at a point, the transfer, the coefficient sets, the frame, what
+ * it acts on) is the waist's, in shape-scene's `mask.h` and its documentation: MK2 to MK7.  The rules below are what this
+ * sink adds, in real arithmetic unless stated; shape-cpu is the reference every other sink is measured against (AD-18).
+ * They are cited by the tests, the planted defects and the vector generator.
+ *
+ * - **MC1 What the sink claims.**  For a raster target the caps gain `GSHSCENE_CAP_GROUP_SOFT_MASK` and `mask_native` with
+ *   every `GSHSCENE_MASK_NATIVE_*` bit, so no mask is refused for `SOFT_MASK` or `MASK_FEATURE`.  A masked group that is also
+ *   non-isolated or knockout is refused first, by `GROUP_ISOLATION` or `GROUP_KNOCKOUT`, since this sink claims neither: a
+ *   masked group here is an isolated, non-knockout group in an isolated, non-knockout parent (the root, or such a group), and
+ *   there the opacity and the shape differ for a mask only for the operators that are not bounded (`DEST_IN`, `SRC`, `SRC_IN`,
+ *   `SRC_OUT`, `CLEAR`) and for `PLUS` where its sum clamps.
+ * - **MC2 When and where the mask is drawn.**  At the group's pop, over the **pop region** `P`: the region the pop composites
+ *   (the group's dirty rectangle for a bounded operator, the whole region for an unbounded one) met with the reach of the
+ *   clips in force around the group and with the damage; nothing is drawn when the render would composite nothing of the
+ *   group.  The mask's picture is walked by an expansion of its own under the chain of maps `T I_1 ... I_k Q` (the
+ *   target's map, the enclosing instances', then the group's placement) into **one extra frame**: an isolated layer in the
+ *   mask's render space that starts at `(0, 0, 0, 0)`, whose units are gone through as any unit is, restricted to `P` (a
+ *   unit whose rectangle misses `P` draws nothing).  The clips in force around the group are not in force inside the mask
+ *   (the frame's clip base is the clip count at the pop).  The frame is released at the end of the pop.  A pixel's value in the
+ *   frame does not depend on `P`: every operation is per pixel, so a mask drawn over a window is the crop of the mask drawn
+ *   over the whole region, bit for bit.  A masked group inside a mask picture draws its own frame inside the outer pass.
+ * - **MC3 The value.**  For each pixel of `P` with a nonzero clip weight: the mask frame is read at the pixel (zero outside its
+ *   dirty rectangle, as a group's layer is), and `v` is the waist's MK2 in `double`, each `sat` of N1 at the point MK2 names it:
+ *   `ALPHA`: `clamp01(TR(clamp01(a)))`; `LUMINANCE`: the premultiplied layer converted from the render space to the luminance
+ *   space by N3, `r = sat(c_L + (1 - a) B_L)` with the backdrop `B_L` converted into the luminance space once for the pop,
+ *   `y = sat(k_r r_r + k_g r_g + k_b r_b)` in that order, and `clamp01(TR(clamp01(y)))`.  The coefficients, the spaces and `TR`
+ *   are shape-scene's one resolution and one evaluation (`gshscene_mask_resolve`, `gshscene_mask_transfer`); this sink holds no
+ *   transfer and no coefficient table of its own.  `v` is not rounded: the one rounding of a render is the write (D7).  A
+ *   vector's `v` is exact only where every step is exact in doubles, and otherwise within `1e-12 max(1, |v|)` of the oracle
+ *   before the write (P3's rule), and D7's rule after it.
+ * - **MC4 Applying it.**  For a mask acting on the opacity, each component of the group's converted source is multiplied by
+ *   `o v` where it was multiplied by `o` (the product `o v` is formed first); for one acting on the shape, the pop's weight
+ *   `m8 / 255` becomes `(m8 / 255) v`.  Nothing else in the pop changes: the bounded operator's skip of an all-zero source is
+ *   taken after the multiplication, the pixel is marked touched when `apply` is called, and `apply` is the one every pop uses.
+ *   With `v = 1` the pop is bit for bit the pop of a group with no mask.
+ * - **MC5 Memory is exact.**  The layout counts a mask frame as one more open group at the pop of each masked group, plus
+ *   everything the mask's picture needs while it is drawn: the groups and clips it opens (a masked group inside it adds its
+ *   own mask frame), its gradient fills and their stops, its strokes, and the walk memory of every picture of a mask being
+ *   drawn (`gshscene_expansion_bytes`, one on another), with the frame records and the chain of a mask's unit.  A picture is
+ *   counted once, however many masks name it (a memo of the first 64 pictures; a picture past them is counted again where
+ *   it is used, which changes the time and not the number).  `workspace_bytes` is exact, a `CALLER_MEMORY` render calls no
+ *   allocator and gives the pixels of the render from the sink's own memory, and one byte less is `ERR_LIMIT`.  A list with no
+ *   masked group lays out exactly as before: the mask's state is carved only when the list has one.
+ * - **MC6 Limits inside a mask.**  An item inside a mask's picture meets the sink's limits (cells, points, the coordinate range)
+ *   as any item does, and its cell deposits are counted over its rectangle met with the **whole render's** region, never over
+ *   `P` or the damage.  A refusal is `RESOURCE_LIMIT` with the chain `[... , i, j ...]` (`i` the index of the group's push, `j` the
+ *   unit inside the picture, deeper through instances), the item is skipped (the mask lacks it), and a strict render stops with
+ *   the finished prefix.  Whether a mask is drawn at all is decided by the whole render's pop region, kept beside the
+ *   damaged one for the purpose, so a damage-limited render refuses exactly what the whole render refuses, including a mask
+ *   whose group lies outside the damage.  A refusal never depends on a tier.  A bound over the whole region over-counts for a
+ *   small group (an item whose rectangle is large is charged in full): conservative, and deterministic.
+ * - **MC7 Work and cancel.**  The mask pass's work (points, cell deposits, pixel visits of its units) is added to the work of
+ *   the group's pop, and the per-pixel evaluation of MC3 counts one visit for each pixel of `P`, so the pop's composite is two
+ *   passes over its region.  Cancel is checked **between the mask's units** as between any units: the declared
+ *   `cancel_work_bound` is the worst single unit's, which is either a unit of the mask or the pop's composite, and the
+ *   pop's two passes over its pixels are within the bound's two-passes term.  The expansion count and the progress units do
+ *   not count a mask's units.
+ * - **MC8 Fast tiers (AD-13).**  Each is bit-equal to the general tier by construction, can be forced off by a test, is counted,
+ *   and a test shows it taken.  *FT-M1, the outside value:* a pixel of `P` outside the mask frame's dirty rectangle has the
+ *   layer `(0, 0, 0, 0)`, so `v` is MK5's constant, found once for the pop by the same function and used for those pixels.
+ *   *FT-M2, the identity transfer:* the transfer's call is skipped for the identity (the clamp remains).  Both are the general
+ *   formula with a constant or an identity folded.  A list holding a masked group is composited in double layers, not the byte
+ *   layers of the fast fill coverage: a mask is never quantized to 8 bits between its layer and the write.
+ * - **MC9 Cost for groups that set nothing.**  A group with no mask pays no mask code: no frame, no walk memory in the layout, no
+ *   per-pixel call.  A list with no masked group has the `workspace_bytes`, the work counts, the pixels and the hashes it had
+ *   before masks.
+ * - **MC10 State.**  A render keeps nothing about a mask after its pop: no cache, nothing held by `prepare`, `evict` and
+ *   `static_bytes` unchanged; renders on distinct surfaces and threads cannot interact through masks.
+ *
  * ### Memory (S9)
  *
  * A render takes one block: the layers (32 bytes a pixel of the region for the
- * root and for each level of group nesting), the touched map and the coverage
+ * root and for each level of group nesting, a mask frame counting as one), the touched map and the coverage
  * scratch (a byte a pixel each), a byte a pixel for each level of clip nesting,
  * the cell accumulator of ::GSHCPU_RENDER_BAND_ROWS rows, the walk, and for
  * gradients a table of twice the gradient fills of the expansion (a picture's
- * counted where it is drawn) and room for their stops, and, only when the expansion holds a stroke that aligns, three
+ * counted where it is drawn) and room for their stops, and, only when a group has a mask, the mask frame of MC5, and, only when the expansion holds a stroke that aligns, three
  * more arrays of a byte a pixel (the aligned part, the clip path's coverage and their composition, SC5), and, only when it
  * holds a stroke, the exact step's memory (UC9: a count and a place for each cell of a band as wide as the whole render's
  * region, a pool of pieces and the scratch of one cell, sized by `max_exact_fragments`).  The

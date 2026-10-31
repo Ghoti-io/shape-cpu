@@ -39,10 +39,15 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   scene stores (gray, RGB and RGBA at 8, 12 and 16 bits and as floats). The filter is chosen once for a fill by whether its
   map stretches every direction. The image is read in place and never copied, and the sink's sampler equals the image oracle's
   vectors; `GSHCPU_Limits.max_area_pixel_work` and `max_image_work` bound the work of `AREA` before any pixel is drawn.
+  Soft masks: a group whose mask resource is an alpha or luminance mask of a picture (every coefficient set, any render and
+  luminance spaces, a backdrop, an exponential, table or stitching transfer, acting on the opacity or the shape) is drawn at its
+  pop with the mask's value at each pixel weighing the composite, in `double` with no rounding before the write; the mask's
+  picture is drawn over the pop region only, in memory the layout counts exactly. A mask is not a clip: two abutting shapes in a
+  mask give three quarters where they share a half-covered pixel.
   `gshcpu_render_hash` and `gshcpu_render_dump` spell a render; the
   fixture set's renders are committed goldens, the same on every target.
   `examples/render.c` renders a list; `examples/stroke.c` strokes a path and shows the cache serve a translation;
-  `examples/image.c` draws an image with two filters and checks what each does.
+  `examples/image.c` draws an image with two filters and checks what each does; `examples/mask.c` draws an alpha and a luminance mask.
 
 ## Building
 
