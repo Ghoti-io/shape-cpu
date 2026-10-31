@@ -2267,7 +2267,7 @@ static GSHSCENE_Result group_pop_masked(Run * run, const size_t * chain, size_t 
   widen(run, parent, region);
   const unsigned tiers = run->cs->tiers;
   const int outside_tier = (tiers & GSHCPU_RENDER_TIER_MASK_OUTSIDE) != 0;
-  const int identity_tier = (tiers & GSHCPU_RENDER_TIER_MASK_IDENTITY) != 0 && me.identity;
+  const int identity_tier = (tiers & GSHCPU_RENDER_TIER_MASK_IDENTITY) != 0;
   int have_outside = 0;
   int took_outside = 0;
   int evaluated = 0;
@@ -2328,10 +2328,14 @@ static GSHSCENE_Result group_pop_masked(Run * run, const size_t * chain, size_t 
     gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_pixels),
         (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0));
   }
+  if (!gshcpu_render_rect_empty(mf->dirty)) {
+    gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_dirty),
+        (uint64_t)(mf->dirty.x1 - mf->dirty.x0) * (uint64_t)(mf->dirty.y1 - mf->dirty.y0));
+  }
   if (took_outside) {
     gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_outside));
   }
-  if (identity_tier && evaluated) {
+  if (identity_tier && me.identity && evaluated) {
     gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_identity));
   }
   run->top--;

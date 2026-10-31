@@ -141,7 +141,7 @@ int gshcpu_render_mask_prepare(GSHCPU_Mask_Eval * e, const GSHSCENE_Resource * m
 
 /**
  * MC3: the mask's value `v` in `[0, 1]` for the premultiplied pixel @p g of the mask frame (in the frame's space), in `double`.
- * @p identity_tier: skip the transfer's call for an identity transfer (FT-M2); the result is the same bit for bit.
+ * @p identity_tier: skip the transfer's call where it is the identity (FT-M2); the result is the same bit for bit.
  */
 double gshcpu_render_mask_value(const GSHCPU_Mask_Eval * e, const double g[4], int identity_tier);
 
@@ -846,7 +846,8 @@ typedef struct GSHCPU_Render_Counters {
   uint64_t masks;            /* masked groups composited (MC2: a mask frame rendered and its value found for each pixel) */
   uint64_t mask_outside;     /* ... of them with a pixel that took FT-M1, the outside value */
   uint64_t mask_identity;    /* ... of them whose transfer is the identity and not called (FT-M2) */
-  uint64_t mask_pixels;      /* the pixels the masks were drawn over: the pop regions P (MC2), added up */
+  uint64_t mask_pixels;      /* the pixels of the pop regions P (MC2) of the masked groups, added up */
+  uint64_t mask_dirty;       /* the pixels the mask frames were drawn on: their dirty rectangles, which MC2 holds inside P */
 } GSHCPU_Render_Counters;
 
 /** What identifies an expansion in the cache (SC7). */

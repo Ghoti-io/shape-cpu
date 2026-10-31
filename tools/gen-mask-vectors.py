@@ -401,6 +401,7 @@ def cases():
         [group(1.0, 0, LIN)] + masked(mask([fill([1, 1, 1, 0.5])]), composite=0, opacity=0.75) + [UNGROUP])
     add("a masked group of its own space, a mask rendered in the enclosing one",
         masked(mask([fill([0.9, 0.2, 0.1, 0.75])], mode=LUMINANCE, coefficients=LUM), blend=P3))
+    add("a masked group whose only content is a group", [group(mask=mask([fill([1, 1, 1, 0.5])])), group(0.5), fill([1, 0, 0, 1]), UNGROUP, UNGROUP])
     add("nested masked groups", [group(0.75, 0, ZSPACE, mask([fill([1, 1, 1, 0.5])])), fill([1, 0, 0, 1]),
                                  group(1.0, 0, ZSPACE, mask([fill([1, 1, 1, 0.5], 40)], acts_on=SHAPE)), fill([0, 0, 1, 1]), UNGROUP, UNGROUP])
     # a mask of a mask: the picture's own group is masked

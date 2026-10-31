@@ -33,8 +33,10 @@
 #include <ghoti.io/shape-scene/shape-scene.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <map>
+#include <thread>
 
 using namespace mh;
 
@@ -289,6 +291,7 @@ TEST(RenderMask, TheMaskIsDrawnOverThePopRegionAndNoMore) {
     ASSERT_EQ(d.result, GSHSCENE_OK) << c.what;
     EXPECT_EQ(d.counters.masks, 1u) << c.what;
     EXPECT_EQ(d.counters.mask_pixels, c.pixels) << c.what;
+    EXPECT_EQ(d.counters.mask_dirty, c.pixels) << c.what << ": the mask frame is drawn on those pixels and no others (a picture that covers the region)";
   }
 }
 
@@ -500,6 +503,7 @@ struct Deep {
     GSHSCENE_Stroke_Style st;
     gshscene_stroke_style_init(&st);
     st.width = 2.0;
+    st.alignment = GSHSCENE_STROKE_ALIGN_INSIDE; /* an aligned stroke needs the arrays the layout adds for one */
     const GSHSCENE_Resource * style = nullptr;
     EXPECT_EQ(gshscene_store_intern_stroke_style(s.store, &st, &style), GSHSCENE_OK);
     s.held.push_back(style);
@@ -509,12 +513,19 @@ struct Deep {
       GSHSCENE_Group g = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, s.alpha_mask(level));
       EXPECT_EQ(gshscene_list_group_push(up, &g, 0, 0.0), GSHSCENE_OK);
       GSHSCENE_Paint w = white();
+      if (decorated) {
+        EXPECT_EQ(gshscene_list_clip_push(up, s.rect(0, 0, 13, 13), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0), GSHSCENE_OK);
+      }
       EXPECT_EQ(gshscene_list_fill(up, s.rect(0, 0, 14 + k, 14 + k), nullptr, GSHGEOM_FILL_NONZERO, decorated ? &gp : &w, 0, 0.0),
           GSHSCENE_OK);
+      if (decorated) {
+        EXPECT_EQ(gshscene_list_clip_pop(up), GSHSCENE_OK);
+      }
       if (decorated) {
         EXPECT_EQ(gshscene_list_stroke(up, s.polygon({1, 1, 12, 3, 5, 12}), style, nullptr, &w, 0, 0.0), GSHSCENE_OK);
       }
       EXPECT_EQ(gshscene_list_group_pop(up), GSHSCENE_OK);
+      EXPECT_EQ(gshscene_list_fill(up, s.rect(0, 14 + k, 12, 15 + k), nullptr, GSHGEOM_FILL_NONZERO, &w, 0, 0.0), GSHSCENE_OK) << "a unit after the masked group: the outer walk goes on after the inner pass";
       level = s.picture(up);
     }
     list = s.masked_fill(s.alpha_mask(level), s.rect(0, 0, 24, 24), red());
@@ -533,6 +544,7 @@ TEST(RenderMask, AMaskOfAMaskOfAMaskDrawsOnlyWhatEveryLevelCovers) {
   EXPECT_EQ(out.at8(11, 11, 3), 255u);
   EXPECT_EQ(out.at8(12, 11, 3), 0u);
   EXPECT_EQ(out.at8(11, 12, 3), 0u);
+  EXPECT_EQ(out.at8(5, 20, 3), 255u) << "the strip the outermost picture draws after its masked group: the walk goes on after the inner pass";
 }
 
 // MC5: every masked fixture, a mask of a mask, and a mask picture holding gradients and strokes render from the caller's memory
@@ -639,6 +651,40 @@ TEST(RenderMask, AListOfMoreDistinctMaskPicturesThanTheMemoHoldsIsStillExact) {
   ASSERT_EQ(out.result, GSHSCENE_OK);
   EXPECT_EQ(out.bytes, ref.bytes);
   EXPECT_EQ(out.counters.masks, 90u);
+}
+
+// MC5: the arena is sized by the items of the mask's picture too: a picture with one large path in it, drawn from the exact memory.
+TEST(RenderMask, TheArenaIsSizedByTheItemsOfTheMasksPictureToo) {
+  Scene s;
+  std::vector<double> zigzag;
+  for (int i = 0; i < 600; i++) {
+    zigzag.push_back(0.5 + 23.0 * (double)i / 599.0);
+    zigzag.push_back(i % 2 ? 2.0 : 22.0);
+  }
+  const GSHSCENE_Resource * mask = s.alpha_mask(s.picture_of(s.polygon(zigzag), white()));
+  GSHSCENE_List * l = s.masked_fill(mask, s.rect(0, 0, 24, 24), red());
+  Draw ref = draw(l, 24, 24);
+  Options caller;
+  caller.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+  Draw out = draw(l, 24, 24, caller);
+  ASSERT_EQ(ref.result, GSHSCENE_OK);
+  EXPECT_EQ(out.result, GSHSCENE_OK) << "the exact memory holds the mask's largest item";
+  EXPECT_EQ(out.bytes, ref.bytes);
+  // The same list with a mask of a small picture needs less: the need depends on the picture's largest item.
+  Scene t;
+  GSHSCENE_List * small = t.masked_fill(t.alpha_mask(t.picture_of(t.rect(0, 0, 24, 24), white())), t.rect(0, 0, 24, 24), red());
+  Draw little = draw(small, 24, 24);
+  EXPECT_GT(ref.need, little.need + 600u * 16u);
+}
+
+// MC7: a masked pop counts its region twice: the pixels visited and the value found for each, so the worst unit of a render of a
+// masked group over a region of 100 pixels is the pop's 200, past the push's 144 and the units of the mask's own.
+TEST(RenderMask, AMaskedPopCountsItsRegionTwice) {
+  Scene s;
+  const GSHSCENE_Resource * mask = s.alpha_mask(s.picture_of(s.rect(0, 0, 10, 10), white()));
+  Draw d = draw(s.masked_fill(mask, s.rect(0, 0, 10, 10), red()), 12, 12);
+  ASSERT_EQ(d.result, GSHSCENE_OK);
+  EXPECT_EQ(d.summary.work_max, 200u);
 }
 
 /* --- MC6, MC7: refusals inside a mask, notices, cancel ---------------------------------------------------------------- */
@@ -1038,6 +1084,171 @@ TEST(RenderMask, ADamageThatMissesTheGroupTouchesNothingAndDrawsNoMask) {
         EXPECT_EQ(d.px(x, y), std::string(4, '\0')) << "outside the damage nothing is touched: " << x << "," << y;
       }
     }
+  }
+}
+
+/* --- MC10: no state ----------------------------------------------------------------------------------------------------- */
+
+// A render keeps nothing about a mask after its pop: renders of masked lists on distinct surfaces, from several threads through
+// one sink, give the bytes a lone render gives, and the sink holds no byte for them.
+TEST(RenderMask, RendersOnDistinctSurfacesFromManyThreadsDoNotInteractThroughMasks) {
+  Deep deep(3, false); // (strokes in a picture are cached as any stroke is, SC7: the sink then holds their expansions)
+  StarScene star;
+  Options lone;
+  lone.backdrop = true;
+  const Draw want_deep = draw(deep.list, 24, 24, lone);
+  const Draw want_star = draw(star.list, 32, 32, lone);
+  ASSERT_EQ(want_deep.result, GSHSCENE_OK);
+  ASSERT_EQ(want_star.result, GSHSCENE_OK);
+  SinkRef sink;
+  uint64_t kept = 1;
+  EXPECT_EQ(gshscene_sink_static_bytes(sink.sink, &kept), GSHSCENE_OK);
+  EXPECT_EQ(kept, 0u) << "nothing is kept before a render";
+  std::atomic<int> wrong{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < 6; t++) {
+    threads.emplace_back([&, t]() {
+      for (int k = 0; k < 6; k++) {
+        const bool first = (t + k) % 2 == 0;
+        const GSHSCENE_List * list = first ? deep.list : star.list;
+        const uint32_t size = first ? 24 : 32;
+        RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, size, size));
+        ReportRef report;
+        GSHSCENE_Target target = target_of(r.raster);
+        GSHSCENE_Render_Request req = request_of(list, &target, report.report);
+        if (gshscene_sink_render(sink.sink, &req) != GSHSCENE_OK || r.bytes() != (first ? want_deep.bytes : want_star.bytes)) {
+          wrong++;
+        }
+      }
+    });
+  }
+  for (std::thread & th : threads) {
+    th.join();
+  }
+  EXPECT_EQ(wrong.load(), 0);
+  EXPECT_EQ(gshscene_sink_static_bytes(sink.sink, &kept), GSHSCENE_OK);
+  EXPECT_EQ(kept, 0u) << "a render keeps nothing about a mask: no cache, nothing held by the sink";
+}
+
+// MC5: the arena is sized by a mask picture's items at every depth: the largest item is in the picture of a mask inside a mask.
+TEST(RenderMask, TheArenaIsSizedByTheItemsOfAMaskInsideAMaskToo) {
+  Scene s;
+  std::vector<double> zigzag;
+  for (int i = 0; i < 600; i++) {
+    zigzag.push_back(0.5 + 23.0 * (double)i / 599.0);
+    zigzag.push_back(i % 2 ? 2.0 : 22.0);
+  }
+  const GSHSCENE_Resource * inner = s.alpha_mask(s.picture_of(s.polygon(zigzag), white()));
+  GSHSCENE_List * pl = s.open();
+  GSHSCENE_Group g = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, inner);
+  ASSERT_EQ(gshscene_list_group_push(pl, &g, 0, 0.0), GSHSCENE_OK);
+  GSHSCENE_Paint w = white();
+  ASSERT_EQ(gshscene_list_fill(pl, s.rect(0, 0, 24, 24), nullptr, GSHGEOM_FILL_NONZERO, &w, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_pop(pl), GSHSCENE_OK);
+  GSHSCENE_List * l = s.masked_fill(s.alpha_mask(s.picture(pl)), s.rect(0, 0, 24, 24), red());
+  Draw ref = draw(l, 24, 24);
+  Options caller;
+  caller.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+  Draw out = draw(l, 24, 24, caller);
+  ASSERT_EQ(ref.result, GSHSCENE_OK);
+  EXPECT_EQ(out.result, GSHSCENE_OK) << "the exact memory holds the largest item of the mask inside the mask";
+  EXPECT_EQ(out.bytes, ref.bytes);
+}
+
+// MC7: the work of the mask's units is the work of the group's pop: a mask picture holding a stroke of a long polyline (whose
+// expansion alone is the worst unit) gives the render a work between two checks at least what that stroke is alone.
+TEST(RenderMask, TheWorkOfTheMasksUnitsCountsInTheWorkBetweenTwoChecks) {
+  Scene s;
+  std::vector<double> zigzag;
+  for (int i = 0; i < 600; i++) {
+    zigzag.push_back(0.5 + 23.0 * (double)i / 599.0);
+    zigzag.push_back(i % 2 ? 2.0 : 22.0);
+  }
+  GSHSCENE_Stroke_Style st;
+  gshscene_stroke_style_init(&st);
+  st.width = 1.5;
+  const GSHSCENE_Resource * style = nullptr;
+  ASSERT_EQ(gshscene_store_intern_stroke_style(s.store, &st, &style), GSHSCENE_OK);
+  s.held.push_back(style);
+  const GSHSCENE_Resource * line = s.polygon(zigzag);
+  GSHSCENE_Paint w = white();
+  GSHSCENE_List * alone = s.open();
+  ASSERT_EQ(gshscene_list_stroke(alone, line, style, nullptr, &w, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(alone), GSHSCENE_OK);
+  GSHSCENE_List * pl = s.open();
+  ASSERT_EQ(gshscene_list_stroke(pl, line, style, nullptr, &w, 0, 0.0), GSHSCENE_OK);
+  GSHSCENE_List * masked = s.masked_fill(s.alpha_mask(s.picture(pl)), s.rect(0, 0, 24, 24), red());
+  Draw one = draw(alone, 24, 24);
+  Draw two = draw(masked, 24, 24);
+  ASSERT_EQ(one.result, GSHSCENE_OK);
+  ASSERT_EQ(two.result, GSHSCENE_OK);
+  EXPECT_GT(one.summary.work_max, 4u * 24u * 24u) << "the stroke is the worst unit";
+  EXPECT_GE(two.summary.work_max, one.summary.work_max) << "and its work in the mask is counted";
+}
+
+// MC6, MC2: a masked group that draws nothing in the whole render has no mask drawn for it, and the group before it at the same
+// depth leaves nothing of its own behind.
+TEST(RenderMask, AMaskedGroupThatDrawsNothingDrawsNoMask) {
+  Scene s;
+  const GSHSCENE_Resource * mask = s.alpha_mask(s.picture_of(s.rect(0, 0, 16, 16), white()));
+  GSHSCENE_List * l = s.open();
+  GSHSCENE_Paint r = red();
+  GSHSCENE_Group g = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, mask);
+  for (double x : {2.0, 400.0}) { /* the second group's fill is far off the 16 by 16 target */
+    ASSERT_EQ(gshscene_list_group_push(l, &g, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_fill(l, s.rect(x, 2, x + 8, 10), nullptr, GSHGEOM_FILL_NONZERO, &r, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+  }
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  Draw d = draw(l, 16, 16);
+  ASSERT_EQ(d.result, GSHSCENE_OK);
+  EXPECT_EQ(d.counters.masks, 1u) << "the group that draws nothing has no mask drawn for it";
+  EXPECT_EQ(d.counters.mask_pixels, 8u * 8u);
+}
+
+// MC6, MC2: a masked group inside a mask's picture is drawn when the whole render would draw it, which is decided by the whole
+// render's pop region of the outer group (the pixels the outer mask is drawn over), not by the whole region.  The outer group is
+// a few pixels at (30, 30); its mask holds a clipped corner (0, 0) to (8, 8), with an unbounded group in it whose own mask holds
+// a diamond past the cell cap.  The whole render draws the outer mask over (30, 30) to (34, 34), so the clip leaves the inner
+// group nothing to compose and its mask is never drawn: nothing is refused, whole or damaged.
+TEST(RenderMask, AMaskedGroupInsideAMaskIsDrawnOnlyWhereTheWholeRenderDrawsIt) {
+  Scene s;
+  GSHGEOM_Path * p = nullptr;
+  gshgeom_path_create(nullptr, nullptr, 2, &p);
+  gshgeom_path_move_to(p, GSHGEOM_Point{32.0, 1.0, 0});
+  gshgeom_path_line_to(p, GSHGEOM_Point{62.0, 32.25, 0});
+  gshgeom_path_line_to(p, GSHGEOM_Point{32.5, 62.0, 0});
+  gshgeom_path_line_to(p, GSHGEOM_Point{1.0, 31.75, 0});
+  gshgeom_path_close(p);
+  const GSHSCENE_Resource * inner_mask = s.alpha_mask(s.picture_of(s.path(p), white()));
+  GSHSCENE_List * pl = s.open();
+  GSHSCENE_Paint w = white();
+  ASSERT_EQ(gshscene_list_clip_push(pl, s.rect(0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0), GSHSCENE_OK);
+  GSHSCENE_Group inner = s.group(1.0, GSHSCENE_COMPOSITE_DEST_IN, inner_mask);
+  ASSERT_EQ(gshscene_list_group_push(pl, &inner, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(pl, s.rect(0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, &w, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_pop(pl), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_clip_pop(pl), GSHSCENE_OK);
+  const GSHSCENE_Resource * outer_mask = s.alpha_mask(s.picture(pl));
+  GSHSCENE_List * l = s.open();
+  GSHSCENE_Paint r = red();
+  GSHSCENE_Group outer = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, outer_mask);
+  ASSERT_EQ(gshscene_list_group_push(l, &outer, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(30, 30, 34, 34), nullptr, GSHGEOM_FILL_NONZERO, &r, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  limits.max_deposits = 40;
+  const GSHSCENE_Rect windows[] = {{0, 0, 64, 64}, {30, 30, 34, 34}, {0, 0, 8, 8}, {20, 20, 40, 40}};
+  for (const GSHSCENE_Rect & win : windows) {
+    Options opt;
+    opt.limits = &limits;
+    opt.damage = &win;
+    Draw d = draw(l, 64, 64, opt);
+    ASSERT_EQ(d.result, GSHSCENE_OK);
+    EXPECT_EQ(d.count(GSHSCENE_ENTRY_REFUSED), 0u) << "the inner mask is not drawn, so nothing in it is refused (window " << win.x0 << "," << win.y0 << ")";
+    EXPECT_EQ(d.counters.masks, 1u) << "only the outer mask, drawn whenever the whole render would draw it (over an empty window where the damage holds none of the group)";
   }
 }
 
