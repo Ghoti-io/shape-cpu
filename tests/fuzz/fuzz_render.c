@@ -48,7 +48,13 @@
  * sixteenth of a pixel, wide), both width spaces, every join, cap and alignment, either alignment rule, either
  * degenerate rule, dashes of a few patterns in either scope.  The sink draws it by expansion, a stroke of a glyph run too
  * (strokes story S5: the path ::gshscene_glyph_run_centerline defines for it), and no stroke is ever refused for its
- * kind.  The render is then drawn again by a second sink with every fast tier off, and the bytes must be the same.  A
+ * kind.  The render is then drawn again by a second sink with every fast tier off, and the bytes must be the same.  Masks (masks
+ * story M2): with the request byte's bit 7 set, a group whose blend byte has bits 7 and 5 as 0 and 1 takes a soft mask from the
+ * bytes that follow: alpha or luminance, a coefficient set, either thing it acts on, a transfer of any kind, the picture's and
+ * the luminance's spaces, a backdrop, a placement (identity, a translation, a scale, a turn, a singular map), and a picture of
+ * one to three fills (solid, gradient or image paints, under maps, clips and groups, and a masked group of its own to a depth
+ * of two); the render's invariants then hold with masks in it, the two mask tiers off give the same bytes, and a refusal inside a
+ * mask picture is the same in a damage-limited render.  A
  * list that holds a stroke of a run is also rebuilt with each such centerline replaced by its path (ST11): drawn, it is
  * the same bytes.
  *
@@ -107,7 +113,8 @@ enum {
   OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_STROKE_RUN_DRAWN, OUT_STROKE_DRAWN, OUT_STROKE_ALIGNED, OUT_STROKE_CACHED,
   OUT_STROKE_SPARSE, OUT_STROKE_NOTICE, OUT_STROKE_EXACT, OUT_STROKE_RUN_TWIN, OUT_STROKE_DUAL,
   OUT_BUDGET_REFUSED, OUT_BUDGET_SAME, OUT_IMAGE_DRAWN, OUT_IMAGE_AREA, OUT_IMAGE_LIMIT, OUT_IMAGE_NOTICE, OUT_IMAGE_TINT,
-  OUT_IMAGE_STROKE, OUT_COUNT
+  OUT_IMAGE_STROKE, OUT_MASK_DRAWN, OUT_MASK_LUMINANCE, OUT_MASK_NESTED, OUT_MASK_OUTSIDE, OUT_MASK_IDENTITY,
+  OUT_MASK_REFUSED_INSIDE, OUT_MASK_TIERS_EQUAL, OUT_MASK_DAMAGE, OUT_MASK_CALLER_MEMORY, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -127,7 +134,11 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a render under a tightened budget or piece cap that refused nothing, the same bytes as the default limits",
     "a render with an image paint drawn (IC1)", "an image drawn with the AREA filter (IC7)",
     "an image item refused for the sink's work or domain limit (IC9)", "an image fill that draws nothing (a notice)",
-    "an alpha-only image drawn with a tint (IP9)", "a stroke painted with an image"};
+    "an alpha-only image drawn with a tint (IP9)", "a stroke painted with an image",
+    "a render with a masked group composited (MC1)", "a luminance mask composited (MC3)", "a mask of a mask (MC2)",
+    "a masked pop that took the outside value (FT-M1)", "a masked pop that skipped an identity transfer (FT-M2)",
+    "an item inside a mask picture refused for a sink limit (MC6)", "a masked render equal to the render with both mask tiers off (MC8)",
+    "a damage-limited render of a masked group equal to the whole render (MC6)", "a masked render in caller memory (MC5)"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -246,6 +257,11 @@ typedef struct World {
   size_t aligned;                    /* ... whose style aligns */
   int aligned_style;
   double dashes[4];                  /* the style's dash lengths */
+  const GSHGEOM_Allocator * alloc;   /* the harness's counting allocator: the pictures of masks are made through it */
+  int masks_on;                      /* the request byte's bit 7: a group may take a mask */
+  size_t masks;                      /* groups recorded with a mask */
+  size_t mask_luminance;             /* ... of luminance */
+  size_t mask_nested;                /* ... masks inside a mask's picture */
 } World;
 
 static void intern_paths(Input * in, GSHSCENE_Store * store, const GSHGEOM_Allocator * alloc, World * w) {
@@ -670,6 +686,175 @@ static void paint_of(Input * in, World * w, GSHSCENE_Paint * paint, const GSHSCE
   }
 }
 
+static const GSHSCENE_Resource * mask_of(Input * in, World * w, int depth);
+
+/** A group's mask placement from a byte: identity (zero-filled), a translation, a scale, a turn about (32, 32), a singular map. */
+static void placement_of(uint8_t b, GSHGEOM_Map * map) {
+  GSHGEOM_Map a, c;
+  switch (b % 7) {
+    case 1:
+      gshgeom_map_translate(2, (double)(b >> 3) - 8.0, (double)(b >> 4) - 4.0, 0.0, map);
+      break;
+    case 2:
+      gshgeom_map_scale(2, 1.5, 0.75, 1.0, map);
+      break;
+    case 3:
+      gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, (double)(b >> 3) * 4.0, &a);
+      gshgeom_map_translate(2, 32.0, 32.0, 0.0, &c);
+      gshgeom_map_compose(&c, &a, map);
+      break;
+    case 4:
+      gshgeom_map_scale(2, 0.0, 1.0, 1.0, map); /* singular: every item of the picture is degenerate (MK5) */
+      break;
+    default:
+      memset(map, 0, sizeof *map); /* the identity, as a group with no placement has it */
+      break;
+  }
+}
+
+/**
+ * A soft mask from the bytes (masks story M2), or NULL where nothing can be made of it (the picture or the mask is refused at
+ * intern: a limit, or the store out of memory).  Bytes: the picture's shape (how many fills, a clip around the last, a
+ * masked group of its own), the mode, coefficient set, acts-on and backdrop, the transfer, the two spaces; then each fill's
+ * path, map, paint and rule as a list's fill.  The caller holds the reference.
+ */
+static const GSHSCENE_Resource * mask_of(Input * in, World * w, int depth) {
+  const uint8_t shape = next(in);
+  const uint8_t mode = next(in);
+  const uint8_t transfer = next(in);
+  const uint8_t spaces = next(in);
+  GSHSCENE_List * picture_list = NULL;
+  if (!w->store || !w->path_count || gshscene_list_create(w->alloc, NULL, w->store, &picture_list) != GSHSCENE_OK) {
+    return NULL;
+  }
+  const size_t fills = 1u + shape % 3u;
+  int nested = 0;
+  for (size_t i = 0; i < fills; i++) {
+    GSHGEOM_Map map;
+    GSHSCENE_Paint paint;
+    const GSHSCENE_Resource * held = NULL;
+    const GSHSCENE_Resource * path = w->paths[next(in) % w->path_count];
+    map_of(in, &map);
+    paint_of(in, w, &paint, &held);
+    int past = 0;
+    for (int k = 0; k < 3; k++) {
+      past |= !(paint.rgba[k] >= -0x1p16 && paint.rgba[k] <= 0x1p16);
+    }
+    const uint8_t rule = next(in);
+    const GSHSCENE_Resource * inner = NULL;
+    const int wrap = depth < 2 && (shape & 0x20) && i == 0;
+    const int clipped = (shape & 0x40) && i + 1 == fills;
+    int group_open = 0;
+    int clip_open = 0;
+    if (wrap) {
+      inner = mask_of(in, w, depth + 1);
+      GSHSCENE_Group group;
+      memset(&group, 0, sizeof group);
+      group.opacity = (double)(1 + rule % 4) / 4.0;
+      group.soft_mask = inner;
+      group_open = gshscene_list_group_push(picture_list, &group, 0, 0.0) == GSHSCENE_OK;
+      nested += group_open && inner != NULL;
+    }
+    if (clipped) {
+      clip_open = gshscene_list_clip_push(picture_list, path, &map, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK;
+    }
+    GSHSCENE_Result fr = past ? GSHSCENE_ERR_LIMIT
+                              : gshscene_list_fill(picture_list, path, &map, rule & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint, 0, 0.0);
+    w->gradients += held != NULL && paint.kind == GSHSCENE_PAINT_GRADIENT && fr == GSHSCENE_OK;
+    w->images += held != NULL && paint.kind == GSHSCENE_PAINT_IMAGE && fr == GSHSCENE_OK;
+    gshscene_resource_release(held);
+    if (clip_open) {
+      CHECK(gshscene_list_clip_pop(picture_list) == GSHSCENE_OK);
+    }
+    if (group_open) {
+      CHECK(gshscene_list_group_pop(picture_list) == GSHSCENE_OK);
+    }
+    gshscene_resource_release(inner);
+  }
+  const GSHSCENE_Result closed = gshscene_list_close(picture_list);
+  CHECK(closed == GSHSCENE_OK || closed == GSHSCENE_ERR_OOM);
+  if (closed != GSHSCENE_OK) {
+    gshscene_list_destroy(picture_list);
+    return NULL;
+  }
+  const GSHSCENE_Resource * picture = NULL;
+  GSHSCENE_Result pr = gshscene_store_intern_picture(w->store, picture_list, &picture);
+  gshscene_list_destroy(picture_list);
+  CHECK(pr == GSHSCENE_OK || pr == GSHSCENE_ERR_OOM || pr == GSHSCENE_ERR_LIMIT);
+  if (pr != GSHSCENE_OK) {
+    return NULL;
+  }
+  GSHSCENE_Mask m;
+  memset(&m, 0, sizeof m);
+  m.picture = picture;
+  m.acts_on = (mode >> 3) & 1u;
+  const int luminance = mode & 1u;
+  m.mode = luminance ? GSHSCENE_MASK_LUMINANCE : GSHSCENE_MASK_ALPHA;
+  if (luminance) {
+    m.coefficients = (mode >> 1) & 3u;
+    m.space = gradient_space((uint8_t)(spaces >> 4));
+    static const double backdrops[8][3] = {{0, 0, 0}, {0.5, 0.5, 0.5}, {1, 1, 1}, {0.25, 0.5, 1.0}, {0.9, 0.1, 0.2}, {0, 0, 0}, {0.5, 0.5, 0.5}, {2, 0.125, 0}};
+    memcpy(m.backdrop, backdrops[(mode >> 4) & 7u], sizeof m.backdrop);
+    if ((mode >> 4 & 7u) == 7u) {
+      m.backdrop_space = gradient_space((uint8_t)(spaces >> 4 ^ 2));
+    }
+  }
+  m.render_space = gradient_space(spaces);
+  double samples[4];
+  GSHSCENE_Transfer_Piece pieces[2];
+  switch (transfer & 3u) {
+    case 1: {
+      static const double exponents[4] = {0.0, 0.5, 1.0, 2.0};
+      m.transfer.kind = GSHSCENE_TRANSFER_EXPONENTIAL;
+      m.transfer.c0 = (double)((transfer >> 2) & 3u) / 4.0;
+      m.transfer.c1 = 1.0 - (double)((transfer >> 4) & 3u) / 8.0;
+      m.transfer.n = exponents[(transfer >> 6) & 3u];
+      break;
+    }
+    case 2:
+      m.transfer.kind = GSHSCENE_TRANSFER_TABLE;
+      m.transfer.sample_count = 2u + (transfer >> 2) % 3u;
+      for (size_t i = 0; i < m.transfer.sample_count; i++) {
+        samples[i] = (double)next(in) / 255.0;
+      }
+      m.transfer.samples = samples;
+      break;
+    case 3: {
+      const double cut = (double)(1 + (transfer >> 2) % 3u) / 4.0;
+      memset(pieces, 0, sizeof pieces);
+      pieces[0].lo = 0.0;
+      pieces[0].hi = cut;
+      pieces[0].e0 = 0.0;
+      pieces[0].e1 = 1.0;
+      pieces[0].leaf_kind = GSHSCENE_TRANSFER_IDENTITY;
+      pieces[1].lo = cut;
+      pieces[1].hi = 1.0;
+      pieces[1].e0 = 1.0;
+      pieces[1].e1 = 0.25;
+      pieces[1].leaf_kind = GSHSCENE_TRANSFER_EXPONENTIAL;
+      pieces[1].c0 = 0.0;
+      pieces[1].c1 = 1.0;
+      pieces[1].n = (transfer >> 5) & 1u ? 2.0 : 0.5;
+      m.transfer.kind = GSHSCENE_TRANSFER_STITCHING;
+      m.transfer.piece_count = 2;
+      m.transfer.pieces = pieces;
+      break;
+    }
+    default:
+      break;
+  }
+  const GSHSCENE_Resource * mask = NULL;
+  GSHSCENE_Result mr = gshscene_store_intern_mask(w->store, &m, &mask);
+  gshscene_resource_release(picture);
+  CHECK(mr == GSHSCENE_OK || mr == GSHSCENE_ERR_OOM || mr == GSHSCENE_ERR_LIMIT || mr == GSHSCENE_ERR_INVALID);
+  if (mr != GSHSCENE_OK) {
+    return NULL;
+  }
+  w->mask_luminance += luminance;
+  w->mask_nested += nested > 0;
+  return mask;
+}
+
 /** Record the list: fills, clips and groups, closed balanced.  @return the deepest group nesting reached. */
 static int record(Input * in, GSHSCENE_List * list, World * w) {
   int clips = 0, groups = 0, open[16], depth = 0, deepest = 0;
@@ -767,7 +952,18 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
       } else if ((blend & 0xA0) == 0x80) {
         group.isolation = GSHSCENE_ISOLATION_NON_ISOLATED;
       }
-      if (gshscene_list_group_push(list, &group, 0, 0.0) == GSHSCENE_OK) {
+      const GSHSCENE_Resource * soft = NULL;
+      if (w->masks_on && (blend & 0xA0) == 0x20) {
+        soft = mask_of(in, w, 0);
+        if (soft) {
+          group.soft_mask = soft;
+          placement_of(next(in), &group.soft_mask_map);
+        }
+      }
+      GSHSCENE_Result gr = gshscene_list_group_push(list, &group, 0, 0.0);
+      gshscene_resource_release(soft); /* the list holds its own reference */
+      if (gr == GSHSCENE_OK) {
+        w->masks += soft != NULL;
         open[depth++] = 1;
         groups++;
         w->blends += group.composite >= GSHSCENE_COMPOSITE_SCREEN;
@@ -1040,6 +1236,8 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     goto done;
   }
   world.store = store;
+  world.alloc = &alloc;
+  world.masks_on = (request_byte & 0x80) != 0;
   intern_paths(&in, store, &alloc, &world);
   intern_runs(&in, store, &tp, &world);
   if (record(&in, list, &world) >= 2) {
@@ -1186,10 +1384,18 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     GSHSCENE_Report_Entry e;
     CHECK(gshscene_report_entry(report, i, &e) == GSHSCENE_OK);
     limit_refused += e.reason == GSHSCENE_REASON_RESOURCE_LIMIT;
-    if (e.reason == GSHSCENE_REASON_GROUP_ISOLATION || e.reason == GSHSCENE_REASON_GROUP_KNOCKOUT ||
-        e.reason == GSHSCENE_REASON_SOFT_MASK) {
+    if (e.reason == GSHSCENE_REASON_GROUP_ISOLATION || e.reason == GSHSCENE_REASON_GROUP_KNOCKOUT) {
       CHECK(e.entry_class == GSHSCENE_ENTRY_REFUSED);
       outcomes[OUT_PDF_REFUSED]++;
+    }
+    /* MC1: this sink claims the soft-mask flag and every mask feature, so neither reason is ever given. */
+    CHECK(e.reason != GSHSCENE_REASON_SOFT_MASK && e.reason != GSHSCENE_REASON_MASK_FEATURE);
+    if (e.reason == GSHSCENE_REASON_RESOURCE_LIMIT && e.chain_count >= 2) {
+      /* MC6: an item inside a mask's picture refused for a limit has the chain [the group's push, the item, ...]. */
+      const GSHSCENE_Item * top = NULL;
+      if (gshscene_list_item(list, e.chain[0], &top) == GSHSCENE_OK && top->kind == GSHSCENE_ITEM_GROUP_PUSH && top->group.soft_mask) {
+        outcomes[OUT_MASK_REFUSED_INSIDE]++;
+      }
     }
     /* The sink claims the seven kinds it draws: nothing is refused for its kind, and a stroke is never refused for its
      * style (every feature is met by expansion, SC1). */
@@ -1260,6 +1466,12 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     }
   }
 
+  outcomes[OUT_MASK_DRAWN] += r == GSHSCENE_OK && counters.masks > 0;
+  outcomes[OUT_MASK_LUMINANCE] += r == GSHSCENE_OK && counters.masks > 0 && world.mask_luminance > 0;
+  outcomes[OUT_MASK_NESTED] += r == GSHSCENE_OK && counters.masks > 0 && world.mask_nested > 0;
+  outcomes[OUT_MASK_OUTSIDE] += counters.mask_outside > 0;
+  outcomes[OUT_MASK_IDENTITY] += counters.mask_identity > 0;
+  outcomes[OUT_MASK_CALLER_MEMORY] += r == GSHSCENE_OK && counters.masks > 0 && (request.flags & GSHSCENE_RENDER_CALLER_MEMORY);
   outcomes[OUT_STROKE_DRAWN] += r == GSHSCENE_OK && counters.strokes > 0;
   outcomes[OUT_STROKE_RUN_DRAWN] += r == GSHSCENE_OK && counters.strokes > 0 && world.run_strokes > 0;
   outcomes[OUT_STROKE_ALIGNED] += r == GSHSCENE_OK && counters.strokes > 0 && world.aligned > 0;
@@ -1354,6 +1566,27 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
           gshscene_sink_destroy(dual);
           gimg_raster_destroy(twin_out);
         }
+        /* MC8: a render that composited a masked group is the render with both mask tiers off, bit for bit. */
+        if (counters.masks > 0) {
+          GSHSCENE_Sink * general = NULL;
+          GIMG_Raster * other = copy_of(backdrop, format);
+          GSHCPU_Render_Counters general_counters;
+          if (other && gshcpu_render_sink_create_tiered(NULL, NULL, &limits,
+                  GSHCPU_RENDER_TIERS_ALL & ~(unsigned)(GSHCPU_RENDER_TIER_MASK_OUTSIDE | GSHCPU_RENDER_TIER_MASK_IDENTITY),
+                  &general_counters, NULL, NULL, &general) == GSHCPU_OK) {
+            target.surface = other;
+            GSHSCENE_Result rm = gshscene_sink_render(general, &request);
+            CHECK(rm == GSHSCENE_OK || rm == GSHSCENE_ERR_OOM);
+            if (rm == GSHSCENE_OK) {
+              CHECK(same_bytes(raster, other));
+              CHECK(general_counters.mask_outside == 0 && general_counters.mask_identity == 0);
+              outcomes[OUT_MASK_TIERS_EQUAL]++;
+            }
+            target.surface = again;
+          }
+          gshscene_sink_destroy(general);
+          gimg_raster_destroy(other);
+        }
         /* ST11: the list with every stroked run replaced by the stroke of its path draws the same bytes. */
         if (world.run_strokes > 0 && counters.strokes > 0 && !(request_byte & 8)) {
           GSHSCENE_List * twin = twin_of(list, store, &alloc);
@@ -1390,6 +1623,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
               }
             }
             outcomes[OUT_DAMAGE]++;
+            outcomes[OUT_MASK_DAMAGE] += counters.masks > 0;
           }
         }
       }

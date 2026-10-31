@@ -29,6 +29,7 @@ import os
 import sys
 
 BIASED_FILES = 120
+BIASED_MASK_FILES = 60
 PLAIN_FILES = 40
 
 # A coordinate byte below 12 picks the table in fuzz_render.c: 0 is 0.0, 2 is 0.5, 9 is 64.0.
@@ -37,6 +38,7 @@ Z, HALF, FULL = 0, 2, 9
 # index into {1, 7, 33, 64}.
 T64 = (3 << 2) | (3 << 4)
 STRICT, CALLER_MEMORY, EXTENT, DAMAGE, SHORT = 1, 2, 4, 8, 16
+MASKS = 128  # the request byte's bit 7: a group whose blend byte has bits 7 and 5 as 0 and 1 takes a soft mask
 
 
 class Rng:
@@ -203,6 +205,26 @@ def header(target=T64, request=0, cancel=0, limit=0, fail=0):
 
 
 STANDARD = [fill(0), group(), fill(1, rule=1), fill(3), fill(7, ROTATED), group(3, 9), fill(0, ROTATED), POP, POP]
+
+
+def mask_bytes(fills=(), shape=0, mode=0, transfer=0, spaces=0, samples=b"", placement=0):
+    """A soft mask's bytes, in fuzz_render.c's mask_of order after a group's five: the shape byte (1 + shape % 3 fills; bit 5 a
+    masked group of its own around the first, bit 6 a clip around the last), the mode byte (bit 0 luminance, bits 1 and 2 the
+    coefficient set, bit 3 acts on the shape, bits 4 to 6 the backdrop), the transfer byte (mod 4: 0 identity, 1 exponential,
+    2 a table of 2 + (b >> 2) % 3 samples, 3 a stitching), the spaces byte (the picture's space low, the luminance's high), each
+    fill (its path pick, map, paint and rule), a table's samples, and then the group's placement byte."""
+    body = b"".join(fills)
+    return bytes([shape, mode, transfer, spaces]) + body + samples + bytes([placement])
+
+
+def inner_fill(pick, map_bytes=b"\x00", rule=0, gradient=None):
+    """One fill of a mask's picture: a record's fill without its op byte."""
+    return fill(pick, map_bytes, rule=rule, gradient=gradient)[1:]
+
+
+def masked_group(mask, opacity=3, composite=0):
+    """A group item whose blend byte (0x20) takes a mask, and the mask's bytes."""
+    return bytes([5, 0, opacity, composite, 0x20]) + mask
 
 
 def scripted():
@@ -386,6 +408,30 @@ def scripted():
     # Found by mutating the image seeds (story I3): under a tightened crossings budget (limit mode 6) the sparse stroke tier painted
     # the bands before the one that met the budget, and the item was then refused, so it was left part drawn; the general tier
     # refuses before it paints.  A stroke whose outline could pass the pieces or crossings limit now takes the general tier.
+    # Masks-images-patterns story M2: a request byte with bit 7 set lets a group take a soft mask (MC1 to MC10).  An alpha mask of the
+    # curve over the square (the mask covers part of the group: the outside value, FT-M1, and an identity transfer, FT-M2), a
+    # luminance mask under a table transfer in linear light, a stitching, a mask on the shape, a mask of a mask, a gradient in
+    # a mask's picture, each on an 8-bit and a float target, in caller memory and damaged.
+    alpha = masked_group(mask_bytes([inner_fill(1)]))
+    luminance = masked_group(mask_bytes([inner_fill(0), inner_fill(1, ROTATED)], shape=1, mode=1 | 2 << 1 | 3 << 4, transfer=2 | 1 << 2,
+                                       spaces=1 | 3 << 4, samples=bytes([20, 200, 90]), placement=1))
+    shape_mask = masked_group(mask_bytes([inner_fill(1)], mode=8, transfer=1 | 2 << 2 | 1 << 4 | 2 << 6, placement=2), composite=6)
+    stitched = masked_group(mask_bytes([inner_fill(0, rule=1)], mode=1, transfer=3 | 1 << 2, spaces=2, placement=3), opacity=2, composite=23)
+    nested = masked_group(mask_bytes([inner_fill(0)] + [mask_bytes([inner_fill(1)])[:-1]], shape=0x21, placement=0))
+    graded = masked_group(mask_bytes([inner_fill(0, gradient=LINEAR)], placement=4))
+    for name, group_bytes in (("alpha", alpha), ("luminance", luminance), ("shape", shape_mask), ("stitching", stitched),
+                              ("nested", nested), ("gradient", graded)):
+        items = [fill(0), group_bytes, fill(1), POP]
+        out["scripted-mask-%s.bin" % name] = header(request=MASKS) + body(items)
+        out["scripted-mask-%s-float.bin" % name] = header(target=T64 | 3, request=MASKS) + body(items)
+        out["scripted-mask-%s-memory-damage.bin" % name] = header(request=MASKS | CALLER_MEMORY | DAMAGE) + body(items)
+    # A mask's picture holds a fill the sink refuses while drawing (an image paint mapped far past the sampling domain, IC9), whole
+    # and damaged and strict: the same refusal with the chain [the group's push, the item], the mask lacking the item (MC6).
+    refused = [fill(0), masked_group(mask_bytes([image_fill(0, image(3, 3, 2, 0, map_kind=5))[1:]])), fill(0), POP]
+    out["scripted-mask-refused.bin"] = header(request=MASKS) + body(refused)
+    out["scripted-mask-refused-damage.bin"] = header(request=MASKS | DAMAGE) + body(refused)
+    out["scripted-mask-refused-strict.bin"] = header(request=MASKS | STRICT) + body(refused)
+    out["scripted-mask-cancel.bin"] = header(request=MASKS, cancel=3) + body([fill(0), alpha, fill(1), POP, fill(0)])
     out["regression-sparse-partial-under-budget.bin"] = base64.b64decode("PAAABgAiBQICAAAAAAAJAgAAAACqCQkAAAAAAQIJAAAAAAEAAAAAAAAFAwIJAAAAAPMAAAkACQkEAAAAAAAABQIMAAIAAAAAAA//AgAAAAC4AQICAgIJAwkCAAACAQICAgIJAwkCAAACAwAAAMhkMv8CBggAAAEDFMhkMv8CBgACAxTIZDL/AgY=")
     out["regression-strict-cells-outside-damage.bin"] = base64.b64decode(
         "cQsAMplAJm0ZT3ZmwR6Jf2Fd7lDCRLR/QSt6/zbm6uHj7bR6JLZqECw6JO+wOwclMCTHsAvBvaXFi6p+svmrTJ+KgxAuG0woagxRNjJeiGcC"
@@ -419,10 +465,24 @@ def plain(seed):
     return bytes(rng.byte() for _ in range(5 + 50 + rng.below(500)))
 
 
+def biased_mask(seed):
+    """A biased file whose request byte lets a group take a mask, and whose body has more groups with the blend bits that take one."""
+    data = bytearray(biased(500 + seed))
+    data[1] |= MASKS
+    rng = Rng(9000 + seed)
+    for _ in range(12):
+        # a group op, a pick, an opacity, an operator, and a blend byte of the masked kind, somewhere in the body
+        at = 5 + rng.below(len(data) - 10)
+        data[at:at + 5] = bytes([5, rng.byte(), rng.byte(), rng.byte(), (rng.byte() & 0x5F) | 0x20])
+    return bytes(data)
+
+
 def files():
     out = {}
     for i in range(BIASED_FILES):
         out["biased-%03d.bin" % i] = biased(i + 1)
+    for i in range(BIASED_MASK_FILES):
+        out["biased-mask-%03d.bin" % i] = biased_mask(i + 1)
     for i in range(PLAIN_FILES):
         out["plain-%03d.bin" % i] = plain(i + 1)
     out.update(scripted())
