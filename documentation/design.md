@@ -341,10 +341,19 @@ element step. Every fixture of the corpus on all four formats agrees with the no
 bytes, and those two differ by a rounding at the one write. A list without these groups takes none of the new code and has the layout, the
 work counts, the pixels and the goldens it had.
 
-**Measured.** The render-level gate against the third restatement of the rules (654 cases, 204 exact, over four combinations, eleven
-operators, three backdrops, clips, nesting, spaces and abutting shapes): worst error before the write 3.3e-16 against the `1e-12`
-bound; shape-scene's installed `group_vectors.h` through the primitives (52 cases, worst 1.1e-16) and through renders where the
-coverage is whole; seven fixtures add 28 goldens and move no earlier one.
+**Measured.** The render-level gate against the third restatement of the rules (672 cases, 210 exact, over four combinations, eleven
+operators, three backdrops, clips, nesting, spaces, abutting shapes and a transparent shape in a child of a knockout group): worst
+error before the write 3.3e-16 against the `1e-12` bound; shape-scene's installed `group_vectors.h` through the primitives (52 cases,
+worst 1.1e-16) and through renders where the coverage is whole; its installed `mask_vectors.h` (485 cases, 156 exact, worst 2.8e-16: every
+mode, transfer and backdrop of a mask under each of the four parents, so `SHAPE` against `OPACITY` is shown for source-over and the
+blend modes under a knockout parent, and for the operators that are not bounded under every parent) through the primitives; seven
+fixtures add 28 goldens and move no earlier one.
+
+**A disagreement the vectors found.** A paint of the zero space is the render target's. Inside a mask's picture the sink converts it from
+the target's space into the mask's render space `R`; shape-scene's oracle draws the picture as a render of its own whose target is `R`,
+and reads the same paint as already in `R`. They agree wherever `R` is the target's space (the mask's own default), and 24 of the 485
+installed vectors have another `R`. The test holds the oracle's reading against all 485 and the sink's against the 461 where they
+agree, and pins the 24, so that whichever reading the waist settles on is seen to be made.
 
 ### A refused stroke draws nothing in every tier
 
