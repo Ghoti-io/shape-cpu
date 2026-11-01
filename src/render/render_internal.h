@@ -848,6 +848,7 @@ typedef struct GSHCPU_Render_Counters {
   uint64_t mask_identity;    /* ... of them whose transfer is the identity and not called (FT-M2) */
   uint64_t mask_pixels;      /* the pixels of the pop regions P (MC2) of the masked groups, added up */
   uint64_t mask_dirty;       /* the pixels the mask frames were drawn on: their dirty rectangles, which MC2 holds inside P */
+  uint64_t mask_pictures;    /* the pictures of masks the layout counted: one for each picture it met, however many masks name it (MC5) */
 } GSHCPU_Render_Counters;
 
 /** What identifies an expansion in the cache (SC7). */
@@ -1200,6 +1201,44 @@ void gshcpu_batch_destroy(GSHCPU_Batch * batch);
  */
 int gshcpu_batch_add(GSHCPU_Batch * batch, const GSHGEOM_Flat_Path * path, int64_t shift_x, int64_t shift_y, GSHCPU_Rect rect,
     const uint8_t color[4], GSHCPU_Result * result);
+
+/* --- the memo of the layout's count of mask pictures (memo.c) -------------------------------------------------------------- */
+
+/** The most bytes of value a memo holds for a key. */
+#define GSHCPU_MEMO_VALUE_MAX 64u
+
+/** The slots of a memo before it takes room of its own (a power of two). */
+#define GSHCPU_MEMO_INLINE 32u
+
+typedef struct GSHCPU_Memo_Slot {
+  uint64_t key;
+  uint64_t full;
+  unsigned char value[GSHCPU_MEMO_VALUE_MAX];
+} GSHCPU_Memo_Slot;
+
+typedef struct GSHCPU_Memo {
+  GSHCPU_Memo_Slot * slots;       /* the table: `first`, or a block of the allocator or of the scratch */
+  size_t cap;                     /* its slots, a power of two */
+  size_t used;                    /* the slots full: at most half of them, or all but one when it cannot grow */
+  size_t value_bytes;
+  const GSHGEOM_Allocator * alloc; /* where a larger table comes from, or NULL */
+  unsigned char * scratch;        /* ... or from here (aligned), when there is no allocator */
+  size_t scratch_left;
+  int heap;                       /* `slots` is the allocator's block */
+  GSHCPU_Memo_Slot first[GSHCPU_MEMO_INLINE];
+} GSHCPU_Memo;
+
+/** An empty memo of values of @p value_bytes; larger tables come from @p alloc, or from @p scratch when @p alloc is NULL. */
+void gshcpu_memo_open(GSHCPU_Memo * memo, size_t value_bytes, const GSHGEOM_Allocator * alloc, void * scratch, size_t scratch_bytes);
+
+/** Copy the value of @p key to @p value and return 1, or return 0 when the memo does not hold it. */
+int gshcpu_memo_find(const GSHCPU_Memo * memo, uint64_t key, void * value);
+
+/** Remember @p value for @p key (not already held); silently nothing when there is no room. */
+void gshcpu_memo_add(GSHCPU_Memo * memo, uint64_t key, const void * value);
+
+/** Give back what the memo took from the allocator. */
+void gshcpu_memo_close(GSHCPU_Memo * memo);
 
 #ifdef __cplusplus
 }

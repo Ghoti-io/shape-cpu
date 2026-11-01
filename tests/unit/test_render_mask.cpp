@@ -653,6 +653,243 @@ TEST(RenderMask, AListOfMoreDistinctMaskPicturesThanTheMemoHoldsIsStillExact) {
   EXPECT_EQ(out.counters.masks, 90u);
 }
 
+namespace {
+
+/**
+ * A list of @p pictures distinct mask pictures, each named by @p uses masked groups (one mask, so one picture each), the uses
+ * coming round by round: every picture is named once, then every picture again, so a picture is named again only after all the
+ * others were met (a memo that forgets what it held when it grew is seen by that, and not by two uses side by side).
+ */
+GSHSCENE_List * many_pictures(Scene & s, int pictures, int uses) {
+  GSHSCENE_List * l = s.open();
+  GSHSCENE_Paint r = red();
+  std::vector<const GSHSCENE_Resource *> masks;
+  for (int k = 0; k < pictures; k++) {
+    GSHSCENE_Paint w = white();
+    GSHSCENE_List * inner = s.open();
+    EXPECT_EQ(gshscene_list_fill(inner, s.rect(0, 0, 8.0 + 0.0625 * (double)k, 8), nullptr, GSHGEOM_FILL_NONZERO, &w, 0, 0.0), GSHSCENE_OK);
+    masks.push_back(s.alpha_mask(s.picture(inner)));
+  }
+  for (int u = 0; u < uses; u++) {
+    for (int k = 0; k < pictures; k++) {
+      GSHSCENE_Group g = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, masks[(size_t)k]);
+      EXPECT_EQ(gshscene_list_group_push(l, &g, 0, 0.0), GSHSCENE_OK);
+      EXPECT_EQ(gshscene_list_fill(l, s.rect(0, (double)((k + u) % 8), 24, (double)((k + u) % 8) + 1), nullptr, GSHGEOM_FILL_NONZERO, &r, 0, 0.0),
+          GSHSCENE_OK);
+      EXPECT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+    }
+  }
+  EXPECT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  return l;
+}
+
+} // namespace
+
+// MC5: the layout walks each mask picture once, however many pictures there are and however many masks name each: the walks are
+// counted (`mask_pictures`), and one list of three pictures says how many layouts a draw makes.  Past the first sixty-four pictures
+// the memo of the first version counted again where a picture was used a second time.  A render from the caller's memory finds the
+// table's room in the caller's buffer, before anything else lives there; the target here is large enough that its layers hold it (a
+// table takes up to about 640 bytes for each picture, and one layer takes 32 bytes for each pixel).
+TEST(RenderMask, TheLayoutWalksEachMaskPictureOnceAtAnyNumberOfPictures) {
+  for (bool caller_memory : {false, true}) {
+    Options opt;
+    if (caller_memory) {
+      opt.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+    }
+    Scene base;
+    Draw three = draw(many_pictures(base, 3, 2), 128, 96, opt);
+    ASSERT_EQ(three.result, GSHSCENE_OK);
+    ASSERT_GT(three.counters.mask_pictures, 0u);
+    ASSERT_EQ(three.counters.mask_pictures % 3u, 0u);
+    const uint64_t layouts = three.counters.mask_pictures / 3u; /* the layouts a draw makes, each walking the three once */
+    for (int pictures : {64, 65, 130, 700}) {
+      Scene s;
+      Draw d = draw(many_pictures(s, pictures, 2), 128, 96, opt);
+      ASSERT_EQ(d.result, GSHSCENE_OK);
+      EXPECT_EQ(d.counters.masks, 2u * (uint64_t)pictures);
+      EXPECT_EQ(d.counters.mask_pictures, layouts * (uint64_t)pictures)
+          << pictures << " pictures, each named twice" << (caller_memory ? ", from the caller's memory" : "");
+    }
+  }
+}
+
+// ... and a render from the caller's memory takes the memo's room from its own buffer and calls the allocator for nothing, whatever the
+// number of pictures: sizing in the buffer, then two renders.
+TEST(RenderMask, TheLayoutsMemoInTheCallersWorkspaceNeverCallsTheAllocator) {
+  Scene s;
+  GSHSCENE_List * list = many_pictures(s, 300, 2);
+  tracker::Tracker t;
+  GSHSCENE_Allocator alloc = tracker::allocator_for(&t);
+  {
+    Options plain;
+    plain.alloc = &alloc;
+    plain.backdrop = true;
+    Draw ref = draw(list, 128, 96, plain);
+    ASSERT_EQ(ref.result, GSHSCENE_OK);
+    SinkRef sink(nullptr, &alloc);
+    ReportRef report(&alloc);
+    RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, 128, 96));
+    GSHSCENE_Target target = target_of(r.raster);
+    GSHSCENE_Render_Request req = request_of(list, &target, report.report);
+    req.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+    size_t need = 0;
+    ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &req, &need), GSHSCENE_OK);
+    std::vector<unsigned char> workspace(need, 0xc5);
+    req.workspace = workspace.data();
+    req.workspace_bytes = need;
+    const long before = t.calls;
+    size_t again = 0;
+    ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &req, &again), GSHSCENE_OK);
+    EXPECT_EQ(again, need);
+    EXPECT_EQ(t.calls, before) << "sizing in the caller's workspace called the allocator";
+    ASSERT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK); /* the first render may make the sink's own one-off allocations */
+    EXPECT_EQ(r.bytes(), ref.bytes);
+    const long calls = t.calls;
+    ASSERT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK);
+    EXPECT_EQ(t.calls, calls) << "a render from the caller's workspace called the allocator";
+    EXPECT_EQ(r.bytes(), ref.bytes);
+  }
+  EXPECT_TRUE(t.live.empty());
+}
+
+// ... the allocator's tables are all given back, whatever the number of pictures (the sink and the tracker both outlive the draw).
+TEST(RenderMask, TheLayoutsMemoGivesBackEveryTableItTookFromTheAllocator) {
+  tracker::Tracker t;
+  GSHSCENE_Allocator alloc = tracker::allocator_for(&t);
+  {
+    Scene s;
+    Options plain;
+    plain.alloc = &alloc;
+    Draw d = draw(many_pictures(s, 300, 2), 128, 96, plain);
+    ASSERT_EQ(d.result, GSHSCENE_OK);
+    EXPECT_EQ(d.counters.masks, 600u);
+  }
+  EXPECT_GT(t.calls, 0);
+  EXPECT_TRUE(t.live.empty()) << t.live.size() << " blocks live after the sink and the report were destroyed";
+}
+
+// The memo itself (src/render/memo.c), in each of its three rooms: the allocator's, the scratch's and none.  A key it holds is found
+// with its own value and the table never answers with another's; the allocator's room holds everything and gives it back, the
+// scratch's holds what its bytes allow and is not written past, and with no room it holds the inline table's half and no more.
+TEST(RenderMask, TheLayoutsMemoFindsEveryKeyItHoldsWithItsOwnValueInEachRoom) {
+  struct Value {
+    uint64_t a, b, c;
+  };
+  const auto key_of = [](int k) { return (uint64_t)k * UINT64_C(0x9E3779B97F4A7C15) + 7u; };
+  const auto value_of = [](int k) { return Value{(uint64_t)k, ~(uint64_t)k, (uint64_t)k * 3u}; };
+  const int keys = 5000;
+  for (int room = 0; room < 5; room++) {
+    // 0: the allocator's; 1: a scratch that holds all the tables; 2: a scratch that holds only a few; 3: none; 4: a scratch that holds
+    // exactly one table (the first doubling, 64 slots of 80 bytes, with nothing left over: a table that fits exactly is taken).
+    tracker::Tracker t;
+    GSHSCENE_Allocator alloc = tracker::allocator_for(&t);
+    const size_t slot_bytes = sizeof(GSHCPU_Memo_Slot);
+    const size_t offset = room == 4 ? 0 : 17; /* an unaligned start: the memo aligns it (the exact fit starts aligned) */
+    const size_t scratch_bytes = room == 1 ? (size_t)8 << 20 : room == 2 ? (size_t)100 << 10 : room == 4 ? 2 * GSHCPU_MEMO_INLINE * slot_bytes : 0;
+    std::vector<unsigned char> store(scratch_bytes + 64, 0xc5);
+    unsigned char * scratch = scratch_bytes ? store.data() + offset : nullptr;
+    GSHCPU_Memo memo;
+    gshcpu_memo_open(&memo, sizeof(Value), room == 0 ? &alloc : nullptr, scratch, scratch_bytes ? scratch_bytes - offset : 0);
+    for (int k = 0; k < keys; k++) {
+      const Value v = value_of(k);
+      Value probe;
+      ASSERT_FALSE(gshcpu_memo_find(&memo, key_of(k), &probe)) << "room " << room << ": a key not added is not found, " << k;
+      gshcpu_memo_add(&memo, key_of(k), &v);
+    }
+    int held = 0, earliest_lost = -1;
+    for (int k = 0; k < keys; k++) {
+      Value got;
+      if (gshcpu_memo_find(&memo, key_of(k), &got)) {
+        held++;
+        const Value want = value_of(k);
+        ASSERT_TRUE(got.a == want.a && got.b == want.b && got.c == want.c) << "room " << room << ": the value of key " << k << " is another's";
+      } else if (earliest_lost < 0) {
+        earliest_lost = k;
+      }
+    }
+    for (int k = keys; k < keys + 200; k++) {
+      Value probe;
+      ASSERT_FALSE(gshcpu_memo_find(&memo, key_of(k), &probe)) << "room " << room << ": a key never added is found";
+    }
+    if (room <= 1) {
+      EXPECT_EQ(held, keys) << "room " << room << ": a room that holds all of them holds all of them";
+    } else if (room == 2) {
+      EXPECT_GT(held, 200) << "the scratch's tables hold what they can";
+      EXPECT_LT(held, keys);
+      EXPECT_GT(earliest_lost, 0) << "what was added first is what is held";
+    } else if (room == 3) {
+      EXPECT_EQ(held, (int)GSHCPU_MEMO_INLINE - 1) << "the inline table's, with a free slot kept";
+    } else {
+      EXPECT_EQ(held, 2 * (int)GSHCPU_MEMO_INLINE - 1) << "the one table that fits, with a free slot kept";
+    }
+    if (room == 0) {
+      EXPECT_GT(t.calls, 0) << "tables came from the allocator";
+    } else {
+      EXPECT_EQ(t.calls, 0) << "and from nowhere else";
+    }
+    gshcpu_memo_close(&memo);
+    EXPECT_TRUE(t.live.empty()) << "room " << room << ": the memo gave back what it took";
+    for (int k = 0; k < keys; k++) {
+      Value probe;
+      ASSERT_FALSE(gshcpu_memo_find(&memo, key_of(k), &probe)) << "room " << room << ": a closed memo holds nothing, " << k;
+    }
+    gshcpu_memo_close(&memo); /* closing again gives back nothing twice */
+    {
+      const Value v = value_of(1);
+      Value probe;
+      gshcpu_memo_add(&memo, key_of(1), &v);
+      ASSERT_TRUE(gshcpu_memo_find(&memo, key_of(1), &probe)) << "room " << room << ": a closed memo takes a key again";
+      EXPECT_EQ(probe.b, ~(uint64_t)1);
+      gshcpu_memo_close(&memo);
+    }
+    EXPECT_TRUE(t.live.empty());
+    for (size_t b = 0; b < offset && scratch_bytes; b++) {
+      ASSERT_EQ(store[b], 0xc5) << "written before the scratch, at " << b;
+    }
+    for (size_t b = scratch_bytes ? scratch_bytes : 0; b < store.size() && scratch_bytes; b++) {
+      ASSERT_EQ(store[b], 0xc5) << "room " << room << ": written past the scratch, at " << b;
+    }
+  }
+}
+
+// ... and a picture inside a mask's picture is walked once too: some masks name one outer picture, which holds a masked group for
+// each of a hundred distinct inner pictures, and the walks are the outer one and the hundred, the same whether one mask names it or
+// three.
+TEST(RenderMask, AMaskPictureInsideAMaskPictureIsWalkedOnceToo) {
+  uint64_t walks[2] = {0, 0};
+  for (int variant = 0; variant < 2; variant++) {
+    const int uses = variant == 0 ? 1 : 3;
+    Scene s;
+    GSHSCENE_List * outer = s.open();
+    GSHSCENE_Paint w = white();
+    for (int k = 0; k < 100; k++) {
+      GSHSCENE_List * inner = s.open();
+      ASSERT_EQ(gshscene_list_fill(inner, s.rect(0, 0, 8.0 + 0.0625 * (double)k, 8), nullptr, GSHGEOM_FILL_NONZERO, &w, 0, 0.0), GSHSCENE_OK);
+      GSHSCENE_Group g = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, s.alpha_mask(s.picture(inner)));
+      ASSERT_EQ(gshscene_list_group_push(outer, &g, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_fill(outer, s.rect(0, 0, 24, 16), nullptr, GSHGEOM_FILL_NONZERO, &w, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_group_pop(outer), GSHSCENE_OK);
+    }
+    ASSERT_EQ(gshscene_list_close(outer), GSHSCENE_OK);
+    const GSHSCENE_Resource * mask = s.alpha_mask(s.picture(outer));
+    GSHSCENE_List * l = s.open();
+    GSHSCENE_Paint r = red();
+    for (int u = 0; u < uses; u++) {
+      GSHSCENE_Group g = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, mask);
+      ASSERT_EQ(gshscene_list_group_push(l, &g, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 2.0 * u, 24, 2.0 * u + 1), nullptr, GSHGEOM_FILL_NONZERO, &r, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+    }
+    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+    Draw d = draw(l, 24, 16);
+    ASSERT_EQ(d.result, GSHSCENE_OK);
+    walks[variant] = d.counters.mask_pictures;
+  }
+  ASSERT_GT(walks[0], 0u);
+  EXPECT_EQ(walks[0] % 101u, 0u) << "the outer picture and its hundred inner ones, once for each layout";
+  EXPECT_EQ(walks[1], walks[0]) << "three masks name the outer picture and it is still walked once";
+}
+
 // MC5: the arena is sized by the items of the mask's picture too: a picture with one large path in it, drawn from the exact memory.
 TEST(RenderMask, TheArenaIsSizedByTheItemsOfTheMasksPictureToo) {
   Scene s;

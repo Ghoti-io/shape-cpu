@@ -341,8 +341,7 @@ unused variable, seven were not seen) and showed three generated ones that no te
 (``rs-2227-del``: the cancel test of the first draft was cancelled between the main walk's units and never reached the pass), an
 instance's map in the measure of a mask's picture (``rs-673-del``) and the pop that closes a group which draws nothing
 (``rs-2248-del``); each has a test since and is held.  Of the survivors on the lines of the soft mask (16 of sink.c's 280 and 9 of
-mask.c's 28) none can change a result: the memo's insertion (``rs-341-del``, ``rs-343-del``: it changes the time of a count and not
-the number), the guards of the nested walks' memory that the layout makes unreachable (``rs-660-gt``, ``rs-2191-gt``), the three group
+mask.c's 28) none can change a result: the guards of the nested walks' memory that the layout makes unreachable (``rs-660-gt``, ``rs-2191-gt``), the three group
 fields set on the mask frame and its whole-render rectangle (``rs-2204-del`` to ``rs-2206-del``, ``rs-2208-del``: the frame is
 never popped, and nothing reads them), the clearing of the skip state and of the work at the start of a pass (``rs-2212-del``,
 ``rs-2222-del``: both are clear already), the flag that caches the outside value (``rs-2290-del``), the comparisons that are ties of a
@@ -353,6 +352,19 @@ clamp's ties at 0 and 1 (``rq-41-gt``, ``rq-41-gt2``), the clearing of an evalua
 (``rq-47-del``), and four statements of the value whose deletion leaves a local uninitialized (``rq-71-del``, ``rq-76-del``,
 ``rq-79-del``, ``rq-81-del``: undefined behavior that a sanitizer sees; the hand plants ``rm-picture-not-converted-into-l``,
 ``rm-backdrop-ignored`` and ``rm-luminance-clamp-dropped`` are the same defects written so that they compile to a value).
+
+The layout's memo (2026-10-31) moved from a 64-entry table in sink.c to src/render/memo.c (a table that doubles, from the allocator or
+from the caller's workspace), changed seven lines of sink.c without moving any other, and added the counter ``mask_pictures`` that
+the tests read.  Eleven held entries whose lines changed were dropped and the 78 candidates of the changed lines and of memo.c (62 and
+16) swept in ghoti-build:gcc16 on a 12-thread host with ``PLANT_ALL_TESTS=1``: 16 do not compile, 55 are caught (now held, 45 of
+memo.c's and 10 of sink.c's) and 7 survive, all of memo.c's and none can change a result: the hash of a key when the shift is not
+taken (``rn-47-del``: every key then starts its probe at slot 0, which is slower and the same), the comparisons that are ties of a
+size (``rn-65-le``: the value that is exactly the most, ``rn-70-ge``: a scratch with nothing left after its alignment,
+``rn-122-gt``: a table grown one entry earlier, ``rn-92-gt``: the overflow guard of a table of 2^58 slots), the ``||`` for ``&&`` that
+the allocator's first choice makes the same (``rn-67-and``) and the clear of a slot's padding that is copied and never read
+(``rn-126-del``).  The sweep showed that the first test of the memo, which named each picture twice in a row, could not see a table
+that forgets on growth: a picture is named again after all the others now (``rm-memo-forgets-what-it-held-on-growth``).  The hand
+plants of the memo (``rm-memo-``) are caught.
 
 Run by ``make check-planted`` from the library directory, with the build's
 flags in the PLANT_* environment variables.
@@ -686,6 +698,7 @@ RG = "src/render/geometry.c"
 RA = "src/render/arena.c"
 RH = "src/render/hash.c"
 RS = "src/render/sink.c"
+RN = "src/render/memo.c"
 RI = "src/render/render_internal.h"
 RHD = "include/ghoti.io/shape-cpu/render.h"
 # Quick and likely first: the sweep stops at the first test that fails.
@@ -1426,14 +1439,14 @@ PLANTS += [
 # consolidated pass.  The id says the rule: rm- the value (mask.c, MC3) and its pop (MC4), then, by name, the region and the frame
 # (MC2), the limits (MC6), the layout (MC5), cancel and work (MC7), the tiers (MC8).  A mutant of a statement that cannot change a
 # result is not planted: the waist clamps the transfer's input and output (the clamp of the alpha path and of the final value are
-# redundant to it), the memo of the layout (it changes the time of a count, not the number: a shared picture's gradient is resolved
-# once), the clearing of the skip state at the start of a pass and its restore at the end (it is clear on both sides: the pop was not
+# redundant to it), the clearing of the skip state at the start of a pass and its restore at the end (it is clear on both sides: the pop was not
 # skipped), the flag of fills a picture holds (only the direct 8-bit stroke tier reads it, and a list with a group never takes it), and
 # the maps the measure sets for the geometry of an item that the arena's need does not depend on.
 MKF = "src/render/mask.c"
 MKT = ["testRender_mask_vectors", "testRender_mask", "testRender_conformance"]
 MKS = ["testRender_mask", "testRender_mask_vectors", "testRender_conformance"]
 MKP = ["testRender_mask", "probe"]
+MKM = ["testRender_mask"]
 PLANTS += [
     # MC3: the value
     ("rm-alpha-reads-luminance", "src", MKF, "e->alpha = m.mode == (uint32_t)GSHSCENE_MASK_ALPHA;", "e->alpha = 0;", MKT),
@@ -1519,6 +1532,17 @@ PLANTS += [
     ("rm-identity-counter-not-counted", "src", RS, "  if (identity_tier && me.identity && evaluated) {\n    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_identity));\n  }", "  (void)evaluated;", MKS),
     # MC9: a group with no mask pays nothing
     ("rm-mask-area-in-every-list", "src", RS, "  run->masked = M.bytes != 0;", "  run->masked = 1;", MKS),
+    # MC5, the layout's memo: a picture is walked once however many there are (the counter ``mask_pictures`` counts the walks), in the
+    # allocator's room and, from the caller's memory, in the caller's buffer
+    ("rm-memo-never-grows-in-the-allocators-room", "src", RN, "    table = memo->alloc->calloc_fn(memo->alloc->ctx, 1u, bytes);", "    table = NULL;", MKM),
+    ("rm-memo-never-grows-in-the-workspace", "src", RN, "  } else if (memo->scratch_left >= bytes) {", "  } else if (0) {", MKM),
+    ("rm-memo-forgets-what-it-held-on-growth", "src", RN, "      put(table, memo->cap * 2u, &memo->slots[i]);", "      (void)table;", MKM),
+    ("rm-memo-remembers-nothing", "src", RN, "  put(memo->slots, memo->cap, &slot);\n  memo->used++;", "  (void)slot;", MKM),
+    ("rm-memo-finds-nothing", "src", RN, "    if (memo->slots[at].key == key) {", "    if (0) {", MKM),
+    ("rm-memo-finds-the-wrong-key", "src", RN, "    if (memo->slots[at].key == key) {", "    if (1) {", MKM),
+    ("rm-memo-keeps-a-short-value", "src", RN, "  memcpy(slot.value, value, memo->value_bytes);", "  memcpy(slot.value, value, memo->value_bytes < 8u ? memo->value_bytes : 8u);", MKM),
+    ("rm-memo-leaks-the-allocators-table", "src", RN, "  if (memo->heap) {\n    memo->alloc->free_fn(memo->alloc->ctx, memo->slots);\n  }\n  memo->heap = 0;", "  memo->heap = 0;", MKM + ["testRender_limits"]),
+    ("rm-memo-allocates-under-caller-memory", "src", RS, "(request->flags & GSHSCENE_RENDER_CALLER_MEMORY) ? NULL : &cs->alloc, request->workspace", "&cs->alloc, request->workspace", MKM),
     ("rm-unmasked-group-reaches-the-mask-code", "src", RS, "    if (f->group.soft_mask) {\n      return group_pop_masked(run, chain, count, region, whole);\n    }", "    if (1) {\n      return group_pop_masked(run, chain, count, region, whole);\n    }", MKS),
 ]
 

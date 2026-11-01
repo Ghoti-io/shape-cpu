@@ -279,18 +279,18 @@ typedef struct Need {
   int aligned, strokes, other, wide, ok;
 } Need;
 
-/** The needs of the pictures of masks already found, by the picture's id: a picture shared by many masks is counted once. */
-#define NEST_MEMO 64u
-
-typedef struct Nest_Memo {
-  uint64_t id[NEST_MEMO];
-  Need need[NEST_MEMO];
-  size_t used;
-} Nest_Memo;
+/**
+ * The needs of the pictures of masks already found, by the picture's id (MC5): a picture shared by many masks is counted once,
+ * however many pictures there are.  The table grows from the sink's allocator, or from the caller's workspace under
+ * `CALLER_MEMORY`, which allocates nothing; one that cannot grow stops remembering, and a picture past it is counted again.
+ */
+typedef GSHCPU_Memo Nest_Memo;
+typedef char need_fits_the_memo[sizeof(Need) <= GSHCPU_MEMO_VALUE_MAX ? 1 : -1];
 
 /** One counting walk: the memo it shares with the walks of the masks' pictures, and what it finds of masks. */
 typedef struct Nest {
   Nest_Memo * memo;
+  GSHCPU_Stroke_Cache * cache; /* the counters */
   size_t walk;               /* the most walk memory the pictures of masks, one in another, take at one pop */
   int masked;                /* a group in the list has a mask */
 } Nest;
@@ -314,12 +314,8 @@ static int out_of_range(const GSHSCENE_Paint * paint) {
 static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops,
     int * aligned, int * strokes, int * other, int * wide, Nest * nest);
 
-/**
- * The needs of the picture of @p mask (MC5), drawn into the mask's frame at a pop: the groups and clips its own units open
- * (a masked group inside it, one mask frame deeper, counted by the walk of the picture), its gradients and strokes, and the
- * walk memory of the masks inside it.  Found once for a picture: the memo holds the first NEST_MEMO, and a picture past them
- * is counted again where it is used (the same numbers, only more time).
- */
+/** The needs of the picture of @p mask (MC5), drawn into its frame at a pop: found once for a picture, however many masks name it
+ * and however many pictures there are, and counted again only where the memo had no room; `mask_pictures` counts the walks. */
 static int mask_need(const GSHSCENE_Resource * mask, Need * out, Nest * nest) {
   GSHSCENE_Mask m;
   memset(out, 0, sizeof *out);
@@ -327,22 +323,26 @@ static int mask_need(const GSHSCENE_Resource * mask, Need * out, Nest * nest) {
     return 0;
   }
   const uint64_t id = gshscene_resource_id(m.picture);
-  for (size_t i = 0; i < nest->memo->used; i++) {
-    if (nest->memo->id[i] == id) {
-      *out = nest->memo->need[i];
-      return out->ok;
-    }
+  if (gshcpu_memo_find(nest->memo, id, out)) {
+    return out->ok;
   }
-  Nest sub = {nest->memo, 0, 0};
+  Nest sub = {nest->memo, nest->cache, 0, 0};
+  gshcpu_stroke_cache_count(nest->cache, offsetof(GSHCPU_Render_Counters, mask_pictures));
   out->ok = nesting(gshscene_resource_picture(m.picture), &out->groups, &out->clips, &out->gradients, &out->stops, &out->aligned,
       &out->strokes, &out->other, &out->wide, &sub);
   out->walk = sub.walk;
-  if (nest->memo->used < NEST_MEMO) {
-    nest->memo->id[nest->memo->used] = id;
-    nest->memo->need[nest->memo->used] = *out;
-    nest->memo->used++;
-  }
+  gshcpu_memo_add(nest->memo, id, out);
   return out->ok;
+}
+
+/** `nesting` of @p list, with a memo whose room is the sink's allocator's, or the request's workspace under CALLER_MEMORY. */
+static int counted_nesting(const Cpu_Sink * cs, const GSHSCENE_List * list, Layout * L, Nest * nest, const GSHSCENE_Render_Request * request) {
+  Nest_Memo memo;
+  gshcpu_memo_open(&memo, sizeof(Need), (request->flags & GSHSCENE_RENDER_CALLER_MEMORY) ? NULL : &cs->alloc, request->workspace, request->workspace_bytes);
+  nest->memo = &memo;
+  const int ok = nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned, &L->strokes, &L->other, &L->wide, nest);
+  gshcpu_memo_close(&memo);
+  return ok;
 }
 
 static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops,
@@ -460,11 +460,11 @@ static GSHCPU_Rect whole_of(const GSHSCENE_Target * target) {
 
 /**
  * Lay out a render of @p list on @p target; ::GSHCPU_ERR_LIMIT past a limit or when a size overflows.  @p M gets the mask area
- * (MC5) when a group in the list, or in a picture it draws, has a mask; the groups and clips @p L holds count the frames and
- * the clips of the masks' pictures, and `L->fixed` the area.  A list with no masked group lays out as it did before masks (MC9).
+ * (MC5) when a group in the list, or in a picture it draws, has a mask (MC9: none, as before masks).  Under CALLER_MEMORY the
+ * count of the mask pictures takes its memo's room from @p request's workspace, where nothing else lives yet (it allocates nothing).
  */
 static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, const GSHSCENE_Target * target, Layout * L,
-    Mask_Layout * M) {
+    Mask_Layout * M, const GSHSCENE_Render_Request * request) {
   memset(L, 0, sizeof *L);
   memset(M, 0, sizeof *M);
   L->region = region_of(target);
@@ -481,10 +481,10 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
   }
   L->walk = gshscene_expansion_bytes(list);
   L->levels = L->walk / (sizeof(const GSHSCENE_List *) + sizeof(size_t));
-  Nest_Memo memo;
-  memo.used = 0;
-  Nest nest = {&memo, 0, 0};
-  if (!nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned, &L->strokes, &L->other, &L->wide, &nest)) {
+  /* The count of the mask pictures (MC5) shares its memo with the walks of the pictures: each picture is walked once, however
+   * many pictures there are. */
+  Nest nest = {NULL, cs->cache, 0, 0};
+  if (!counted_nesting(cs, list, L, &nest, request)) {
     return GSHCPU_ERR_LIMIT;
   }
   if (nest.masked) {
@@ -730,7 +730,7 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
 static GSHCPU_Result need_of(const Cpu_Sink * cs, const GSHSCENE_Render_Request * request, size_t * out) {
   Layout L;
   Mask_Layout M;
-  GSHCPU_Result r = layout(cs, request->list, request->target, &L, &M);
+  GSHCPU_Result r = layout(cs, request->list, request->target, &L, &M, request);
   if (r != GSHCPU_OK) {
     return r;
   }
@@ -2542,7 +2542,7 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   const GSHSCENE_Target * target = request->target;
   Layout L;
   Mask_Layout M;
-  GSHCPU_Result lr = layout(cs, request->list, target, &L, &M);
+  GSHCPU_Result lr = layout(cs, request->list, target, &L, &M, request);
   if (lr != GSHCPU_OK) {
     return scene_result(lr);
   }

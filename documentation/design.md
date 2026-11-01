@@ -267,8 +267,10 @@ window, including one that holds none of the group, to meet the same cap).
 
 **Memory is counted as groups are, and a list with no mask is laid out as before.** The layout adds, at each masked group,
 the mask frame and everything the picture needs while it is drawn (its groups and clips, its gradients and strokes, and a
-masked group inside it one frame deeper), found once for a picture by a memo of the pictures seen (a hostile list of more
-distinct pictures than the memo holds is counted again where used: slower, never different). The walks of the pictures of
+masked group inside it one frame deeper), found once for a picture, however many masks name it and however many pictures there are, by a memo of the pictures seen that
+grows with them (from the sink's allocator, or, under `CALLER_MEMORY`, which allocates nothing, from the caller's buffer before
+anything else lives in it; a table with no room left forgets, and a picture past it is counted again where used: slower, never
+different. Rendered targets are large next to a table, which takes about 640 bytes a picture at most, so the room is there in practice). The walks of the pictures of
 masks being drawn are stacked in one area, the frame records and the chain of a unit beside them. That area is carved after the
 `Run`, directly, and only when the list has a mask, and the flag that says so takes padding the `Run` already had: the
 need for memory, the work counts and the units of every fixture from before masks are unchanged (a test pins them).

@@ -49,6 +49,7 @@ FILES = {
     "src/render/exact.c": "rx",   # strokes stories S4b and S4c: the exact step (UC1 to UC20)
     "src/render/stroke.c": "rk",  # strokes story S4
     "src/render/mask.c": "rq",    # masks story M2: the value of a soft mask (MC3)
+    "src/render/memo.c": "rn",    # masks story M2: the layout's memo of the mask pictures (MC5)
 }
 # The order is the cost: the quick and the likely first, the sweep stops at the first that fails.
 # Every test of the library, in the order of the cheap ones first: a candidate is caught by the first that fails, and one
