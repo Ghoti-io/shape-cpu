@@ -528,6 +528,7 @@ check-vectors: ## Fail if tests/known_answers.h, tests/render_vectors.h, tests/m
 	@python3 tools/gen-render-vectors.py --check
 	@python3 tools/gen-mask-vectors.py --check
 	@python3 tools/gen-general-vectors.py --check
+	@python3 tools/probe-groups.py --selftest
 	@python3 tools/gen-dense-cells.py --check
 
 # Each planted defect in tools/check-planted.py is built into a copy of the

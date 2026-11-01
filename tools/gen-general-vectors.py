@@ -356,6 +356,12 @@ def cases():
                 [group(0, 0), fill(RED, 64), group(1, 0, 0.75, op), fill(BLUE, 40), UNGROUP, fill(GREEN, 16), UNGROUP], bd)
             add("ni child %s in a knockout parent on %s" % (OP_NAMES[op], bname),
                 [group(0, 1), fill(RED, 64), group(1, 0, 0.75, op), fill(BLUE, 40), UNGROUP, fill(GREEN, 16), UNGROUP], bd)
+        # A transparent shape in a child group of a knockout group: the child's group shape is its coverage whatever its source, so
+        # its pop knocks out its share of what the parent holds (T5's shape m fg).
+        for iso in (0, 1):
+            for op in (SRC_OVER, MULTIPLY, DEST_OVER):
+                add("%s child %s holding a transparent shape in a knockout parent on %s" % ("ni" if iso else "iso", OP_NAMES[op], bname),
+                    [group(0, 1), fill(RED, 64), group(iso, 0, 1.0, op), fill(CLEAR_FILL, 32), UNGROUP, UNGROUP], bd)
         add("ni in ni on %s" % bname,
             [group(1, 0, 1.0, MULTIPLY), fill(RED, 64), group(1, 0, 0.5, SCREEN), fill(BLUE, 40), UNGROUP, UNGROUP], bd)
         add("ko ancestor two levels up on %s" % bname,

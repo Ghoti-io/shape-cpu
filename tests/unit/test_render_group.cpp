@@ -37,6 +37,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -330,6 +331,7 @@ TEST(RenderGroup, AGroupShapeIsCarriedByExactlyTheGroupsWithAKnockoutProperAnces
   EXPECT_EQ(channels(Program("ni..k.").list), slots(1, 0)) << "no knockout around either";
   EXPECT_EQ(channels(Program("k.in..").list), slots(1, 0)) << "the knockout group closed before them";
   EXPECT_EQ(channels(Program("k.nk..").list), slots(1, 0)) << "an ancestor that is not knockout";
+  EXPECT_EQ(channels(Program("kn.n..").list), slots(1, 1)) << "a sibling under a knockout group reuses the channel the first gave back";
 }
 
 TEST(RenderGroup, AStackOfOpenGroupsPastAChunkOfTheLayoutsStackIsCountedAndDrawnFromEveryMemory) {
@@ -340,13 +342,17 @@ TEST(RenderGroup, AStackOfOpenGroupsPastAChunkOfTheLayoutsStackIsCountedAndDrawn
   Program p(text.c_str());
   EXPECT_EQ(channels(p.list), slots(200, 239)) << "the groups under a knockout group carry a shape: 139 knockout and 100 non-isolated";
   for (uint32_t flags : {0u, (uint32_t)GSHSCENE_RENDER_CALLER_MEMORY}) {
+    tracker::Tracker t;
+    GSHSCENE_Allocator alloc = tracker::allocator_for(&t);
     Options o;
     o.flags = flags;
     o.format = GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED;
+    o.alloc = &alloc;
     Draw d = mh::draw(p.list, 24, 24, o);
     ASSERT_EQ(d.result, GSHSCENE_OK) << flags;
     EXPECT_EQ(d.counters.group_alpha_slots, 200u);
     EXPECT_EQ(d.counters.group_shape_slots, 239u);
+    EXPECT_TRUE(t.live.empty()) << "every chunk of the stack is given back: " << flags;
   }
 }
 
@@ -370,6 +376,43 @@ TEST(RenderGroup, TheCountsRecurseIntoInstancesAndStartAgainInMaskPictures) {
     ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
     ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
     EXPECT_EQ(channels(l), slots(1, 1));
+  }
+  // The same picture instanced inside a non-isolated group: its group alpha is the second open at once.
+  {
+    GSHSCENE_List * l = s.open();
+    GSHSCENE_Group n = s.group();
+    n.isolation = GSHSCENE_ISOLATION_NON_ISOLATED;
+    ASSERT_EQ(gshscene_list_group_push(l, &n, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_instance(l, picture, nullptr, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+    EXPECT_EQ(channels(l), slots(2, 0));
+  }
+  // A mask whose picture holds a knockout group that holds a plain one (a group shape in the picture), the masked group itself
+  // under a knockout group (a group shape of its own): two shapes are open at the masked group's pop.
+  {
+    GSHSCENE_List * inner = s.open();
+    GSHSCENE_Group k = s.group();
+    k.knockout = 1;
+    ASSERT_EQ(gshscene_list_group_push(inner, &k, 0, 0.0), GSHSCENE_OK);
+    GSHSCENE_Group plain = s.group();
+    ASSERT_EQ(gshscene_list_group_push(inner, &plain, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_fill(inner, s.rect(0, 0, 6, 6), nullptr, GSHGEOM_FILL_NONZERO, &pt, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_group_pop(inner), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_group_pop(inner), GSHSCENE_OK);
+    GSHSCENE_Mask m{};
+    m.picture = s.picture(inner);
+    m.mode = GSHSCENE_MASK_ALPHA;
+    const GSHSCENE_Resource * mask = s.mask(m);
+    GSHSCENE_List * l = s.open();
+    ASSERT_EQ(gshscene_list_group_push(l, &k, 0, 0.0), GSHSCENE_OK);
+    GSHSCENE_Group masked = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, mask);
+    ASSERT_EQ(gshscene_list_group_push(l, &masked, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, &pt, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+    EXPECT_EQ(channels(l), slots(0, 2));
   }
   // The same picture as the picture of a mask of a knockout group: the mask's picture is its own isolated group, so the
   // knockout group around the masked one is not its ancestor (MK2), and the two channels are counted open at the pop.
@@ -791,6 +834,337 @@ TEST(RenderGroup, AnIsolatedPlainGroupIsNotRoutedThroughTheElementStepInAListTha
   Draw e = mh::draw(q.list, 24, 24, o);
   EXPECT_EQ(e.counters.general_layers, 0u);
   EXPECT_EQ(e.counters.general_pops, 0u);
+}
+
+/* --- KC8: what a list of plain groups does not take, and a workspace too short for the stack ---------------------- */
+
+TEST(RenderGroup, AListOfPlainGroupsTakesNoRoomForTheStackOfOpenGroups) {
+  // The stack of open groups takes its first chunk from the allocator when the first non-isolated or knockout group is pushed, and
+  // never for a plain one: sizing a list of one plain group allocates as often as sizing the same fills outside it.
+  long calls[2] = {0, 0};
+  for (int grouped = 0; grouped < 2; grouped++) {
+    Scene s;
+    GSHSCENE_List * l = s.open();
+    GSHSCENE_Paint pt = paint(0.9, 0.2, 0.2, 0.8);
+    GSHSCENE_Group g = s.group();
+    if (grouped) {
+      ASSERT_EQ(gshscene_list_group_push(l, &g, 0, 0.0), GSHSCENE_OK);
+    }
+    for (int i = 0; i < 3; i++) {
+      ASSERT_EQ(gshscene_list_fill(l, s.rect(i, i, i + 6.0, i + 6.0), nullptr, GSHGEOM_FILL_NONZERO, &pt, 0, 0.0), GSHSCENE_OK);
+    }
+    if (grouped) {
+      ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+    }
+    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+    tracker::Tracker t;
+    GSHSCENE_Allocator alloc = tracker::allocator_for(&t);
+    {
+      mh::SinkRef sink(nullptr, &alloc);
+      mh::ReportRef report(&alloc);
+      mh::RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, 16, 16));
+      GSHSCENE_Target target = mh::target_of(r.raster);
+      GSHSCENE_Render_Request req = mh::request_of(l, &target, report.report);
+      size_t need = 0;
+      const long before = t.calls;
+      ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &req, &need), GSHSCENE_OK);
+      calls[grouped] = t.calls - before;
+    }
+  }
+  EXPECT_EQ(calls[0], calls[1]);
+}
+
+TEST(RenderGroup, AWorkspaceTooShortForTheStackIsALimitAndNeverAnAllocationFailure) {
+  Program p("nk..");
+  mh::SinkRef sink;
+  mh::ReportRef report;
+  mh::RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, 16, 16));
+  GSHSCENE_Target target = mh::target_of(r.raster);
+  GSHSCENE_Render_Request req = mh::request_of(p.list, &target, report.report);
+  req.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+  std::vector<unsigned char> small(64, 0xc5);
+  req.workspace = small.data();
+  req.workspace_bytes = small.size();
+  EXPECT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_ERR_LIMIT);
+  for (unsigned char b : small) {
+    ASSERT_EQ(b, 0xc5) << "nothing is written to a workspace the render refuses";
+  }
+  size_t need = 0;
+  EXPECT_EQ(gshscene_sink_workspace_bytes(sink.sink, &req, &need), GSHSCENE_ERR_LIMIT) << "no room to size itself in: a limit, as for any list";
+}
+
+/* --- KC2: a stroke alone in a general layer takes the element step on every route ------------------------------- */
+
+TEST(RenderGroup, AStrokeAloneInAGeneralLayerIsDrawnByTheElementStepWhicheverTierDrawsIt) {
+  GSHCPU_Limits fast{};
+  fast.stroke_coverage = GSHCPU_STROKE_COVERAGE_FAST;
+  for (int variant = 0; variant < 3; variant++) {
+    Scene s;
+    GSHSCENE_List * l = s.open();
+    GSHSCENE_Paint blue = paint(0.1, 0.1, 0.9, 0.6);
+    const bool group = variant < 2;
+    GSHSCENE_Group g = s.group();
+    g.knockout = 1;
+    if (group) {
+      ASSERT_EQ(gshscene_list_group_push(l, &g, 0, 0.0), GSHSCENE_OK);
+    }
+    GSHGEOM_Path * p = nullptr;
+    gshgeom_path_create(nullptr, nullptr, 2, &p);
+    gshgeom_path_move_to(p, GSHGEOM_Point{2.25, 6.25, 0});
+    gshgeom_path_line_to(p, GSHGEOM_Point{13.75, 6.25, 0});
+    const GSHSCENE_Resource * line = s.path(p);
+    GSHSCENE_Stroke_Style st;
+    gshscene_stroke_style_init(&st);
+    st.width = 3.5;
+    st.cap = GSHSCENE_STROKE_CAP_BUTT;
+    const GSHSCENE_Resource * style = nullptr;
+    ASSERT_EQ(gshscene_store_intern_stroke_style(s.store, &st, &style), GSHSCENE_OK);
+    s.held.push_back(style);
+    ASSERT_EQ(gshscene_list_stroke(l, line, style, nullptr, &blue, 0, 0.0), GSHSCENE_OK);
+    if (group) {
+      ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+    }
+    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+    Options o;
+    o.format = GSHCPU_FORMAT_RGBA8_PREMULTIPLIED;
+    if (variant == 1) {
+      o.limits = &fast; // the fast stroke coverage's own composite
+    }
+    if (variant == 2) {
+      o.limits = &fast; // and with every layer through the element step (KC9's switch), where no stroke may go straight to the bytes
+      o.tiers = GSHCPU_RENDER_TIERS_ALL | GSHCPU_RENDER_FORCE_GENERAL;
+    }
+    Draw d = mh::draw(l, 16, 16, o);
+    ASSERT_EQ(d.result, GSHSCENE_OK) << variant;
+    EXPECT_EQ(d.counters.strokes, 1u) << variant;
+    EXPECT_GE(d.counters.general_fills, 1u) << "the stroke's pixels take the element step: " << variant;
+  }
+}
+
+// The fast fill coverage composites into byte layers where it can; a list that holds a general layer is composited in doubles, as one
+// that holds a masked group or an image paint is (the layers carry channels no byte layer holds).  Each general fixture drawn with the
+// fast coverage on an 8-bit target stays within the few levels the fast coverage differs from the exact one at an edge, and a
+// knockout or non-isolated group drawn as a plain one would be off by a color.
+TEST(RenderGroup, AGeneralGroupUnderTheFastFillCoverageIsDrawnInDoublesAndNotInBytes) {
+  GSHCPU_Limits fast{};
+  fast.fill_coverage = GSHCPU_FILL_COVERAGE_FAST;
+  fast.stroke_coverage = GSHCPU_STROKE_COVERAGE_FAST;
+  const size_t first = first_general_fixture();
+  int worst = 0;
+  for (size_t i = first; i < RF_FIXTURE_COUNT; i++) {
+    RF_Ctx c;
+    rf_begin(&c);
+    GSHSCENE_List * list = RF_FIXTURES[i].build(&c);
+    ASSERT_TRUE(!c.failed && list) << RF_FIXTURES[i].name;
+    Draw exact;
+    Draw quick;
+    for (int fastest = 0; fastest < 2; fastest++) {
+      Options o;
+      o.backdrop = true;
+      o.limits = fastest ? &fast : nullptr;
+      (fastest ? quick : exact) = mh::draw(list, RF_WIDTH, RF_HEIGHT, o);
+      ASSERT_EQ((fastest ? quick : exact).result, GSHSCENE_OK) << RF_FIXTURES[i].name;
+    }
+    EXPECT_GT(quick.counters.general_layers, 0u) << RF_FIXTURES[i].name;
+    EXPECT_GT(quick.counters.general_pops, 0u) << RF_FIXTURES[i].name << ": the pops took the element step, not the byte layers' composite";
+    for (size_t b = 0; b < exact.bytes.size(); b++) {
+      const int d = std::abs((int)(unsigned char)exact.bytes[b] - (int)(unsigned char)quick.bytes[b]);
+      worst = std::max(worst, d);
+      ASSERT_LE(d, 64) << RF_FIXTURES[i].name << " byte " << b << ": a general layer drawn as a plain one is off by a color";
+    }
+    rf_release(&c);
+  }
+  std::printf("general fixtures under the fast fill coverage: worst difference from the exact coverage %d levels\n", worst);
+}
+
+/* --- what the survivors of the generated plants asked for ----------------------------------------------------------- */
+
+TEST(RenderGroup, OnlyTheGeneralLayersAreCountedAsGeneral) {
+  Program p("i.i.k.");
+  Draw d = mh::draw(p.list, 24, 24);
+  ASSERT_EQ(d.result, GSHSCENE_OK);
+  EXPECT_EQ(d.counters.general_layers, 1u) << "two plain groups and one knockout group";
+  EXPECT_EQ(d.counters.general_fills, 1u);
+  EXPECT_EQ(d.counters.general_pops, 1u);
+}
+
+/** A masked group of one fill at (x, y), its mask the picture of a group of a plain circle fill; @p general makes the masked group non-isolated. */
+const GSHSCENE_Resource * mask_of_a_picture_with_a_group(Scene & s, int index) {
+  GSHSCENE_List * pl = s.open();
+  GSHSCENE_Group g = s.group();
+  EXPECT_EQ(gshscene_list_group_push(pl, &g, 0, 0.0), GSHSCENE_OK);
+  GSHSCENE_Paint white = paint(1, 1, 1, 0.8);
+  EXPECT_EQ(gshscene_list_fill(pl, s.rect(index, 0, index + 8.0, 8), nullptr, GSHGEOM_FILL_NONZERO, &white, 0, 0.0), GSHSCENE_OK);
+  EXPECT_EQ(gshscene_list_group_pop(pl), GSHSCENE_OK);
+  return s.alpha_mask(s.picture(pl));
+}
+
+TEST(RenderGroup, AMaskFrameDoesNotInheritTheRecordOfAGroupThatEndedAtItsDepth) {
+  // A knockout group that ends, then a masked group at the same depth whose picture holds a group: the frame the mask is drawn in is its
+  // own isolated group, whatever a group before it left at that depth, so the picture's group carries no group shape (the layout counted
+  // none) and the masked part of the picture is drawn as it is without the knockout group before it.
+  Draw by[2];
+  for (int before = 0; before < 2; before++) {
+    Scene s;
+    const GSHSCENE_Resource * mask = mask_of_a_picture_with_a_group(s, 0);
+    GSHSCENE_List * l = s.open();
+    GSHSCENE_Paint red = paint(0.9, 0.1, 0.1, 0.9);
+    if (before) {
+      // A plain group around a knockout group, both ended: the knockout group's record is the one at the depth the mask's frame will take.
+      GSHSCENE_Group outer = s.group();
+      ASSERT_EQ(gshscene_list_group_push(l, &outer, 0, 0.0), GSHSCENE_OK);
+      GSHSCENE_Group k = s.group();
+      k.knockout = 1;
+      ASSERT_EQ(gshscene_list_group_push(l, &k, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, 6, 6), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+    }
+    GSHSCENE_Group masked = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, mask);
+    GSHGEOM_Map at;
+    gshgeom_map_translate(2, 12.0, 12.0, 0.0, &at);
+    masked.soft_mask_map = at;
+    ASSERT_EQ(gshscene_list_group_push(l, &masked, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_fill(l, s.rect(10, 10, 22, 22), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+    Options o;
+    o.format = GSHCPU_FORMAT_RGBA8_STRAIGHT; // a straight target written back where the touched map says it was drawn: a flag set wrongly shows
+    o.backdrop = true;
+    by[before] = mh::draw(l, 24, 24, o);
+    ASSERT_EQ(by[before].result, GSHSCENE_OK);
+    EXPECT_EQ(by[before].counters.group_shape_slots, 0u) << "no group shape is carried: the knockout group has ended";
+  }
+  for (uint32_t y = 8; y < 24; y++) {
+    for (uint32_t x = 8; x < 24; x++) {
+      for (int c = 0; c < 4; c++) {
+        ASSERT_EQ(by[0].at8(x, y, c), by[1].at8(x, y, c)) << x << "," << y;
+      }
+    }
+  }
+}
+
+TEST(RenderGroup, AMaskedNonIsolatedGroupThatDrawsNothingIsAUnitDoneAndItsMaskIsNeverDrawn) {
+  Scene s;
+  const GSHSCENE_Resource * mask = mask_of_a_picture_with_a_group(s, 0);
+  GSHSCENE_List * l = s.open();
+  GSHSCENE_Group g = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, mask);
+  g.isolation = GSHSCENE_ISOLATION_NON_ISOLATED;
+  ASSERT_EQ(gshscene_list_group_push(l, &g, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+  GSHSCENE_Paint red = paint(0.9, 0.1, 0.1, 0.9);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(2, 2, 9, 9), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  Draw d = mh::draw(l, 24, 24);
+  ASSERT_EQ(d.result, GSHSCENE_OK);
+  EXPECT_EQ(d.counters.masks, 0u) << "nothing of the group is composited, and no mask is drawn for it";
+  EXPECT_EQ(d.summary.units_done, d.summary.units_total) << "the group is closed, so the fill after it is a unit done";
+}
+
+TEST(RenderGroup, AMaskedGeneralGroupIsCountedAsAMaskedPopAndEveryMaskedFixtureDrawsItsMask) {
+  size_t index = RF_FIXTURE_COUNT;
+  for (size_t i = 0; i < RF_FIXTURE_COUNT; i++) {
+    if (std::strcmp(RF_FIXTURES[i].name, "group-masked") == 0) {
+      index = i;
+    }
+  }
+  ASSERT_LT(index, RF_FIXTURE_COUNT);
+  Fixture f = draw_fixture(index, GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, GSHCPU_RENDER_TIERS_ALL);
+  ASSERT_EQ(f.result, (int)GSHSCENE_OK);
+  EXPECT_EQ(f.counters.masks, 4u) << "three masked general groups and one whose mask picture is a knockout group";
+  EXPECT_GT(f.counters.mask_pixels, 0u);
+  EXPECT_EQ(f.counters.general_pops, 4u);
+}
+
+TEST(RenderGroup, AnAllocationThatFailsWhileTheLayoutCountsIsAnAllocationFailureAndNeverALimit) {
+  // The stack of open groups is the one allocation of the layout that only a general group makes; a mask's picture holding such a group
+  // makes it inside the count of the picture.  Failing each allocation of a render in turn gives the render or an out-of-memory.
+  for (int variant = 0; variant < 2; variant++) {
+    Scene s;
+    GSHSCENE_List * l = nullptr;
+    std::unique_ptr<Program> plain;
+    if (variant == 0) {
+      plain.reset(new Program("nk.."));
+      l = plain->list;
+    } else {
+      GSHSCENE_List * pl = s.open();
+      GSHSCENE_Group k = s.group();
+      k.knockout = 1;
+      ASSERT_EQ(gshscene_list_group_push(pl, &k, 0, 0.0), GSHSCENE_OK);
+      GSHSCENE_Paint white = paint(1, 1, 1, 0.8);
+      ASSERT_EQ(gshscene_list_fill(pl, s.rect(0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, &white, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_group_pop(pl), GSHSCENE_OK);
+      const GSHSCENE_Resource * mask = s.alpha_mask(s.picture(pl));
+      l = s.open();
+      GSHSCENE_Group masked = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, mask);
+      ASSERT_EQ(gshscene_list_group_push(l, &masked, 0, 0.0), GSHSCENE_OK);
+      GSHSCENE_Paint red = paint(0.9, 0.1, 0.1, 0.9);
+      ASSERT_EQ(gshscene_list_fill(l, s.rect(1, 1, 7, 7), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+    }
+    long total = 0;
+    {
+      tracker::Tracker t;
+      GSHSCENE_Allocator alloc = tracker::allocator_for(&t);
+      mh::SinkRef sink(nullptr, &alloc);
+      mh::ReportRef report(&alloc);
+      mh::RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, 16, 16));
+      GSHSCENE_Target target = mh::target_of(r.raster);
+      GSHSCENE_Render_Request req = mh::request_of(l, &target, report.report);
+      const long before = t.calls;
+      ASSERT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK);
+      total = t.calls - before;
+    }
+    ASSERT_GT(total, 0);
+    for (long fail = 0; fail < total; fail++) {
+      tracker::Tracker t;
+      GSHSCENE_Allocator alloc = tracker::allocator_for(&t);
+      mh::SinkRef sink(nullptr, &alloc);
+      mh::ReportRef report(&alloc);
+      mh::RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, 16, 16));
+      GSHSCENE_Target target = mh::target_of(r.raster);
+      GSHSCENE_Render_Request req = mh::request_of(l, &target, report.report);
+      t.fail_from = t.calls + fail;
+      const GSHSCENE_Result got = gshscene_sink_render(sink.sink, &req);
+      EXPECT_TRUE(got == GSHSCENE_OK || got == GSHSCENE_ERR_OOM) << "variant " << variant << ", allocation " << fail << " failing gave " << (int)got;
+    }
+  }
+}
+
+TEST(RenderGroup, TheStackOfOpenGroupsAndTheMemoOfMaskPicturesShareTheCallersMemoryWithoutOverlapping) {
+  // A non-isolated group (the stack takes its first chunk from the caller's memory) around 40 masked groups of 40 different pictures (the
+  // memo of the pictures grows past its first table, from the same memory): the render from the caller's memory equals the render from the
+  // sink's own, so neither wrote over the other.
+  Scene s;
+  GSHSCENE_List * l = s.open();
+  GSHSCENE_Group n = s.group();
+  n.isolation = GSHSCENE_ISOLATION_NON_ISOLATED;
+  ASSERT_EQ(gshscene_list_group_push(l, &n, 0, 0.0), GSHSCENE_OK);
+  GSHSCENE_Paint red = paint(0.9, 0.1, 0.1, 0.9);
+  for (int i = 0; i < 40; i++) {
+    GSHSCENE_Group masked = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, mask_of_a_picture_with_a_group(s, i));
+    ASSERT_EQ(gshscene_list_group_push(l, &masked, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_fill(l, s.rect(i % 8, (i / 8) * 3, i % 8 + 4.0, (i / 8) * 3 + 3.0), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+  }
+  ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+  // A second non-isolated group after the first: one channel again, if the stack gave the first group back whole.
+  ASSERT_EQ(gshscene_list_group_push(l, &n, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 12, 6, 15), nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+  Options normal;
+  Options caller;
+  caller.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+  Draw a = mh::draw(l, 16, 16, normal);
+  Draw b = mh::draw(l, 16, 16, caller);
+  ASSERT_EQ(a.result, GSHSCENE_OK);
+  ASSERT_EQ(b.result, GSHSCENE_OK);
+  EXPECT_EQ(a.bytes, b.bytes);
+  EXPECT_GE(a.counters.mask_pictures, 40u);
+  EXPECT_EQ(a.counters.group_alpha_slots, 1u);
+  EXPECT_EQ(b.counters.group_alpha_slots, 1u) << "the stack's chunk and the memo's tables are not the same bytes";
 }
 
 }  // namespace
