@@ -226,6 +226,63 @@ TEST(RenderMask, TheMasksValueWeighsTheOpacityOrTheShapeAndTheyAgreeWhereTheOper
   }
 }
 
+// MC4 and MK7: PLUS is affine in the source only below its clamp.  With v = 1/2 and a group opacity of 1, the shape weighs the whole
+// operator, (1 - v) B + v min(1, S + B), and the opacity the source, min(1, B + v S).  Where no component of S + B exceeds 1 they are
+// the same number (B + v S); where one does they are not: the shape gives B + v (1 - B) there and the opacity min(1, B + v S).
+TEST(RenderMask, PlusIsTheSameForShapeAndOpacityBelowItsClampAndNotAboveIt) {
+  struct Case {
+    const char * what;
+    GSHSCENE_Paint backdrop, source;
+    bool clamps;
+    float opacity[4], shape[4]; /* premultiplied, at one pixel */
+  };
+  const Case cases[] = {
+      // B = (0.15, 0, 0.15, 0.3), S = (0.4, 0.1, 0, 0.4): every sum is at most 1, so B + v S for both.
+      {"below the clamp", rh::solid(0.5, 0.0, 0.5, 0.3), rh::solid(1.0, 0.25, 0.0, 0.4), false, {0.0f}, {0.0f}},
+      // B = (0.75, 0, 0.5, 1), S = (1, 0.25, 0, 1): red and alpha clamp.  Opacity: (1, 0.125, 0.5, 1); shape: (0.875, 0.125, 0.5, 1).
+      {"above the clamp", rh::solid(0.75, 0.0, 0.5, 1.0), rh::solid(1.0, 0.25, 0.0, 1.0), true, {1.0f, 0.125f, 0.5f, 1.0f}, {0.875f, 0.125f, 0.5f, 1.0f}},
+  };
+  for (const Case & c : cases) {
+    Draw by[2];
+    for (uint32_t acts : {(uint32_t)GSHSCENE_MASK_ACTS_ON_OPACITY, (uint32_t)GSHSCENE_MASK_ACTS_ON_SHAPE}) {
+      Scene s;
+      GSHSCENE_List * pl = s.open();
+      GSHSCENE_Paint half = rh::solid(1, 1, 1, 0.5);
+      ASSERT_EQ(gshscene_list_fill(pl, s.rect(0, 0, 4, 4), nullptr, GSHGEOM_FILL_NONZERO, &half, 0, 0.0), GSHSCENE_OK);
+      const GSHSCENE_Resource * mask = s.alpha_mask(s.picture(pl), acts);
+      GSHSCENE_List * l = s.open();
+      GSHSCENE_Paint backdrop = c.backdrop;
+      ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, 4, 4), nullptr, GSHGEOM_FILL_NONZERO, &backdrop, 0, 0.0), GSHSCENE_OK);
+      GSHSCENE_Group g = s.group(1.0, GSHSCENE_COMPOSITE_PLUS, mask);
+      ASSERT_EQ(gshscene_list_group_push(l, &g, 0, 0.0), GSHSCENE_OK);
+      GSHSCENE_Paint src = c.source;
+      ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, 4, 4), nullptr, GSHGEOM_FILL_NONZERO, &src, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+      Options opt;
+      opt.format = GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED;
+      by[acts] = draw(l, 4, 4, opt);
+      ASSERT_EQ(by[acts].result, GSHSCENE_OK);
+    }
+    const Draw & o = by[GSHSCENE_MASK_ACTS_ON_OPACITY];
+    const Draw & sh = by[GSHSCENE_MASK_ACTS_ON_SHAPE];
+    if (!c.clamps) {
+      // B + v S, from the premultiplied values: the sum of the premultiplied components of the backdrop and half the source's.
+      const float want[4] = {0.15f + 0.5f * 0.4f, 0.0f + 0.5f * 0.1f, 0.15f + 0.0f, 0.3f + 0.5f * 0.4f};
+      for (int ch = 0; ch < 4; ch++) {
+        EXPECT_NEAR(o.atf(1, 1, ch), want[ch], 2e-6) << c.what << ", opacity, channel " << ch;
+        EXPECT_NEAR(sh.atf(1, 1, ch), want[ch], 2e-6) << c.what << ", shape, channel " << ch;
+      }
+    } else {
+      for (int ch = 0; ch < 4; ch++) {
+        EXPECT_NEAR(o.atf(1, 1, ch), c.opacity[ch], 2e-6) << c.what << ", opacity, channel " << ch;
+        EXPECT_NEAR(sh.atf(1, 1, ch), c.shape[ch], 2e-6) << c.what << ", shape, channel " << ch;
+      }
+      EXPECT_GT(std::fabs(o.atf(1, 1, 0) - sh.atf(1, 1, 0)), 0.1f) << "the clamp binds in red, and the two differ there";
+    }
+  }
+}
+
 // MC4: a mask of value 1 changes nothing, bit for bit: `o * 1 = o`, and `(m8 / 255) * 1 = m8 / 255`.
 TEST(RenderMask, AMaskOfValueOneIsTheSameBitsAsNoMask) {
   for (uint32_t acts : {(uint32_t)GSHSCENE_MASK_ACTS_ON_OPACITY, (uint32_t)GSHSCENE_MASK_ACTS_ON_SHAPE}) {

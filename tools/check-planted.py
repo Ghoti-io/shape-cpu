@@ -364,7 +364,7 @@ size (``rn-65-le``: the value that is exactly the most, ``rn-70-ge``: a scratch 
 the allocator's first choice makes the same (``rn-67-and``) and the clear of a slot's padding that is copied and never read
 (``rn-126-del``).  The sweep showed that the first test of the memo, which named each picture twice in a row, could not see a table
 that forgets on growth: a picture is named again after all the others now (``rm-memo-forgets-what-it-held-on-growth``).  The hand
-plants of the memo (``rm-memo-``) are caught.
+plants of the memo (``rm-memo-``) and of PLUS's clamp (``rm-plus-``) are caught.
 
 Run by ``make check-planted`` from the library directory, with the build's
 flags in the PLANT_* environment variables.
@@ -1543,6 +1543,9 @@ PLANTS += [
     ("rm-memo-keeps-a-short-value", "src", RN, "  memcpy(slot.value, value, memo->value_bytes);", "  memcpy(slot.value, value, memo->value_bytes < 8u ? memo->value_bytes : 8u);", MKM),
     ("rm-memo-leaks-the-allocators-table", "src", RN, "  if (memo->heap) {\n    memo->alloc->free_fn(memo->alloc->ctx, memo->slots);\n  }\n  memo->heap = 0;", "  memo->heap = 0;", MKM + ["testRender_limits"]),
     ("rm-memo-allocates-under-caller-memory", "src", RS, "(request->flags & GSHSCENE_RENDER_CALLER_MEMORY) ? NULL : &cs->alloc, request->workspace", "&cs->alloc, request->workspace", MKM),
+    # MC4, MK7: PLUS is affine in the source only below its clamp, so the opacity and the shape agree there and not above it
+    ("rm-plus-opacity-weighed-twice", "src", RS, "const double ov = o * v; /* MC4: the opacity source is o v */", "const double ov = op == (uint32_t)GSHSCENE_COMPOSITE_PLUS ? o * v * v : o * v;", ["testRender_mask"]),
+    ("rm-plus-shape-weighed-twice", "src", RS, "weight = weight * v; /* MC4: the shape is weighed by v, the opacity as it was */\n        for (int i = 0; i < 4; i++) {\n          s[i] = o * s[i];", "weight = weight * v; /* MC4 */\n        for (int i = 0; i < 4; i++) {\n          s[i] = (op == (uint32_t)GSHSCENE_COMPOSITE_PLUS ? o * v : o) * s[i];", ["testRender_mask"]),
     ("rm-unmasked-group-reaches-the-mask-code", "src", RS, "    if (f->group.soft_mask) {\n      return group_pop_masked(run, chain, count, region, whole);\n    }", "    if (1) {\n      return group_pop_masked(run, chain, count, region, whole);\n    }", MKS),
 ]
 
