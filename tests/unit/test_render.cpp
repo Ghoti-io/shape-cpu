@@ -53,8 +53,9 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
     EXPECT_EQ(caps.stroke_native, 0u) << "a stroke is never drawn as a stroke: every feature is met by expansion (SC1)";
     EXPECT_EQ(caps.composites, (1u << GSHSCENE_COMPOSITE_COUNT) - 1u)
         << "the twelve Porter-Duff operators, plus and the fifteen blend modes (color-paint story P3)";
-    EXPECT_EQ(caps.flags & (GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT), 0u)
-        << "PDF's non-isolated and knockout groups are refused (S19) until they are composited";
+    EXPECT_EQ(caps.flags & (GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT),
+        (uint32_t)(GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT))
+        << "PDF's non-isolated and knockout groups are composited (masks-images-patterns story M3, KC1)";
     EXPECT_NE(caps.flags & GSHSCENE_CAP_GROUP_SOFT_MASK, 0u) << "a soft mask is composited (masks story M2, MC1)";
     EXPECT_EQ(caps.mask_native, (uint32_t)GSHSCENE_MASK_NATIVE_ALL) << "with every feature the waist defines";
     // The caps claim exactly what the compositor composites (color-paint story P3-12): an operator the caps claim
@@ -66,7 +67,8 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
     }
     EXPECT_EQ(caps.flags, GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA |
         GSHSCENE_CAP_BLEND_SPACES | GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT | GSHSCENE_CAP_GRADIENT_SPACES |
-        GSHSCENE_CAP_STROKE_EXPAND | GSHSCENE_CAP_STROKE_RUNS | GSHSCENE_CAP_IMAGE_FILTER_SPACES | GSHSCENE_CAP_GROUP_SOFT_MASK);
+        GSHSCENE_CAP_STROKE_EXPAND | GSHSCENE_CAP_STROKE_RUNS | GSHSCENE_CAP_IMAGE_FILTER_SPACES | GSHSCENE_CAP_GROUP_SOFT_MASK |
+        GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT);
     EXPECT_NE(caps.flags & GSHSCENE_CAP_STROKE_RUNS, 0u) << "a stroked run is the stroke of its centerline (strokes story S5, ST8)";
     EXPECT_EQ(caps.gradient_kinds, (1u << GSHSCENE_GRADIENT_LINEAR) | (1u << GSHSCENE_GRADIENT_RADIAL) |
         (1u << GSHSCENE_GRADIENT_SWEEP)) << "every gradient kind (color-paint story P2)";

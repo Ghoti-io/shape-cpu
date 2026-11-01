@@ -302,17 +302,43 @@ def scripted():
              bound_fill(0, 0x80 | 0x20 | 2), bound_fill(1, 0x80 | 0x40 | 0x30 | 0x08 | 2)]
     out["scripted-color-bound.bin"] = header() + body(bound)
     out["scripted-color-bound-float.bin"] = header(target=T64 | 3) + body(bound)
-    # Color-paint story P3: a group's composite byte is the operator modulo 28 (13 to 27 the blend modes), and its
-    # blend byte with bits 7 and 5 set (0xA0) makes it knockout, with bit 7 alone (0x80) non-isolated: shape-cpu
-    # refuses both (S19).  Each blend mode over the standard backdrop, on an 8-bit and a float target, and the two
-    # refused groups.
+    # Color-paint story P3: a group's composite byte is the operator modulo 28 (13 to 27 the blend modes).  Each blend mode over the
+    # standard backdrop, on an 8-bit and a float target.
     blends = [fill(0)]
     for mode in range(13, 28):
         blends += [bytes([5, 0, 3 + mode % 2, mode, 1]), fill(1 if mode % 3 else 0), POP]
     out["scripted-blend-modes.bin"] = header() + body(blends)
     out["scripted-blend-modes-float.bin"] = header(target=T64 | 3) + body(blends)
-    pdf = [fill(0), bytes([5, 0, 4, 23, 0xA1]), fill(1), POP, bytes([5, 0, 4, 0, 0x81]), fill(0), POP]
-    out["scripted-pdf-refused.bin"] = header() + body(pdf)
+    # Masks-images-patterns story M3: a group's blend byte with bit 7 set is general (KC2): bit 5 then makes it knockout, bit 4 beside
+    # it a knockout group that is also non-isolated, and neither a non-isolated one; bit 3 gives it a soft mask when the request
+    # byte takes masks.  A non-isolated group with a blend mode over the backdrop and a knockout group of translucent shapes, on
+    # both targets; nested, so that a group alpha and a group shape are carried in two layers (a knockout in a non-isolated group in a
+    # knockout group); a stroke in a knockout group; a masked non-isolated and a masked knockout group; each damaged and in caller
+    # memory.
+    def general_group(blend, opacity=2, composite=0):
+        return bytes([5, 0, opacity, composite, blend])
+    ni = 0x81
+    ko = 0xA1
+    both = 0xB1
+    flat = [fill(0), general_group(ni, 3, 23), fill(1), fill(3), POP, general_group(ko), fill(1), fill(7, ROTATED), POP]
+    out["scripted-general.bin"] = header() + body(flat)
+    out["scripted-general-float.bin"] = header(target=T64 | 3) + body(flat)
+    nested = [fill(0), general_group(ko, 3), fill(3), general_group(ni, 3, 21), fill(1), general_group(ko, 2, 24), fill(7, ROTATED), POP,
+              general_group(both, 4), fill(0, ROTATED), POP, POP, general_group(0x81, 3, 1), fill(1), POP, POP]
+    out["scripted-general-nested.bin"] = header() + body(nested)
+    out["scripted-general-nested-memory.bin"] = header(target=T64 | 2, request=CALLER_MEMORY | DAMAGE) + body(nested)
+    out["scripted-general-damage.bin"] = header(request=DAMAGE | EXTENT) + body(flat)
+    out["scripted-general-strict.bin"] = header(request=STRICT) + body(nested)
+    gstroke = [fill(0), general_group(ko, 3), stroke(3, first=style(width=3)), fill(1), stroke(7, ROTATED), POP,
+               general_group(ni, 3, 23), stroke(3), POP]
+    out["scripted-general-stroke.bin"] = header() + body_with_line(gstroke)
+    out["scripted-general-stroke-memory.bin"] = header(request=CALLER_MEMORY | DAMAGE) + body_with_line(gstroke)
+    gmask = [fill(0), masked_group(mask_bytes([inner_fill(1)], mode=0)), fill(3), POP]
+    gmask_ni = bytes([5, 0, 3, 0, 0x89]) + mask_bytes([inner_fill(1)], mode=1)
+    gmask_ko = bytes([5, 0, 3, 23, 0xA9]) + mask_bytes([inner_fill(3)], mode=0x09, transfer=1)
+    masked_general = [fill(0), gmask_ni, fill(1), fill(3), POP, gmask_ko, fill(1), fill(7, ROTATED), POP, gmask[1], fill(3), POP]
+    out["scripted-general-masked.bin"] = header(request=MASKS) + body(masked_general)
+    out["scripted-general-masked-memory.bin"] = header(target=T64 | 3, request=MASKS | CALLER_MEMORY | DAMAGE) + body(masked_general)
     # Strokes stories S1, S4 and S5: a fill whose rule byte has bits 1 and 2 set is a stroke of the shape instead, drawn by
     # expansion; one of a glyph run is drawn as the stroke of the path its glyphs make (ST1, ST8), unhinted whatever the
     # run asks, and the harness draws the same list with each such centerline replaced by that path and requires the same

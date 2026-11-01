@@ -523,10 +523,11 @@ $(HASH_PROBE): tools/corpus-hash.c tests/render_fixtures.h tests/dense_vectors.h
 check-corpus-hash: $(HASH_PROBE) ## Fail unless the probe prints the committed cross-target hash (CAP-13)
 	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash tests/corpus/render.hash tests/corpus/dense.hash tests/corpus/render-fast.hash
 
-check-vectors: ## Fail if tests/known_answers.h, tests/render_vectors.h or tests/mask_vectors.h is not what its independent generator writes
+check-vectors: ## Fail if tests/known_answers.h, tests/render_vectors.h, tests/mask_vectors.h or tests/general_vectors.h is not what its independent generator writes
 	@python3 tools/gen-coverage-vectors.py --check
 	@python3 tools/gen-render-vectors.py --check
 	@python3 tools/gen-mask-vectors.py --check
+	@python3 tools/gen-general-vectors.py --check
 	@python3 tools/gen-dense-cells.py --check
 
 # Each planted defect in tools/check-planted.py is built into a copy of the

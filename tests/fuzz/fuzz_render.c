@@ -110,11 +110,12 @@ enum {
   OUT_OK = 0, OUT_REFUSED_WHILE_DRAWING, OUT_STRICT, OUT_LIMIT_REGION, OUT_CANCEL_MID, OUT_OOM, OUT_CALLER_MEMORY,
   OUT_WORKSPACE_SHORT, OUT_DAMAGE, OUT_GLYPHS_FAST, OUT_GLYPHS_GENERAL, OUT_FLOAT_TARGET, OUT_NESTED_GROUP,
   OUT_GRADIENT_DRAWN, OUT_GRADIENT_NOTICE, OUT_GRADIENT_LIMIT, OUT_COLOR_LIMIT, OUT_COLOR_AT_BOUND, OUT_BLEND_DRAWN,
-  OUT_BLEND_FLOAT, OUT_PDF_REFUSED, OUT_STROKE_RUN_DRAWN, OUT_STROKE_DRAWN, OUT_STROKE_ALIGNED, OUT_STROKE_CACHED,
+  OUT_BLEND_FLOAT, OUT_GENERAL_DRAWN, OUT_STROKE_RUN_DRAWN, OUT_STROKE_DRAWN, OUT_STROKE_ALIGNED, OUT_STROKE_CACHED,
   OUT_STROKE_SPARSE, OUT_STROKE_NOTICE, OUT_STROKE_EXACT, OUT_STROKE_RUN_TWIN, OUT_STROKE_DUAL,
   OUT_BUDGET_REFUSED, OUT_BUDGET_SAME, OUT_IMAGE_DRAWN, OUT_IMAGE_AREA, OUT_IMAGE_LIMIT, OUT_IMAGE_NOTICE, OUT_IMAGE_TINT,
   OUT_IMAGE_STROKE, OUT_MASK_DRAWN, OUT_MASK_LUMINANCE, OUT_MASK_NESTED, OUT_MASK_OUTSIDE, OUT_MASK_IDENTITY,
-  OUT_MASK_REFUSED_INSIDE, OUT_MASK_TIERS_EQUAL, OUT_MASK_DAMAGE, OUT_MASK_CALLER_MEMORY, OUT_COUNT
+  OUT_MASK_REFUSED_INSIDE, OUT_MASK_TIERS_EQUAL, OUT_MASK_DAMAGE, OUT_MASK_CALLER_MEMORY, OUT_NON_ISOLATED, OUT_KNOCKOUT, OUT_GENERAL_MASKED, OUT_GENERAL_SHAPE,
+  OUT_GENERAL_NESTED, OUT_GENERAL_CALLER_MEMORY, OUT_GENERAL_DAMAGE, OUT_GENERAL_STROKE, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -124,7 +125,7 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a render with a gradient fill", "a gradient fill that draws nothing (a notice)",
     "a gradient past G14's bounds, refused at intern", "a fill's color past N1's bound, refused",
     "a render with a color at N1's bound in a gamma space", "a render with a blend-mode group",
-    "a blend-mode group on a float target", "a group of PDF's fields refused (S19)",
+    "a blend-mode group on a float target", "a render with a non-isolated or knockout group composited (KC1)",
     "a render with a stroke of a glyph run drawn (ST8)", "a render with a stroke drawn (SC1)",
     "a render with an aligned stroke drawn (SC5)", "a stroke served from the cache (SC7)",
     "a stroke drawn by the sparse composite (SC8)", "a stroke that draws nothing (a notice)",
@@ -138,7 +139,11 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a render with a masked group composited (MC1)", "a luminance mask composited (MC3)", "a mask of a mask (MC2)",
     "a masked pop that took the outside value (FT-M1)", "a masked pop that skipped an identity transfer (FT-M2)",
     "an item inside a mask picture refused for a sink limit (MC6)", "a masked render equal to the render with both mask tiers off (MC8)",
-    "a damage-limited render of a masked group equal to the whole render (MC6)", "a masked render in caller memory (MC5)"};
+    "a damage-limited render of a masked group equal to the whole render (MC6)", "a masked render in caller memory (MC5)",
+    "a render with a non-isolated group (KC5)", "a render with a knockout group (KC4)", "a masked group that is non-isolated or knockout (KC10)",
+    "a group shape carried under a knockout ancestor (KC3)", "general groups nested, a group alpha or group shape channel in two layers (KC8)",
+    "a render with a general group in caller memory (KC8)", "a damage-limited render of a general group equal to the whole render (KC10)",
+    "a stroke drawn into a general layer (KC2)"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -262,6 +267,8 @@ typedef struct World {
   size_t masks;                      /* groups recorded with a mask */
   size_t mask_luminance;             /* ... of luminance */
   size_t mask_nested;                /* ... masks inside a mask's picture */
+  size_t general;                    /* groups made non-isolated or knockout */
+  size_t knockouts;                  /* ... of them knockout groups */
 } World;
 
 static void intern_paths(Input * in, GSHSCENE_Store * store, const GSHGEOM_Allocator * alloc, World * w) {
@@ -946,14 +953,18 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
         group.blend_space.transfer = GCOL_TRANSFER_GAMMA;
         group.blend_space.gamma = 0.1;
       }
-      /* T1, S19: PDF's group fields, which shape-cpu refuses (its planning pass), never drawing them as a default. */
-      if ((blend & 0xA0) == 0xA0) {
-        group.knockout = 1;
-      } else if ((blend & 0xA0) == 0x80) {
-        group.isolation = GSHSCENE_ISOLATION_NON_ISOLATED;
+      /* T1, KC1: PDF's group fields, which this sink composites: bit 0x80 makes the group general, 0x20 then makes it a knockout group
+       * (isolated) and 0x10 beside it a knockout group that is also non-isolated; without 0x20 it is non-isolated. */
+      if (blend & 0x80) {
+        group.knockout = (blend & 0x20) != 0;
+        if (!(blend & 0x20) || (blend & 0x10)) {
+          group.isolation = GSHSCENE_ISOLATION_NON_ISOLATED;
+        }
+        w->general += 1;
+        w->knockouts += group.knockout;
       }
       const GSHSCENE_Resource * soft = NULL;
-      if (w->masks_on && (blend & 0xA0) == 0x20) {
+      if (w->masks_on && ((blend & 0xA0) == 0x20 || (blend & 0x88) == 0x88)) {
         soft = mask_of(in, w, 0);
         if (soft) {
           group.soft_mask = soft;
@@ -1384,10 +1395,8 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     GSHSCENE_Report_Entry e;
     CHECK(gshscene_report_entry(report, i, &e) == GSHSCENE_OK);
     limit_refused += e.reason == GSHSCENE_REASON_RESOURCE_LIMIT;
-    if (e.reason == GSHSCENE_REASON_GROUP_ISOLATION || e.reason == GSHSCENE_REASON_GROUP_KNOCKOUT) {
-      CHECK(e.entry_class == GSHSCENE_ENTRY_REFUSED);
-      outcomes[OUT_PDF_REFUSED]++;
-    }
+    /* KC1: this sink claims non-isolated and knockout groups, so neither reason is ever given. */
+    CHECK(e.reason != GSHSCENE_REASON_GROUP_ISOLATION && e.reason != GSHSCENE_REASON_GROUP_KNOCKOUT);
     /* MC1: this sink claims the soft-mask flag and every mask feature, so neither reason is ever given. */
     CHECK(e.reason != GSHSCENE_REASON_SOFT_MASK && e.reason != GSHSCENE_REASON_MASK_FEATURE);
     if (e.reason == GSHSCENE_REASON_RESOURCE_LIMIT && e.chain_count >= 2) {
@@ -1472,6 +1481,14 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   outcomes[OUT_MASK_OUTSIDE] += counters.mask_outside > 0;
   outcomes[OUT_MASK_IDENTITY] += counters.mask_identity > 0;
   outcomes[OUT_MASK_CALLER_MEMORY] += r == GSHSCENE_OK && counters.masks > 0 && (request.flags & GSHSCENE_RENDER_CALLER_MEMORY);
+  outcomes[OUT_GENERAL_DRAWN] += r == GSHSCENE_OK && counters.general_layers > 0;
+  outcomes[OUT_NON_ISOLATED] += r == GSHSCENE_OK && counters.group_alpha_slots > 0;
+  outcomes[OUT_KNOCKOUT] += r == GSHSCENE_OK && counters.general_layers > 0 && world.knockouts > 0;
+  outcomes[OUT_GENERAL_MASKED] += r == GSHSCENE_OK && counters.general_pops > 0 && counters.masks > 0;
+  outcomes[OUT_GENERAL_SHAPE] += r == GSHSCENE_OK && counters.group_shape_slots > 0;
+  outcomes[OUT_GENERAL_NESTED] += r == GSHSCENE_OK && (counters.group_alpha_slots > 1 || counters.group_shape_slots > 1);
+  outcomes[OUT_GENERAL_CALLER_MEMORY] += r == GSHSCENE_OK && counters.general_layers > 0 && (request.flags & GSHSCENE_RENDER_CALLER_MEMORY);
+  outcomes[OUT_GENERAL_STROKE] += r == GSHSCENE_OK && counters.general_fills > 0 && counters.strokes > 0;
   outcomes[OUT_STROKE_DRAWN] += r == GSHSCENE_OK && counters.strokes > 0;
   outcomes[OUT_STROKE_RUN_DRAWN] += r == GSHSCENE_OK && counters.strokes > 0 && world.run_strokes > 0;
   outcomes[OUT_STROKE_ALIGNED] += r == GSHSCENE_OK && counters.strokes > 0 && world.aligned > 0;
@@ -1624,6 +1641,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
             }
             outcomes[OUT_DAMAGE]++;
             outcomes[OUT_MASK_DAMAGE] += counters.masks > 0;
+            outcomes[OUT_GENERAL_DAMAGE] += counters.general_layers > 0;
           }
         }
       }

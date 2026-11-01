@@ -124,7 +124,7 @@ struct Bench {
   }
   /** Record one item (a composite_vectors or render_vectors item, in their common shape). */
   void record(int kind, int paint, const double rgba[4], GSHSCENE_Color_Space space, double opacity,
-      GSHSCENE_Color_Space blend, int composite, int width, int entry = 0) {
+      GSHSCENE_Color_Space blend, int composite, int width, int entry = 0, int isolation = 0, int knockout = 0) {
     if (kind == 1) {
       GSHSCENE_Paint p{};
       p.kind = paint == 2 ? GSHSCENE_PAINT_FOREGROUND : paint == 3 ? GSHSCENE_PAINT_PALETTE : GSHSCENE_PAINT_SOLID;
@@ -145,6 +145,8 @@ struct Bench {
       g.opacity = opacity;
       g.blend_space = blend;
       g.composite = (uint32_t)composite;
+      g.isolation = isolation ? GSHSCENE_ISOLATION_NON_ISOLATED : GSHSCENE_ISOLATION_ISOLATED;
+      g.knockout = knockout ? 1u : 0u;
       ASSERT_EQ(gshscene_list_group_push(list, &g, 0, 0.0), GSHSCENE_OK);
     } else {
       ASSERT_EQ(gshscene_list_group_pop(list), GSHSCENE_OK);

@@ -40,9 +40,9 @@
  * composites, named one by one (the twelve Porter-Duff operators, `PLUS` and the
  * fifteen blend modes of color-paint story P3; an operator past them is refused
  * by the planning pass, never drawn as another); a soft mask, every mode, transfer, coefficient set and space
- * of it (`GROUP_SOFT_MASK` and every `GSHSCENE_MASK_NATIVE_*` bit, MC1); and none of PDF's other group fields
- * (non-isolated, knockout: shape-scene's T1 to T7), so the planning
- * pass refuses a group that sets one (S19);
+ * of it (`GROUP_SOFT_MASK` and every `GSHSCENE_MASK_NATIVE_*` bit, MC1); and PDF's other group fields, a group that is non-isolated,
+ * knockout or both (`GROUP_NON_ISOLATED` and `GROUP_KNOCKOUT`, shape-scene's T1 to T7, KC1), with or without a mask, so the planning
+ * pass refuses none of them;
  * `CAN_BLOCK` (it completes inside `begin`), `CALLER_MEMORY`, `CLIP_AA`,
  * `BLEND_SPACES`, `READBACK` and `GLYPHS_FROM_FONT` (story 14a: a run from a font
  * is drawn through its face's provider by shape-scene's route, glyph.h, the fast
@@ -272,8 +272,8 @@
  *   own rectangle (and by `max_deposits`), the sweep hands over a row at a time only the pixels that can be nonzero.  It
  *   is detected as a *solid hairline* (device width 1) or a *plain solid stroke* (any other width), each counted.
  * - **SC9 Groups and order.**  A stroke is one unit of its sequence.  In an isolated group it composites `SRC_OVER`
- *   into the group's layer and the group's blend mode acts at its pop.  A non-isolated or knockout group is
- *   refused as before, and the strokes inside are skipped; a soft-masked group is drawn (MC1).
+ *   into the group's layer and the group's blend mode acts at its pop.  In a non-isolated or knockout group it is one element of
+ *   a general layer (KC2), and its coverage is that element's shape; a soft-masked group is drawn (MC1).
  * - **SC10 The test sink.**  shape-scene's test sink states, for a stroke whose centerline is a path, the hash of the
  *   outline this sink draws on a raster target (`outline=` of its `K` record): the canonical expansion of SC3.
  * - **SC11 Work and cancel.**  A stroke counts the points of its parts, the cell deposits, two passes over its pixels
@@ -573,11 +573,10 @@
  * They are cited by the tests, the planted defects and the vector generator.
  *
  * - **MC1 What the sink claims.**  For a raster target the caps gain `GSHSCENE_CAP_GROUP_SOFT_MASK` and `mask_native` with
- *   every `GSHSCENE_MASK_NATIVE_*` bit, so no mask is refused for `SOFT_MASK` or `MASK_FEATURE`.  A masked group that is also
- *   non-isolated or knockout is refused first, by `GROUP_ISOLATION` or `GROUP_KNOCKOUT`, since this sink claims neither: a
- *   masked group here is an isolated, non-knockout group in an isolated, non-knockout parent (the root, or such a group), and
- *   there the opacity and the shape differ for a mask only for the operators that are not bounded (`DEST_IN`, `SRC`, `SRC_IN`,
- *   `SRC_OUT`, `CLEAR`) and for `PLUS` where its sum clamps.
+ *   every `GSHSCENE_MASK_NATIVE_*` bit, so no mask is refused for `SOFT_MASK` or `MASK_FEATURE`.  A masked group may also be
+ *   non-isolated or knockout (KC1, KC10).  Under an isolated parent the opacity and the shape differ for a mask only for the operators
+ *   that are not bounded (`DEST_IN`, `SRC`, `SRC_IN`, `SRC_OUT`, `CLEAR`) and for `PLUS` where its sum clamps; under a knockout parent
+ *   they differ for every operator (MK7).
  * - **MC2 When and where the mask is drawn.**  At the group's pop, over the **pop region** `P`: the region the pop composites
  *   (the group's dirty rectangle for a bounded operator, the whole region for an unbounded one) met with the reach of the
  *   clips in force around the group and with the damage; nothing is drawn when the render would composite nothing of the
@@ -636,10 +635,89 @@
  * - **MC10 State.**  A render keeps nothing about a mask after its pop: no cache, nothing held by `prepare`, `evict` and
  *   `static_bytes` unchanged; renders on distinct surfaces and threads cannot interact through masks.
  *
+ * ### Non-isolated and knockout groups (KC1 to KC11; shape-scene's T1 to T7)
+ *
+ * PDF's two kinds of group are the waist's (T1 to T5, with the installed vectors); this sink composites them.  The rules below say how
+ * the reference realizes T3 to T5 and in what arithmetic; they do not restate them.  `f` is an element's shape, `S` its opacity source
+ * (premultiplied, alpha `q`), `A = f S`, `Bk` its backdrop, `L` the layer, `L0` the group's initial backdrop, `Ag` its group alpha and
+ * `fg` its group shape.  They are cited by the tests, the planted defects and the vector generator.
+ *
+ * - **KC1 What the sink claims.**  `GSHSCENE_CAP_GROUP_NON_ISOLATED` and `GSHSCENE_CAP_GROUP_KNOCKOUT`, with the soft-mask claim of
+ *   MC1, so every combination of the three is drawn and the planning pass refuses none (`GROUP_ISOLATION` and `GROUP_KNOCKOUT` stay
+ *   the reasons for sinks that do not claim them).
+ * - **KC2 General layers.**  A layer is **general** if its group is non-isolated or knockout.  An element drawn into a general layer
+ *   (a fill, a stroke, an instance's items one by one, the pop of a child group) composites by KC4; every element drawn into any
+ *   other layer, and the root, composites as it did before.  A group's own flags decide its layer, not its parent's: an isolated,
+ *   non-knockout group inside a knockout group is a plain layer whose pop is an element of a general one.  An instance draws its
+ *   picture's items individually, so they are separate elements of a knockout group; a front-end that wants a form to be one element
+ *   wraps the instance in a group.  A glyph run's fill and a stroke are each one element.
+ * - **KC3 The channels.**  Besides `L` (premultiplied, four doubles a pixel, in the layer's space) a layer carries `Ag` (one double a
+ *   pixel) **iff its group is non-isolated** (for an isolated knockout group `L0 = 0`, so `Ag` is the alpha of `L` at every step, and
+ *   the layer's alpha is read as it), and `fg` (one double a pixel) **iff some proper ancestor group is knockout**, because `fg`
+ *   reaches the result only as the shape of the group's pop in a knockout parent, and a parent's own `fg` is a function of its
+ *   elements' shapes, this group's pop among them.  A plain layer that carries `fg` steps it with each element (`fg' = fg + f - fg f`)
+ *   and composites by the same step as a general one, which with `Bk = L` is the plain composite bit for bit.  Where `fg` is not carried
+ *   the pop's shape `m fg` is taken as `m`: the result does not depend on it unless the parent is knockout.  A mask's picture is its
+ *   own isolated group, so the knockout groups around the masked group are not ancestors of the groups inside the picture.  A channel
+ *   starts at 0, made ready where `L` is.
+ * - **KC4 The element step.**  For PDF's operators (source-over and the blend modes) the layer becomes
+ *   `sat((1 - f)(L - Bk) + op_X(A, Bk))` and, for the alpha part, the same on alpha alone, where `op_X(A, Bk)` is what the plain
+ *   `apply` makes of the weight and the source (B4: `apply(D, S, m, op_X) = op_X(m S, D)`); this is T3's `(1 - f) L + (f - Aa) Bk + T`
+ *   rewritten, since `T + (1 - Aa) Bk = op_X(A, Bk)`, and the generator checks the identity in exact rationals against T3's literal
+ *   form at every step of every vector.  For every other operator the layer becomes `sat((1 - f) L + f op(S, Bk))` with `S` the opacity
+ *   source alone.  `Bk = L` in a layer that is not knockout and `Bk = L0` (KC5) in one that is.  The group alpha steps by the same
+ *   step on alpha alone with `Agb` (`Ag` for a layer that is not knockout, 0 for one that is) in place of `Bk`'s alpha, and the group
+ *   shape by `fg + f - fg f`.  `f` is a fill's coverage times the clips in force (N7, N9), a stroke's composed coverage (SC5) times
+ *   the clips, and for the pop of a child the shape T5 gives: `m fg` of the child for PDF's operators and `m` for the others, with the
+ *   mask's substitution of MK7 (`o` becomes `o v`, or `m` becomes `m v`) for a masked child.  An element of no shape (`m = 0` and
+ *   `f = 0`) leaves the layer, its group alpha and its group shape as they are.  A bounded operator whose source is nothing leaves the
+ *   layer as it is where the backdrop is the layer (T6); in a knockout group it knocks out its shape's share of what the layer holds
+ *   beyond its initial backdrop (T3 with `A = 0`), so it is skipped there only when the shape is 0 as well.  The group shape steps
+ *   whatever the source.
+ * - **KC5 The initial backdrop is read, not copied.**  T4: an isolated group's `L0` is `(0, 0, 0, 0)`; a non-isolated group's is the
+ *   backdrop it has as an element of its parent (the parent's value, or the parent's own `L0` when the parent is knockout),
+ *   converted by N3 from the parent's space into the group's.  The parent is not modified between the group's push and its pop (the
+ *   group's items are the only things drawn in that interval), so the sink does not copy it at the push: it reads the parent's pixel,
+ *   through knockout parents, with the one prepared conversion each time (nothing where the spaces are equal: N3 leaves the value
+ *   exactly alone).  A read gives the bits a copy at the push would have held, being the same function of the same unmodified pixel.
+ *   The layer of a non-isolated group is **initialized** to `L0` where it is made ready, so a pixel no element reaches has `L = L0`
+ *   bit for bit.
+ * - **KC6 The group's result.**  At the pop `G = sat(L - (1 - Ag) L0)` on the color channels, with alpha `Ag`, where `L0` is KC5's
+ *   (0 for an isolated group); then `G` is converted to the parent's space (N3, saturated) and is the element of the parent: by KC4 when
+ *   the parent is general or carries a group shape, by the plain composite when it does not.  At a pixel no element reached `L = L0`
+ *   exactly and `Ag = 0`, so `G = 0` exactly: a bounded operator changes nothing there and the pop region is the group's dirty
+ *   rectangle, as for an isolated group.  An isolated group's `G` is its layer.
+ * - **KC7 Arithmetic and tolerance.**  `double`, with N1's saturation at the points T3 to T5 state, one rounding at the write (D7).  A
+ *   vector's value is exact only where every step is exact in doubles (the generator traces KC4's order of operations and bounds each
+ *   step) and otherwise within `1e-12 max(1, |v|)` of the oracle before the write.
+ * - **KC8 Memory is exact.**  The layout counts, beside MC5's frames, the most over every point of the expansion of the non-isolated
+ *   groups open and, separately, of the groups open that carry a group shape, each times the region's pixels times 8 bytes, a mask's
+ *   picture counting where its group pops with the groups open there, and a record for each frame.  `workspace_bytes` is exact, a
+ *   `CALLER_MEMORY` render allocates nothing and gives the same pixels, and one byte short is `ERR_LIMIT`.  A list with none of these
+ *   groups has the layout it had.  The stack that tells a group's flags at its pop is made from the sink's allocator or, from the
+ *   caller's memory, from its first bytes, before anything else lives in them, and takes nothing until a group is non-isolated or knockout.
+ * - **KC9 Cost, and the default path.**  Only general layers (and plain layers that carry a group shape), and the pops into them or
+ *   out of them, run KC4.  A list with none has the `workspace_bytes`, work counts, pixels and hashes it had, and the plain
+ *   path is not routed through KC4.  The two are the same function in the reals (T6) and not bit for bit in doubles where the order of
+ *   the operations differs, so the equivalence is a gate and not a tier: an internal switch (`GSHCPU_RENDER_FORCE_GENERAL`) routes
+ *   every layer, the root's too, through KC4, and every fixture of the corpus rendered both ways agrees, exactly where the arithmetic
+ *   is exact.  Where a layer's elements are a fill's, KC4 is `apply` bit for bit whenever `Bk = L`.
+ * - **KC10 Masks, clips, strokes, damage.**  A masked general group: T5's `G` is computed first (KC6), then MK7's substitution acts on
+ *   the element (the mask pass of MC2 runs at the pop, over the pop region, as before).  The clips in force inside a general group
+ *   multiply `f` (N9); the clips around it multiply once at its pop.  A general layer reads its backdrop wherever its units reach,
+ *   so the parent is made ready over the same pixels first; inside a damage the render equals the whole render, and limit refusals are
+ *   identical.  The readiness of a layer (the initial backdrop's conversion) is not counted in the work between two checks, as the
+ *   root's load is not.
+ * - **KC11 Conflation is the definition.**  In a knockout group a shape's partial coverage `f < 1` leaves `1 - f` of the layer's
+ *   previous value and `f` of the element against `L0`, so two abutting shapes each half-covering a pixel leave a quarter of the
+ *   initial backdrop showing through where an exact union would show none.  That is T3 (a knockout is defined on shape, and shape is
+ *   coverage); this sink still refuses the conflation-free flag, and a test pins the values so a "fix" is seen.
+ *
  * ### Memory (S9)
  *
  * A render takes one block: the layers (32 bytes a pixel of the region for the
- * root and for each level of group nesting, a mask frame counting as one), the touched map and the coverage
+ * root and for each level of group nesting, a mask frame counting as one, and 8 bytes a pixel for each non-isolated group open at once
+ * and for each group open at once that carries a group shape, KC8), the touched map and the coverage
  * scratch (a byte a pixel each), a byte a pixel for each level of clip nesting,
  * the cell accumulator of ::GSHCPU_RENDER_BAND_ROWS rows, the walk, and for
  * gradients a table of twice the gradient fills of the expansion (a picture's

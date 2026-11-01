@@ -2382,6 +2382,258 @@ static inline GSHSCENE_List * rf_mask_not_a_clip(RF_Ctx * c) {
   return l;
 }
 
+
+/* --- non-isolated and knockout groups (masks-images-patterns story M3) ------------------------------------------ */
+
+/** Push a group of @p opacity and @p composite that is non-isolated if @p isolation and knockout if @p knockout, in @p space (or the target's). */
+static inline void rf_general(RF_Ctx * c, GSHSCENE_List * l, int isolation, int knockout, double opacity, uint32_t composite,
+    const GSHSCENE_Color_Space * space) {
+  GSHSCENE_Group g = rf_group(opacity, composite);
+  g.isolation = isolation ? GSHSCENE_ISOLATION_NON_ISOLATED : GSHSCENE_ISOLATION_ISOLATED;
+  g.knockout = knockout ? 1u : 0u;
+  if (space) {
+    g.blend_space = *space;
+  }
+  rf_check(c, gshscene_list_group_push(l, &g, 0, 0.0) == GSHSCENE_OK);
+}
+
+static inline void rf_pop(RF_Ctx * c, GSHSCENE_List * l) {
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+}
+
+/** Two overlapping translucent discs and a star under a blend mode, drawn in a group of each kind, over the page. */
+static inline GSHSCENE_List * rf_group_non_isolated(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.85, 0.8, 0.3, 1.0), 0, 0.0);
+  for (int k = 0; k < 4; k++) {
+    /* The same picture four times: isolated, non-isolated, each with a multiply group and with a plain one. */
+    const int ni = k & 1;
+    GSHGEOM_Map at = rf_move(1.0 + 12.0 * (double)k, 2.0);
+    rf_check(c, gshscene_list_clip_push(l, rf_rect(c, 1.0 + 12.0 * (double)k, 2.0, 12.0 + 12.0 * (double)k, 18.0), NULL,
+                    GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+    rf_general(c, l, ni, 0, k < 2 ? 1.0 : 0.7, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+    rf_fill(c, l, rf_circle(c, 5.0), &at, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.2, 0.2, 0.8), 0, 0.0);
+    /* a blend mode inside the group: a non-isolated group blends with the page, an isolated one with its own layer */
+    GSHGEOM_Map at2 = rf_move(5.0 + 12.0 * (double)k, 7.0);
+    rf_fill(c, l, rf_circle(c, 5.0), &at2, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.4, 0.9, 0.8), 0, 0.0);
+    rf_pop(c, l);
+    rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+  }
+  /* a blend mode as the fill's own group inside a non-isolated group: the page shows through to it */
+  rf_general(c, l, 1, 0, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  rf_fill(c, l, rf_rect(c, 2, 22, 40, 36), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.5, 0.2, 0.5), 0, 0.0);
+  rf_general(c, l, 0, 0, 1.0, GSHSCENE_COMPOSITE_MULTIPLY, NULL);
+  rf_fill(c, l, rf_star(c, 21.0, 29.0, 8.0), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.3, 0.7, 0.9), 0, 0.0);
+  rf_pop(c, l);
+  rf_general(c, l, 1, 0, 0.8, GSHSCENE_COMPOSITE_SCREEN, NULL);
+  GSHGEOM_Map lamp = rf_move(30.0, 26.0);
+  rf_fill(c, l, rf_circle(c, 6.0), &lamp, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.9, 0.2, 0.7), 0, 0.0);
+  rf_pop(c, l);
+  rf_pop(c, l);
+  rf_close(c, l);
+  return l;
+}
+
+/** Overlapping translucent shapes in a knockout group and in a plain one, partial coverage at the edges, a clipped element. */
+static inline GSHSCENE_List * rf_group_knockout(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.9, 0.95, 1.0), 0, 0.0);
+  for (int k = 0; k < 2; k++) {
+    GSHGEOM_Map a = rf_move(2.0 + 22.0 * (double)k, 2.0);
+    GSHGEOM_Map b = rf_move(8.0 + 22.0 * (double)k, 6.5);
+    GSHGEOM_Map d = rf_move(5.0 + 22.0 * (double)k, 11.0);
+    rf_general(c, l, k == 1, k == 0 || k == 1, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+    rf_fill(c, l, rf_circle(c, 7.0), &a, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.1, 0.1, 0.7), 0, 0.0);
+    rf_fill(c, l, rf_circle(c, 7.0), &b, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.2, 0.8, 0.6), 0, 0.0);
+    rf_check(c, gshscene_list_clip_push(l, rf_rect(c, 3.0 + 22.0 * (double)k, 10.0, 15.5 + 22.0 * (double)k, 19.0), NULL,
+                    GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+    rf_fill(c, l, rf_star(c, 11.0 + 22.0 * (double)k, 13.0, 7.0), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.7, 0.2, 0.5), 0, 0.0);
+    rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+    (void)d;
+    rf_pop(c, l);
+  }
+  /* the plain group beside them: an isolated group of the same picture, and one at opacity 0.6 */
+  rf_general(c, l, 0, 0, 0.6, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  GSHGEOM_Map p1 = rf_move(4.0, 24.0);
+  GSHGEOM_Map p2 = rf_move(10.0, 28.5);
+  rf_fill(c, l, rf_circle(c, 7.0), &p1, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.1, 0.1, 0.7), 0, 0.0);
+  rf_fill(c, l, rf_circle(c, 7.0), &p2, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.2, 0.8, 0.6), 0, 0.0);
+  rf_pop(c, l);
+  /* a knockout group of abutting rectangles: each half-covers a pixel, so a quarter of the backdrop shows there (KC11) */
+  rf_general(c, l, 0, 1, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  rf_fill(c, l, rf_rect(c, 26, 26, 33.5, 38), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.2, 0.2, 1.0), 0, 0.0);
+  rf_fill(c, l, rf_rect(c, 33.5, 26, 41, 38), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.2, 0.2, 1.0), 0, 0.0);
+  rf_pop(c, l);
+  rf_close(c, l);
+  return l;
+}
+
+/** A knockout group in a non-isolated group in a knockout group, an isolated child in a knockout parent, a non-isolated child in an isolated one. */
+static inline GSHSCENE_List * rf_group_nested(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.9, 0.8, 1.0), 0, 0.0);
+  GSHGEOM_Map a = rf_move(2.0, 2.0);
+  GSHGEOM_Map b = rf_move(8.0, 6.0);
+  GSHGEOM_Map d = rf_move(13.0, 4.0);
+  rf_general(c, l, 0, 1, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  rf_fill(c, l, rf_circle(c, 8.0), &a, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.3, 0.1, 0.6), 0, 0.0);
+  rf_general(c, l, 1, 0, 0.9, GSHSCENE_COMPOSITE_MULTIPLY, NULL);
+  rf_fill(c, l, rf_circle(c, 8.0), &b, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.5, 0.9, 0.7), 0, 0.0);
+  rf_general(c, l, 0, 1, 0.8, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  rf_fill(c, l, rf_circle(c, 8.0), &d, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.8, 0.3, 0.6), 0, 0.0);
+  rf_fill(c, l, rf_star(c, 20.0, 12.0, 8.0), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.9, 0.1, 0.5), 0, 0.0);
+  rf_pop(c, l);
+  rf_pop(c, l);
+  rf_pop(c, l);
+  /* an isolated child in a knockout parent, and a non-isolated child in an isolated parent and in a knockout parent */
+  GSHGEOM_Map e = rf_move(2.0, 22.0);
+  GSHGEOM_Map f = rf_move(9.0, 25.0);
+  rf_general(c, l, 0, 1, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  rf_fill(c, l, rf_circle(c, 7.0), &e, GSHGEOM_FILL_NONZERO, rf_solid(0.7, 0.1, 0.5, 0.8), 0, 0.0);
+  rf_general(c, l, 0, 0, 0.7, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  rf_fill(c, l, rf_circle(c, 7.0), &f, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.5, 0.7, 0.8), 0, 0.0);
+  rf_pop(c, l);
+  rf_pop(c, l);
+  GSHGEOM_Map g1 = rf_move(26.0, 22.0);
+  GSHGEOM_Map g2 = rf_move(33.0, 25.0);
+  rf_general(c, l, 0, 0, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  rf_fill(c, l, rf_circle(c, 7.0), &g1, GSHGEOM_FILL_NONZERO, rf_solid(0.7, 0.1, 0.5, 0.8), 0, 0.0);
+  rf_general(c, l, 1, 0, 0.7, GSHSCENE_COMPOSITE_SCREEN, NULL);
+  rf_fill(c, l, rf_circle(c, 7.0), &g2, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.5, 0.7, 0.8), 0, 0.0);
+  rf_pop(c, l);
+  rf_pop(c, l);
+  rf_close(c, l);
+  return l;
+}
+
+/** Parent, group and child in different blend spaces (sRGB, linear light, Display P3, a gamma space): L0 converted into the group's space and G back. */
+static inline GSHSCENE_List * rf_group_spaces(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  const GSHSCENE_Color_Space lin = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_LINEAR, 0.0);
+  const GSHSCENE_Color_Space p3 = rf_space(GCOL_PRIMARIES_DISPLAY_P3, GCOL_TRANSFER_SRGB, 0.0);
+  const GSHSCENE_Color_Space gam = rf_space(GCOL_PRIMARIES_SRGB, GCOL_TRANSFER_GAMMA, 2.2);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.6, 0.7, 0.9, 1.0), 0, 0.0);
+  const GSHSCENE_Color_Space * spaces[4] = {&lin, &p3, &gam, &lin};
+  for (int k = 0; k < 4; k++) {
+    GSHGEOM_Map a = rf_move(2.0 + 11.0 * (double)k, 2.0);
+    GSHGEOM_Map b = rf_move(5.0 + 11.0 * (double)k, 6.0);
+    rf_general(c, l, 1, k >= 2, 0.9, k % 2 ? GSHSCENE_COMPOSITE_MULTIPLY : GSHSCENE_COMPOSITE_SRC_OVER, spaces[k]);
+    rf_fill(c, l, rf_circle(c, 4.5), &a, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.2, 0.1, 0.8), 0, 0.0);
+    rf_general(c, l, 1, 0, 0.8, GSHSCENE_COMPOSITE_SCREEN, spaces[(k + 1) % 4]);
+    rf_fill(c, l, rf_circle(c, 4.5), &b, GSHGEOM_FILL_NONZERO, rf_solid_in(0.1, 0.8, 0.3, 0.7, p3), 0, 0.0);
+    rf_pop(c, l);
+    rf_pop(c, l);
+  }
+  /* an isolated group in linear light holding a non-isolated one in a gamma space, over the page in sRGB */
+  rf_general(c, l, 0, 0, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, &lin);
+  rf_fill(c, l, rf_rect(c, 2, 20, 30, 38), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.9, 0.2, 0.6), 0, 0.0);
+  rf_general(c, l, 1, 1, 0.9, GSHSCENE_COMPOSITE_MULTIPLY, &gam);
+  GSHGEOM_Map disc = rf_move(16.0, 29.0);
+  rf_fill(c, l, rf_circle(c, 9.0), &disc, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.5, 0.9, 0.7), 0, 0.0);
+  rf_pop(c, l);
+  rf_pop(c, l);
+  rf_close(c, l);
+  return l;
+}
+
+/** A child's pop under each operator (bounded and unbounded, PDF's and the Porter-Duff family) into a non-isolated parent and a knockout one. */
+static inline GSHSCENE_List * rf_group_operators(RF_Ctx * c) {
+  static const uint32_t ops[8] = {GSHSCENE_COMPOSITE_SRC_OVER, GSHSCENE_COMPOSITE_DEST_OVER, GSHSCENE_COMPOSITE_PLUS,
+      GSHSCENE_COMPOSITE_XOR, GSHSCENE_COMPOSITE_DEST_IN, GSHSCENE_COMPOSITE_SRC, GSHSCENE_COMPOSITE_SRC_ATOP, GSHSCENE_COMPOSITE_DIFFERENCE};
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.85, 0.7, 1.0), 0, 0.0);
+  for (int k = 0; k < 8; k++) {
+    const int col = k % 4;
+    const int row = k / 4;
+    const double x = 1.0 + 12.0 * (double)col;
+    const double y = 1.0 + 19.0 * (double)row;
+    rf_check(c, gshscene_list_clip_push(l, rf_rect(c, x, y, x + 11.0, y + 18.0), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+    rf_general(c, l, 1, row == 1, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+    GSHGEOM_Map a = rf_move(x + 1.0, y + 1.0);
+    GSHGEOM_Map b = rf_move(x + 4.0, y + 6.0);
+    rf_fill(c, l, rf_rect(c, 0, 0, 9, 7), &a, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.2, 0.2, 0.6), 0, 0.0);
+    rf_general(c, l, 0, 0, 0.8, ops[k], NULL);
+    rf_fill(c, l, rf_circle(c, 4.0), &b, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.3, 0.9, 0.7), 0, 0.0);
+    rf_pop(c, l);
+    rf_pop(c, l);
+    rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+  }
+  rf_close(c, l);
+  return l;
+}
+
+/** A stroke, a gradient fill, a glyph, an instance's items and a child group, each one element of a knockout group. */
+static inline GSHSCENE_List * rf_group_elements(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.95, 0.85, 1.0), 0, 0.0);
+  GSHSCENE_List * pl = rf_open(c);
+  rf_fill(c, pl, rf_circle(c, 5.0), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.2, 0.2, 0.7), 0, 0.0);
+  GSHGEOM_Map shifted = rf_move(4.0, 3.0);
+  rf_fill(c, pl, rf_circle(c, 5.0), &shifted, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.2, 0.8, 0.7), 0, 0.0);
+  const GSHSCENE_Resource * pic = rf_picture_of(c, pl);
+  const GSHSCENE_Resource * star = rf_star(c, 8.0, 8.0, 8.0);
+  const GSHSCENE_Resource * pen = rf_pen(c, 3.0, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND);
+  for (int k = 0; k < 2; k++) {
+    const double dy = 20.0 * (double)k;
+    rf_general(c, l, k, 1, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+    GSHGEOM_Map s1 = rf_move(2.0, 1.0 + dy);
+    rf_fill(c, l, star, &s1, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.8, 0.2, 0.8), 0, 0.0);
+    GSHGEOM_Map s2 = rf_move(5.0, 3.0 + dy);
+    rf_stroke(c, l, star, pen, &s2, rf_solid(0.1, 0.4, 0.6, 0.6));
+    const GSHSCENE_Gradient_Stop two[2] = {rf_stop(0.0, rf_solid(0.9, 0.1, 0.1, 0.8)), rf_stop(1.0, rf_solid(0.1, 0.1, 0.9, 0.8))};
+    rf_fill(c, l, rf_rect(c, 20, 2.0 + dy, 32, 16.0 + dy), NULL, GSHGEOM_FILL_NONZERO,
+        rf_gradient_paint(rf_gradient(c, rf_linear(20, 0, 32, 0, 0, 0, GSHSCENE_EXTEND_PAD), two, 2), 1.0), 0, 0.0);
+    GSHGEOM_Map at = rf_move(26.0, 6.0 + dy);
+    rf_check(c, gshscene_list_instance(l, pic, &at, 0, 0.0) == GSHSCENE_OK);
+    rf_general(c, l, 0, 0, 0.5, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+    GSHGEOM_Map far = rf_move(40.0, 8.0 + dy);
+    rf_fill(c, l, rf_circle(c, 5.0), &far, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.7, 0.2, 0.9), 0, 0.0);
+    rf_pop(c, l);
+    rf_pop(c, l);
+  }
+  rf_close(c, l);
+  return l;
+}
+
+/** A masked non-isolated group, a masked knockout group, and a mask whose picture holds a knockout group. */
+static inline GSHSCENE_List * rf_group_masked(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.85, 0.6, 1.0), 0, 0.0);
+  for (int k = 0; k < 3; k++) {
+    GSHSCENE_Mask m = rf_mask_of(rf_picture_fill(c, rf_circle(c, 7.0), rf_solid(1, 1, 1, 0.8)), k == 1 ? GSHSCENE_MASK_LUMINANCE : GSHSCENE_MASK_ALPHA,
+        k == 2 ? GSHSCENE_MASK_ACTS_ON_SHAPE : GSHSCENE_MASK_ACTS_ON_OPACITY);
+    GSHSCENE_Group g = rf_group(0.9, k == 1 ? GSHSCENE_COMPOSITE_MULTIPLY : GSHSCENE_COMPOSITE_SRC_OVER);
+    g.isolation = k != 1 ? GSHSCENE_ISOLATION_NON_ISOLATED : GSHSCENE_ISOLATION_ISOLATED;
+    g.knockout = k >= 1;
+    g.soft_mask = rf_mask_intern(c, &m);
+    GSHGEOM_Map place = rf_move(2.0 + 15.0 * (double)k, 2.0);
+    g.soft_mask_map = place;
+    rf_check(c, gshscene_list_group_push(l, &g, 0, 0.0) == GSHSCENE_OK);
+    GSHGEOM_Map a = rf_move(4.0 + 15.0 * (double)k, 4.0);
+    GSHGEOM_Map b = rf_move(8.0 + 15.0 * (double)k, 8.0);
+    rf_fill(c, l, rf_rect(c, 0, 0, 12, 12), &a, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.1, 0.2, 0.7), 0, 0.0);
+    rf_fill(c, l, rf_rect(c, 0, 0, 12, 12), &b, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.2, 0.8, 0.6), 0, 0.0);
+    rf_pop(c, l);
+  }
+  /* a mask whose picture is a knockout group of two shapes */
+  GSHSCENE_List * pl = rf_open(c);
+  rf_general(c, pl, 0, 1, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  rf_fill(c, pl, rf_circle(c, 8.0), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1, 1, 1, 0.9), 0, 0.0);
+  GSHGEOM_Map second = rf_move(7.0, 3.0);
+  rf_fill(c, pl, rf_circle(c, 8.0), &second, GSHGEOM_FILL_NONZERO, rf_solid(1, 1, 1, 0.4), 0, 0.0);
+  rf_pop(c, pl);
+  GSHSCENE_Mask km = rf_mask_of(rf_picture_of(c, pl), GSHSCENE_MASK_ALPHA, GSHSCENE_MASK_ACTS_ON_OPACITY);
+  GSHSCENE_Group g = rf_group(1.0, GSHSCENE_COMPOSITE_SRC_OVER);
+  g.soft_mask = rf_mask_intern(c, &km);
+  GSHGEOM_Map place = rf_move(4.0, 20.0);
+  g.soft_mask_map = place;
+  rf_check(c, gshscene_list_group_push(l, &g, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, 2, 20, 38, 38), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.5, 0.2, 1.0), 0, 0.0);
+  rf_pop(c, l);
+  rf_close(c, l);
+  return l;
+}
+
 typedef struct RF_Fixture {
   const char * name;
   RF_Build build;
@@ -2437,6 +2689,13 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"mask-frames", rf_mask_frames},
     {"mask-compose", rf_mask_compose},
     {"mask-not-a-clip", rf_mask_not_a_clip},
+    {"group-non-isolated", rf_group_non_isolated},
+    {"group-knockout", rf_group_knockout},
+    {"group-nested", rf_group_nested},
+    {"group-spaces", rf_group_spaces},
+    {"group-operators", rf_group_operators},
+    {"group-elements", rf_group_elements},
+    {"group-masked", rf_group_masked},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

@@ -114,6 +114,44 @@ void gshcpu_render_composite_row(uint32_t op, double opacity, const double * src
 /** N4: nonzero for an operator with `op(0, D) = D` for every `D` (every blend mode, B3). */
 int gshcpu_render_bounded(uint32_t op);
 
+/** Nonzero for PDF's operators, which T3 and T5 give their own form: source-over and the blend modes. */
+int gshcpu_render_pdf_operator(uint32_t op);
+
+/**
+ * KC4: the element step of a general layer.  @p l, the layer's value, becomes `sat((1 - shape)(L - Bk) + op_X(m S, Bk))` for PDF's
+ * operators (`op_X(m S, Bk)` being what ::gshcpu_render_apply makes of @p bk, @p s, @p m and @p op, by B4), and
+ * `sat((1 - m) L + m op(S, Bk))` for every other.  @p bk may be @p l itself; with `Bk = L` and `shape = m` the first is
+ * ::gshcpu_render_apply's result bit for bit.
+ *
+ * @param s The opacity source, premultiplied.
+ * @param m The weight the source takes in the composite (a fill's shape; a group's clips times a mask's shape value).
+ * @param shape The element's shape `f` for the `(1 - f)` term: `m` for a fill and for every operator but PDF's, `m fg` for the
+ *   pop of a group under one of PDF's.
+ * @return 1; or 0, with @p l untouched, for an operator it does not composite.
+ */
+int gshcpu_render_element(double l[4], const double bk[4], const double s[4], double m, double shape, uint32_t op);
+
+/* --- general layers (group.c; masks-images-patterns story M3) ----------------------------------------------- */
+
+/**
+ * KC4, KC3: one pixel of a general layer takes one element.  @p l is the layer's value, @p bk its backdrop for the element (the layer
+ * itself, or its initial backdrop in a knockout group), @p ag the group alpha (NULL where the layer's alpha is it) and @p fg the group
+ * shape (NULL where none is carried), @p s, @p m, @p shape and @p op as ::gshcpu_render_element.  An element of no shape, and a
+ * bounded operator's source of nothing that cannot change the layer, are skipped (the definition's consequence: the plain step skips
+ * the second too).
+ *
+ * @return 1 where the layer was composited; 0 where the element was skipped (the group shape is still stepped where it is
+ *   carried); -1 for an operator it does not composite.
+ */
+int gshcpu_render_group_step(double l[4], const double bk[4], double * ag, double * fg, int knockout, const double s[4], double m,
+    double shape, uint32_t op);
+
+/**
+ * KC6: the group's own result `G` from its layer's value @p l, its group alpha @p ag, and its initial backdrop @p l0 (in the group's
+ * space): `sat(L - (1 - Ag) L0)` with alpha `Ag`; an @p isolated group's is its layer.
+ */
+void gshcpu_render_group_result(const double l[4], double ag, int isolated, const double l0[4], double g[4]);
+
 /* --- masks (mask.c; masks-images-patterns story M2) -------------------------------------------- */
 
 /**
@@ -811,6 +849,11 @@ void gshcpu_render_image_texel(const GSHCPU_Image * im, uint32_t x, uint32_t y, 
 #define GSHCPU_RENDER_TIER_MASK_OUTSIDE 128u
 /** MC8, FT-M2: an identity transfer is not called (the clamp remains). */
 #define GSHCPU_RENDER_TIER_MASK_IDENTITY 256u
+/**
+ * A test switch, not a tier (it is not in ::GSHCPU_RENDER_TIERS_ALL or in the general tier): every layer, the root's too, composites
+ * its elements by KC4's element step (render.h), the gate of KC9 that the plain step is the same function in the reals.
+ */
+#define GSHCPU_RENDER_FORCE_GENERAL 512u
 #define GSHCPU_RENDER_TIERS_ALL \
   (GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE | GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT | \
       GSHCPU_RENDER_TIER_IMAGE_COPY | GSHCPU_RENDER_TIER_IMAGE_SEPARABLE | GSHCPU_RENDER_TIER_IMAGE_TABLE | \
@@ -849,6 +892,11 @@ typedef struct GSHCPU_Render_Counters {
   uint64_t mask_pixels;      /* the pixels of the pop regions P (MC2) of the masked groups, added up */
   uint64_t mask_dirty;       /* the pixels the mask frames were drawn on: their dirty rectangles, which MC2 holds inside P */
   uint64_t mask_pictures;    /* the pictures of masks the layout counted: one for each picture it met, however many masks name it (MC5) */
+  uint64_t general_layers;   /* layers made general (KC2): a group that is non-isolated or knockout (or every one, under the test switch) */
+  uint64_t general_fills;    /* fills and strokes whose paint began in a general layer (KC4) */
+  uint64_t general_pops;     /* pops composited by the general step (KC4 to KC6): the group or its parent is a general layer */
+  uint64_t group_alpha_slots; /* the most group alpha channels the layout counted for a render (KC8): non-isolated groups open at once */
+  uint64_t group_shape_slots; /* ... and group shape channels: groups open at once with a knockout proper ancestor */
 } GSHCPU_Render_Counters;
 
 /** What identifies an expansion in the cache (SC7). */
@@ -1205,7 +1253,7 @@ int gshcpu_batch_add(GSHCPU_Batch * batch, const GSHGEOM_Flat_Path * path, int64
 /* --- the memo of the layout's count of mask pictures (memo.c) -------------------------------------------------------------- */
 
 /** The most bytes of value a memo holds for a key. */
-#define GSHCPU_MEMO_VALUE_MAX 64u
+#define GSHCPU_MEMO_VALUE_MAX 96u
 
 /** The slots of a memo before it takes room of its own (a power of two). */
 #define GSHCPU_MEMO_INLINE 32u
@@ -1215,6 +1263,27 @@ typedef struct GSHCPU_Memo_Slot {
   uint64_t full;
   unsigned char value[GSHCPU_MEMO_VALUE_MAX];
 } GSHCPU_Memo_Slot;
+
+/** The entries of a chunk of a ::GSHCPU_Bits. */
+#define GSHCPU_BITS_CHUNK 128u
+
+typedef struct GSHCPU_Bits_Chunk {
+  struct GSHCPU_Bits_Chunk * prev, * next;
+  uint64_t v[GSHCPU_BITS_CHUNK];
+} GSHCPU_Bits_Chunk;
+
+/**
+ * A stack of 64-bit entries whose room comes from the memo it is opened on: its allocator, or the scratch the memo was opened with.
+ * Unlike the memo's table it never forgets: a push that finds no room fails, and so does whatever counted on it.  It takes no room
+ * until the first push.
+ */
+typedef struct GSHCPU_Bits {
+  struct GSHCPU_Memo * memo;
+  GSHCPU_Bits_Chunk * first;      /* the chunks, linked, kept until the stack is closed */
+  GSHCPU_Bits_Chunk * top;        /* the chunk holding the entry on top */
+  size_t len;
+  int failed;                     /* a push found no room */
+} GSHCPU_Bits;
 
 typedef struct GSHCPU_Memo {
   GSHCPU_Memo_Slot * slots;       /* the table: `first`, or a block of the allocator or of the scratch */
@@ -1239,6 +1308,21 @@ void gshcpu_memo_add(GSHCPU_Memo * memo, uint64_t key, const void * value);
 
 /** Give back what the memo took from the allocator. */
 void gshcpu_memo_close(GSHCPU_Memo * memo);
+
+/** An empty stack on @p memo (which must outlive it). */
+void gshcpu_bits_open(GSHCPU_Bits * bits, GSHCPU_Memo * memo);
+
+/** Push @p v.  @return 1; or 0, with the stack unchanged and `failed` set, where there is no room. */
+int gshcpu_bits_push(GSHCPU_Bits * bits, uint64_t v);
+
+/** The top entry (the stack is not empty). */
+uint64_t gshcpu_bits_top(const GSHCPU_Bits * bits);
+
+/** Pop and return the top entry (the stack is not empty). */
+uint64_t gshcpu_bits_pop(GSHCPU_Bits * bits);
+
+/** Give back the chunks taken from the allocator. */
+void gshcpu_bits_close(GSHCPU_Bits * bits);
 
 #ifdef __cplusplus
 }

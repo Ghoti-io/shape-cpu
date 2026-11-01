@@ -141,3 +141,84 @@ void gshcpu_memo_close(GSHCPU_Memo * memo) {
   memo->used = 0;
   memset(memo->first, 0, sizeof memo->first);
 }
+
+/* --- a stack of bytes on the memo's room ---------------------------------------------------------- */
+
+void gshcpu_bits_open(GSHCPU_Bits * bits, GSHCPU_Memo * memo) {
+  memset(bits, 0, sizeof *bits);
+  bits->memo = memo;
+}
+
+/** A chunk from the memo's allocator or scratch; NULL where there is none. */
+static GSHCPU_Bits_Chunk * chunk_make(GSHCPU_Memo * memo) {
+  GSHCPU_Bits_Chunk * c = NULL;
+  if (memo->alloc) {
+    c = memo->alloc->malloc_fn(memo->alloc->ctx, sizeof *c);
+  } else {
+    const size_t bytes = (sizeof *c + (MEMO_ALIGN - 1u)) & ~(size_t)(MEMO_ALIGN - 1u);
+    if (memo->scratch_left >= bytes) {
+      c = (GSHCPU_Bits_Chunk *)(void *)memo->scratch;
+      memo->scratch += bytes;
+      memo->scratch_left -= bytes;
+    }
+  }
+  if (c) {
+    c->prev = NULL;
+    c->next = NULL;
+  }
+  return c;
+}
+
+int gshcpu_bits_push(GSHCPU_Bits * bits, uint64_t v) {
+  const size_t at = bits->len % GSHCPU_BITS_CHUNK;
+  if (bits->len == 0 || at == 0) {
+    /* The next chunk: the one already linked after the top (a stack that was popped back), or a new one. */
+    GSHCPU_Bits_Chunk * next = bits->top ? bits->top->next : bits->first;
+    if (!next) {
+      next = chunk_make(bits->memo);
+      if (!next) {
+        bits->failed = 1;
+        return 0;
+      }
+      next->prev = bits->top;
+      if (bits->top) {
+        bits->top->next = next;
+      } else {
+        bits->first = next;
+      }
+    }
+    bits->top = next;
+  }
+  bits->top->v[at] = v;
+  bits->len++;
+  return 1;
+}
+
+uint64_t gshcpu_bits_top(const GSHCPU_Bits * bits) {
+  return bits->top->v[(bits->len - 1u) % GSHCPU_BITS_CHUNK];
+}
+
+uint64_t gshcpu_bits_pop(GSHCPU_Bits * bits) {
+  const size_t at = (bits->len - 1u) % GSHCPU_BITS_CHUNK;
+  const uint64_t v = bits->top->v[at];
+  bits->len--;
+  if (at == 0) {
+    /* The chunk is empty: the top is the one before it (kept linked, for the next push to reuse). */
+    bits->top = bits->top->prev;
+  }
+  return v;
+}
+
+void gshcpu_bits_close(GSHCPU_Bits * bits) {
+  if (bits->memo->alloc) {
+    GSHCPU_Bits_Chunk * c = bits->first;
+    while (c) {
+      GSHCPU_Bits_Chunk * next = c->next;
+      bits->memo->alloc->free_fn(bits->memo->alloc->ctx, c);
+      c = next;
+    }
+  }
+  bits->first = NULL;
+  bits->top = NULL;
+  bits->len = 0;
+}

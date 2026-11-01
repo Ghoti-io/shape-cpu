@@ -1172,17 +1172,18 @@ TEST(RenderStroke, AStrokeInAnIsolatedGroupCompositesSrcOverAndTheGroupsModeActs
   GSHSCENE_Group multiply = rf_group(1.0, GSHSCENE_COMPOSITE_MULTIPLY);
   Drawn blended = render_list(sink.sink, list_with(multiply, true), 24, 24);
   EXPECT_EQ(blended.alpha, bare.alpha);
-  // A knockout or non-isolated group is refused by this sink as before, and the stroke inside is skipped.
-  GSHSCENE_Group knock = rf_group(1.0, GSHSCENE_COMPOSITE_SRC_OVER);
-  knock.knockout = 1;
-  Drawn refused = render_list(sink.sink, list_with(knock, true), 24, 24);
-  ASSERT_EQ(refused.entries.size(), 1u);
-  EXPECT_EQ(refused.entries[0].reason, GSHSCENE_REASON_GROUP_KNOCKOUT);
-  for (uint8_t a : refused.alpha) {
-    EXPECT_EQ(a, 0);
+  // A knockout or a non-isolated group is composited (masks-images-patterns story M3): a lone stroke over nothing is the same in a
+  // group of either kind (the initial backdrop of a stroke in a knockout group is nothing here), and nothing is refused.
+  for (int variant = 0; variant < 2; variant++) {
+    GSHSCENE_Group general = rf_group(1.0, GSHSCENE_COMPOSITE_SRC_OVER);
+    general.knockout = variant == 0;
+    general.isolation = variant == 1 ? GSHSCENE_ISOLATION_NON_ISOLATED : GSHSCENE_ISOLATION_ISOLATED;
+    Drawn drawn = render_list(sink.sink, list_with(general, true), 24, 24);
+    EXPECT_EQ(drawn.entries.size(), 0u) << variant;
+    EXPECT_EQ(drawn.alpha, bare.alpha) << variant;
+    Drawn strict = render_list(sink.sink, list_with(general, true), 24, 24, GSHCPU_FORMAT_RGBA8_STRAIGHT, GSHSCENE_RENDER_STRICT);
+    EXPECT_EQ(strict.result, GSHSCENE_OK) << variant;
   }
-  Drawn strict = render_list(sink.sink, list_with(knock, true), 24, 24, GSHCPU_FORMAT_RGBA8_STRAIGHT, GSHSCENE_RENDER_STRICT);
-  EXPECT_EQ(strict.result, GSHSCENE_ERR_REFUSED);
   // The soft-mask slot names a mask resource (an alpha mask over a picture of one fill of the left half of the raster): this sink
   // draws it (masks story M2), and the stroke inside the group is held to the half the mask covers.
   GSHSCENE_List * mask_list = s.open();

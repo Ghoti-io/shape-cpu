@@ -84,6 +84,7 @@ typedef struct Frame {
   size_t clip_base;          /* the first clip pushed in this group */
   GSHCPU_Rect dirty;         /* the pixels anything was applied to, and the pixels made ready */
   int bytes;                 /* fast8: the layer is premultiplied bytes (px8), not doubles: the root and a group in the target's space */
+  int general;               /* a general layer (KC2): its elements composite by KC4; takes the padding the record had */
   unsigned char * px8;       /* fast8: the layer as premultiplied bytes (the target's own for the root), pixel (x, y) at ... */
   size_t stride8;            /* ... px8 + (y - oy) * stride8 + 4 (x - ox) */
   int64_t ox, oy;
@@ -181,6 +182,36 @@ typedef struct Mask_Layout {
   size_t at_frames, at_chain, at_walk;
 } Mask_Layout;
 
+/**
+ * What a general layer keeps beside its Frame (KC2, KC3): carved after the Frame array only when the list has a group that is non-isolated
+ * or knockout, so that a list with none has the memory it had before them (KC9).
+ */
+typedef struct Gen_Frame {
+  double * ag;                    /* a non-isolated group: its group alpha, one double a pixel; else NULL (the layer's alpha is it) */
+  double * fg;                    /* a proper ancestor is knockout: the group shape, one double a pixel; else NULL */
+  GSHCPU_Convert from_parent;     /* a non-isolated group: the parent's space into this layer's (N3), for the initial backdrop */
+  int on;                         /* a general layer */
+  int nonisolated;
+  int knockout;
+  int ko_anc;                     /* some proper ancestor in this walk is knockout (KC3) */
+} Gen_Frame;
+
+typedef struct Gen_State {
+  double * ag;                    /* the group alpha channels: one for each non-isolated group open at once */
+  double * fg;                    /* the group shape channels */
+  size_t ag_used, fg_used;        /* the channels of the groups open now */
+  Gen_Frame * frames;             /* one for each Frame, the root's too */
+} Gen_State;
+
+/** The sizes of that, and where the channels lie (from the aligned base). */
+typedef struct Gen_Layout {
+  int on;                         /* a general layer may exist: a group that is non-isolated or knockout, or the forced switch */
+  size_t ag_slots;                /* the most non-isolated groups open at once (KC8) */
+  size_t fg_slots;                /* the most groups open at once that have a knockout proper ancestor */
+  size_t records;                 /* bytes after the Frame array: the state and a record for each Frame */
+  size_t at_ag, at_fg;
+} Gen_Layout;
+
 typedef struct Run {
   Cpu_Sink * cs;
   GSHSCENE_Job * job;
@@ -211,7 +242,8 @@ typedef struct Run {
   int straight8;             /* ... and the target is straight alpha: its root is a byte layer of its own, loaded and stored */
   int fast8;                 /* the fast fill coverage on an 8-bit premultiplied or straight target: the layers are bytes, the root the target itself */
   int direct8;               /* the fast coverage composes straight into the target's bytes (strokes alone, 8-bit premultiplied) */
-  int masked;                /* the list holds a masked group: a Mask_State follows the Run (it takes the Run's padding, so a list with no mask lays out as it did) */
+  unsigned masked : 1;       /* the list holds a masked group: a Mask_State follows the Run (it takes the Run's padding, so a list with no mask lays out as it did) */
+  unsigned general : 1;      /* the list holds a general layer (KC2): a Gen_State follows the Frame array */
   GSHCPU_Batch * batch;      /* ... and its strokes are queued and drawn over stripes by several threads (GSHCPU_Limits.threads) */
   size_t acc_zero;           /* the accumulator's first bytes known to be zero: the caller's memory is not zeroed, the dense sweeps leave theirs written, and a sparse one needs the part it uses zero */
   int caller;                /* CALLER_MEMORY: nothing allocated, so no cache */
@@ -241,6 +273,16 @@ typedef struct Run {
 /** The Mask_State of a render whose list holds a masked group (run->masked). */
 static Mask_State * ms_of(const Run * run) {
   return (Mask_State *)(void *)((unsigned char *)(void *)(Run *)run + RUN_BYTES);
+}
+
+/** The Gen_State of a render whose list holds a general layer (run->general): directly after the Frame array. */
+static Gen_State * gs_of(const Run * run) {
+  return (Gen_State *)(void *)((unsigned char *)(void *)run->frames + (run->layout.groups + 1u) * sizeof(Frame));
+}
+
+/** The record of @p f, one of the run's frames. */
+static Gen_Frame * gen_of(const Run * run, const Frame * f) {
+  return &gs_of(run)->frames[f - run->frames];
 }
 
 /* --- sizes ------------------------------------------------------------------------------------ */
@@ -276,7 +318,8 @@ static size_t mul3(size_t a, size_t b, size_t c) {
  */
 typedef struct Need {
   size_t groups, clips, gradients, stops, walk;
-  int aligned, strokes, other, wide, ok;
+  size_t ag, fg;             /* KC8: the most non-isolated groups, and groups with a knockout proper ancestor, open at once in it */
+  int aligned, strokes, other, wide, ok, general;
 } Need;
 
 /**
@@ -293,6 +336,10 @@ typedef struct Nest {
   GSHCPU_Stroke_Cache * cache; /* the counters */
   size_t walk;               /* the most walk memory the pictures of masks, one in another, take at one pop */
   int masked;                /* a group in the list has a mask */
+  size_t ko;                 /* the knockout groups open now in this walk: a mask's picture starts again at none (MK2) */
+  size_t depth;              /* the groups open now in this walk */
+  GSHCPU_Bits * bits;        /* the open groups that are non-isolated or knockout, as (depth << 2) | flags, to undo at their pop */
+  int oom;                   /* the stack of open groups found no room */
 } Nest;
 
 /** @p a plus @p b, saturating at SIZE_MAX. */
@@ -312,7 +359,7 @@ static int out_of_range(const GSHSCENE_Paint * paint) {
 }
 
 static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops,
-    int * aligned, int * strokes, int * other, int * wide, Nest * nest);
+    int * aligned, int * strokes, int * other, int * wide, int * general, size_t * ag, size_t * fg, Nest * nest);
 
 /** The needs of the picture of @p mask (MC5), drawn into its frame at a pop: found once for a picture, however many masks name it
  * and however many pictures there are, and counted again only where the memo had no room; `mask_pictures` counts the walks. */
@@ -326,32 +373,48 @@ static int mask_need(const GSHSCENE_Resource * mask, Need * out, Nest * nest) {
   if (gshcpu_memo_find(nest->memo, id, out)) {
     return out->ok;
   }
-  Nest sub = {nest->memo, nest->cache, 0, 0};
+  /* The picture is its own isolated, non-knockout group (MK2): the knockout groups around the masked group are not its ancestors. */
+  Nest sub = {nest->memo, nest->cache, 0, 0, 0, 0, nest->bits, 0};
   gshcpu_stroke_cache_count(nest->cache, offsetof(GSHCPU_Render_Counters, mask_pictures));
   out->ok = nesting(gshscene_resource_picture(m.picture), &out->groups, &out->clips, &out->gradients, &out->stops, &out->aligned,
-      &out->strokes, &out->other, &out->wide, &sub);
+      &out->strokes, &out->other, &out->wide, &out->general, &out->ag, &out->fg, &sub);
+  nest->oom = nest->oom || sub.oom;
   out->walk = sub.walk;
   gshcpu_memo_add(nest->memo, id, out);
   return out->ok;
 }
 
 /** `nesting` of @p list, with a memo whose room is the sink's allocator's, or the request's workspace under CALLER_MEMORY. */
-static int counted_nesting(const Cpu_Sink * cs, const GSHSCENE_List * list, Layout * L, Nest * nest, const GSHSCENE_Render_Request * request) {
+static int counted_nesting(const Cpu_Sink * cs, const GSHSCENE_List * list, Layout * L, Gen_Layout * G, Nest * nest,
+    const GSHSCENE_Render_Request * request) {
   Nest_Memo memo;
   gshcpu_memo_open(&memo, sizeof(Need), (request->flags & GSHSCENE_RENDER_CALLER_MEMORY) ? NULL : &cs->alloc, request->workspace, request->workspace_bytes);
+  GSHCPU_Bits bits;
+  gshcpu_bits_open(&bits, &memo);
   nest->memo = &memo;
-  const int ok = nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned, &L->strokes, &L->other, &L->wide, nest);
+  nest->bits = &bits;
+  int general = 0;
+  const int ok = nesting(list, &L->groups, &L->clips, &L->gradients, &L->stops, &L->aligned, &L->strokes, &L->other, &L->wide, &general,
+      &G->ag_slots, &G->fg_slots, nest);
+  G->on = general;
+  gshcpu_bits_close(&bits);
   gshcpu_memo_close(&memo);
   return ok;
 }
 
 static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops,
-    int * aligned, int * strokes, int * other, int * wide, Nest * nest) {
+    int * aligned, int * strokes, int * other, int * wide, int * general, size_t * ag, size_t * fg, Nest * nest) {
   size_t g = 0;
   size_t c = 0;
   size_t most_g = 0;
   size_t most_c = 0;
+  size_t open_ag = 0;        /* KC8: the non-isolated groups open now, and the groups with a knockout proper ancestor */
+  size_t open_fg = 0;
+  size_t most_ag = 0;
+  size_t most_fg = 0;
+  const size_t base = nest->bits->len;
   int ok = 1;
+  *general = 0;
   size_t count = gshscene_list_count(list);
   for (size_t i = 0; i < count; i++) {
     const GSHSCENE_Item * item = NULL;
@@ -386,8 +449,30 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
       *aligned = 1; /* SC5: the parts and their composition need arrays of their own */
     }
     switch (item->kind) {
-      case GSHSCENE_ITEM_GROUP_PUSH:
+      case GSHSCENE_ITEM_GROUP_PUSH: {
         g++;
+        /* KC3: a non-isolated group carries a group alpha; a group with a knockout proper ancestor carries a group shape.  A group
+         * that is either is one entry on a stack, read back at its pop; a plain group takes none, so a list without them takes
+         * no room for the stack. */
+        const int ni = item->group.isolation == (uint32_t)GSHSCENE_ISOLATION_NON_ISOLATED;
+        const int ko = item->group.knockout != 0;
+        nest->depth++;
+        if ((ni || ko) && !gshcpu_bits_push(nest->bits, ((uint64_t)nest->depth << 2) | (ni ? 1u : 0u) | (ko ? 2u : 0u))) {
+          nest->oom = 1;
+          return 0;
+        }
+        *general = *general || ni || ko;
+        if (ni) {
+          open_ag++;
+        }
+        if (nest->ko > 0) {
+          open_fg++;
+        }
+        if (ko) {
+          nest->ko++;
+        }
+        most_ag = open_ag > most_ag ? open_ag : most_ag;
+        most_fg = open_fg > most_fg ? open_fg : most_fg;
         if (item->group.soft_mask) {
           /* MC5: at this group's pop its mask is drawn into one more layer, and everything the picture needs while it is drawn
            * is open with it: the groups and clips of the picture (a masked group inside it, one more again), its gradients
@@ -398,6 +483,9 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
           *wide = 1;
           most_g = sat_add(sat_add(g, 1u), pn.groups) > most_g ? sat_add(sat_add(g, 1u), pn.groups) : most_g;
           most_c = sat_add(c, pn.clips) > most_c ? sat_add(c, pn.clips) : most_c;
+          most_ag = sat_add(open_ag, pn.ag) > most_ag ? sat_add(open_ag, pn.ag) : most_ag;
+          most_fg = sat_add(open_fg, pn.fg) > most_fg ? sat_add(open_fg, pn.fg) : most_fg;
+          *general = *general || pn.general;
           ok = ok && gcu_safe_add_size(*gradients, pn.gradients, gradients) && gcu_safe_add_size(*stops, pn.stops, stops);
           *aligned = *aligned || pn.aligned;
           *strokes = *strokes || pn.strokes;
@@ -410,8 +498,22 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
           }
         }
         break;
+      }
       case GSHSCENE_ITEM_GROUP_POP:
         g--;
+        if (nest->bits->len > base && (gshcpu_bits_top(nest->bits) >> 2) == nest->depth) {
+          const uint64_t bits = gshcpu_bits_pop(nest->bits);
+          if (bits & 2u) {
+            nest->ko--;
+          }
+          if (bits & 1u) {
+            open_ag--;
+          }
+        }
+        if (nest->ko > 0) {
+          open_fg--; /* it carried a group shape exactly when a knockout group was open around it, which is as many as now */
+        }
+        nest->depth--;
         break;
       case GSHSCENE_ITEM_CLIP_PUSH:
         c++;
@@ -422,9 +524,20 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
       case GSHSCENE_ITEM_INSTANCE: {
         size_t ig = 0;
         size_t ic = 0;
-        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops, aligned, strokes, other, wide, nest) && ok;
+        size_t iag = 0;
+        size_t ifg = 0;
+        int igeneral = 0;
+        /* The instance's items are drawn into this layer, its groups inside the groups open here (and under their knockout ones). */
+        ok = nesting(gshscene_resource_picture(item->resource), &ig, &ic, gradients, stops, aligned, strokes, other, wide, &igeneral,
+                 &iag, &ifg, nest) && ok;
+        if (nest->oom) {
+          return 0;
+        }
+        *general = *general || igeneral;
         most_g = g + ig > most_g ? g + ig : most_g;
         most_c = c + ic > most_c ? c + ic : most_c;
+        most_ag = open_ag + iag > most_ag ? open_ag + iag : most_ag;
+        most_fg = open_fg + ifg > most_fg ? open_fg + ifg : most_fg;
         break;
       }
       default:
@@ -435,6 +548,8 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
   }
   *groups = most_g;
   *clips = most_c;
+  *ag = most_ag;
+  *fg = most_fg;
   return ok;
 }
 
@@ -464,9 +579,10 @@ static GSHCPU_Rect whole_of(const GSHSCENE_Target * target) {
  * count of the mask pictures takes its memo's room from @p request's workspace, where nothing else lives yet (it allocates nothing).
  */
 static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, const GSHSCENE_Target * target, Layout * L,
-    Mask_Layout * M, const GSHSCENE_Render_Request * request) {
+    Mask_Layout * M, Gen_Layout * G, const GSHSCENE_Render_Request * request) {
   memset(L, 0, sizeof *L);
   memset(M, 0, sizeof *M);
+  memset(G, 0, sizeof *G);
   L->region = region_of(target);
   L->whole = whole_of(target);
   L->width = (size_t)(L->region.x1 - L->region.x0);
@@ -483,9 +599,25 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
   L->levels = L->walk / (sizeof(const GSHSCENE_List *) + sizeof(size_t));
   /* The count of the mask pictures (MC5) shares its memo with the walks of the pictures: each picture is walked once, however
    * many pictures there are. */
-  Nest nest = {NULL, cs->cache, 0, 0};
-  if (!counted_nesting(cs, list, L, &nest, request)) {
-    return GSHCPU_ERR_LIMIT;
+  Nest nest = {NULL, cs->cache, 0, 0, 0, 0, NULL, 0};
+  if (!counted_nesting(cs, list, L, G, &nest, request)) {
+    /* The stack of open groups found no room: an allocator that failed, or a workspace too short to hold it (nothing is allocated). */
+    return nest.oom && !(request->flags & GSHSCENE_RENDER_CALLER_MEMORY) ? GSHCPU_ERR_OOM : GSHCPU_ERR_LIMIT;
+  }
+  if (cs->tiers & GSHCPU_RENDER_FORCE_GENERAL) {
+    G->on = 1; /* KC9's gate: every layer, the root's too, takes the element step */
+  }
+  if (G->on) {
+    /* KC8: a record for each frame, and a channel for each non-isolated group open at once and each group with a knockout ancestor.
+     * No byte layer can hold a general layer's channels, and a list that holds one has none (the layers are doubles, as a masked list's). */
+    L->wide = 1;
+    G->records = align_up(sizeof(Gen_State));
+    if (G->records == SIZE_MAX || !gcu_safe_add_size(G->records, mul3(L->groups + 1u, sizeof(Gen_Frame), 1), &G->records)) {
+      return GSHCPU_ERR_LIMIT;
+    }
+  } else {
+    G->ag_slots = 0;
+    G->fg_slots = 0;
   }
   if (nest.masked) {
     /* MC5: the area after the Run: the state, a frame record for each layer, the chain of a mask's item, and the walks of the
@@ -540,10 +672,12 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
   int ok = place(&at, sizeof(Run), &ignored) && place(&at, M->bytes, &M->at) && place(&at, L->walk, &L->at_walk) &&
       place(&at, mul3(L->levels + 2u, sizeof(GSHGEOM_Map), 1), &L->at_maps) &&
       place(&at, mul3(L->levels, sizeof(size_t), 1), &L->at_stop) &&
-      place(&at, mul3(L->groups + 1u, sizeof(Frame), 1), &L->at_frames) &&
+      place(&at, sat_add(mul3(L->groups + 1u, sizeof(Frame), 1), G->records), &L->at_frames) &&
       place(&at, mul3(L->clips, sizeof(Clip), 1), &L->at_clips) &&
       place(&at, mul3(L->pixels, 4u, sizeof(double)), &L->at_root) &&
       place(&at, mul3(L->groups, L->pixels, 4u * sizeof(double)), &L->at_layers) &&
+      place(&at, mul3(G->ag_slots, L->pixels, sizeof(double)), &G->at_ag) &&
+      place(&at, mul3(G->fg_slots, L->pixels, sizeof(double)), &G->at_fg) &&
       place(&at, L->pixels, &L->at_touched) && place(&at, L->pixels, &L->at_coverage) &&
       place(&at, L->aligned ? L->pixels : 0, &L->at_cov_aligned) && place(&at, L->aligned ? L->pixels : 0, &L->at_cov_clip) &&
       place(&at, L->aligned ? L->pixels : 0, &L->at_cov_result) &&
@@ -730,7 +864,8 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
 static GSHCPU_Result need_of(const Cpu_Sink * cs, const GSHSCENE_Render_Request * request, size_t * out) {
   Layout L;
   Mask_Layout M;
-  GSHCPU_Result r = layout(cs, request->list, request->target, &L, &M, request);
+  Gen_Layout G;
+  GSHCPU_Result r = layout(cs, request->list, request->target, &L, &M, &G, request);
   if (r != GSHCPU_OK) {
     return r;
   }
@@ -861,6 +996,8 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
    * masked group that is also non-isolated or knockout is refused first, by the flags this sink does not claim. */
   out->flags |= GSHSCENE_CAP_GROUP_SOFT_MASK;
   out->mask_native = GSHSCENE_MASK_NATIVE_ALL;
+  /* KC1: a group that is non-isolated, or knockout, or both, with or without a mask, so no combination is refused. */
+  out->flags |= GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT;
   out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;
   out->cancel_work_bound = work_bound(cs);
   out->work_measure = "cells+points+pixels+texels";
@@ -922,8 +1059,41 @@ static size_t at(const Run * run, int64_t x, int64_t y) {
   return (size_t)(y - run->layout.region.y0) * run->layout.width + (size_t)(x - run->layout.region.x0);
 }
 
+static void initial_backdrop(const Run * run, size_t i, size_t p, double out[4]);
+
 /**
- * Make the pixels of row @p y from @p x0 to @p x1 of @p f ready (widen): a group's layer starts at `(0, 0, 0, 0)`;
+ * The backdrop an element of frame @p i's layer composites with at pixel @p p (T3): the layer itself, or in a knockout group its
+ * initial backdrop (KC4).  The layer is read in place, where it was made ready (widen).
+ */
+static void backdrop_of(const Run * run, size_t i, size_t p, double out[4]) {
+  if (gs_of(run)->frames[i].knockout) {
+    initial_backdrop(run, i, p, out);
+  } else {
+    memcpy(out, &run->frames[i].layer[4u * p], 4u * sizeof(double));
+  }
+}
+
+/**
+ * KC5: the initial backdrop `L0` of frame @p i at pixel @p p, in its own space: nothing for an isolated group (N6); for a non-isolated
+ * one the backdrop it has as an element of its parent (the parent's value, or in a knockout parent the parent's own initial backdrop,
+ * read the same way through the parents), converted by the one prepared conversion (N3, which leaves equal spaces exactly alone).  It is
+ * read where it is needed and never copied: the parent does not change while the group is open, so a read gives the bits a copy at
+ * the push would have held, and it is the same function whether the layer is made ready or popped.
+ */
+static void initial_backdrop(const Run * run, size_t i, size_t p, double out[4]) {
+  const Gen_Frame * g = &gs_of(run)->frames[i];
+  if (!g->nonisolated) {
+    memset(out, 0, 4u * sizeof(double));
+    return;
+  }
+  double b[4];
+  backdrop_of(run, i - 1u, p, b);
+  gshcpu_render_convert_premultiplied(&g->from_parent, b, out);
+}
+
+/**
+ * Make the pixels of row @p y from @p x0 to @p x1 of @p f ready (widen): a group's layer starts at `(0, 0, 0, 0)`, or at its initial
+ * backdrop when it is non-isolated (KC5), its group alpha and group shape at 0 (KC3);
  * the root layer is the target (N6), its values read once, here, and its touched map clear.
  */
 static void ready_span(Run * run, Frame * f, int64_t x0, int64_t x1, int64_t y) {
@@ -943,6 +1113,21 @@ static void ready_span(Run * run, Frame * f, int64_t x0, int64_t x1, int64_t y) 
   size_t n = (size_t)(x1 - x0);
   if (f != &run->frames[0]) {
     memset(f->layer + 4u * p, 0, 4u * n * sizeof *f->layer);
+    if (run->general) {
+      const Gen_Frame * g = gen_of(run, f);
+      if (g->ag) {
+        memset(g->ag + p, 0, n * sizeof *g->ag);
+      }
+      if (g->fg) {
+        memset(g->fg + p, 0, n * sizeof *g->fg);
+      }
+      if (g->nonisolated) {
+        const size_t i = (size_t)(f - run->frames);
+        for (size_t k = 0; k < n; k++) {
+          initial_backdrop(run, i, p + k, &f->layer[4u * (p + k)]);
+        }
+      }
+    }
     return;
   }
   memset(run->touched + p, 0, n);
@@ -965,6 +1150,10 @@ static void widen(Run * run, Frame * f, GSHCPU_Rect r) {
   if (gshcpu_render_rect_empty(r) ||
       (grown.x0 == old.x0 && grown.y0 == old.y0 && grown.x1 == old.x1 && grown.y1 == old.y1)) {
     return;
+  }
+  if (run->general && f != &run->frames[0] && gen_of(run, f)->nonisolated) {
+    /* KC10: a non-isolated layer reads its parent where it is made ready, so the parent is made ready over the same pixels first. */
+    widen(run, f - 1, grown);
   }
   if (gshcpu_render_rect_empty(old)) {
     old.x0 = old.x1 = grown.x0; /* nothing is ready: every row of grown is below this one */
@@ -1096,6 +1285,13 @@ static GSHSCENE_Result resolved_of(Run * run, const GSHSCENE_Resource * resource
   return GSHSCENE_OK;
 }
 
+/** KC4: a fill or stroke begun in a general layer, counted (its pixels take the element step). */
+static void count_general_fill(Run * run, const Frame * frame) {
+  if (frame->general) {
+    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, general_fills));
+  }
+}
+
 /**
  * What paints the spans of an item's coverage (D8, N5, N7; G6 to G12, S11): the item's paint made ready by painter_begin, then
  * each span, row by row, weighed by the clips in force and composited SRC_OVER into the layer.  A solid paint is one source;
@@ -1213,6 +1409,7 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
   p->table8 = NULL;
   p->gradient = item->paint.kind == GSHSCENE_PAINT_GRADIENT;
   p->image = item->paint.kind == GSHSCENE_PAINT_IMAGE;
+  count_general_fill(run, frame);
   if (p->image) {
     return image_begin(p, run, item, chain, count, frame, rect, whole);
   }
@@ -1306,10 +1503,30 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
   return GSHSCENE_OK;
 }
 
+/**
+ * KC4: one fill's pixel into a general layer: shape @p f, the opacity source @p src, source-over, onto the layer's backdrop (itself, or
+ * in a knockout group its initial backdrop), with the group alpha and group shape stepped where the layer carries them.
+ */
+static void general_fill(Run * run, Frame * frame, size_t p, const double * src, double f) {
+  const Gen_Frame * g = gen_of(run, frame);
+  double bk[4];
+  const double * b = &frame->layer[4u * p];
+  if (g->knockout) {
+    initial_backdrop(run, (size_t)(frame - run->frames), p, bk);
+    b = bk;
+  }
+  (void)gshcpu_render_group_step(&frame->layer[4u * p], b, g->ag ? g->ag + p : NULL, g->fg ? g->fg + p : NULL, g->knockout, src, f, f,
+      GSHSCENE_COMPOSITE_SRC_OVER);
+}
+
 /** One pixel of weight @p m8 and source @p src at (x, y), in the layer. */
 static inline void painter_pixel(Run * run, Frame * frame, int64_t x, int64_t y, uint32_t m8, const double * src) {
   const size_t p = at(run, x, y);
-  apply_src_over(&frame->layer[4u * p], src, gshcpu_k_level[m8]);
+  if (frame->general) {
+    general_fill(run, frame, p, src, gshcpu_k_level[m8]);
+  } else {
+    apply_src_over(&frame->layer[4u * p], src, gshcpu_k_level[m8]);
+  }
   if (run->top == 0) {
     run->touched[p] = 1;
   }
@@ -1681,7 +1898,11 @@ static void sparse_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8_
       continue;
     }
     size_t p = at(run, px, py);
-    apply_src_over(&frame->layer[4u * p], sp->src, gshcpu_k_level[m]);
+    if (frame->general) {
+      general_fill(run, frame, p, sp->src, gshcpu_k_level[m]);
+    } else {
+      apply_src_over(&frame->layer[4u * p], sp->src, gshcpu_k_level[m]);
+    }
     if (run->top == 0) {
       run->touched[p] = 1;
     }
@@ -1854,6 +2075,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
       r = gshcpu_render_lean_cover(body, s.shift_x, s.shift_y, rect, run->acc, scratch, run->coverage, sparse8_span, &sp8);
     } else {
       widen_w(run, frame, rect, whole);
+      count_general_fill(run, frame);
       Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
       r = gshcpu_render_lean_cover(body, s.shift_x, s.shift_y, rect, run->acc, scratch, run->coverage, sparse_span, &sp);
     }
@@ -1912,6 +2134,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
     double src[4];
     source_of(run, item, frame, src);
     widen_w(run, frame, rect, whole);
+    count_general_fill(run, frame);
     Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
     GSHCPU_Rect drawn;
     GSHCPU_Rect counted;
@@ -1998,6 +2221,32 @@ static void group_push(Run * run, const GSHSCENE_Item * item, size_t index) {
   f->stride8 = 4u * run->layout.width;
   f->ox = run->layout.region.x0;
   f->oy = run->layout.region.y0;
+  f->general = 0;
+  if (run->general) {
+    /* KC2, KC3: the group's flags decide its layer, not its parent's; a group alpha for a non-isolated group, a group shape for a group
+     * with a knockout proper ancestor; the channels are the next free ones, as the groups open nest. */
+    Gen_State * gs = gs_of(run);
+    const Gen_Frame * pg = &gs->frames[run->top - 1u];
+    Gen_Frame * g = &gs->frames[run->top];
+    memset(g, 0, sizeof *g);
+    g->nonisolated = item->group.isolation == (uint32_t)GSHSCENE_ISOLATION_NON_ISOLATED;
+    g->knockout = item->group.knockout != 0;
+    g->ko_anc = pg->ko_anc || pg->knockout;
+    g->on = g->nonisolated || g->knockout || (run->cs->tiers & GSHCPU_RENDER_FORCE_GENERAL) != 0;
+    if (g->nonisolated) {
+      g->ag = gs->ag + gs->ag_used++ * run->layout.pixels;
+      gshcpu_render_convert_prepare(&g->from_parent, &parent->space, &f->space);
+    }
+    if (g->ko_anc) {
+      g->fg = gs->fg + gs->fg_used++ * run->layout.pixels;
+    }
+    /* A plain layer under a knockout group still steps its group shape with each element (KC3), by the same step: with its backdrop
+     * the layer itself the step is the plain composite's, bit for bit. */
+    f->general = g->on || g->fg != NULL;
+    if (g->on) {
+      gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, general_layers));
+    }
+  }
   run->groups_open++;
   run->work += run->layout.pixels;
   if (run->masked) {
@@ -2205,6 +2454,13 @@ static GSHSCENE_Result mask_pass(Run * run, const GSHCPU_Mask_Eval * me, const s
   f->group.composite = GSHSCENE_COMPOSITE_SRC_OVER;
   f->group.isolation = GSHSCENE_ISOLATION_ISOLATED;
   f->clip_base = run->clip_count;
+  if (run->general) {
+    /* The mask frame is its own isolated, non-knockout group (MK2): the groups around the masked group are not its ancestors (KC3). */
+    Gen_Frame * g = &gs_of(run)->frames[run->top];
+    memset(g, 0, sizeof *g);
+    g->on = (run->cs->tiers & GSHCPU_RENDER_FORCE_GENERAL) != 0;
+    f->general = g->on;
+  }
   memset(&mfs[run->top].whole_dirty, 0, sizeof mfs[run->top].whole_dirty);
   const GSHCPU_Rect saved_window = ms->window;
   const GSHCPU_Rect saved_whole = ms->whole_window;
@@ -2235,6 +2491,82 @@ static GSHSCENE_Result mask_pass(Run * run, const GSHCPU_Mask_Eval * me, const s
 }
 
 /**
+ * What the pop of a masked group keeps while it visits its pixels (MC2 to MC4, MC6 to MC8): the mask made ready, the mask frame the
+ * pass drew, and which tiers were taken.
+ */
+typedef struct Mask_Pop {
+  GSHCPU_Mask_Eval me;
+  const Frame * mf;           /* the mask frame, drawn by mask_pass and released at the end of the pop */
+  int outside_tier, identity_tier;
+  int have_outside, took_outside, evaluated;
+  double v_outside;
+} Mask_Pop;
+
+/**
+ * Begin the pop of the masked group on top of the stack: make its mask ready for a parent in the group's enclosing space, and draw the
+ * mask over the pop region @p region (when the whole render, @p whole, would have drawn it).  The mask frame is the one above the group
+ * afterwards, and `run->top` is the group's again.
+ */
+static GSHSCENE_Result mask_pop_begin(Run * run, Mask_Pop * mp, const size_t * chain, size_t count, GSHCPU_Rect region,
+    GSHCPU_Rect whole) {
+  const size_t top = run->top;
+  const Frame * f = &run->frames[top];
+  const Frame * parent = &run->frames[top - 1u];
+  memset(mp, 0, sizeof *mp);
+  if (!gshcpu_render_mask_prepare(&mp->me, f->group.soft_mask, &parent->space)) {
+    return GSHSCENE_ERR_INTERNAL; /* unreachable: the plan refused a mask the waist cannot resolve */
+  }
+  GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, region, whole);
+  if (r != GSHSCENE_OK) {
+    return r;
+  }
+  mp->mf = &run->frames[top + 1u];
+  run->top = top; /* the mask frame is released at the end of the pop: nothing below reads another */
+  mp->outside_tier = (run->cs->tiers & GSHCPU_RENDER_TIER_MASK_OUTSIDE) != 0;
+  mp->identity_tier = (run->cs->tiers & GSHCPU_RENDER_TIER_MASK_IDENTITY) != 0;
+  return GSHSCENE_OK;
+}
+
+/** MC3, MC8: the mask's value at pixel @p p of the pop (inside the pop region). */
+static double mask_pop_value(const Run * run, Mask_Pop * mp, int64_t x, int64_t y, size_t p) {
+  static const double zero[4] = {0.0, 0.0, 0.0, 0.0};
+  mp->evaluated = 1;
+  if (inside(mp->mf->dirty, x, y)) {
+    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);
+  }
+  (void)run;
+  if (mp->outside_tier) {
+    /* FT-M1: the mask frame is (0, 0, 0, 0) here, so the value is MK5's, found once for the pop with the same code. */
+    if (!mp->have_outside) {
+      mp->v_outside = gshcpu_render_mask_value(&mp->me, zero, mp->identity_tier);
+      mp->have_outside = 1;
+    }
+    mp->took_outside = 1;
+    return mp->v_outside;
+  }
+  return gshcpu_render_mask_value(&mp->me, zero, mp->identity_tier);
+}
+
+/** The counters of a masked pop that visited @p region. */
+static void mask_pop_end(Run * run, const Mask_Pop * mp, GSHCPU_Rect region) {
+  gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, masks));
+  if (!gshcpu_render_rect_empty(region)) {
+    gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_pixels),
+        (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0));
+  }
+  if (!gshcpu_render_rect_empty(mp->mf->dirty)) {
+    gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_dirty),
+        (uint64_t)(mp->mf->dirty.x1 - mp->mf->dirty.x0) * (uint64_t)(mp->mf->dirty.y1 - mp->mf->dirty.y0));
+  }
+  if (mp->took_outside) {
+    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_outside));
+  }
+  if (mp->identity_tier && mp->me.identity && mp->evaluated) {
+    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_identity));
+  }
+}
+
+/**
  * The pop of a masked group (MC2 to MC4, MC6 to MC8): the mask is drawn over the pop region @p region, when the whole
  * render (@p whole) would have drawn it, and each pixel's composite is weighed by the mask's value there: the opacity
  * source becomes `o v`, or the shape `m8 / 255` becomes `(m8 / 255) v`, and nothing else is changed.
@@ -2248,16 +2580,11 @@ static GSHSCENE_Result group_pop_masked(Run * run, const size_t * chain, size_t 
     run->groups_open--;
     return GSHSCENE_OK; /* the whole render composites nothing of this group, and draws no mask for it */
   }
-  GSHCPU_Mask_Eval me;
-  if (!gshcpu_render_mask_prepare(&me, f->group.soft_mask, &parent->space)) {
-    return GSHSCENE_ERR_INTERNAL; /* unreachable: the plan refused a mask the waist cannot resolve */
-  }
-  GSHSCENE_Result r = mask_pass(run, &me, chain, count, region, whole);
+  Mask_Pop mp;
+  GSHSCENE_Result r = mask_pop_begin(run, &mp, chain, count, region, whole);
   if (r != GSHSCENE_OK) {
     return r;
   }
-  const Frame * mf = &run->frames[top + 1u];
-  run->top = top; /* the mask frame is released at the end of the pop: nothing below reads another */
   const uint32_t op = f->group.composite;
   const int bounded = gshcpu_render_bounded(op);
   GSHCPU_Convert c;
@@ -2265,13 +2592,6 @@ static GSHSCENE_Result group_pop_masked(Run * run, const size_t * chain, size_t 
   const double o = f->group.opacity;
   static const double zero[4] = {0.0, 0.0, 0.0, 0.0};
   widen(run, parent, region);
-  const unsigned tiers = run->cs->tiers;
-  const int outside_tier = (tiers & GSHCPU_RENDER_TIER_MASK_OUTSIDE) != 0;
-  const int identity_tier = (tiers & GSHCPU_RENDER_TIER_MASK_IDENTITY) != 0;
-  int have_outside = 0;
-  int took_outside = 0;
-  int evaluated = 0;
-  double v_outside = 0.0;
   for (int64_t y = region.y0; y < region.y1; y++) {
     for (int64_t x = region.x0; x < region.x1; x++) {
       uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);
@@ -2279,25 +2599,11 @@ static GSHSCENE_Result group_pop_masked(Run * run, const size_t * chain, size_t 
         continue;
       }
       size_t p = at(run, x, y);
-      double v;
-      evaluated = 1;
-      if (inside(mf->dirty, x, y)) {
-        v = gshcpu_render_mask_value(&me, &mf->layer[4u * p], identity_tier);
-      } else if (outside_tier) {
-        /* FT-M1: the mask frame is (0, 0, 0, 0) here, so the value is MK5's, found once for the pop with the same code. */
-        if (!have_outside) {
-          v_outside = gshcpu_render_mask_value(&me, zero, identity_tier);
-          have_outside = 1;
-        }
-        v = v_outside;
-        took_outside = 1;
-      } else {
-        v = gshcpu_render_mask_value(&me, zero, identity_tier);
-      }
+      const double v = mask_pop_value(run, &mp, x, y, p);
       double s[4];
       gshcpu_render_convert_premultiplied(&c, inside(f->dirty, x, y) ? &f->layer[4u * p] : zero, s);
       double weight = (double)m8 / 255.0;
-      if (me.shape) {
+      if (mp.me.shape) {
         weight = weight * v; /* MC4: the shape is weighed by v, the opacity as it was */
         for (int i = 0; i < 4; i++) {
           s[i] = o * s[i];
@@ -2323,27 +2629,128 @@ static GSHSCENE_Result group_pop_masked(Run * run, const size_t * chain, size_t 
     /* The pop's pixels, and the value found for each (MC7). */
     run->work += 2u * (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0);
   }
-  gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, masks));
-  if (!gshcpu_render_rect_empty(region)) {
-    gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_pixels),
-        (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0));
-  }
-  if (!gshcpu_render_rect_empty(mf->dirty)) {
-    gshcpu_stroke_cache_add(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_dirty),
-        (uint64_t)(mf->dirty.x1 - mf->dirty.x0) * (uint64_t)(mf->dirty.y1 - mf->dirty.y0));
-  }
-  if (took_outside) {
-    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_outside));
-  }
-  if (identity_tier && me.identity && evaluated) {
-    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_identity));
-  }
+  mask_pop_end(run, &mp, region);
   run->top--;
   run->groups_open--;
   return GSHSCENE_OK;
 }
 
-static GSHSCENE_Result group_pop(Run * run, const size_t * chain, size_t count) {
+/**
+ * KC6: the result `G` of the group on top of the stack at pixel @p p of its dirty rectangle, in the group's space, and its group
+ * shape (1 where none is carried, as KC3 says: it is only read where the parent is knockout, which carries it).
+ */
+static void group_result_at(const Run * run, size_t top, size_t p, double g[4], double * fg) {
+  const Gen_Frame * gf = &gs_of(run)->frames[top];
+  const double * l = &run->frames[top].layer[4u * p];
+  double l0[4] = {0.0, 0.0, 0.0, 0.0};
+  if (gf->nonisolated) {
+    initial_backdrop(run, top, p, l0);
+  }
+  gshcpu_render_group_result(l, gf->ag ? gf->ag[p] : l[3], !gf->nonisolated, l0, g);
+  *fg = gf->fg ? gf->fg[p] : 1.0;
+}
+
+/**
+ * The pop where the group or its parent is a general layer (KC2, KC4 to KC6, KC10): the group's result `G` (the initial backdrop taken
+ * out of a non-isolated group's layer), converted into the parent's space, weighed by the clips, the opacity and a mask's value as
+ * the plain pop does, and composited as an element of the parent: by KC4 into a general parent (with the shape PDF's operators give a
+ * group, `m fg`), by the plain step into any other.
+ */
+static GSHSCENE_Result group_pop_general(Run * run, const size_t * chain, size_t count, GSHCPU_Rect region, GSHCPU_Rect whole) {
+  const size_t top = run->top;
+  Frame * f = &run->frames[top];
+  Frame * parent = &run->frames[top - 1u];
+  const Gen_State * gs = gs_of(run);
+  const Gen_Frame * pg = &gs->frames[top - 1u];
+  const int masked = f->group.soft_mask != NULL;
+  Mask_Pop mp;
+  if (masked) {
+    if (gshcpu_render_rect_empty(whole)) {
+      run->top--;
+      run->groups_open--;
+      return GSHSCENE_OK; /* the whole render composites nothing of this group, and draws no mask for it */
+    }
+    GSHSCENE_Result r = mask_pop_begin(run, &mp, chain, count, region, whole);
+    if (r != GSHSCENE_OK) {
+      return r;
+    }
+  }
+  const uint32_t op = f->group.composite;
+  const int bounded = gshcpu_render_bounded(op);
+  const int pdf = gshcpu_render_pdf_operator(op);
+  GSHCPU_Convert c;
+  gshcpu_render_convert_prepare(&c, &f->space, &parent->space);
+  const double o = f->group.opacity;
+  widen(run, parent, region);
+  for (int64_t y = region.y0; y < region.y1; y++) {
+    for (int64_t x = region.x0; x < region.x1; x++) {
+      uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);
+      if (m8 == 0) {
+        continue;
+      }
+      const size_t p = at(run, x, y);
+      const double v = masked ? mask_pop_value(run, &mp, x, y, p) : 1.0;
+      double gres[4] = {0.0, 0.0, 0.0, 0.0};
+      double fgc = gs->frames[top].fg ? 0.0 : 1.0; /* nothing drawn here: no shape, where it is carried */
+      if (inside(f->dirty, x, y)) {
+        group_result_at(run, top, p, gres, &fgc);
+      }
+      double s[4];
+      gshcpu_render_convert_premultiplied(&c, gres, s);
+      double weight = (double)m8 / 255.0;
+      if (masked && mp.me.shape) {
+        weight = weight * v; /* MC4 (MK7): the shape is weighed by v, the opacity as it was */
+        for (int i = 0; i < 4; i++) {
+          s[i] = o * s[i];
+        }
+      } else {
+        const double ov = o * v; /* MC4: the opacity source is o v (v = 1 without a mask: o) */
+        for (int i = 0; i < 4; i++) {
+          s[i] = ov * s[i];
+        }
+      }
+      if (pg->on || pg->fg) {
+        double bk[4];
+        const double * b = &parent->layer[4u * p];
+        if (pg->knockout) {
+          initial_backdrop(run, top - 1u, p, bk);
+          b = bk;
+        }
+        /* T5: PDF's operators see the group as an object of shape `m fg`; every other operator acts on its whole clip region. */
+        const int stepped = gshcpu_render_group_step(&parent->layer[4u * p], b, pg->ag ? pg->ag + p : NULL, pg->fg ? pg->fg + p : NULL,
+            pg->knockout, s, weight, pdf ? weight * fgc : weight, op);
+        if (stepped < 0) {
+          return GSHSCENE_ERR_INTERNAL; /* unreachable: the planning pass refuses an operator the caps do not claim */
+        }
+        if (stepped > 0 && run->top == 1u) {
+          run->touched[p] = 1;
+        }
+        continue;
+      }
+      if (bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0) {
+        continue;
+      }
+      if (!gshcpu_render_apply(&parent->layer[4u * p], s, weight, op)) {
+        return GSHSCENE_ERR_INTERNAL; /* unreachable: the planning pass refuses an operator the caps do not claim */
+      }
+      if (run->top == 1u) {
+        run->touched[p] = 1;
+      }
+    }
+  }
+  if (!gshcpu_render_rect_empty(region)) {
+    run->work += (masked ? 2u : 1u) * (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0);
+  }
+  if (masked) {
+    mask_pop_end(run, &mp, region);
+  }
+  gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, general_pops));
+  run->top--;
+  run->groups_open--;
+  return GSHSCENE_OK;
+}
+
+static GSHSCENE_Result group_pop_plain(Run * run, const size_t * chain, size_t count) {
   if (run->fast8) {
     return group_pop8(run);
   }
@@ -2355,18 +2762,27 @@ static GSHSCENE_Result group_pop(Run * run, const size_t * chain, size_t count) 
    * weighed above zero (N8). */
   GSHCPU_Rect region = bounded ? f->dirty : window_of(run);
   region = gshcpu_render_rect_meet(region, reach_of(run, parent->clip_base, f->clip_base));
+  GSHCPU_Rect whole = {0, 0, 0, 0};
   if (run->masked) {
     /* MC6: the same in the whole render, which decides whether a mask is drawn at all, so that what a damaged render refuses
      * inside a mask is what the whole render refuses. */
     Mask_Frame * frames = ms_of(run)->frames;
-    GSHCPU_Rect whole = bounded ? frames[run->top].whole_dirty : ms_of(run)->whole_window;
+    whole = bounded ? frames[run->top].whole_dirty : ms_of(run)->whole_window;
     whole = gshcpu_render_rect_meet(whole, whole_reach_of(run, parent->clip_base, f->clip_base));
     if (!gshcpu_render_rect_empty(whole)) {
       frames[run->top - 1u].whole_dirty = gshcpu_render_rect_join(frames[run->top - 1u].whole_dirty, whole);
     }
-    if (f->group.soft_mask) {
-      return group_pop_masked(run, chain, count, region, whole);
+  }
+  if (run->general) {
+    const Gen_State * gs = gs_of(run);
+    const Gen_Frame * g = &gs->frames[run->top];
+    const Gen_Frame * pg = &gs->frames[run->top - 1u];
+    if (g->on || g->fg || pg->on || pg->fg) {
+      return group_pop_general(run, chain, count, region, whole);
     }
+  }
+  if (run->masked && f->group.soft_mask) {
+    return group_pop_masked(run, chain, count, region, whole);
   }
   GSHCPU_Convert c;
   gshcpu_render_convert_prepare(&c, &f->space, &parent->space);
@@ -2415,6 +2831,23 @@ static GSHSCENE_Result group_pop(Run * run, const size_t * chain, size_t count) 
   run->top--;
   run->groups_open--;
   return GSHSCENE_OK;
+}
+
+/** Pop the group on top of the stack, and give back the channels it held (KC3). */
+static GSHSCENE_Result group_pop(Run * run, const size_t * chain, size_t count) {
+  if (!run->general) {
+    return group_pop_plain(run, chain, count);
+  }
+  Gen_State * gs = gs_of(run);
+  const Gen_Frame g = gs->frames[run->top];
+  const GSHSCENE_Result r = group_pop_plain(run, chain, count);
+  if (g.ag) {
+    gs->ag_used--;
+  }
+  if (g.fg) {
+    gs->fg_used--;
+  }
+  return r;
 }
 
 /** Go through one unit.  @return ::GSHSCENE_OK to go on, or the result to stop with. */
@@ -2542,7 +2975,8 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   const GSHSCENE_Target * target = request->target;
   Layout L;
   Mask_Layout M;
-  GSHCPU_Result lr = layout(cs, request->list, target, &L, &M, request);
+  Gen_Layout G;
+  GSHCPU_Result lr = layout(cs, request->list, target, &L, &M, &G, request);
   if (lr != GSHCPU_OK) {
     return scene_result(lr);
   }
@@ -2588,6 +3022,19 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   }
   run->acc = (int64_t *)(void *)(base + L.at_acc);
   run->masked = M.bytes != 0;
+  run->general = G.on != 0;
+  if (run->general) {
+    /* KC3: the state after the Frame array, and the channels (KC8) where the layout put them. */
+    Gen_State * gs = gs_of(run);
+    gs->ag = (double *)(void *)(base + G.at_ag);
+    gs->fg = (double *)(void *)(base + G.at_fg);
+    gs->ag_used = 0;
+    gs->fg_used = 0;
+    gs->frames = (Gen_Frame *)(void *)((unsigned char *)(void *)gs + align_up(sizeof(Gen_State)));
+    memset(gs->frames, 0, (L.groups + 1u) * sizeof *gs->frames);
+    gshcpu_stroke_cache_raise(cs->cache, offsetof(GSHCPU_Render_Counters, group_alpha_slots), G.ag_slots);
+    gshcpu_stroke_cache_raise(cs->cache, offsetof(GSHCPU_Render_Counters, group_shape_slots), G.fg_slots);
+  }
   if (run->masked) {
     /* MC5: the area after the Run (layout): the window every unit is held to starts as the region. */
     Mask_State * ms = ms_of(run);
@@ -2619,7 +3066,7 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
       (run->format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED || run->format == GSHCPU_FORMAT_RGBA8_STRAIGHT) && !cs->observer && !L.wide;
   run->straight8 = run->fast8 && run->format == GSHCPU_FORMAT_RGBA8_STRAIGHT;
   run->direct8 = cs->fast && run->format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED && !cs->observer && L.groups == 0 && L.clips == 0 &&
-      !L.aligned && !L.other && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) != 0;
+      !L.aligned && !L.other && !G.on && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) != 0;
   if (run->direct8 && cs->executor.start && !caller) {
     /* Several threads: the strokes are queued and drawn over stripes.  Nothing is queued without the batch (out of memory), and
      * the render goes on as one thread does. */
@@ -2651,6 +3098,10 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   memset(root, 0, sizeof *root);
   root->layer = run->root;
   root->bytes = run->fast8;
+  if (run->general && (cs->tiers & GSHCPU_RENDER_FORCE_GENERAL)) {
+    gs_of(run)->frames[0].on = 1; /* KC9's gate: the root's elements take the element step too */
+    root->general = 1;
+  }
   if (run->straight8) {
     /* The target is straight: the root is premultiplied bytes of its own (the room of the double root), loaded as the units reach it
      * and stored, the pixels that changed, at the end. */

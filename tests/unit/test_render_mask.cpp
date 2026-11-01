@@ -67,11 +67,12 @@ TEST(RenderMask, TheSinkClaimsTheFlagAndEveryFeatureTheWaistDefines) {
   GSHSCENE_Sink_Caps caps = caps_of_cpu();
   EXPECT_NE(caps.flags & GSHSCENE_CAP_GROUP_SOFT_MASK, 0u);
   EXPECT_EQ(caps.mask_native, (uint32_t)GSHSCENE_MASK_NATIVE_ALL);
-  // Still not claimed: M3's.
-  EXPECT_EQ(caps.flags & (GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT), 0u);
+  // And the two flags a masked group may also set (masks-images-patterns story M3, KC1).
+  EXPECT_EQ(caps.flags & (GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT),
+      (uint32_t)(GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT));
 }
 
-TEST(RenderMask, AMaskedGroupIsDrawnWithNoRefusalAndOneThatIsAlsoNonIsolatedOrKnockoutIsRefusedByThatFirst) {
+TEST(RenderMask, AMaskedGroupIsDrawnWithNoRefusalWhetherOrNotItIsAlsoNonIsolatedOrKnockout) {
   for (int variant = 0; variant < 3; variant++) {
     Scene s;
     const GSHSCENE_Resource * mask = s.alpha_mask(s.picture_of(s.rect(0, 0, 8, 8), white()));
@@ -86,20 +87,11 @@ TEST(RenderMask, AMaskedGroupIsDrawnWithNoRefusalAndOneThatIsAlsoNonIsolatedOrKn
     ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
     Draw d = draw(l, 8, 8);
     ASSERT_EQ(d.result, GSHSCENE_OK);
-    if (variant == 0) {
-      EXPECT_EQ(d.count(GSHSCENE_ENTRY_REFUSED), 0u);
-      EXPECT_EQ(d.px(3, 3), std::string("\xff\x00\x00\xff", 4)) << "drawn";
-    } else {
-      ASSERT_EQ(d.count(GSHSCENE_ENTRY_REFUSED), 1u);
-      EXPECT_EQ(d.count(GSHSCENE_ENTRY_REFUSED, variant == 1 ? GSHSCENE_REASON_GROUP_ISOLATION : GSHSCENE_REASON_GROUP_KNOCKOUT), 1u)
-          << "before SOFT_MASK, until M3 claims them";
-      EXPECT_EQ(d.px(3, 3), std::string(4, '\0')) << "the block is skipped";
-      Options strict;
-      strict.flags = GSHSCENE_RENDER_STRICT;
-      Draw sd = draw(l, 8, 8, strict);
-      EXPECT_EQ(sd.result, GSHSCENE_ERR_REFUSED) << "strict fails before the target is touched";
-      EXPECT_EQ(sd.px(3, 3), std::string(4, '\0'));
-    }
+    EXPECT_EQ(d.count(GSHSCENE_ENTRY_REFUSED), 0u) << variant;
+    EXPECT_EQ(d.px(3, 3), std::string("\xff\x00\x00\xff", 4)) << "drawn, in every combination: " << variant;
+    Options strict;
+    strict.flags = GSHSCENE_RENDER_STRICT;
+    EXPECT_EQ(draw(l, 8, 8, strict).result, GSHSCENE_OK) << "strict refuses nothing: " << variant;
   }
 }
 

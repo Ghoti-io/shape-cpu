@@ -400,8 +400,12 @@ static void set_sat(double c[3], double s) {
   memcpy(c, out, sizeof out);
 }
 
-int gshcpu_render_blends(uint32_t op) {
+static inline __attribute__((always_inline)) int is_blend(uint32_t op) {
   return op >= GSHSCENE_COMPOSITE_SCREEN && op <= GSHSCENE_COMPOSITE_LUMINOSITY;
+}
+
+int gshcpu_render_blends(uint32_t op) {
+  return is_blend(op);
 }
 
 void gshcpu_render_mix(uint32_t op, const double cb[3], const double cs[3], double out[3]) {
@@ -489,84 +493,85 @@ int gshcpu_render_bounded(uint32_t op) {
   }
 }
 
+/**
+ * N4: the factors of a Porter-Duff operator, `op(S, D) = fa S + fb D` componentwise.  @return 1 for an operator of the
+ * family; 2 for ::GSHSCENE_COMPOSITE_PLUS, which has none (it adds and clamps); 0 for any other.  Used by both composites, the
+ * plain step (`apply_core`) and the general layers' (KC4), so that the factors are written once.
+ */
+static inline __attribute__((always_inline)) int pd_factors(uint32_t op, double sa, double da, double * fa, double * fb) {
+  *fa = 0.0;
+  *fb = 0.0;
+  switch (op) {
+    case GSHSCENE_COMPOSITE_CLEAR:
+      return 1;
+    case GSHSCENE_COMPOSITE_SRC:
+      *fa = 1.0;
+      return 1;
+    case GSHSCENE_COMPOSITE_DEST:
+      *fb = 1.0;
+      return 1;
+    case GSHSCENE_COMPOSITE_SRC_OVER:
+      *fa = 1.0;
+      *fb = 1.0 - sa;
+      return 1;
+    case GSHSCENE_COMPOSITE_DEST_OVER:
+      *fa = 1.0 - da;
+      *fb = 1.0;
+      return 1;
+    case GSHSCENE_COMPOSITE_SRC_IN:
+      *fa = da;
+      return 1;
+    case GSHSCENE_COMPOSITE_DEST_IN:
+      *fb = sa;
+      return 1;
+    case GSHSCENE_COMPOSITE_SRC_OUT:
+      *fa = 1.0 - da;
+      return 1;
+    case GSHSCENE_COMPOSITE_DEST_OUT:
+      *fb = 1.0 - sa;
+      return 1;
+    case GSHSCENE_COMPOSITE_SRC_ATOP:
+      *fa = da;
+      *fb = 1.0 - sa;
+      return 1;
+    case GSHSCENE_COMPOSITE_DEST_ATOP:
+      *fa = 1.0 - da;
+      *fb = sa;
+      return 1;
+    case GSHSCENE_COMPOSITE_XOR:
+      *fa = 1.0 - da;
+      *fb = 1.0 - sa;
+      return 1;
+    case GSHSCENE_COMPOSITE_PLUS:
+      return 2;
+    default:
+      return 0;
+  }
+}
+
 static inline __attribute__((always_inline)) int apply_core(double d[4], const double s[4], double m, uint32_t op) {
   const double sa = s[3];
   const double da = d[3];
   double fa = 0.0;
   double fb = 0.0;
   double o[4];
-  switch (op) {
-    case GSHSCENE_COMPOSITE_CLEAR:
-      break;
-    case GSHSCENE_COMPOSITE_SRC:
-      fa = 1.0;
-      break;
-    case GSHSCENE_COMPOSITE_DEST:
-      fb = 1.0;
-      break;
-    case GSHSCENE_COMPOSITE_SRC_OVER:
-      fa = 1.0;
-      fb = 1.0 - sa;
-      break;
-    case GSHSCENE_COMPOSITE_DEST_OVER:
-      fa = 1.0 - da;
-      fb = 1.0;
-      break;
-    case GSHSCENE_COMPOSITE_SRC_IN:
-      fa = da;
-      break;
-    case GSHSCENE_COMPOSITE_DEST_IN:
-      fb = sa;
-      break;
-    case GSHSCENE_COMPOSITE_SRC_OUT:
-      fa = 1.0 - da;
-      break;
-    case GSHSCENE_COMPOSITE_DEST_OUT:
-      fb = 1.0 - sa;
-      break;
-    case GSHSCENE_COMPOSITE_SRC_ATOP:
-      fa = da;
-      fb = 1.0 - sa;
-      break;
-    case GSHSCENE_COMPOSITE_DEST_ATOP:
-      fa = 1.0 - da;
-      fb = sa;
-      break;
-    case GSHSCENE_COMPOSITE_XOR:
-      fa = 1.0 - da;
-      fb = 1.0 - sa;
-      break;
-    case GSHSCENE_COMPOSITE_PLUS:
-      break;
-    case GSHSCENE_COMPOSITE_SCREEN:
-    case GSHSCENE_COMPOSITE_OVERLAY:
-    case GSHSCENE_COMPOSITE_DARKEN:
-    case GSHSCENE_COMPOSITE_LIGHTEN:
-    case GSHSCENE_COMPOSITE_COLOR_DODGE:
-    case GSHSCENE_COMPOSITE_COLOR_BURN:
-    case GSHSCENE_COMPOSITE_HARD_LIGHT:
-    case GSHSCENE_COMPOSITE_SOFT_LIGHT:
-    case GSHSCENE_COMPOSITE_DIFFERENCE:
-    case GSHSCENE_COMPOSITE_EXCLUSION:
-    case GSHSCENE_COMPOSITE_MULTIPLY:
-    case GSHSCENE_COMPOSITE_HUE:
-    case GSHSCENE_COMPOSITE_SATURATION:
-    case GSHSCENE_COMPOSITE_COLOR:
-    case GSHSCENE_COMPOSITE_LUMINOSITY:
-      /* B2, inside N5's apply unchanged. */
-      blend(op, s, d, o);
-      for (int i = 0; i < 4; i++) {
-        d[i] = gshcpu_render_saturate((1.0 - m) * d[i] + m * o[i]); /* N1 */
-      }
-      return 1;
-    default:
-      /* No silent default: an operator this does not know is never drawn as another (it would be CLEAR).  The caps
-       * claim exactly the operators named above, so the planning pass refuses every other before a render reaches
-       * here; the caller fails the render if one does. */
-      return 0;
+  if (is_blend(op)) {
+    /* B2, inside N5's apply unchanged. */
+    blend(op, s, d, o);
+    for (int i = 0; i < 4; i++) {
+      d[i] = gshcpu_render_saturate((1.0 - m) * d[i] + m * o[i]); /* N1 */
+    }
+    return 1;
+  }
+  const int family = pd_factors(op, sa, da, &fa, &fb);
+  if (!family) {
+    /* No silent default: an operator this does not know is never drawn as another (it would be CLEAR).  The caps
+     * claim exactly the operators named above, so the planning pass refuses every other before a render reaches
+     * here; the caller fails the render if one does. */
+    return 0;
   }
   for (int i = 0; i < 4; i++) {
-    if (op == GSHSCENE_COMPOSITE_PLUS) {
+    if (family == 2) {
       double sum = s[i] + d[i];
       o[i] = sum < 1.0 ? sum : 1.0;
     } else {
@@ -755,4 +760,49 @@ void gshcpu_render_store(GSHCPU_Format format, unsigned char * row, size_t x, co
     }
     memcpy(row + x * 16u, f, sizeof f);
   }
+}
+
+/* --- KC4: the element step of a general layer ------------------------------------------------------ */
+
+int gshcpu_render_pdf_operator(uint32_t op) {
+  return op == GSHSCENE_COMPOSITE_SRC_OVER || is_blend(op);
+}
+
+int gshcpu_render_element(double l[4], const double bk[4], const double s[4], double m, double shape, uint32_t op) {
+  double b[4];
+  memcpy(b, bk, sizeof b); /* the backdrop may be the layer itself */
+  if (gshcpu_render_pdf_operator(op)) {
+    /* `op_X(m S, Bk)` is B2's operator, which apply makes of the weight and the source (B4); the layer then keeps what the
+     * element's shape leaves of what it holds beyond its backdrop: with Bk = L the difference is exactly 0 and the step is
+     * apply's, bit for bit. */
+    double t[4];
+    memcpy(t, b, sizeof t);
+    if (!apply_core(t, s, m, op)) {
+      return 0;
+    }
+    const double keep = 1.0 - shape;
+    for (int i = 0; i < 4; i++) {
+      l[i] = gshcpu_render_saturate(keep * (l[i] - b[i]) + t[i]);
+    }
+    return 1;
+  }
+  /* Every other operator: `(1 - f) L + f op(S, Bk)` with S the opacity source alone. */
+  double fa;
+  double fb;
+  const int family = pd_factors(op, s[3], b[3], &fa, &fb);
+  if (!family) {
+    return 0;
+  }
+  const double keep = 1.0 - m;
+  for (int i = 0; i < 4; i++) {
+    double o;
+    if (family == 2) {
+      const double sum = s[i] + b[i];
+      o = sum < 1.0 ? sum : 1.0;
+    } else {
+      o = fa * s[i] + fb * b[i];
+    }
+    l[i] = gshcpu_render_saturate(keep * l[i] + m * o);
+  }
+  return 1;
 }

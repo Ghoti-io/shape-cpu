@@ -197,5 +197,33 @@ render mask-not-a-clip rgba8 ebef079df6074c2a
 render mask-not-a-clip rgba8-premultiplied 41332b1d7fea4319
 render mask-not-a-clip rgbaf32 70c2e14376b16114
 render mask-not-a-clip rgbaf32-premultiplied 4a6a198d0b44508b
-hash fe466e6a44db3801
-count 196
+render group-non-isolated rgba8 71c4b843414ed7ba
+render group-non-isolated rgba8-premultiplied f7977d5891e1e5a5
+render group-non-isolated rgbaf32 6508a5d0964cebaa
+render group-non-isolated rgbaf32-premultiplied 18aff4a9792d9335
+render group-knockout rgba8 06c0fa046e75ba27
+render group-knockout rgba8-premultiplied 6d11acd4798e55b4
+render group-knockout rgbaf32 e6b1d5f1752d6158
+render group-knockout rgbaf32-premultiplied 57742d36dfd55a77
+render group-nested rgba8 45790244343ec211
+render group-nested rgba8-premultiplied 960b0fa70d481a2e
+render group-nested rgbaf32 ed41d9fdd037408d
+render group-nested rgbaf32-premultiplied e92d1c5d1a8a6cb6
+render group-spaces rgba8 6cd47934e76b48fa
+render group-spaces rgba8-premultiplied 8e7b0f1096816f35
+render group-spaces rgbaf32 f09aae93657d427f
+render group-spaces rgbaf32-premultiplied 8b3899824645abec
+render group-operators rgba8 cafd9b2649ca44aa
+render group-operators rgba8-premultiplied 4882c1bc0ad48001
+render group-operators rgbaf32 8550dcafb97120cb
+render group-operators rgbaf32-premultiplied d1462b2315f8e2bc
+render group-elements rgba8 644f0ce85eb093de
+render group-elements rgba8-premultiplied 57df72717cde9c4d
+render group-elements rgbaf32 3f6224a3ba220f8c
+render group-elements rgbaf32-premultiplied ab378cbaf5e5c21b
+render group-masked rgba8 f61c55c348b0d3cd
+render group-masked rgba8-premultiplied a27e6a89c28ad46e
+render group-masked rgbaf32 81d91e7022db1e91
+render group-masked rgbaf32-premultiplied 2cb0281b05a56b6a
+hash cf5bb6e84b4a886f
+count 224
