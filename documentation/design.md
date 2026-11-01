@@ -294,6 +294,58 @@ rationals and shares nothing with the library or with shape-scene's oracle): wor
 `1e-12` bound, 204 stored values exact; nine fixtures add 72 goldens (36 exact, 36 under the fast coverages) and move no earlier
 one. On the corpus the 60 masked pops took FT-M1 in 29 and FT-M2 in 48.
 
+### Non-isolated and knockout groups (KC1 to KC11)
+
+A **general layer** is the layer of a group that is non-isolated or knockout. T3 to T5 of the waist's transparency model say what its
+pixels are; this section says how the reference computes them, and why the cost falls only on the groups that set a flag.
+
+**One operator, rewritten.** T3 writes an element's step as `(1 - f) L + (f - Aa) Bk + T`, which needs the blend term `T` and two
+backdrop terms. `T + (1 - Aa) Bk` is what the plain compositor's operator makes of `A = f S` and the backdrop (`op_X(A, Bk)`, B4),
+so the layer becomes `(1 - f)(L - Bk) + op_X(A, Bk)`. It is the same function in the reals, and the vector generator checks the
+identity in exact rationals at every step of every case. It means one operator serves both paths: with `Bk = L` the subtraction is
+exactly 0 and the step is the plain `apply`, bit for bit, so the layers that need none of this are not routed through anything new,
+and a plain layer under a knockout group, which has to step its group shape, still composites exactly as it did. The operators that
+are not PDF's take `(1 - f) L + f op(S, Bk)` with the backdrop in the operator only.
+
+**The backdrop is read, not copied.** A non-isolated group's initial backdrop is the parent's pixel at the push (or the parent's own
+initial backdrop where the parent is knockout), converted into the group's space. The parent does not change while the group is open,
+so a read at any time gives the bits a copy at the push would have: the sink reads it where a layer is made ready, where an element of
+a knockout group needs it, and at the pop, through the parents that are knockout, with one conversion prepared at the push. That is why
+a group costs no memory for a backdrop. It also fixes a requirement: the parent is made ready over a pixel before the child is, which
+`widen` does (the parent's dirty rectangle grows to the child's), so inside a damage the render equals the whole render.
+
+**A pixel nothing reached is exactly empty.** The layer of a non-isolated group is made ready as a copy of its initial backdrop, with a
+group alpha of 0. At the pop `G = L - (1 - Ag) L0` is then a difference of two equal doubles, 0 exactly, so a bounded operator skips
+the pixel and the pop region is the dirty rectangle, as for an isolated group. A design that kept the backdrop in another
+representation (a copy, a differently rounded conversion) would leave a residue of `1e-16` at every pixel and make every
+non-isolated group look unbounded.
+
+**The channels.** A non-isolated group carries a group alpha. An isolated knockout group does not: its initial backdrop is 0, so its group alpha is
+the alpha of its layer at every step. A group carries a group shape only when some ancestor is knockout, because the shape reaches
+a result only as the shape of a pop in a knockout parent, and a parent's own shape is made of its elements' shapes, this group's pop
+among them. The layout counts the two maxima over the expansion with a stack of the open groups that are non-isolated or knockout (a
+plain group needs no entry, so a list of plain groups never allocates for it), recursing into instances, which are drawn into the layer
+they sit in, and into mask pictures, each of which is its own isolated group and so starts again with no knockout ancestor.
+
+**What the story's skip rule had to change.** A bounded operator with a source of nothing leaves the layer alone where the backdrop is
+the layer. In a knockout group it does not: an element of no opacity but some shape removes its shape's share of what the layer holds
+beyond its initial backdrop (T3 with `A = 0`: PDF's "a transparent object knocks out"). The step skips it only when its shape is 0 as
+well, and the group shape steps whatever the source.
+
+**Conflation is the definition (KC11).** In a knockout group two abutting shapes each covering half of a pixel leave a quarter of the
+initial backdrop showing, where an exact union would leave none. A knockout is defined on shape, shape is coverage, and `SEAMLESS`
+is not claimed. The test pins the values so that a fix would be seen.
+
+**The default path.** `GSHCPU_RENDER_FORCE_GENERAL` (a test switch, not a tier) routes every layer, the root's too, through the
+element step. Every fixture of the corpus on all four formats agrees with the normal render: all but two of the 224 are the same
+bytes, and those two differ by a rounding at the one write. A list without these groups takes none of the new code and has the layout, the
+work counts, the pixels and the goldens it had.
+
+**Measured.** The render-level gate against the third restatement of the rules (654 cases, 204 exact, over four combinations, eleven
+operators, three backdrops, clips, nesting, spaces and abutting shapes): worst error before the write 3.3e-16 against the `1e-12`
+bound; shape-scene's installed `group_vectors.h` through the primitives (52 cases, worst 1.1e-16) and through renders where the
+coverage is whole; seven fixtures add 28 goldens and move no earlier one.
+
 ### A refused stroke draws nothing in every tier
 
 The sparse stroke tier paints a band of rows as it sweeps it, so a stroke refused for its pieces or crossings (UC9, UC19) in a later
