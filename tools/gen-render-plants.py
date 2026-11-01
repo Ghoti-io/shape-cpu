@@ -50,11 +50,12 @@ FILES = {
     "src/render/stroke.c": "rk",  # strokes story S4
     "src/render/mask.c": "rq",    # masks story M2: the value of a soft mask (MC3)
     "src/render/memo.c": "rn",    # masks story M2: the layout's memo of the mask pictures (MC5)
+    "src/render/group.c": "rz",   # masks story M3: the element step of a general layer (KC4 to KC6)
 }
 # The order is the cost: the quick and the likely first, the sweep stops at the first that fails.
 # Every test of the library, in the order of the cheap ones first: a candidate is caught by the first that fails, and one
 # that no test fails is a survivor, so a list that leaves a test out turns what that test sees into a survivor.
-TESTS = ["testRender_vectors", "testRender_mask_vectors", "testRender_mask", "testRender_parts", "testRender_gradient", "testRender", "testRender_limits",
+TESTS = ["testRender_vectors", "testRender_mask_vectors", "testRender_mask", "testRender_group", "testRender_parts", "testRender_gradient", "testRender", "testRender_limits",
          "testRender_conformance", "testRender_plane", "testRender_placeholder", "testGlyph_render", "testCore",
          "testCoverage", "testCoverage_limits", "testCoverage_report", "testRender_stroke", "testRender_stroke_text",
          "testRender_stroke_bracket", "testRender_exact", "testRender_dual", "testRender_dense", "probe"]

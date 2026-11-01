@@ -366,6 +366,36 @@ the allocator's first choice makes the same (``rn-67-and``) and the clear of a s
 that forgets on growth: a picture is named again after all the others now (``rm-memo-forgets-what-it-held-on-growth``).  The hand
 plants of the memo (``rm-memo-``) and of PLUS's clamp (``rm-plus-``) are caught.
 
+Masks-images-patterns story M3 (non-isolated and knockout groups, KC1 to KC11) added src/render/group.c, the stack of open groups to
+memo.c, the element step to compose.c and the channels, the layout and the pop to sink.c.  The hand plants are ``rj-``, written for every
+rule and branch (the backdrop and its conversion, the group's result, which layers carry which channel, the layout's counts, the step and
+its skips, the pop and its dispatch, the caps, the stack's chunks): 91 of them, 87 caught and 4 equivalent (``SURVIVORS``).  The sink's own
+tables moved a hundred lines or more, so the 2812 held generated entries of sink.c, compose.c and memo.c were realigned to their lines (935
+moved, 41 dropped because their line changed), and the 335 generated candidates of the changed lines and of group.c (``rz-``: 22, sink.c:
+250, memo.c: 42, compose.c: 21) were swept in ghoti-build:gcc16 with the tests of the library: 60 do not compile, 245 are caught (now held)
+and 30 survive, of the kinds below.  The first sweep left 37; the survivors of what the tests lacked were answered with tests (an
+allocation that fails in the layout is an out-of-memory and never a limit, the count of general layers, a masked group that draws nothing
+is a unit done, a masked general pop is counted, the stack's chunks are given back, the stack and the memo share the caller's memory), and
+seven of them are caught now.
+
+  - ties of a maximum or a limit that give the same value either way (``rs-474-gt``, ``rs-475-gt``, ``rs-486-gt``, ``rs-487-gt``,
+    ``rs-539-gt``, ``rs-540-gt``: the most open groups; ``rc-801-lt``: PLUS where the sum is exactly 1; ``rn-159-ge``: a scratch with
+    exactly the room);
+  - unreachable, cached or informational (``rs-532-and``: the count of an instance fails only for an allocation that returns at once;
+    ``rs-616-ret``: the records of the frames cannot overflow; ``rs-619-del``, ``rs-620-del``: zeros the count already gives;
+    ``rs-2542-del``: a constant found once and found again; ``rn-180-del``: a flag nothing reads; ``rn-221-del``, ``rn-222-del``,
+    ``rn-223-del``: the state of a stack that is closed);
+  - an element of no weight and no shape never reaches the step, the pop skips a clip weight of 0 first (``rz-39-eq``, ``rz-39-and``,
+    ``rz-39-eq2``), and the colors loop's extra pass writes an alpha that the next statement replaces (``rz-71-lt``);
+  - visible only to a counter under the test switch, where a mask's frame is a layer of its own (``rs-2461-del``, ``rs-2462-del``), or
+    only to the accounting of work, which the declared bound's test holds and no test pins pixel by pixel (``rs-2741-neg``,
+    ``rs-2742-del``);
+  - visible only to a sanitizer: an uninitialized record read before it is set (``rs-2515-del``), a chunk's link before it is set
+    (``rn-166-del``), and a stale record at a mask frame's depth, which then writes a group shape past a region of no size into the arrays
+    that follow it, none of which a plain build reads back (``rs-2460-del``);
+  - a workspace smaller than the memo's own tables is what shows a scratch cursor that is not advanced (``rn-162-del``), and a tier
+    that is bit-equal to the path without it (``rs-3069-ne``, the direct 8-bit composite on a line this change touched).
+
 Run by ``make check-planted`` from the library directory, with the build's
 flags in the PLANT_* environment variables.
 """
@@ -1550,6 +1580,105 @@ PLANTS += [
 ]
 
 
+RGF = "src/render/group.c"
+PLANTS += [
+    # Masks-images-patterns story M3: non-isolated and knockout groups (KC1 to KC11).  The id says the rule: backdrop and result (KC4 to KC6),
+    # channels (KC3), layout (KC8), the step, the pop, caps and the default path (KC1, KC2, KC9).
+    # Written with the story; the sweep of the generated plants is run in the consolidated pass.
+    ("rj-knockout-backdrop-is-the-layer", "src", RS, "  if (g->knockout) {\n    initial_backdrop(run, (size_t)(frame - run->frames), p, bk);\n    b = bk;\n  }", "  if (0) {\n    initial_backdrop(run, (size_t)(frame - run->frames), p, bk);\n    b = bk;\n  }", ['testRender_group', 'probe']),
+    ("rj-pop-knockout-backdrop-is-the-layer", "src", RS, "        if (pg->knockout) {\n          initial_backdrop(run, top - 1u, p, bk);\n          b = bk;\n        }", "        if (0) {\n          initial_backdrop(run, top - 1u, p, bk);\n          b = bk;\n        }", ['testRender_group', 'probe']),
+    ("rj-plain-backdrop-is-the-initial-backdrop", "src", RS, "  if (gs_of(run)->frames[i].knockout) {\n    initial_backdrop(run, i, p, out);", "  if (1) {\n    initial_backdrop(run, i, p, out);", ['testRender_group', 'probe']),
+    ("rj-backdrop-read-from-the-root", "src", RS, "  backdrop_of(run, i - 1u, p, b);\n  gshcpu_render_convert_premultiplied(&g->from_parent, b, out);", "  backdrop_of(run, 0, p, b);\n  gshcpu_render_convert_premultiplied(&g->from_parent, b, out);", ['testRender_group', 'probe']),
+    ("rj-backdrop-not-converted-into-the-group", "src", RS, "  gshcpu_render_convert_premultiplied(&g->from_parent, b, out);\n}", "  memcpy(out, b, 4u * sizeof(double));\n}", ['testRender_group', 'probe']),
+    ("rj-conversion-prepared-the-wrong-way", "src", RS, "gshcpu_render_convert_prepare(&g->from_parent, &parent->space, &f->space);", "gshcpu_render_convert_prepare(&g->from_parent, &f->space, &parent->space);", ['testRender_group', 'probe']),
+    ("rj-result-not-converted-back", "src", RS, "      gshcpu_render_convert_premultiplied(&c, gres, s);\n      double weight = (double)m8 / 255.0;\n      if (masked && mp.me.shape) {", "      memcpy(s, gres, sizeof s);\n      double weight = (double)m8 / 255.0;\n      if (masked && mp.me.shape) {", ['testRender_group', 'probe']),
+    ("rj-nonisolated-layer-starts-empty", "src", RS, "      if (g->nonisolated) {\n        const size_t i = (size_t)(f - run->frames);", "      if (0) {\n        const size_t i = (size_t)(f - run->frames);", ['testRender_group', 'probe']),
+    ("rj-parent-not-made-ready", "src", RS, "    widen(run, f - 1, grown);\n  }", "    (void)run;\n  }", ['testRender_group', 'probe']),
+    ("rj-initial-backdrop-left-in-the-result", "src", RGF, "    g[i] = gshcpu_render_saturate(l[i] - keep * l0[i]); /* T5: the initial backdrop taken out */", "    g[i] = gshcpu_render_saturate(l[i] - 0.0 * keep * l0[i]); /* T5: the initial backdrop taken out */", ['testRender_group', 'probe']),
+    ("rj-result-alpha-is-the-layers", "src", RS, "  gshcpu_render_group_result(l, gf->ag ? gf->ag[p] : l[3], !gf->nonisolated, l0, g);", "  gshcpu_render_group_result(l, l[3], !gf->nonisolated, l0, g);", ['testRender_group', 'probe']),
+    ("rj-result-keeps-the-whole-backdrop", "src", RGF, "  const double keep = 1.0 - ag;", "  const double keep = 0.0;", ['testRender_group', 'probe']),
+    ("rj-group-shape-not-carried-through-a-child", "src", RS, "    g->ko_anc = pg->ko_anc || pg->knockout;", "    g->ko_anc = pg->knockout;", ['testRender_group', 'probe']),
+    ("rj-group-shape-carried-by-every-group", "src", RS, "    g->ko_anc = pg->ko_anc || pg->knockout;", "    g->ko_anc = pg->ko_anc || pg->knockout || run->top > 0;", ['testRender_group']),
+    ("rj-group-shape-carried-by-the-knockout-group-itself", "src", RS, "    g->ko_anc = pg->ko_anc || pg->knockout;", "    g->ko_anc = pg->ko_anc || g->knockout;", ['testRender_group', 'probe']),
+    ("rj-group-alpha-not-carried-by-non-isolated", "src", RS, "    if (g->nonisolated) {\n      g->ag = gs->ag + gs->ag_used++ * run->layout.pixels;", "    if (0) {\n      g->ag = gs->ag + gs->ag_used++ * run->layout.pixels;", ['testRender_group', 'probe']),
+    ("rj-plain-layer-under-knockout-does-not-step-its-shape", "src", RS, "    f->general = g->on || g->fg != NULL;", "    f->general = g->on;", ['testRender_group', 'probe']),
+    ("rj-every-group-is-general", "src", RS, "    g->on = g->nonisolated || g->knockout || (run->cs->tiers & GSHCPU_RENDER_FORCE_GENERAL) != 0;\n    if (g->nonisolated) {", "    g->on = 1;\n    if (g->nonisolated) {", ['testRender_group']),
+    ("rj-force-switch-ignored", "src", RS, "    g->on = g->nonisolated || g->knockout || (run->cs->tiers & GSHCPU_RENDER_FORCE_GENERAL) != 0;\n    if (g->nonisolated) {", "    g->on = g->nonisolated || g->knockout;\n    if (g->nonisolated) {", ['testRender_group']),
+    ("rj-channels-not-released-at-the-pop", "src", RS, "  if (g.ag) {\n    gs->ag_used--;\n  }", "  if (0) {\n    gs->ag_used--;\n  }", ['testRender_group']),
+    ("rj-shape-channel-not-released-at-the-pop", "src", RS, "  if (g.fg) {\n    gs->fg_used--;\n  }", "  if (0) {\n    gs->fg_used--;\n  }", ['testRender_group']),
+    ("rj-group-channels-not-zeroed-where-made-ready", "src", RS, "      if (g->ag) {\n        memset(g->ag + p, 0, n * sizeof *g->ag);\n      }", "      if (0) {\n        memset(g->ag + p, 0, n * sizeof *g->ag);\n      }", ['testRender_group']),
+    ("rj-group-shape-not-zeroed-where-made-ready", "src", RS, "      if (g->fg) {\n        memset(g->fg + p, 0, n * sizeof *g->fg);\n      }", "      if (0) {\n        memset(g->fg + p, 0, n * sizeof *g->fg);\n      }", ['testRender_group']),
+    ("rj-layout-omits-the-alpha-channels", "src", RS, "      place(&at, mul3(G->ag_slots, L->pixels, sizeof(double)), &G->at_ag) &&", "      place(&at, 0, &G->at_ag) &&", ['testRender_group']),
+    ("rj-layout-omits-the-shape-channels", "src", RS, "      place(&at, mul3(G->fg_slots, L->pixels, sizeof(double)), &G->at_fg) &&", "      place(&at, 0, &G->at_fg) &&", ['testRender_group']),
+    ("rj-layout-counts-one-alpha-channel-too-many", "src", RS, "        most_ag = open_ag > most_ag ? open_ag : most_ag;", "        most_ag = open_ag + 1u > most_ag ? open_ag + 1u : most_ag;", ['testRender_group']),
+    ("rj-layout-counts-one-shape-channel-too-many", "src", RS, "        most_fg = open_fg > most_fg ? open_fg : most_fg;", "        most_fg = open_fg + 1u > most_fg ? open_fg + 1u : most_fg;", ['testRender_group']),
+    ("rj-layout-counts-an-isolated-group-alpha", "src", RS, "        if (ni) {\n          open_ag++;\n        }", "        if (1) {\n          open_ag++;\n        }", ['testRender_group']),
+    ("rj-layout-counts-no-shape-under-an-ancestor", "src", RS, "        if (nest->ko > 0) {\n          open_fg++;\n        }", "        if (0) {\n          open_fg++;\n        }", ['testRender_group']),
+    ("rj-layout-knockout-count-not-undone", "src", RS, "          if (bits & 2u) {\n            nest->ko--;\n          }", "          if (0) {\n            nest->ko--;\n          }", ['testRender_group']),
+    ("rj-layout-alpha-count-not-undone", "src", RS, "          if (bits & 1u) {\n            open_ag--;\n          }", "          if (0) {\n            open_ag--;\n          }", ['testRender_group']),
+    ("rj-layout-shape-count-not-undone", "src", RS, "        if (nest->ko > 0) {\n          open_fg--; /* it carried a group shape exactly when a knockout group was open around it, which is as many as now */\n        }", "        if (0) {\n          open_fg--; /* it carried a group shape exactly when a knockout group was open around it, which is as many as now */\n        }", ['testRender_group']),
+    ("rj-layout-mask-picture-inherits-the-knockout-ancestors", "src", RS, "  Nest sub = {nest->memo, nest->cache, 0, 0, 0, 0, nest->bits, 0};", "  Nest sub = {nest->memo, nest->cache, 0, 0, nest->ko, 0, nest->bits, 0};", ['testRender_group']),
+    ("rj-layout-instance-groups-lose-the-open-ones", "src", RS, "        most_ag = open_ag + iag > most_ag ? open_ag + iag : most_ag;", "        most_ag = iag > most_ag ? iag : most_ag;", ['testRender_group']),
+    ("rj-layout-mask-picture-groups-lose-the-open-ones", "src", RS, "          most_fg = sat_add(open_fg, pn.fg) > most_fg ? sat_add(open_fg, pn.fg) : most_fg;", "          most_fg = pn.fg > most_fg ? pn.fg : most_fg;", ['testRender_group']),
+    ("rj-layout-plain-groups-take-a-stack-entry", "src", RS, "        if ((ni || ko) && !gshcpu_bits_push(", "        if (!gshcpu_bits_push(", ['testRender_group']),
+    ("rj-layout-pop-matches-the-wrong-depth", "src", RS, "(gshcpu_bits_top(nest->bits) >> 2) == nest->depth) {", "(gshcpu_bits_top(nest->bits) >> 2) != nest->depth) {", ['testRender_group']),
+    ("rj-layout-no-room-is-an-allocation-failure", "src", RS, "    return nest.oom && !(request->flags & GSHSCENE_RENDER_CALLER_MEMORY) ? GSHCPU_ERR_OOM : GSHCPU_ERR_LIMIT;", "    return nest.oom ? GSHCPU_ERR_OOM : GSHCPU_ERR_LIMIT;", ['testRender_group', 'testRender_conformance']),
+    ("rj-layout-allocates-under-caller-memory-for-the-stack", "src", RN, "  } else {\n    const size_t bytes = (sizeof *c + (MEMO_ALIGN - 1u)) & ~(size_t)(MEMO_ALIGN - 1u);", "  } else if (0) {\n    const size_t bytes = (sizeof *c + (MEMO_ALIGN - 1u)) & ~(size_t)(MEMO_ALIGN - 1u);", ['testRender_group']),
+    ("rj-layout-forced-switch-leaves-the-bytes-layers", "src", RS, "    L->wide = 1;\n    G->records", "    G->records", ['testRender_group', 'probe']),
+    ("rj-stack-pop-keeps-the-emptied-chunk", "src", RN, "  if (at == 0) {\n    /* The chunk is empty: the top is the one before it (kept linked, for the next push to reuse). */\n    bits->top = bits->top->prev;\n  }", "", ['testRender_group']),
+    ("rj-stack-push-never-moves-to-the-next-chunk", "src", RN, "  if (bits->len == 0 || at == 0) {", "  if (bits->len == 0) {", ['testRender_group']),
+    ("rj-stack-push-always-takes-a-new-chunk", "src", RN, "    GSHCPU_Bits_Chunk * next = bits->top ? bits->top->next : bits->first;", "    GSHCPU_Bits_Chunk * next = NULL;", ['testRender_group']),
+    ("rj-stack-top-reads-the-wrong-entry", "src", RN, "  return bits->top->v[(bits->len - 1u) % GSHCPU_BITS_CHUNK];", "  return bits->top->v[bits->len % GSHCPU_BITS_CHUNK];", ['testRender_group']),
+    ("rj-stack-failure-not-reported", "src", RN, "      if (!next) {\n        bits->failed = 1;\n        return 0;\n      }", "      if (!next) {\n        bits->failed = 1;\n        return 1;\n      }", ['testRender_group', 'testRender_conformance']),
+    ("rj-stack-chunks-leak", "src", RN, "  if (bits->memo->alloc) {\n    GSHCPU_Bits_Chunk * c = bits->first;", "  if (0) {\n    GSHCPU_Bits_Chunk * c = bits->first;", ['testRender_group']),
+    ("rj-element-shape-merged-into-opacity", "src", RC, "    const double keep = 1.0 - shape;\n    for (int i = 0; i < 4; i++) {\n      l[i] = gshcpu_render_saturate(keep * (l[i] - b[i]) + t[i]);", "    const double keep = 1.0 - shape * s[3];\n    for (int i = 0; i < 4; i++) {\n      l[i] = gshcpu_render_saturate(keep * (l[i] - b[i]) + t[i]);", ['testRender_group', 'probe']),
+    ("rj-element-opacity-merged-into-shape", "src", RC, "    memcpy(t, b, sizeof t);\n    if (!apply_core(t, s, m, op)) {", "    memcpy(t, b, sizeof t);\n    if (!apply_core(t, s, shape, op)) {", ['testRender_group', 'probe']),
+    ("rj-element-keeps-the-layer-not-the-excess", "src", RC, "      l[i] = gshcpu_render_saturate(keep * (l[i] - b[i]) + t[i]);", "      l[i] = gshcpu_render_saturate(keep * l[i] + t[i]);", ['testRender_group', 'probe']),
+    ("rj-element-backdrop-aliased-after-the-first-channel", "src", RC, "  double b[4];\n  memcpy(b, bk, sizeof b); /* the backdrop may be the layer itself */", "  double * b = (double *)bk;", ['testRender_group', 'probe']),
+    ("rj-element-other-operators-weigh-by-the-shape", "src", RC, "  const double keep = 1.0 - m;\n  for (int i = 0; i < 4; i++) {\n    double o;", "  const double keep = 1.0 - m;\n  m = shape;\n  for (int i = 0; i < 4; i++) {\n    double o;", ['testRender_group']),
+    ("rj-element-plus-unclamped", "src", RC, "      const double sum = s[i] + b[i];\n      o = sum < 1.0 ? sum : 1.0;\n    } else {\n      o = fa * s[i] + fb * b[i];", "      const double sum = s[i] + b[i];\n      o = sum;\n    } else {\n      o = fa * s[i] + fb * b[i];", ['testRender_group', 'probe']),
+    ("rj-element-blend-modes-are-not-pdf-operators", "src", RC, "  return op == GSHSCENE_COMPOSITE_SRC_OVER || is_blend(op);", "  return op == GSHSCENE_COMPOSITE_SRC_OVER;", ['testRender_group', 'probe']),
+    ("rj-element-source-over-is-not-pdf-operator", "src", RC, "  return op == GSHSCENE_COMPOSITE_SRC_OVER || is_blend(op);", "  return is_blend(op);", ['testRender_group', 'probe']),
+    ("rj-element-pd-factors-shared-plus-flag", "src", RC, "    case GSHSCENE_COMPOSITE_PLUS:\n      return 2;", "    case GSHSCENE_COMPOSITE_PLUS:\n      return 1;", ['testRender_group', 'probe']),
+    ("rj-step-alpha-part-forgotten", "src", RGF, "  if (ag) {\n    /* The group alpha steps", "  if (0) {\n    /* The group alpha steps", ['testRender_group', 'probe']),
+    ("rj-step-alpha-backdrop-is-the-layers", "src", RGF, "    const double agb = knockout ? 0.0 : *ag;", "    const double agb = bk[3];", ['testRender_group', 'probe']),
+    ("rj-step-alpha-backdrop-is-never-nothing", "src", RGF, "    const double agb = knockout ? 0.0 : *ag;", "    const double agb = *ag;", ['testRender_group', 'probe']),
+    ("rj-step-skips-a-knockout-element-of-no-source", "src", RGF, "s[3] == 0.0 && (!knockout || shape == 0.0)) {", "s[3] == 0.0) {", ['testRender_group', 'probe']),
+    ("rj-step-skips-a-knockout-element-of-no-source-and-some-shape", "src", RGF, "s[3] == 0.0 && (!knockout || shape == 0.0)) {", "s[3] == 0.0 && (!knockout || shape != 0.0)) {", ['testRender_group', 'probe']),
+    ("rj-step-never-skips-an-element-of-no-source", "src", RGF, "  if (gshcpu_render_bounded(op) && s[0] == 0.0", "  if (0 && gshcpu_render_bounded(op) && s[0] == 0.0", ['testRender_group']),
+    ("rj-step-skips-on-either-weight-zero", "src", RGF, "  if (m == 0.0 && shape == 0.0) {", "  if (m == 0.0 || shape == 0.0) {", ['testRender_group', 'probe']),
+    ("rj-step-group-shape-adds", "src", RGF, "    *fg = (*fg + shape) - *fg * shape; /* the group shape, after each element: fg + f - fg f */", "    *fg = *fg + shape;", ['testRender_group', 'probe']),
+    ("rj-step-group-shape-steps-by-the-weight", "src", RGF, "    *fg = (*fg + shape) - *fg * shape;", "    *fg = (*fg + m) - *fg * m;", ['testRender_group', 'probe']),
+    ("rj-step-group-shape-skipped-with-the-source", "src", RGF, "  if (fg) {\n    *fg = (*fg + shape)", "  if (fg && (s[3] != 0.0)) {\n    *fg = (*fg + shape)", ['testRender_group', 'probe']),
+    ("rj-step-reports-a-skip-as-composited", "src", RGF, "    return 0;\n  }\n  if (!gshcpu_render_element(", "    return 1;\n  }\n  if (!gshcpu_render_element(", ['testRender_group']),
+    ("rj-pop-shape-is-the-weight-for-pdf-operators", "src", RS, "pdf ? weight * fgc : weight, op);", "(pdf ? weight : weight), op);", ['testRender_group', 'probe']),
+    ("rj-pop-shape-is-the-group-shape-for-every-operator", "src", RS, "pdf ? weight * fgc : weight, op);", "(pdf ? weight * fgc : weight * fgc), op);", ['testRender_group', 'probe']),
+    ("rj-pop-shape-ignores-the-clips", "src", RS, "pdf ? weight * fgc : weight, op);", "pdf ? fgc : weight, op);", ['testRender_group', 'probe']),
+    ("rj-pop-nothing-drawn-has-a-whole-shape", "src", RS, "      double fgc = gs->frames[top].fg ? 0.0 : 1.0; /* nothing drawn here: no shape, where it is carried */", "      double fgc = 1.0;", ['testRender_group', 'probe']),
+    ("rj-pop-group-shape-read-from-the-parent", "src", RS, "  *fg = gf->fg ? gf->fg[p] : 1.0;", "  *fg = gs_of(run)->frames[top - 1u].fg ? gs_of(run)->frames[top - 1u].fg[p] : 1.0;", ['testRender_group', 'probe']),
+    ("rj-pop-opacity-not-applied", "src", RS, "        const double ov = o * v; /* MC4: the opacity source is o v (v = 1 without a mask: o) */", "        const double ov = v;", ['testRender_group', 'probe']),
+    ("rj-pop-mask-ignored", "src", RS, "        const double ov = o * v; /* MC4: the opacity source is o v (v = 1 without a mask: o) */", "        const double ov = o;", ['testRender_group', 'testRender_mask', 'probe']),
+    ("rj-pop-mask-acts-on-the-wrong-input", "src", RS, "      if (masked && mp.me.shape) {\n        weight = weight * v; /* MC4 (MK7)", "      if (masked && !mp.me.shape) {\n        weight = weight * v; /* MC4 (MK7)", ['testRender_group', 'testRender_mask', 'probe']),
+    ("rj-pop-mask-value-unused", "src", RS, "      const double v = masked ? mask_pop_value(run, &mp, x, y, p) : 1.0;", "      const double v = 1.0;", ['testRender_group', 'testRender_mask', 'probe']),
+    ("rj-pop-general-parent-composited-plain", "src", RS, "      if (pg->on || pg->fg) {\n        double bk[4];", "      if (0) {\n        double bk[4];", ['testRender_group', 'probe']),
+    ("rj-pop-bounded-skip-taken-for-a-general-parent", "src", RS, "        const int stepped = gshcpu_render_group_step(", "        if (bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0) {\n          continue;\n        }\n        const int stepped = gshcpu_render_group_step(", ['testRender_group', 'probe']),
+    ("rj-pop-root-not-touched", "src", RS, "        if (stepped > 0 && run->top == 1u) {\n          run->touched[p] = 1;\n        }", "        if (0) {\n          run->touched[p] = 1;\n        }", ['testRender_group']),
+    ("rj-pop-general-pops-uncounted", "src", RS, "  gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, general_pops));", "", ['testRender_group']),
+    ("rj-pop-dispatch-misses-a-general-parent", "src", RS, "    if (g->on || g->fg || pg->on || pg->fg) {", "    if (g->on || g->fg || pg->fg) {", ['testRender_group', 'probe']),
+    ("rj-pop-dispatch-misses-a-general-child", "src", RS, "    if (g->on || g->fg || pg->on || pg->fg) {", "    if (g->fg || pg->on || pg->fg) {", ['testRender_group', 'probe']),
+    ("rj-pop-dispatch-always-general", "src", RS, "    if (g->on || g->fg || pg->on || pg->fg) {", "    if (1 || g->on || g->fg || pg->on || pg->fg) {", ['testRender_group']),
+    ("rj-pop-region-of-an-unbounded-operator-is-the-dirty-rectangle", "src", RS, "  GSHCPU_Rect region = bounded ? f->dirty : window_of(run);\n  region = gshcpu_render_rect_meet(region, reach_of(run, parent->clip_base, f->clip_base));\n  GSHCPU_Rect whole = {0, 0, 0, 0};", "  GSHCPU_Rect region = f->dirty;\n  region = gshcpu_render_rect_meet(region, reach_of(run, parent->clip_base, f->clip_base));\n  GSHCPU_Rect whole = {0, 0, 0, 0};", ['testRender_group']),
+    ("rj-caps-without-non-isolated", "src", RS, "  out->flags |= GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT;", "  out->flags |= GSHSCENE_CAP_GROUP_KNOCKOUT;", ['testRender_group']),
+    ("rj-caps-without-knockout", "src", RS, "  out->flags |= GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT;", "  out->flags |= GSHSCENE_CAP_GROUP_NON_ISOLATED;", ['testRender_group']),
+    ("rj-stroke-sparse-fill-not-counted", "src", RS, "      count_general_fill(run, frame);\n      Sparse sp = {run, frame, src, s.shift_x, s.shift_y};", "      Sparse sp = {run, frame, src, s.shift_x, s.shift_y};", ['testRender_group']),
+    ("rj-stroke-sparse-ignores-the-general-layer", "src", RS, "    if (frame->general) {\n      general_fill(run, frame, p, sp->src, gshcpu_k_level[m]);\n    } else {", "    if (0) {\n      general_fill(run, frame, p, sp->src, gshcpu_k_level[m]);\n    } else {", ['testRender_group', 'probe']),
+    ("rj-painter-ignores-the-general-layer", "src", RS, "  if (frame->general) {\n    general_fill(run, frame, p, src, gshcpu_k_level[m8]);\n  } else {", "  if (0) {\n    general_fill(run, frame, p, src, gshcpu_k_level[m8]);\n  } else {", ['testRender_group', 'probe']),
+    ("rj-fill-weight-is-not-the-shape", "src", RS, "  (void)gshcpu_render_group_step(&frame->layer[4u * p], b, g->ag ? g->ag + p : NULL, g->fg ? g->fg + p : NULL, g->knockout, src, f, f,", "  (void)gshcpu_render_group_step(&frame->layer[4u * p], b, g->ag ? g->ag + p : NULL, g->fg ? g->fg + p : NULL, g->knockout, src, f, 1.0,", ['testRender_group', 'probe']),
+    ("rj-mask-frame-keeps-the-knockout-ancestors", "src", RS, "    Gen_Frame * g = &gs_of(run)->frames[run->top];\n    memset(g, 0, sizeof *g);\n    g->on = (run->cs->tiers & GSHCPU_RENDER_FORCE_GENERAL) != 0;", "    Gen_Frame * g = &gs_of(run)->frames[run->top];\n    *g = gs_of(run)->frames[run->top - 1u];\n    g->on = (run->cs->tiers & GSHCPU_RENDER_FORCE_GENERAL) != 0;", ['testRender_group', 'probe']),
+    ("rj-direct-bytes-tier-taken-with-general-layers", "src", RS, "L.clips == 0 &&\n      !L.aligned && !L.other && !G.on &&", "L.clips == 0 &&\n      !L.aligned && !L.other &&", ['testRender_group']),
+]
+
+
 def run(cmd, shell=False, env_extra=None, cwd=None):
     environment = dict(os.environ)
     if env_extra:
@@ -1703,6 +1832,14 @@ def do_plant(plant, control_objs):
 # when one of them IS caught (take it out of this table then) and when a name here is not in the plant table.  The first is
 # equivalent in the design; the others are not shown to be, and each names the case a test would have to build.
 SURVIVORS = {
+    "rj-element-backdrop-aliased-after-the-first-channel": "equivalent: the step copies the backdrop into the operator's operand before it writes "
+        "the layer, and writes each channel from the same channel of both, so the layer being its own backdrop changes nothing",
+    "rj-element-other-operators-weigh-by-the-shape": "equivalent: every element of an operator that is not PDF's has its shape equal to its "
+        "weight (a fill's coverage; a pop's clips and mask), so the one is the other",
+    "rj-step-skips-on-either-weight-zero": "equivalent: an element whose weight or shape is 0 has the other 0 or a source of nothing too "
+        "(a pop's shape is its weight times a group shape of at most 1, and a group that drew has a shape), so what it skips changes nothing",
+    "rj-pop-nothing-drawn-has-a-whole-shape": "equivalent: a pixel the child never reached is visited only by an unbounded operator, which is "
+        "none of PDF's, and the shape of every other operator is its weight, so the group shape read there is never used",
     "sc7-hit-limit-unchecked": "equivalent: a cache is one sink's, under one geometry limit, and the expansion refuses a part "
         "past max_points before an entry is made, so a hit is never past it",
     "st8-limit-not-the-items": "not seen: a run's centerline is the item's limit only past a limit each glyph passes and the "
