@@ -245,13 +245,19 @@ and calls `gshscene_mask_resolve` and `gshscene_mask_transfer` for everything el
 The sink holds no transfer evaluator and no table. The value meets the pop's composite unrounded, and the pop is the pop of any
 group: `apply` with the source scaled by `o v`, or the weight `(m8 / 255) v` for a mask on the shape. With `v = 1` the products
 are `o` and `m8 / 255` exactly, so a mask of value one is the same bits as no mask (a test says so for both acts-on, four
-operators and every format). A pixel whose weight is zero under `SHAPE` is still composited and marked touched, as `apply`
-with a zero weight is the identity on the value, so the rule needs no case of its own; the oracle states the same.
+operators and every format). A pixel whose weight is zero under `SHAPE` is still touched: the pop calls `apply` for it, with a
+weight of zero, and `apply` with a zero weight is the identity on the value, so the rule needs no case of its own (and the oracle
+states the same). The cost is that such a pixel is visited and marked where a skipped one would not be, and, in a straight-alpha
+target, that its bytes can differ by the rounding of the round trip from what `OPACITY` with a value of zero leaves (a bounded
+operator whose scaled source is zero composites nothing, so that pixel stays untouched).
 
-**A mask list is composited in double layers.** The fast fill coverage holds the layers of an 8-bit target as bytes; a mask
-quantized to 8 bits between its layer and the write would not be the mask, and an 8-bit conversion table is a second source of
-error in a value the oracle bounds to `1e-12`. A list holding a masked group is therefore drawn with double layers, as one holding
-an image paint is (the fast coverages of fills and strokes still apply to the items), and the byte tiers are off for it.
+**A list holding a masked group is composited in double layers, whatever the target's format.** The fast fill coverage holds the
+layers of an 8-bit target as bytes. A mask's value weighs the group's pixels, and a layer quantized to 8 bits before the weight
+is applied is not the mask: the quantization is a second source of error in a value that the exact-rational reference bounds
+to `1e-12`, and that the sink meets to 1.1e-16 (the worst error before the write, over the render-level vectors). There is therefore
+no 8-bit-layer path for a masked group, and a list that holds one has the byte tiers off, as one holding an image paint does (the
+fast coverages of fills and strokes still apply to the items); the layers cost eight bytes a component instead of one, which the
+layout counts (the next paragraphs).
 
 **Limits are the whole render's.** The cell cap is met over an item's rectangle met with the whole render's region, whatever
 the damage (S4). A mask's pop region depends on the group's dirty rectangle, which a damaged render knows only in part, so the
