@@ -998,6 +998,8 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   out->mask_native = GSHSCENE_MASK_NATIVE_ALL;
   /* KC1: a group that is non-isolated, or knockout, or both, with or without a mask, so no combination is refused. */
   out->flags |= GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT;
+  /* S22: no GSHSCENE_CAP_PATTERN.  This sink draws no pattern yet, so the planning pass refuses every fill and stroke painted with
+   * one (PATTERN) before the target is touched; the flag is claimed with the drawing, not before it. */
   out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;
   out->cancel_work_bound = work_bound(cs);
   out->work_measure = "cells+points+pixels+texels";

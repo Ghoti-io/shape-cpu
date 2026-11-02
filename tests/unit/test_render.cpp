@@ -85,6 +85,90 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
   }
 }
 
+TEST(RenderCaps, AFillPaintedWithAPatternIsRefusedForWantOfTheCapabilityAndNothingIsDrawn) {
+  // The sink draws no pattern (shape-scene's S22), so it has no CAP_PATTERN: the planning pass refuses every unit painted with one,
+  // `PATTERN`, before the target is touched, whatever the pattern holds; strict fails; the units around it are drawn.
+  SinkRef sink;
+  RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 16, 16));
+  ASSERT_NE(r.raster, nullptr);
+  GSHSCENE_Sink_Caps caps = caps_for(sink.sink, r.raster);
+  EXPECT_EQ(caps.flags & GSHSCENE_CAP_PATTERN, 0u);
+  GSHSCENE_Store * store = nullptr;
+  ASSERT_EQ(gshscene_store_create(nullptr, nullptr, &store), GSHSCENE_OK);
+  GSHGEOM_Path * path = nullptr;
+  ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &path), GSHGEOM_OK);
+  gshgeom_path_move_to(path, GSHGEOM_Point{1, 1, 0});
+  gshgeom_path_line_to(path, GSHGEOM_Point{9, 1, 0});
+  gshgeom_path_line_to(path, GSHGEOM_Point{9, 9, 0});
+  gshgeom_path_line_to(path, GSHGEOM_Point{1, 9, 0});
+  gshgeom_path_close(path);
+  const GSHSCENE_Resource * square = nullptr;
+  ASSERT_EQ(gshscene_store_intern_path(store, path, &square), GSHSCENE_OK);
+  gshgeom_path_destroy(path);
+  GSHSCENE_Paint red{};
+  red.kind = GSHSCENE_PAINT_SOLID;
+  red.rgba[0] = 1.0;
+  red.rgba[3] = 1.0;
+  GSHSCENE_List * tile_list = nullptr;
+  ASSERT_EQ(gshscene_list_create(nullptr, nullptr, store, &tile_list), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(tile_list, square, nullptr, GSHGEOM_FILL_NONZERO, &red, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(tile_list), GSHSCENE_OK);
+  const GSHSCENE_Resource * tile = nullptr;
+  ASSERT_EQ(gshscene_store_intern_picture(store, tile_list, &tile), GSHSCENE_OK);
+  gshscene_list_destroy(tile_list);
+  GSHSCENE_Pattern pattern;
+  gshscene_pattern_init(&pattern);
+  pattern.tile = tile;
+  pattern.w = pattern.h = pattern.x_step = pattern.y_step = 4.0;
+  const GSHSCENE_Resource * pat = nullptr;
+  ASSERT_EQ(gshscene_store_intern_pattern(store, &pattern, &pat), GSHSCENE_OK);
+  GSHSCENE_Paint painted{};
+  painted.kind = GSHSCENE_PAINT_PATTERN;
+  painted.resource = pat;
+  painted.rgba[3] = 1.0;
+  GSHSCENE_List * list = nullptr;
+  ASSERT_EQ(gshscene_list_create(nullptr, nullptr, store, &list), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_fill(list, square, nullptr, GSHGEOM_FILL_NONZERO, &painted, 0, 0.0), GSHSCENE_OK);  // refused
+  ASSERT_EQ(gshscene_list_fill(list, square, nullptr, GSHGEOM_FILL_NONZERO, &red, 1, 0.0), GSHSCENE_OK);      // drawn
+  ASSERT_EQ(gshscene_list_close(list), GSHSCENE_OK);
+  GSHSCENE_Target target = target_of(r.raster);
+  GSHSCENE_Report * report = nullptr;
+  ASSERT_EQ(gshscene_report_create(nullptr, nullptr, &report), GSHSCENE_OK);
+  GSHSCENE_Render_Request request{};
+  request.list = list;
+  request.target = &target;
+  request.report = report;
+  // Strict: the render fails before the target is touched.
+  uint32_t before = 0;
+  std::memcpy(&before, gimg_raster_pixels_const(r.raster), 4);
+  request.flags = GSHSCENE_RENDER_STRICT;
+  EXPECT_EQ(gshscene_sink_render(sink.sink, &request), GSHSCENE_ERR_REFUSED);
+  uint32_t after = 1;
+  std::memcpy(&after, gimg_raster_pixels_const(r.raster), 4);
+  EXPECT_EQ(after, before) << "strict touched the target";
+  ASSERT_EQ(gshscene_report_count(report), 1u);
+  GSHSCENE_Report_Entry entry;
+  ASSERT_EQ(gshscene_report_entry(report, 0, &entry), GSHSCENE_OK);
+  EXPECT_EQ(entry.entry_class, GSHSCENE_ENTRY_REFUSED);
+  EXPECT_EQ(entry.reason, GSHSCENE_REASON_PATTERN);
+  ASSERT_EQ(entry.chain_count, 1u);
+  EXPECT_EQ(entry.chain[0], 0u);
+  // Not strict: the pattern fill is skipped, the red one drawn (inside the square), and the report has the same one entry.
+  request.flags = 0;
+  EXPECT_EQ(gshscene_sink_render(sink.sink, &request), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_report_count(report), 1u);
+  const unsigned char * px = (const unsigned char *)gimg_raster_pixels_const(r.raster);
+  size_t stride = gimg_raster_stride_bytes(r.raster);
+  EXPECT_EQ(px[5 * stride + 5 * 4 + 0], 255) << "the red square is drawn";
+  EXPECT_EQ(px[5 * stride + 5 * 4 + 3], 255);
+  gshscene_report_destroy(report);
+  gshscene_list_destroy(list);
+  gshscene_resource_release(pat);
+  gshscene_resource_release(tile);
+  gshscene_resource_release(square);
+  gshscene_store_destroy(store);
+}
+
 TEST(RenderCaps, AKindPastTheEightItKnowsIsRefused) {
   // Every kind after the placeholder: the one predicate of the planning pass refuses each, ITEM_KIND, so the sink never
   // meets one it has no drawing for.  The placeholder (8) is not a kind it draws and is not refused for it: the plan
