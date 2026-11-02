@@ -743,7 +743,7 @@ def factor(op, old, new):
 
 
 _FACTORS = [
-    ("clear-fa", "CLEAR", "      return 1;", "      **fa = 1.0;\n      return 1;"),
+    ("clear-fa", "CLEAR", "      return 1;", "      *fa = 1.0;\n      return 1;"),
     ("src-fa", "SRC", "      *fa = 1.0;", "      *fa = 0.5;"),
     ("dest-fb", "DEST", "      *fb = 1.0;", "      *fb = 0.5;"),
     ("src-over-fa", "SRC_OVER", "      *fa = 1.0;\n      *fb = 1.0 - sa;", "      *fa = 0.5;\n      *fb = 1.0 - sa;"),
@@ -1507,8 +1507,8 @@ PLANTS += [
     ("rm-mask-features-unclaimed", "src", RS, "out->mask_native = GSHSCENE_MASK_NATIVE_ALL;", "out->mask_native = GSHSCENE_MASK_NATIVE_ALL & ~(uint32_t)GSHSCENE_MASK_NATIVE_TRANSFER_STITCHING;", ["testRender", "testRender_mask", "testRender_conformance"]),
     ("rm-mask-flag-unclaimed", "src", RS, "out->flags |= GSHSCENE_CAP_GROUP_SOFT_MASK;", "out->flags |= 0;", ["testRender", "testRender_mask", "testRender_conformance"]),
     # MC2: where and when the mask is drawn, and the frame
-    ("rm-mask-over-the-groups-rectangle", "src", RS, "GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, region, whole);", "GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, f->dirty, whole);", MKS),
-    ("rm-mask-over-the-whole-region", "src", RS, "GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, region, whole);", "GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, run->layout.region, whole);", MKS),
+    ("rm-mask-over-the-groups-rectangle", "src", RS, "GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, region, whole);", "(void)region;\n  GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, f->dirty, whole);", MKS),
+    ("rm-mask-over-the-whole-region", "src", RS, "GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, region, whole);", "(void)region;\n  GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, run->layout.region, whole);", MKS),
     ("rm-clips-around-the-group-in-force-in-the-mask", "src", RS, "  f->clip_base = run->clip_count;\n  if (run->general) {\n    /* The mask frame is its own isolated", "  f->clip_base = run->frames[run->top - 2u].clip_base;\n  if (run->general) {\n    /* The mask frame is its own isolated", MKT),
     ("rm-mask-frame-starts-nonzero", "src", RS, "  memset(f, 0, sizeof *f);\n  f->layer = run->layers + (run->top - 1u) * run->layout.pixels * 4u;\n  f->space = me->frame_space;", "  memset(f, 0, sizeof *f);\n  f->layer = run->layers + (run->top - 1u) * run->layout.pixels * 4u;\n  f->space = me->frame_space;\n  f->dirty = run->layout.region;", MKS),
     ("rm-placement-dropped", "src", RS, "  run->maps[count - 1u] = group->group.soft_mask_map;\n", "", MKS),
@@ -1527,7 +1527,7 @@ PLANTS += [
     ("rm-child-pop-not-joined-into-the-parent-whole", "src", RS, "      frames[run->top - 1u].whole_dirty = gshcpu_render_rect_join(frames[run->top - 1u].whole_dirty, whole);", "      (void)frames;", MKT),
     ("rm-whole-window-of-a-pass-is-the-whole-region", "src", RS, "  ms->whole_window = whole_window;\n  ms->walk_used += bytes;", "  ms->whole_window = run->layout.whole;\n  (void)whole_window;\n  ms->walk_used += bytes;", MKS),
     ("rm-pop-reads-the-groups-unready-layer", "src", RS, "      double s[4];\n      gshcpu_render_convert_premultiplied(&c, inside(f->dirty, x, y) ? &f->layer[4u * p] : zero, s);\n      double weight", "      double s[4];\n      gshcpu_render_convert_premultiplied(&c, 1 ? &f->layer[4u * p] : zero, s);\n      double weight", MKS),
-    ("rm-pop-reads-the-masks-unready-layer", "src", RS, "  if (inside(mp->mf->dirty, x, y)) {\n    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);", "  if (1) {\n    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);", MKS),
+    ("rm-pop-reads-the-masks-unready-layer", "src", RS, "  if (inside(mp->mf->dirty, x, y)) {\n    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);", "  (void)x;\n  (void)y;\n  if (1) {\n    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);", MKS),
     ("rm-whole-dirty-of-the-frame-not-reset", "src", RS, "    memset(&mf->whole_dirty, 0, sizeof mf->whole_dirty);\n    mf->push = index;", "    mf->push = index;", MKS),
     # MC5: the layout
     ("rm-layout-mask-frame-omitted", "src", RS, "most_g = sat_add(sat_add(g, 1u), pn.groups) > most_g ? sat_add(sat_add(g, 1u), pn.groups) : most_g;", "most_g = sat_add(g, pn.groups) > most_g ? sat_add(g, pn.groups) : most_g;", MKS),
@@ -1554,7 +1554,7 @@ PLANTS += [
     ("rm-outside-tier-off", "src", RS, "  if (mp->outside_tier) {", "  if (mp->outside_tier && 0) {", MKS),
     ("rm-outside-value-zero-by-the-tier", "src", RS, "      mp->v_outside = gshcpu_render_mask_value(&mp->me, zero, mp->identity_tier);", "      mp->v_outside = 0.0;", MKT),
     ("rm-outside-value-zero-by-the-general-tier", "src", RS, "  return gshcpu_render_mask_value(&mp->me, zero, mp->identity_tier);\n}", "  return 0.0;\n}", MKT),
-    ("rm-outside-value-taken-inside", "src", RS, "  if (inside(mp->mf->dirty, x, y)) {\n    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);", "  if (0) {\n    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);", MKT),
+    ("rm-outside-value-taken-inside", "src", RS, "  if (inside(mp->mf->dirty, x, y)) {\n    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);", "  (void)x;\n  (void)y;\n  if (0) {\n    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);", MKT),
     ("rm-outside-value-skips-a-pixel", "src", RS, "      mp->have_outside = 1;\n    }\n    mp->took_outside = 1;", "      mp->have_outside = 1;\n      mp->took_outside = 1;\n      return 0.0;\n    }\n    mp->took_outside = 1;", MKS),
     ("rm-identity-tier-ignores-its-switch", "src", RS, "  mp->identity_tier = (run->cs->tiers & GSHCPU_RENDER_TIER_MASK_IDENTITY) != 0;", "  mp->identity_tier = 1;", MKS),
     ("rm-outside-tier-ignores-its-switch", "src", RS, "  mp->outside_tier = (run->cs->tiers & GSHCPU_RENDER_TIER_MASK_OUTSIDE) != 0;", "  mp->outside_tier = 1;", MKS),
