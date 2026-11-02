@@ -743,23 +743,23 @@ def factor(op, old, new):
 
 
 _FACTORS = [
-    ("clear-fa", "CLEAR", "      break;", "      fa = 1.0;\n      break;"),
-    ("src-fa", "SRC", "      fa = 1.0;", "      fa = 0.5;"),
-    ("dest-fb", "DEST", "      fb = 1.0;", "      fb = 0.5;"),
-    ("src-over-fa", "SRC_OVER", "      fa = 1.0;\n      fb = 1.0 - sa;", "      fa = 0.5;\n      fb = 1.0 - sa;"),
-    ("src-over-fb", "SRC_OVER", "      fa = 1.0;\n      fb = 1.0 - sa;", "      fa = 1.0;\n      fb = 1.0 - da;"),
-    ("dest-over-fa", "DEST_OVER", "      fa = 1.0 - da;", "      fa = 1.0 - sa;"),
-    ("dest-over-fb", "DEST_OVER", "      fa = 1.0 - da;\n      fb = 1.0;", "      fa = 1.0 - da;\n      fb = sa;"),
-    ("src-in-fa", "SRC_IN", "      fa = da;", "      fa = sa;"),
-    ("dest-in-fb", "DEST_IN", "      fb = sa;", "      fb = da;"),
-    ("src-out-fa", "SRC_OUT", "      fa = 1.0 - da;", "      fa = 1.0 - sa;"),
-    ("dest-out-fb", "DEST_OUT", "      fb = 1.0 - sa;", "      fb = 1.0 - da;"),
-    ("src-atop-fa", "SRC_ATOP", "      fa = da;", "      fa = 1.0 - da;"),
-    ("src-atop-fb", "SRC_ATOP", "      fa = da;\n      fb = 1.0 - sa;", "      fa = da;\n      fb = sa;"),
-    ("dest-atop-fa", "DEST_ATOP", "      fa = 1.0 - da;", "      fa = da;"),
-    ("dest-atop-fb", "DEST_ATOP", "      fa = 1.0 - da;\n      fb = sa;", "      fa = 1.0 - da;\n      fb = 1.0 - sa;"),
-    ("xor-fa", "XOR", "      fa = 1.0 - da;", "      fa = da;"),
-    ("xor-fb", "XOR", "      fa = 1.0 - da;\n      fb = 1.0 - sa;", "      fa = 1.0 - da;\n      fb = sa;"),
+    ("clear-fa", "CLEAR", "      return 1;", "      **fa = 1.0;\n      return 1;"),
+    ("src-fa", "SRC", "      *fa = 1.0;", "      *fa = 0.5;"),
+    ("dest-fb", "DEST", "      *fb = 1.0;", "      *fb = 0.5;"),
+    ("src-over-fa", "SRC_OVER", "      *fa = 1.0;\n      *fb = 1.0 - sa;", "      *fa = 0.5;\n      *fb = 1.0 - sa;"),
+    ("src-over-fb", "SRC_OVER", "      *fa = 1.0;\n      *fb = 1.0 - sa;", "      *fa = 1.0;\n      *fb = 1.0 - da;"),
+    ("dest-over-fa", "DEST_OVER", "      *fa = 1.0 - da;", "      *fa = 1.0 - sa;"),
+    ("dest-over-fb", "DEST_OVER", "      *fa = 1.0 - da;\n      *fb = 1.0;", "      *fa = 1.0 - da;\n      *fb = sa;"),
+    ("src-in-fa", "SRC_IN", "      *fa = da;", "      *fa = sa;"),
+    ("dest-in-fb", "DEST_IN", "      *fb = sa;", "      *fb = da;"),
+    ("src-out-fa", "SRC_OUT", "      *fa = 1.0 - da;", "      *fa = 1.0 - sa;"),
+    ("dest-out-fb", "DEST_OUT", "      *fb = 1.0 - sa;", "      *fb = 1.0 - da;"),
+    ("src-atop-fa", "SRC_ATOP", "      *fa = da;", "      *fa = 1.0 - da;"),
+    ("src-atop-fb", "SRC_ATOP", "      *fa = da;\n      *fb = 1.0 - sa;", "      *fa = da;\n      *fb = sa;"),
+    ("dest-atop-fa", "DEST_ATOP", "      *fa = 1.0 - da;", "      *fa = da;"),
+    ("dest-atop-fb", "DEST_ATOP", "      *fa = 1.0 - da;\n      *fb = sa;", "      *fa = 1.0 - da;\n      *fb = 1.0 - sa;"),
+    ("xor-fa", "XOR", "      *fa = 1.0 - da;", "      *fa = da;"),
+    ("xor-fb", "XOR", "      *fa = 1.0 - da;\n      *fb = 1.0 - sa;", "      *fa = 1.0 - da;\n      *fb = sa;"),
 ]
 
 PLANTS += [
@@ -805,8 +805,8 @@ PLANTS += [
      "    case GSHSCENE_COMPOSITE_SRC_OVER:\n", RT),
     ("r-bounded-plus", "src", RC, "    case GSHSCENE_COMPOSITE_XOR:\n    case GSHSCENE_COMPOSITE_PLUS:\n    /* B3: every blend mode is bounded. */", "    case GSHSCENE_COMPOSITE_XOR:\n    /* B3: every blend mode is bounded. */", RT),
     # P3-12: no silent default, and caps that claim exactly what apply composites.
-    ("r-op-unknown-is-clear", "src", RC, "      return 0;\n  }\n  for (int i = 0; i < 4; i++) {\n    if (op == GSHSCENE_COMPOSITE_PLUS) {",
-     "      break;\n  }\n  for (int i = 0; i < 4; i++) {\n    if (op == GSHSCENE_COMPOSITE_PLUS) {", RT),
+    ("r-op-unknown-is-clear", "src", RC, "    return 0;\n  }\n  for (int i = 0; i < 4; i++) {\n    if (family == 2) {",
+     "  }\n  for (int i = 0; i < 4; i++) {\n    if (family == 2) {", RT),
     ("r-bounded-src-in", "src", RC, "    case GSHSCENE_COMPOSITE_XOR:\n    case GSHSCENE_COMPOSITE_PLUS:\n    /* B3", "    case GSHSCENE_COMPOSITE_XOR:\n    case GSHSCENE_COMPOSITE_SRC_IN:\n    case GSHSCENE_COMPOSITE_PLUS:\n    /* B3", RT),
     # B1 to B14 (color-paint story P3): each mode, a branch, a constant, a clamp, Lum, ClipColor, SetSat, B9, B2, B3.
     ('r-b-screen', "src", RC, '  return b + s - b * s;\n}', '  return b + s + b * s;\n}', RT),
@@ -850,8 +850,8 @@ PLANTS += [
     ('r-b-unpremultiply', "src", RC, '      cs[i] = gshcpu_render_unpremultiply(s[i], sa);', '      cs[i] = s[i];', RT),
     ('r-b-bounded-screen', "src", RC, '    case GSHSCENE_COMPOSITE_SCREEN:\n    case GSHSCENE_COMPOSITE_OVERLAY:\n    case GSHSCENE_COMPOSITE_DARKEN:\n    case GSHSCENE_COMPOSITE_LIGHTEN:\n    case GSHSCENE_COMPOSITE_COLOR_DODGE:\n    case GSHSCENE_COMPOSITE_COLOR_BURN:\n    case GSHSCENE_COMPOSITE_HARD_LIGHT:\n    case GSHSCENE_COMPOSITE_SOFT_LIGHT:\n    case GSHSCENE_COMPOSITE_DIFFERENCE:\n    case GSHSCENE_COMPOSITE_EXCLUSION:\n    case GSHSCENE_COMPOSITE_MULTIPLY:\n    case GSHSCENE_COMPOSITE_HUE:\n    case GSHSCENE_COMPOSITE_SATURATION:\n    case GSHSCENE_COMPOSITE_COLOR:\n    case GSHSCENE_COMPOSITE_LUMINOSITY:\n      return 1;', '    case GSHSCENE_COMPOSITE_OVERLAY:\n    case GSHSCENE_COMPOSITE_DARKEN:\n    case GSHSCENE_COMPOSITE_LIGHTEN:\n    case GSHSCENE_COMPOSITE_COLOR_DODGE:\n    case GSHSCENE_COMPOSITE_COLOR_BURN:\n    case GSHSCENE_COMPOSITE_HARD_LIGHT:\n    case GSHSCENE_COMPOSITE_SOFT_LIGHT:\n    case GSHSCENE_COMPOSITE_DIFFERENCE:\n    case GSHSCENE_COMPOSITE_EXCLUSION:\n    case GSHSCENE_COMPOSITE_MULTIPLY:\n    case GSHSCENE_COMPOSITE_HUE:\n    case GSHSCENE_COMPOSITE_SATURATION:\n    case GSHSCENE_COMPOSITE_COLOR:\n    case GSHSCENE_COMPOSITE_LUMINOSITY:\n      return 1;', RT),
     ('r-b-blends-predicate', "src", RC, 'return op >= GSHSCENE_COMPOSITE_SCREEN && op <= GSHSCENE_COMPOSITE_LUMINOSITY;', 'return op >= GSHSCENE_COMPOSITE_SCREEN && op < GSHSCENE_COMPOSITE_LUMINOSITY;', RT),
-    ('r-b-apply-case', "src", RC, "    case GSHSCENE_COMPOSITE_LUMINOSITY:\n      /* B2, inside N5's apply unchanged. */", "      /* B2, inside N5's apply unchanged. */", RT),
-    ('r-b-apply-weights', "src", RC, '        d[i] = gshcpu_render_saturate((1.0 - m) * d[i] + m * o[i]); /* N1 */\n      }\n      return 1;', '        d[i] = gshcpu_render_saturate(d[i] + m * o[i]); /* N1 */\n      }\n      return 1;', RT),
+    ('r-b-apply-case', "src", RC, "  return op >= GSHSCENE_COMPOSITE_SCREEN && op <= GSHSCENE_COMPOSITE_LUMINOSITY;\n}\n\nint gshcpu_render_blends", "  return op >= GSHSCENE_COMPOSITE_SCREEN && op <= GSHSCENE_COMPOSITE_COLOR;\n}\n\nint gshcpu_render_blends", RT),
+    ('r-b-apply-weights', "src", RC, '      d[i] = gshcpu_render_saturate((1.0 - m) * d[i] + m * o[i]); /* N1 */\n    }\n    return 1;', '      d[i] = gshcpu_render_saturate(d[i] + m * o[i]); /* N1 */\n    }\n    return 1;', RT),
     ('r-caps-blend-modes', "src", RS, '  for (uint32_t c = GSHSCENE_COMPOSITE_SCREEN; c <= GSHSCENE_COMPOSITE_LUMINOSITY; c++) {', '  for (uint32_t c = GSHSCENE_COMPOSITE_SCREEN; c <= GSHSCENE_COMPOSITE_MULTIPLY; c++) {', RT),
     # --- D8 and the write -----------------------------------------------------------------------------------------------
     ("r-weigh-round", "src", RC, "return (m8 * c8 + 127u) / 255u;", "return (m8 * c8 + 128u) / 255u;", RT),
@@ -928,7 +928,7 @@ PLANTS += [
     ("r-group-opacity", "src", RS, "      for (int i = 0; i < 4; i++) {\n        s[i] = o * s[i];", "      for (int i = 0; i < 4; i++) {\n        s[i] = o * o * s[i];", RT),
     ("r-group-opacity-8", "src", RS, "        gshcpu_render_convert_premultiplied(&c, in, s);\n        for (int i = 0; i < 4; i++) {\n          s[i] = o * s[i];", "        gshcpu_render_convert_premultiplied(&c, in, s);\n        for (int i = 0; i < 4; i++) {\n          s[i] = o * o * s[i];", RF8),
     ("r-group-convert-way", "src", RS, "  gshcpu_render_convert_prepare(&c, &f->space, &parent->space);\n  const double o = f->group.opacity;\n  /* The group's layer", "  gshcpu_render_convert_prepare(&c, &parent->space, &f->space);\n  const double o = f->group.opacity;\n  /* The group's layer", RT),
-    ("r-group-convert-way-8", "src", RS, "  gshcpu_render_convert_prepare(&c, &f->space, &parent->space);\n  const double o = f->group.opacity;\n  widen(", "  gshcpu_render_convert_prepare(&c, &parent->space, &f->space);\n  const double o = f->group.opacity;\n  widen(", RF8),
+    ("r-group-convert-way-8", "src", RS, "  gshcpu_render_convert_prepare(&c, &f->space, &parent->space);\n  const double o = f->group.opacity;\n  widen(run, parent, region);\n  const int plain", "  gshcpu_render_convert_prepare(&c, &parent->space, &f->space);\n  const double o = f->group.opacity;\n  widen(run, parent, region);\n  const int plain", RF8),
     ("r-group-outer-clips", "src", RS, "\n      uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);\n      if (m8 == 0) {\n        continue;\n      }\n      size_t p = at(run, x, y);\n      double s[4];", "\n      uint32_t m8 = 255u;\n      if (m8 == 0) {\n        continue;\n      }\n      size_t p = at(run, x, y);\n      double s[4];", RT),
     ("r-group-outer-clips-8", "src", RS, "\n        uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);", "\n        uint32_t m8 = 255u;", RF8),
     ("r-group-unbounded-region", "src", RS, "   * weighed above zero (N8). */\n  GSHCPU_Rect region = bounded ? f->dirty : window_of(run);", "   * weighed above zero (N8). */\n  GSHCPU_Rect region = f->dirty;", RT),
@@ -984,7 +984,7 @@ PLANTS += [
     ("rule-S9-short-block-measures", "src", RS, "  if (request->flags & GSHSCENE_RENDER_CALLER_MEMORY) {\n    if (!request->workspace",
      "  if ((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) && request->workspace && request->workspace_bytes >= L.fixed) {\n    if (!request->workspace", RT),
     ("rule-S10-keeps-a-reference", "src", RS, "  if (!p->gradient) {\n    source_of(run, item, frame, p->src);", "  if (!p->gradient) {\n    gshscene_resource_retain(item->resource);\n    source_of(run, item, frame, p->src);", CONF),
-    ("rule-S11-src-over", "src", RC, "      fa = 1.0;\n      fb = 1.0 - sa;", "      fa = 1.0;\n      fb = 1.0 - sa * 0.5;", RT),
+    ("rule-S11-src-over", "src", RC, "      *fa = 1.0;\n      *fb = 1.0 - sa;", "      *fa = 1.0;\n      *fb = 1.0 - sa * 0.5;", RT),
     ("rule-S14-affine-unstated", "src", RS, "  ops.thread_affine = 0;", "  ops.thread_affine = 1;", CONF),
     ("rule-S15-readback-offset", "src", RS, "+ (size_t)target->extent.x0 * bytes,", "+ (size_t)target->extent.y0 * bytes,", CONF),
 ]
@@ -1502,14 +1502,14 @@ PLANTS += [
     ("rm-opacity-not-weighed", "src", RS, "const double ov = o * v; /* MC4: the opacity source is o v */", "const double ov = o; /* MC4 */", MKT),
     ("rm-shape-not-weighed", "src", RS, "weight = weight * v; /* MC4: the shape is weighed by v, the opacity as it was */", "weight = weight; /* MC4 */", MKT),
     ("rm-shape-merged-into-opacity", "src", RS, "weight = weight * v; /* MC4: the shape is weighed by v, the opacity as it was */\n        for (int i = 0; i < 4; i++) {\n          s[i] = o * s[i];", "weight = weight * v; /* MC4 */\n        for (int i = 0; i < 4; i++) {\n          s[i] = o * v * s[i];", MKT),
-    ("rm-skip-of-a-zero-source-dropped", "src", RS, "      if (bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0) {\n        continue;\n      }\n      if (!gshcpu_render_apply(&parent->layer[4u * p], s, weight, op)) {", "      (void)bounded;\n      if (!gshcpu_render_apply(&parent->layer[4u * p], s, weight, op)) {", MKT),
-    ("rm-masked-group-claims-isolation", "src", RS, "out->flags |= GSHSCENE_CAP_GROUP_SOFT_MASK;", "out->flags |= GSHSCENE_CAP_GROUP_SOFT_MASK | GSHSCENE_CAP_GROUP_KNOCKOUT;", ["testRender", "testRender_mask"]),
+    ("rm-skip-of-a-zero-source-dropped", "src", RS, "          s[i] = ov * s[i];\n        }\n      }\n      if (bounded && s[0] == 0.0 && s[1] == 0.0 && s[2] == 0.0 && s[3] == 0.0) {\n        continue;\n      }\n      if (!gshcpu_render_apply(&parent->layer[4u * p], s, weight, op)) {", "          s[i] = ov * s[i];\n        }\n      }\n      (void)bounded;\n      if (!gshcpu_render_apply(&parent->layer[4u * p], s, weight, op)) {", MKT),
+    # Removed, masks-images-patterns story M3: rm-masked-group-claims-isolation (the soft-mask claim with knockout): the sink claims knockout now (KC1)
     ("rm-mask-features-unclaimed", "src", RS, "out->mask_native = GSHSCENE_MASK_NATIVE_ALL;", "out->mask_native = GSHSCENE_MASK_NATIVE_ALL & ~(uint32_t)GSHSCENE_MASK_NATIVE_TRANSFER_STITCHING;", ["testRender", "testRender_mask", "testRender_conformance"]),
     ("rm-mask-flag-unclaimed", "src", RS, "out->flags |= GSHSCENE_CAP_GROUP_SOFT_MASK;", "out->flags |= 0;", ["testRender", "testRender_mask", "testRender_conformance"]),
     # MC2: where and when the mask is drawn, and the frame
-    ("rm-mask-over-the-groups-rectangle", "src", RS, "GSHSCENE_Result r = mask_pass(run, &me, chain, count, region, whole);", "GSHSCENE_Result r = mask_pass(run, &me, chain, count, f->dirty, whole);", MKS),
-    ("rm-mask-over-the-whole-region", "src", RS, "GSHSCENE_Result r = mask_pass(run, &me, chain, count, region, whole);", "GSHSCENE_Result r = mask_pass(run, &me, chain, count, run->layout.region, whole);", MKS),
-    ("rm-clips-around-the-group-in-force-in-the-mask", "src", RS, "  f->clip_base = run->clip_count;\n  memset(&mfs[run->top].whole_dirty", "  f->clip_base = run->frames[run->top - 2u].clip_base;\n  memset(&mfs[run->top].whole_dirty", MKT),
+    ("rm-mask-over-the-groups-rectangle", "src", RS, "GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, region, whole);", "GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, f->dirty, whole);", MKS),
+    ("rm-mask-over-the-whole-region", "src", RS, "GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, region, whole);", "GSHSCENE_Result r = mask_pass(run, &mp->me, chain, count, run->layout.region, whole);", MKS),
+    ("rm-clips-around-the-group-in-force-in-the-mask", "src", RS, "  f->clip_base = run->clip_count;\n  if (run->general) {\n    /* The mask frame is its own isolated", "  f->clip_base = run->frames[run->top - 2u].clip_base;\n  if (run->general) {\n    /* The mask frame is its own isolated", MKT),
     ("rm-mask-frame-starts-nonzero", "src", RS, "  memset(f, 0, sizeof *f);\n  f->layer = run->layers + (run->top - 1u) * run->layout.pixels * 4u;\n  f->space = me->frame_space;", "  memset(f, 0, sizeof *f);\n  f->layer = run->layers + (run->top - 1u) * run->layout.pixels * 4u;\n  f->space = me->frame_space;\n  f->dirty = run->layout.region;", MKS),
     ("rm-placement-dropped", "src", RS, "  run->maps[count - 1u] = group->group.soft_mask_map;\n", "", MKS),
     ("rm-mask-frame-not-released", "src", RS, "  run->top = top; /* the mask frame is released at the end of the pop: nothing below reads another */\n", "", MKS),
@@ -1521,13 +1521,13 @@ PLANTS += [
     ("rm-whole-window-not-restored", "src", RS, "  ms->whole_window = saved_whole;\n", "  (void)saved_whole;\n", MKS),
     # MC6: limits are the whole render's
     ("rm-cell-cap-over-the-pop-region", "src", RS, "static GSHCPU_Rect whole_reach_of(const Run * run, size_t from, size_t to) {\n  GSHCPU_Rect r = run->layout.whole;", "static GSHCPU_Rect whole_reach_of(const Run * run, size_t from, size_t to) {\n  GSHCPU_Rect r = run->masked && ms_of(run)->walk_used ? ms_of(run)->window : run->layout.whole;", MKS),
-    ("rm-whole-pop-region-is-the-damaged", "src", RS, "    GSHCPU_Rect whole = bounded ? frames[run->top].whole_dirty : ms_of(run)->whole_window;", "    GSHCPU_Rect whole = bounded ? f->dirty : window_of(run);", MKS),
+    ("rm-whole-pop-region-is-the-damaged", "src", RS, "    whole = bounded ? frames[run->top].whole_dirty : ms_of(run)->whole_window;", "    whole = bounded ? f->dirty : window_of(run);", MKS),
     ("rm-whole-dirty-not-noted", "src", RS, "    mf->whole_dirty = gshcpu_render_rect_join(mf->whole_dirty, whole);\n  }\n}", "    (void)mf;\n  }\n}", MKS),
     ("rm-whole-dirty-not-noted-for-the-damaged-rectangle", "src", RS, "  if (run->masked && !gshcpu_render_rect_empty(whole)) {\n    Mask_Frame * mf = &ms_of(run)->frames[f - run->frames];", "  if (run->masked && !gshcpu_render_rect_empty(r)) {\n    Mask_Frame * mf = &ms_of(run)->frames[f - run->frames];", MKS),
     ("rm-child-pop-not-joined-into-the-parent-whole", "src", RS, "      frames[run->top - 1u].whole_dirty = gshcpu_render_rect_join(frames[run->top - 1u].whole_dirty, whole);", "      (void)frames;", MKT),
     ("rm-whole-window-of-a-pass-is-the-whole-region", "src", RS, "  ms->whole_window = whole_window;\n  ms->walk_used += bytes;", "  ms->whole_window = run->layout.whole;\n  (void)whole_window;\n  ms->walk_used += bytes;", MKS),
     ("rm-pop-reads-the-groups-unready-layer", "src", RS, "      double s[4];\n      gshcpu_render_convert_premultiplied(&c, inside(f->dirty, x, y) ? &f->layer[4u * p] : zero, s);\n      double weight", "      double s[4];\n      gshcpu_render_convert_premultiplied(&c, 1 ? &f->layer[4u * p] : zero, s);\n      double weight", MKS),
-    ("rm-pop-reads-the-masks-unready-layer", "src", RS, "      if (inside(mf->dirty, x, y)) {\n        v = gshcpu_render_mask_value(&me, &mf->layer[4u * p], identity_tier);\n      } else if (outside_tier) {", "      if (1) {\n        v = gshcpu_render_mask_value(&me, &mf->layer[4u * p], identity_tier);\n      } else if (outside_tier) {", MKS),
+    ("rm-pop-reads-the-masks-unready-layer", "src", RS, "  if (inside(mp->mf->dirty, x, y)) {\n    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);", "  if (1) {\n    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);", MKS),
     ("rm-whole-dirty-of-the-frame-not-reset", "src", RS, "    memset(&mf->whole_dirty, 0, sizeof mf->whole_dirty);\n    mf->push = index;", "    mf->push = index;", MKS),
     # MC5: the layout
     ("rm-layout-mask-frame-omitted", "src", RS, "most_g = sat_add(sat_add(g, 1u), pn.groups) > most_g ? sat_add(sat_add(g, 1u), pn.groups) : most_g;", "most_g = sat_add(g, pn.groups) > most_g ? sat_add(g, pn.groups) : most_g;", MKS),
@@ -1551,15 +1551,15 @@ PLANTS += [
     ("rm-pop-work-one-pass", "src", RS, "    run->work += 2u * (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0);", "    run->work += 1u * (uint64_t)(region.x1 - region.x0) * (uint64_t)(region.y1 - region.y0);", MKS),
     ("rm-pass-work-kept-by-the-pop", "src", RS, "    gshscene_job_work(run->job, run->work);\n    run->work = 0;\n    if (result == GSHSCENE_OK && gshscene_job_checkpoint", "    run->work = 0;\n    if (result == GSHSCENE_OK && gshscene_job_checkpoint", MKS),
     # MC8: the tiers
-    ("rm-outside-tier-off", "src", RS, "      } else if (outside_tier) {", "      } else if (outside_tier && 0) {", MKS),
-    ("rm-outside-value-zero-by-the-tier", "src", RS, "          v_outside = gshcpu_render_mask_value(&me, zero, identity_tier);", "          v_outside = 0.0;", MKT),
-    ("rm-outside-value-zero-by-the-general-tier", "src", RS, "        v = gshcpu_render_mask_value(&me, zero, identity_tier);\n      }\n      double s[4];", "        v = 0.0;\n      }\n      double s[4];", MKT),
-    ("rm-outside-value-taken-inside", "src", RS, "      if (inside(mf->dirty, x, y)) {\n        v = gshcpu_render_mask_value(&me, &mf->layer[4u * p], identity_tier);", "      if (0) {\n        v = gshcpu_render_mask_value(&me, &mf->layer[4u * p], identity_tier);", MKT),
-    ("rm-outside-value-skips-a-pixel", "src", RS, "        v = v_outside;\n        took_outside = 1;", "        v = v_outside;\n        took_outside = 1;\n        if (x == region.x0 && y == region.y0) {\n          continue;\n        }", MKS),
-    ("rm-identity-tier-ignores-its-switch", "src", RS, "  const int identity_tier = (tiers & GSHCPU_RENDER_TIER_MASK_IDENTITY) != 0;", "  const int identity_tier = 1;", MKS),
-    ("rm-outside-tier-ignores-its-switch", "src", RS, "  const int outside_tier = (tiers & GSHCPU_RENDER_TIER_MASK_OUTSIDE) != 0;", "  const int outside_tier = 1;", MKS),
-    ("rm-tier-counter-not-counted", "src", RS, "  if (took_outside) {\n    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_outside));\n  }", "  (void)took_outside;", MKS),
-    ("rm-identity-counter-not-counted", "src", RS, "  if (identity_tier && me.identity && evaluated) {\n    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_identity));\n  }", "  (void)evaluated;", MKS),
+    ("rm-outside-tier-off", "src", RS, "  if (mp->outside_tier) {", "  if (mp->outside_tier && 0) {", MKS),
+    ("rm-outside-value-zero-by-the-tier", "src", RS, "      mp->v_outside = gshcpu_render_mask_value(&mp->me, zero, mp->identity_tier);", "      mp->v_outside = 0.0;", MKT),
+    ("rm-outside-value-zero-by-the-general-tier", "src", RS, "  return gshcpu_render_mask_value(&mp->me, zero, mp->identity_tier);\n}", "  return 0.0;\n}", MKT),
+    ("rm-outside-value-taken-inside", "src", RS, "  if (inside(mp->mf->dirty, x, y)) {\n    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);", "  if (0) {\n    return gshcpu_render_mask_value(&mp->me, &mp->mf->layer[4u * p], mp->identity_tier);", MKT),
+    ("rm-outside-value-skips-a-pixel", "src", RS, "      mp->have_outside = 1;\n    }\n    mp->took_outside = 1;", "      mp->have_outside = 1;\n      mp->took_outside = 1;\n      return 0.0;\n    }\n    mp->took_outside = 1;", MKS),
+    ("rm-identity-tier-ignores-its-switch", "src", RS, "  mp->identity_tier = (run->cs->tiers & GSHCPU_RENDER_TIER_MASK_IDENTITY) != 0;", "  mp->identity_tier = 1;", MKS),
+    ("rm-outside-tier-ignores-its-switch", "src", RS, "  mp->outside_tier = (run->cs->tiers & GSHCPU_RENDER_TIER_MASK_OUTSIDE) != 0;", "  mp->outside_tier = 1;", MKS),
+    ("rm-tier-counter-not-counted", "src", RS, "  if (mp->took_outside) {\n    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_outside));\n  }", "  (void)mp->took_outside;", MKS),
+    ("rm-identity-counter-not-counted", "src", RS, "  if (mp->identity_tier && mp->me.identity && mp->evaluated) {\n    gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, mask_identity));\n  }", "  (void)mp->evaluated;", MKS),
     # MC9: a group with no mask pays nothing
     ("rm-mask-area-in-every-list", "src", RS, "  run->masked = M.bytes != 0;", "  run->masked = 1;", MKS),
     # MC5, the layout's memo: a picture is walked once however many there are (the counter ``mask_pictures`` counts the walks), in the
@@ -1576,7 +1576,7 @@ PLANTS += [
     # MC4, MK7: PLUS is affine in the source only below its clamp, so the opacity and the shape agree there and not above it
     ("rm-plus-opacity-weighed-twice", "src", RS, "const double ov = o * v; /* MC4: the opacity source is o v */", "const double ov = op == (uint32_t)GSHSCENE_COMPOSITE_PLUS ? o * v * v : o * v;", ["testRender_mask"]),
     ("rm-plus-shape-weighed-twice", "src", RS, "weight = weight * v; /* MC4: the shape is weighed by v, the opacity as it was */\n        for (int i = 0; i < 4; i++) {\n          s[i] = o * s[i];", "weight = weight * v; /* MC4 */\n        for (int i = 0; i < 4; i++) {\n          s[i] = (op == (uint32_t)GSHSCENE_COMPOSITE_PLUS ? o * v : o) * s[i];", ["testRender_mask"]),
-    ("rm-unmasked-group-reaches-the-mask-code", "src", RS, "    if (f->group.soft_mask) {\n      return group_pop_masked(run, chain, count, region, whole);\n    }", "    if (1) {\n      return group_pop_masked(run, chain, count, region, whole);\n    }", MKS),
+    ("rm-unmasked-group-reaches-the-mask-code", "src", RS, "  if (run->masked && f->group.soft_mask) {\n    return group_pop_masked(run, chain, count, region, whole);\n  }", "  if (1) {\n    return group_pop_masked(run, chain, count, region, whole);\n  }", MKS),
 ]
 
 
