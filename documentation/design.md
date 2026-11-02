@@ -344,16 +344,18 @@ work counts, the pixels and the goldens it had.
 **Measured.** The render-level gate against the third restatement of the rules (672 cases, 210 exact, over four combinations, eleven
 operators, three backdrops, clips, nesting, spaces, abutting shapes and a transparent shape in a child of a knockout group): worst
 error before the write 3.3e-16 against the `1e-12` bound; shape-scene's installed `group_vectors.h` through the primitives (52 cases,
-worst 1.1e-16) and through renders where the coverage is whole; its installed `mask_vectors.h` (485 cases, 156 exact, worst 2.8e-16: every
+worst 1.1e-16) and through renders where the coverage is whole; its installed `mask_vectors.h` (485 cases, 156 exact, worst 6.7e-16: every
 mode, transfer and backdrop of a mask under each of the four parents, so `SHAPE` against `OPACITY` is shown for source-over and the
 blend modes under a knockout parent, and for the operators that are not bounded under every parent) through the primitives; seven
 fixtures add 28 goldens and move no earlier one.
 
-**A disagreement the vectors found.** A paint of the zero space is the render target's. Inside a mask's picture the sink converts it from
-the target's space into the mask's render space `R`; shape-scene's oracle draws the picture as a render of its own whose target is `R`,
-and reads the same paint as already in `R`. They agree wherever `R` is the target's space (the mask's own default), and 24 of the 485
-installed vectors have another `R`. The test holds the oracle's reading against all 485 and the sink's against the 461 where they
-agree, and pins the 24, so that whichever reading the waist settles on is seen to be made.
+**A paint of the zero space inside a mask's picture.** A paint of the zero space is the render target's. Inside a mask's picture the
+sink converts it from the target's space into the mask's render space `R`, as it converts any paint into the space of the group it is
+painted in. That is what ISO 32000-1 says of a transparency group (Table 147 makes a group's color space the one colors are
+converted into when painted into the group, and 11.3.4 converts source colors to the blending color space), and a soft mask is derived
+from such a group (11.6.5.2); CSS Masking likewise converts only at the luminance step. shape-scene's oracle draws the
+picture the same way, so the installed `mask_vectors.h` and this sink agree on all 485 vectors, among them 24 whose `R` is another space
+than the target's (an earlier reading of the oracle took such a paint as already in `R`, and those 24 vectors moved when it was corrected).
 
 ### A refused stroke draws nothing in every tier
 

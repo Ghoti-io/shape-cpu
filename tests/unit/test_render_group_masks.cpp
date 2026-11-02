@@ -144,14 +144,10 @@ struct Masks {
 void run(Masks & masks, std::vector<Layer> & stack, const GSHSCENE_Color_Space & target, const VItem * items, int count);
 
 /**
- * What a paint of the zero (target) space means inside a mask's picture when the mask's render space R is not the target's.  The sink
- * converts it from the render's target (every paint is: `source_of` reads the job's target space), and shape-scene's oracle, which
- * draws the picture as a render of its own whose target is R, reads it as already in R.  They agree wherever R is the target's space and
- * the picture's paints name no other, and the installed vectors hold 24 cases where they do not.  Which reading is the waist's is
- * not settled by MK2 ("drawn as its own isolated group in R"), so the test holds both: the sink's reading against the vectors where
- * the readings agree, the oracle's against every vector, and the number of vectors on which they differ.
+ * A paint of the zero (target) space inside a mask's picture is the render target's, converted into the mask's render space R like any
+ * paint in a group (ISO 32000-1 Table 147 and 11.3.4; shape-scene's MK2): `source_of` reads the job's target space, and so does this
+ * evaluator, whatever R is.
  */
-bool g_zero_space_is_r = false;
 
 /** MK2: the mask's value at the pixel for a masked group popped into a layer of space @p parent; fills @p acts_on_shape. */
 double mask_value(Masks & masks, int index, const GSHSCENE_Color_Space & parent, const GSHSCENE_Color_Space & target, bool * acts_on_shape) {
@@ -160,7 +156,7 @@ double mask_value(Masks & masks, int index, const GSHSCENE_Color_Space & parent,
   *acts_on_shape = me.shape != 0;
   std::vector<Layer> stack(1);
   stack[0].space = me.frame_space; // the mask's picture is its own isolated, non-knockout group in the render space (MK2)
-  run(masks, stack, g_zero_space_is_r ? me.frame_space : target, kMasks[index]->items, kMasks[index]->item_count);
+  run(masks, stack, target, kMasks[index]->items, kMasks[index]->item_count);
   return gshcpu_render_mask_value(&me, stack[0].l, 0);
 }
 
@@ -239,9 +235,8 @@ void run(Masks & masks, std::vector<Layer> & stack, const GSHSCENE_Color_Space &
   }
 }
 
-/** The vectors met by the primitives under the reading of a paint's zero space @p zero_is_r; the cases that are not, by name. */
-int meet(bool zero_is_r, std::vector<std::string> * missed, int * shape_cases, int * knockout_parent, int * unbounded, vh::Worst * worst) {
-  g_zero_space_is_r = zero_is_r;
+/** The vectors met by the primitives; the cases that are not, by name. */
+int meet(std::vector<std::string> * missed, int * shape_cases, int * knockout_parent, int * unbounded, vh::Worst * worst) {
   int exact = 0;
   for (const VCase & c : kCases) {
     Masks masks;
@@ -277,29 +272,18 @@ TEST(RenderGroupMasks, ThePrimitivesMeetShapeScenesMaskVectorsUnderEveryParent) 
   int shape_cases = 0;
   int knockout_parent = 0;
   int unbounded = 0;
-  // Under the oracle's reading of a picture's paints every vector is met: the group step, the result, MK7's substitution into the
-  // element and MK2's value are the waist's, under each of the four parents and every operator of the vectors.
-  meet(true, &missed, &shape_cases, &knockout_parent, &unbounded, nullptr);
+  // Every vector is met: the group step, the result, MK7's substitution into the element and MK2's value (with a paint of the zero space
+  // taken from the render target, wherever R is another space) are the waist's, under each of the four parents and every operator.
+  meet(&missed, &shape_cases, &knockout_parent, &unbounded, nullptr);
   EXPECT_TRUE(missed.empty()) << missed.size() << " of the vectors are not met, the first: " << (missed.empty() ? "" : missed[0]);
   // The values themselves, bit for bit where the vector says so.
   std::vector<std::string> again;
-  const int exact = meet(true, &again, nullptr, nullptr, nullptr, &worst);
+  const int exact = meet(&again, nullptr, nullptr, nullptr, &worst);
   EXPECT_EQ(exact, kExactCaseCount);
   EXPECT_GT(shape_cases, 90) << "the vectors that act on the shape";
   EXPECT_GT(knockout_parent, 50) << "under a knockout parent";
   std::printf("mask_vectors (shape-scene's) through the primitives: %d cases, %d exact; worst error %.3g (%s); %d acting on the shape, %d under a "
               "knockout parent, %d of an unbounded operator\n", kCaseCount, exact, worst.error, worst.where.c_str(), shape_cases, knockout_parent, unbounded);
-}
-
-TEST(RenderGroupMasks, TheSinksReadingOfAPaintsZeroSpaceInAMaskPictureDiffersFromTheOraclesOnlyWhereTheRenderSpaceIsNotTheTargets) {
-  std::vector<std::string> missed;
-  meet(false, &missed, nullptr, nullptr, nullptr, nullptr);
-  std::printf("the sink's reading of a paint's zero space in a mask picture differs from the oracle's on %zu of %d vectors\n", missed.size(), kCaseCount);
-  // Pinned so that a decision either way is seen: 24 vectors, every one a case whose render space is another than the target's.
-  EXPECT_EQ(missed.size(), 24u);
-  for (const std::string & name : missed) {
-    EXPECT_TRUE(name.find("R = ") != std::string::npos || name.find("linear sRGB") != std::string::npos) << name;
-  }
 }
 
 }  // namespace
