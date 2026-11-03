@@ -354,6 +354,54 @@ sink converts it from the target's space into the mask's render space `R`, as it
 painted in. That is what ISO 32000-1 says of a transparency group (Table 147 makes a group's color space the one colors are
 converted into when painted into the group, and 11.3.4 converts source colors to the blending color space), and a soft mask is derived
 from such a group (11.6.5.2); CSS Masking likewise converts only at the luminance step. shape-scene's oracle draws the
+### Patterns (PC1 to PC12)
+
+A pattern is a picture repeated on a lattice and the paint that fills with it (shape-scene's PT1 to PT14). The sink draws the
+definition, not a resampled tile: for a fill or a stroke painted with a pattern it renders the **lattice picture** into an isolated
+layer over the pixels the use draws, and reads that layer as the paint's source, as a gradient is read.
+
+**The pass.** A pattern paint, begun like any paint, makes one *pass* over the tile: the tile's units, walked by an expansion of their
+own into one more layer (the mask's picture is walked the same way), each *one element over all the copies*. A unit's coverage in a
+copy is the coverage of its outline under the copy's **canonical map** (the chain's linear part and the translation's fraction in
+`[0, 1)`; `shape-geometry`'s one function splits the translation `i a + j b` of PC3 into whole pixels and that fraction), the outline
+cut to the cell's quadrilateral by `shape-geometry`'s convex clip and scan converted over the region moved by the whole pixels. So a
+copy is a function of the linear part, the fraction and the shift only; two copies with equal fractions are the same bits moved, and a
+paint inside the tile (a gradient, an image, another pattern) is evaluated at the position relative to its own cell. A copy at the
+index a million is the copy at zero moved by an exact number of pixels, with no accumulated error.
+
+**One element, many copies (PC4).** The copies of a unit that touch a pixel are summed in lattice order into an accumulator the size of
+the region: the weights `m8_x` (the 8-bit coverage after the clips of that copy), their count, and either the one copy's source or the
+sum of the sources each times its weight. The unit then acts on the layer as one element with the shape `min(255, sum) / 255` and the
+mean of the sources weighed by the coverages (a pixel only one copy touched is N7 exactly). Rounding is the one difference from the text of
+PC4: the sum of weighed sources divided by the sum of weights is that text's `(m8_x / sum)` weights to within a rounding of the mean, which is
+the form that keeps a single copy equal to the plain fill bit for bit. Each clip of the tile is made again for each copy that
+meets it (its outline cut to that copy's cell), and the unit's weight in a copy is its coverage weighed by that copy's own clips; the
+union of a clip over the copies (saturating) is what a group inside or around the clip block is weighed by at its pop.
+
+**Overlapping cells (PC6) and blend modes.** When a step is smaller than the cell on an axis that repeats, the copies are drawn one at a
+time in lattice order, each with all its units onto the lattice layer (source-over of an isolated copy is drawing it there; a tile that
+holds a blend mode is drawn the same way, as one non-isolated, non-knockout group over the lattice layer). The cells' coverage is not
+multiplied in again: the outlines were cut to the cell by the clip, and multiplying would square the coverage at a cell's edge.
+
+**Strokes in a tile** are restricted to the cell by the cell's coverage (a stroke's parts are not cut by the clip), so a stroke that
+crosses a cell edge is seam free where the copy across the edge continues it, and exact only to the coverage of the cell where it does not.
+
+**Limits (PC8).** The copies of a use are counted by `gshgeom_lattice_each` over what the whole render draws of the use, at every level of
+nesting, summed, and one more than `GSHCPU_Limits.max_pattern_cells` is `RESOURCE_LIMIT` for the fill or stroke painted with the
+pattern: a function of the list and the target, so the same under a damage, with the caller's memory and under any tier. A limit met inside a
+tile (a copy's points, its cells, a shifted coordinate past the range) refuses the use, not the unit; the lattice layer is a group layer and meets the limits
+a group's does. A damage does not change the count of the outermost use, but the copies of a *nested* pattern are counted only for the outer copies
+that are drawn (see below).
+
+**Memory (PC11).** The lattice layer is a group layer in the frame stack, a pass takes an accumulator (37 bytes a pixel), a coverage
+buffer and a record, and nests as the patterns do; under `CALLER_MEMORY` all of it is in the caller's block, the geometry of a tile's units
+comes from the arena above the item that is painted with the pattern, and the size the sink reports is a bound that is never too small.
+
+**What is not built.** The period tier (PC9: whole-pixel step vectors read one period of the picture by integer arithmetic) and the cache of
+its raster (PC10) are not in the sink: every use takes the general tier. A nested pattern's copies are counted only for the outer
+copies that lie inside the damage, so a damaged render may admit a use the whole render refuses (PC8's damage clause holds for the
+outermost count, not the nested one). The planted-defect table for the pass, its fuzz harness, the benchmark scene and the gallery page are not written.
+
 picture the same way, so the installed `mask_vectors.h` and this sink agree on all 485 vectors, among them 24 whose `R` is another space
 than the target's (an earlier reading of the oracle took such a paint as already in `R`, and those 24 vectors moved when it was corrected).
 

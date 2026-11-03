@@ -228,3 +228,9 @@ void gshcpu_render_arena_reset(GSHCPU_Arena * arena) {
   arena->last = NULL;
   arena->last_offset = 0;
 }
+
+void gshcpu_render_arena_rewind(GSHCPU_Arena * arena, size_t mark) {
+  arena->used = mark;
+  arena->last = NULL;
+  arena->last_offset = 0;
+}

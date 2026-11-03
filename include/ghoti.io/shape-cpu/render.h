@@ -713,6 +713,51 @@
  *   initial backdrop showing through where an exact union would show none.  That is T3 (a knockout is defined on shape, and shape is
  *   coverage); this sink still refuses the conflation-free flag, and a test pins the values so a "fix" is seen.
  *
+ * ### Patterns (PC1 to PC8, PC11; shape-scene's PT1 to PT14)
+ *
+ * A pattern is drawn as defined: the **lattice picture** of a use (the tile's units, each over all the copies of the lattice that meet
+ * the pixels the use draws) is rendered into an isolated layer, and the fill or stroke is N7 with that layer's pixel as its source.
+ * Each rule below is stated in real arithmetic unless it says otherwise.
+ *
+ * - **PC1 What the sink claims.**  `GSHSCENE_CAP_PATTERN`, not `PATTERN_RESAMPLED`: every field of the pattern is honored (the repeats, the
+ *   gaps and overlaps, the tints).  A tile may hold what any list holds: fills, strokes, clips, groups of every kind, masks, images,
+ *   gradients and patterns.
+ * - **PC2 The fill.**  The source of a pixel with coverage after the clips is the lattice layer's pixel (PC7: an uncolored pattern reads only
+ *   its alpha, times the tint converted once) times the paint's alpha multiplier; `apply(L, S, m8 / 255, SRC_OVER)` follows.  The lattice
+ *   layer is a group layer over the pixels the use draws, starting `(0, 0, 0, 0)` in the layer's blend space.
+ * - **PC3 The canonical translation of a copy.**  The copy `(i, j)`'s device translation is `gshgeom_lattice_translation`'s `tau + i a + j b`
+ *   (`a`, `b` the device step vectors, each product rounded once, never accumulated), split by `gshgeom_stroke_canonical_map` into the
+ *   whole pixels `s` and a fraction `f` in `[0, 1)`.  The copy is the tile under the chain's linear part with the translation `f`: its outlines
+ *   are flattened there, cut to the cell's quadrilateral under the same map by `gshgeom_flat_path_clip_convex`, and scan converted over the
+ *   region moved by `-s`; a paint in the tile is evaluated at `q - s`.  A copy is therefore a function of the linear part, the fraction and
+ *   the shift: copies of equal fractions, and a pattern moved by whole pixels, are the same bits moved.  A shifted coordinate past
+ *   ::GSHCPU_RENDER_COORD_LIMIT is `RESOURCE_LIMIT`.
+ * - **PC4 A unit with copies.**  Each unit of the tile (a fill, a stroke, a clip push) is one element over all the copies of its use.  At
+ *   a pixel, copy `x` has the 8-bit coverage `m_x`, its own coverage folded with the clips of the tile in force *in that copy* (each clip
+ *   cut to that copy's cell, D8), and the source `S_x`.  The element has the shape `min(255, sum m_x) / 255` and the mean source
+ *   `sum(m_x S_x) / sum(m_x)`, summed in lattice order with no fused multiply-add: the waist's `(1 - sum w_x A_x) L + sum w_x S_x` with
+ *   `w_x = m_x / max(255, sum m)`, to within one rounding of the mean; a pixel only one copy touches is N7 exactly.  A clip block, to a
+ *   group inside or around it, is the saturating union of its copies' coverages.
+ * - **PC5 Groups, strokes, images and nested patterns in the tile.**  A group is one group over all copies, popped once.  A stroke is one
+ *   unit: each copy's stroke coverage (SC5) is restricted to the cell by the cell's 8-bit coverage, since a stroke's parts are not cut by the
+ *   convex clip.  An image paint, a gradient or a pattern is evaluated per copy under the copy's canonical map; a pattern in a tile is a
+ *   pass inside the copy's frame of coordinates, its layer drawn over the unit's pixels in that copy.  A nest is as deep as the tile's
+ *   pictures allow (R1's PT2).
+ * - **PC6 Overlapping cells.**  Where a step is smaller than the cell on an axis that repeats, the copies are drawn one at a time in lattice order,
+ *   all of a copy's units onto the lattice layer before the next copy's.
+ * - **PC7 Colored, uncolored, alpha.**  The tint is resolved and converted once; the lattice layer is drawn with the tile's own colors and only its
+ *   alpha is read.
+ * - **PC8 Limits.**  `GSHCPU_Limits.max_pattern_cells`: the copies of a use, counted by `gshgeom_lattice_each` (a cell that only touches the
+ *   rectangle counts) over what the whole render draws of it, at every level of nesting and summed, are at most it; one more is
+ *   `RESOURCE_LIMIT` for the use, strict stopping with the finished prefix.  The count is of the list and the target and does not depend
+ *   on the damage or the caller's memory.  A limit met inside a tile (a copy's points or cells, a coordinate past the range, a map the
+ *   geometry refuses) refuses the use.  The nested count is taken over the outer copies that are drawn.
+ * - **PC11 Caller memory, damage, cancel.**  Under `CALLER_MEMORY` the lattice layers, the accumulators and each copy's geometry are in the
+ *   caller's block (the size reported covers the use's own item and, above it, the most any unit of a tile takes); a pixel inside a damage is the
+ *   pixel of the whole render.  Cancel is checked before every copy of every unit and between units.
+ *
+ * PC9 (the period tier) and PC10 (its cache) are not part of this sink: every use takes the general tier above.
+ *
  * ### Memory (S9)
  *
  * A render takes one block: the layers (32 bytes a pixel of the region for the

@@ -37,6 +37,10 @@
 #include "render_internal.h"
 
 #include <ghoti.io/cutil/safemath.h>
+#include <ghoti.io/shape-geometry/clip.h>
+#include <ghoti.io/shape-geometry/device.h>
+#include <ghoti.io/shape-geometry/lattice.h>
+#include <ghoti.io/shape-scene/pattern.h>
 #include <ghoti.io/shape-scene/resource.h>
 #include <ghoti.io/shape-scene/stroke.h>
 
@@ -68,6 +72,7 @@ typedef struct Cpu_Sink {
   size_t elements;                  /* the most path elements a stored resource may hold: SC11's term */
   uint64_t max_area_pixel_work;     /* IC9: the most texels and cells one pixel of AREA visits */
   uint64_t max_image_work;          /* IC9: the most one image item visits over the whole render */
+  uint64_t max_pattern_cells;       /* PC8: the most copies of one use of a pattern, summed over the nesting */
 } Cpu_Sink;
 
 /* --- what a render remembers ----------------------------------------------------------------- */
@@ -164,7 +169,27 @@ typedef struct Mask_Frame {
   size_t push;               /* the index of the group's push in its list: the chain of the mask's items names it (MK9) */
 } Mask_Frame;
 
+/**
+ * What a pass of a pattern's tile keeps beside the render's state (PC2): in the mask area, which a list that holds a pattern gets (so a
+ * list that holds none has the memory it had before patterns).
+ */
+typedef struct Pat_Level Pat_Level;
+
+typedef struct Pat_Run {
+  Pat_Level * pat;           /* the pass in progress (the innermost), or NULL */
+  unsigned char * pat_mem;   /* the passes' memory, one stride for each level */
+  size_t pat_depth;          /* the passes in progress */
+  uint64_t pat_total;        /* PC8: the copies counted for the use in progress, summed over its nesting */
+  int64_t org_x, org_y;      /* the pixel the layers' first element is: at() (the region's corner, or in a nested pass its corner moved by the copy's shift) */
+  GSHCPU_Rect whole_cur;     /* what the whole render draws, in the frame of coordinates in force (the render's, or a nested pass's) */
+  size_t pat_levels;         /* the most passes at once, and the bytes of each one's memory */
+  size_t pat_stride;
+  int quiet;                 /* painter_begin does not widen the frame (the pass accumulates, then widens where it applies) */
+  int64_t pshx, pshy;        /* the whole-pixel shift of the copy whose unit's paint is being begun (PC3) */
+} Pat_Run;
+
 typedef struct Mask_State {
+  Pat_Run P;
   GSHCPU_Rect window;        /* the pixels the units reach: the region, or in a mask pass the pop region P (MC2) */
   GSHCPU_Rect whole_window;  /* the same in the whole render: the whole region, or in a mask pass the whole render's P */
   Mask_Frame * frames;       /* one for each frame, the root's too */
@@ -180,6 +205,9 @@ typedef struct Mask_Layout {
   size_t walk;               /* the most the nested walks of masks' pictures take */
   size_t at;                 /* where the area starts, from the Run: directly after it */
   size_t at_frames, at_chain, at_walk;
+  size_t pat_levels;         /* the deepest nest of patterns: a pass of the tile's units for each */
+  size_t pat_stride;         /* the bytes of one level's pass memory */
+  size_t at_pat;
 } Mask_Layout;
 
 /**
@@ -267,6 +295,49 @@ typedef struct Run {
   uint64_t work;
 } Run;
 
+/**
+ * One pass of a pattern's tile (PC2): the lattice picture of one use drawn into a layer, and what the pass keeps while it draws the
+ * tile's units over the copies.  The passes nest as the patterns do (PC5), one record for each.
+ */
+/** PC4: a clip pushed in the tile, kept so that the clip of any one copy can be made again (the unit's weight in a copy is its own clip's). */
+typedef struct Pat_Clip {
+  const GSHSCENE_Item * item;
+  size_t count;              /* the chain length of the item */
+  GSHGEOM_Map * maps;        /* the enclosing instances' maps at the push, and room for two more */
+} Pat_Clip;
+
+struct Pat_Level {
+  GSHSCENE_Pattern pat;
+  GSHGEOM_Lattice lat;
+  GSHGEOM_Map C;             /* pattern space to the pass's frame of coordinates: T I_1 .. I_k M G, composed once (AD-24) */
+  GSHGEOM_Map base;          /* what the tile's items are composed with: the current copy's canonical map (PC3) */
+  GSHGEOM_Map base0;         /* the linear part with no translation: what the disposition of a unit is decided under */
+  int64_t sx, sy;            /* the current copy's whole-pixel shift: a pixel (x, y) of its frame is (x + sx, y + sy) of the pass's */
+  GSHCPU_Rect rect;          /* the lattice layer's pixels, and the pixels of the use in the whole render */
+  GSHCPU_Rect whole;
+  size_t frame;              /* the lattice layer's frame */
+  int single;                /* overlapping cells (PC6): one copy at a time, in lattice order */
+  int64_t ci, cj;
+  GSHCPU_Rect urect;         /* the pixels the unit being drawn has accumulated */
+  uint32_t * sum8;           /* PC4: the unit's accumulator, a pixel of the region each: the sum of the copies' weights ... */
+  uint8_t * cnt;             /* ... how many copies touched it ... */
+  double * acc;              /* ... and the first copy's source, or the sum of the sources weighted by the 8-bit weights */
+  uint8_t * coverage;        /* this level's coverage buffers (the Run's are swapped for them while the pass runs) */
+  uint8_t * cov_aligned;
+  uint8_t * cov_clip;
+  uint8_t * cov_result;
+  uint8_t * quad;            /* the cell's coverage, for a stroke (PC5) */
+  uint8_t * tmp;             /* one clip's coverage in a copy, folded into the unit's */
+  Pat_Clip * pclips;         /* the clips pushed in the tile, by their place in the clip stack */
+  GSHGEOM_Map * pmaps;       /* their maps, `levels + 2` for each */
+  uint8_t * saved_coverage;
+  uint8_t * saved_aligned;
+  uint8_t * saved_clip;
+  uint8_t * saved_result;
+  uint64_t copies;           /* copies drawn by the pass (the counter) */
+  size_t arena_mark;         /* CALLER_MEMORY: the arena's use when the pass began: the item painted with the pattern keeps what is below it */
+};
+
 /** The Run's size rounded to the carve alignment: where the mask area starts when the list has one. */
 #define RUN_BYTES ((sizeof(Run) + (CARVE_ALIGN - 1u)) & ~(size_t)(CARVE_ALIGN - 1u))
 
@@ -278,6 +349,21 @@ static Mask_State * ms_of(const Run * run) {
 /** The Gen_State of a render whose list holds a general layer (run->general): directly after the Frame array. */
 static Gen_State * gs_of(const Run * run) {
   return (Gen_State *)(void *)((unsigned char *)(void *)run->frames + (run->layout.groups + 1u) * sizeof(Frame));
+}
+
+/** The pass state of a render whose list holds a pattern (run->masked: the mask area holds it). */
+static Pat_Run * pr(const Run * run) {
+  return &ms_of(run)->P;
+}
+
+/** The pass in progress, or NULL (and NULL where the list has no mask area to hold one). */
+static inline Pat_Level * cur_pat(const Run * run) {
+  return run->masked ? pr(run)->pat : NULL;
+}
+
+/** Whether the painter is not to widen the frame (a pass accumulates and widens where it applies). */
+static inline int quiet_of(const Run * run) {
+  return run->masked && pr(run)->quiet;
 }
 
 /** The record of @p f, one of the run's frames. */
@@ -319,6 +405,7 @@ static size_t mul3(size_t a, size_t b, size_t c) {
 typedef struct Need {
   size_t groups, clips, gradients, stops, walk;
   size_t ag, fg;             /* KC8: the most non-isolated groups, and groups with a knockout proper ancestor, open at once in it */
+  size_t pdepth, pmaps;      /* PC5: the deepest nest of patterns in it, and the most chain slots the tiles of the nest take */
   int aligned, strokes, other, wide, ok, general;
 } Need;
 
@@ -340,6 +427,9 @@ typedef struct Nest {
   size_t depth;              /* the groups open now in this walk */
   GSHCPU_Bits * bits;        /* the open groups that are non-isolated or knockout, as (depth << 2) | flags, to undo at their pop */
   int oom;                   /* the stack of open groups found no room */
+  int patterned;             /* a fill or stroke in the list is painted with a pattern */
+  size_t pdepth_max;         /* the deepest nest of patterns met */
+  size_t pmaps_max;          /* the most chain slots the tiles of one nest take */
 } Nest;
 
 /** @p a plus @p b, saturating at SIZE_MAX. */
@@ -374,12 +464,39 @@ static int mask_need(const GSHSCENE_Resource * mask, Need * out, Nest * nest) {
     return out->ok;
   }
   /* The picture is its own isolated, non-knockout group (MK2): the knockout groups around the masked group are not its ancestors. */
-  Nest sub = {nest->memo, nest->cache, 0, 0, 0, 0, nest->bits, 0};
+  Nest sub = {nest->memo, nest->cache, 0, 0, 0, 0, nest->bits, 0, 0, 0, 0};
   gshcpu_stroke_cache_count(nest->cache, offsetof(GSHCPU_Render_Counters, mask_pictures));
   out->ok = nesting(gshscene_resource_picture(m.picture), &out->groups, &out->clips, &out->gradients, &out->stops, &out->aligned,
       &out->strokes, &out->other, &out->wide, &out->general, &out->ag, &out->fg, &sub);
   nest->oom = nest->oom || sub.oom;
   out->walk = sub.walk;
+  out->pdepth = sub.pdepth_max;
+  out->pmaps = sub.pmaps_max;
+  gshcpu_memo_add(nest->memo, id, out);
+  return out->ok;
+}
+
+/**
+ * The needs of the tile of @p pattern (PC5), drawn into a lattice layer by a pass: found once for a tile, however many patterns name it
+ * (the memo is the masks'; a picture that is both a tile and a mask's picture has the one answer).
+ */
+static int pattern_need(const GSHSCENE_Resource * pattern, Need * out, Nest * nest) {
+  GSHSCENE_Pattern pt;
+  memset(out, 0, sizeof *out);
+  if (gshscene_resource_pattern(pattern, &pt) != GSHSCENE_OK) {
+    return 0;
+  }
+  const uint64_t id = gshscene_resource_id(pt.tile);
+  if (gshcpu_memo_find(nest->memo, id, out)) {
+    return out->ok;
+  }
+  Nest sub = {nest->memo, nest->cache, 0, 0, 0, 0, nest->bits, 0, 0, 0, 0};
+  out->ok = nesting(gshscene_resource_picture(pt.tile), &out->groups, &out->clips, &out->gradients, &out->stops, &out->aligned,
+      &out->strokes, &out->other, &out->wide, &out->general, &out->ag, &out->fg, &sub);
+  nest->oom = nest->oom || sub.oom;
+  out->walk = sub.walk;
+  out->pdepth = sub.pdepth_max;
+  out->pmaps = sub.pmaps_max;
   gshcpu_memo_add(nest->memo, id, out);
   return out->ok;
 }
@@ -441,6 +558,33 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
         (item->kind == GSHSCENE_ITEM_STROKE && (item->paint.kind == GSHSCENE_PAINT_GRADIENT || item->paint.kind == GSHSCENE_PAINT_IMAGE))) {
       *other = 1; /* a drawing the 8-bit compositor of the fast coverage does not make: fills, gradients, images */
     }
+    if ((item->kind == GSHSCENE_ITEM_FILL || item->kind == GSHSCENE_ITEM_STROKE) && item->paint.kind == GSHSCENE_PAINT_PATTERN) {
+      /* PC5: the pass draws the tile into one more layer, whose units are the tile's: its groups and clips open with it, its gradients
+       * and strokes.  The layers are doubles (the unit's accumulator is, and a lattice layer is a layer of the tile's colors). */
+      Need pn;
+      GSHSCENE_Pattern pt;
+      ok = pattern_need(item->paint.resource, &pn, nest) && ok;
+      nest->patterned = 1;
+      *wide = 1;
+      *other = 1;
+      if (gshscene_resource_pattern(item->paint.resource, &pt) == GSHSCENE_OK) {
+        const size_t bytes = gshscene_expansion_bytes(gshscene_resource_picture(pt.tile));
+        const size_t here = sat_add(bytes, pn.walk);
+        nest->walk = here > nest->walk ? here : nest->walk;
+        const size_t slots = sat_add(sat_add(bytes / (sizeof(const GSHSCENE_List *) + sizeof(size_t)), 2u), pn.pmaps);
+        nest->pmaps_max = slots > nest->pmaps_max ? slots : nest->pmaps_max;
+        nest->pdepth_max = sat_add(1u, pn.pdepth) > nest->pdepth_max ? sat_add(1u, pn.pdepth) : nest->pdepth_max;
+      }
+      most_g = sat_add(sat_add(g, 1u), pn.groups) > most_g ? sat_add(sat_add(g, 1u), pn.groups) : most_g;
+      most_c = sat_add(c, pn.clips) > most_c ? sat_add(c, pn.clips) : most_c;
+      most_ag = sat_add(open_ag, pn.ag) > most_ag ? sat_add(open_ag, pn.ag) : most_ag;
+      most_fg = sat_add(open_fg, pn.fg) > most_fg ? sat_add(open_fg, pn.fg) : most_fg;
+      *general = *general || pn.general;
+      ok = ok && gcu_safe_add_size(*gradients, pn.gradients, gradients) && gcu_safe_add_size(*stops, pn.stops, stops);
+      *aligned = *aligned || pn.aligned;
+      *strokes = *strokes || pn.strokes;
+      *wide = *wide || pn.wide;
+    }
     if (item->kind == GSHSCENE_ITEM_STROKE) {
       *strokes = 1; /* UC9: the exact step's counts and pool */
     }
@@ -485,6 +629,9 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
           most_c = sat_add(c, pn.clips) > most_c ? sat_add(c, pn.clips) : most_c;
           most_ag = sat_add(open_ag, pn.ag) > most_ag ? sat_add(open_ag, pn.ag) : most_ag;
           most_fg = sat_add(open_fg, pn.fg) > most_fg ? sat_add(open_fg, pn.fg) : most_fg;
+          nest->pdepth_max = pn.pdepth > nest->pdepth_max ? pn.pdepth : nest->pdepth_max;
+          nest->pmaps_max = pn.pmaps > nest->pmaps_max ? pn.pmaps : nest->pmaps_max;
+          nest->patterned = nest->patterned || pn.pdepth > 0;
           *general = *general || pn.general;
           ok = ok && gcu_safe_add_size(*gradients, pn.gradients, gradients) && gcu_safe_add_size(*stops, pn.stops, stops);
           *aligned = *aligned || pn.aligned;
@@ -573,6 +720,25 @@ static GSHCPU_Rect whole_of(const GSHSCENE_Target * target) {
   return region_of(&whole);
 }
 
+/** Where the parts of one pass level's memory lie (PC11): the record, the unit's accumulator, and the coverage buffers. */
+typedef struct Pat_Offsets {
+  size_t at_sum8, at_cnt, at_acc, at_coverage, at_aligned, at_clip, at_result, at_quad, at_tmp, at_pclips, at_pmaps, bytes;
+} Pat_Offsets;
+
+/** The sizes of one level's memory for @p pixels pixels; 0 on overflow. */
+static int pat_offsets(size_t pixels, int aligned, size_t clips, size_t levels, Pat_Offsets * o) {
+  size_t at = 0;
+  size_t ignored;
+  const int ok = place(&at, sizeof(Pat_Level), &ignored) && place(&at, mul3(pixels, sizeof(uint32_t), 1), &o->at_sum8) &&
+      place(&at, pixels, &o->at_cnt) && place(&at, mul3(pixels, 4u, sizeof(double)), &o->at_acc) &&
+      place(&at, pixels, &o->at_coverage) && place(&at, aligned ? pixels : 0, &o->at_aligned) &&
+      place(&at, aligned ? pixels : 0, &o->at_clip) && place(&at, aligned ? pixels : 0, &o->at_result) &&
+      place(&at, pixels, &o->at_quad) && place(&at, pixels, &o->at_tmp) && place(&at, mul3(clips, sizeof(Pat_Clip), 1), &o->at_pclips) &&
+      place(&at, mul3(clips, sat_add(levels, 2u), sizeof(GSHGEOM_Map)), &o->at_pmaps);
+  o->bytes = at;
+  return ok;
+}
+
 /**
  * Lay out a render of @p list on @p target; ::GSHCPU_ERR_LIMIT past a limit or when a size overflows.  @p M gets the mask area
  * (MC5) when a group in the list, or in a picture it draws, has a mask (MC9: none, as before masks).  Under CALLER_MEMORY the
@@ -599,10 +765,22 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
   L->levels = L->walk / (sizeof(const GSHSCENE_List *) + sizeof(size_t));
   /* The count of the mask pictures (MC5) shares its memo with the walks of the pictures: each picture is walked once, however
    * many pictures there are. */
-  Nest nest = {NULL, cs->cache, 0, 0, 0, 0, NULL, 0};
+  Nest nest = {NULL, cs->cache, 0, 0, 0, 0, NULL, 0, 0, 0, 0};
   if (!counted_nesting(cs, list, L, G, &nest, request)) {
     /* The stack of open groups found no room: an allocator that failed, or a workspace too short to hold it (nothing is allocated). */
     return nest.oom && !(request->flags & GSHSCENE_RENDER_CALLER_MEMORY) ? GSHCPU_ERR_OOM : GSHCPU_ERR_LIMIT;
+  }
+  /* PC5: the tiles of the patterns are walked by passes, with the machinery of a mask's picture (its walk, its window); each pass's
+   * units take chain slots after the use's. */
+  L->levels = sat_add(L->levels, nest.pmaps_max);
+  M->pat_levels = nest.pdepth_max;
+  if (nest.patterned) {
+    nest.masked = 1;
+    Pat_Offsets po;
+    if (!pat_offsets(L->pixels, L->aligned, L->clips, L->levels, &po)) {
+      return GSHCPU_ERR_LIMIT;
+    }
+    M->pat_stride = po.bytes;
   }
   if (cs->tiers & GSHCPU_RENDER_FORCE_GENERAL) {
     G->on = 1; /* KC9's gate: every layer, the root's too, takes the element step */
@@ -682,6 +860,7 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
       place(&at, L->aligned ? L->pixels : 0, &L->at_cov_aligned) && place(&at, L->aligned ? L->pixels : 0, &L->at_cov_clip) &&
       place(&at, L->aligned ? L->pixels : 0, &L->at_cov_result) &&
       place(&at, mul3(L->clips, L->pixels, 1), &L->at_clip_memory) &&
+      place(&at, mul3(M->pat_levels, M->pat_stride, 1), &M->at_pat) &&
       place(&at, L->acc_bytes, &L->at_acc) &&
       place(&at, L->exact_bytes, &L->at_exact) &&
       place(&at, mul3(L->table, sizeof(Resolved), 1), &L->at_table) &&
@@ -781,6 +960,9 @@ static GSHCPU_Result measure_one(const Cpu_Sink * cs, const GSHSCENE_Target * ta
   return GSHCPU_OK;
 }
 
+static GSHCPU_Result measure_tile(const Cpu_Sink * cs, const GSHSCENE_Target * target, unsigned char * area, const Mask_Layout * M,
+    const GSHSCENE_Item * use, GSHGEOM_Map * maps, size_t n, GSHCPU_Arena * arena, size_t * peak, size_t used, size_t base);
+
 /** The units of the picture of @p group's mask (MC5), at the chain length @p n of the group, as measure_items measures the list's. */
 static GSHCPU_Result measure_mask(const Cpu_Sink * cs, const GSHSCENE_Target * target, unsigned char * area, const Mask_Layout * M,
     const GSHSCENE_Item * group, GSHGEOM_Map * maps, size_t n, GSHCPU_Arena * arena, size_t * peak, size_t used) {
@@ -810,7 +992,77 @@ static GSHCPU_Result measure_mask(const Cpu_Sink * cs, const GSHSCENE_Target * t
     if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && item->group.soft_mask) {
       r = measure_mask(cs, target, area, M, item, maps, count, arena, peak, used + bytes);
     } else {
-      r = measure_one(cs, target, item, maps, count, arena, peak);
+      size_t outer = 0;
+      r = measure_one(cs, target, item, maps, count, arena, &outer);
+      *peak = outer > *peak ? outer : *peak;
+      if (r == GSHCPU_OK && (item->kind == GSHSCENE_ITEM_FILL || item->kind == GSHSCENE_ITEM_STROKE) &&
+          item->paint.kind == GSHSCENE_PAINT_PATTERN) {
+        r = measure_tile(cs, target, area, M, item, maps, count, arena, peak, used + bytes, outer);
+      }
+    }
+    if (r != GSHCPU_OK) {
+      return r;
+    }
+  }
+  return GSHCPU_OK;
+}
+
+/**
+ * The units of the tile of the pattern that paints @p use (PC5, PC11), at the chain length @p n of the use: each is measured under
+ * the use's composed map without its translation, as the pass draws it, and the memory the pass takes of the arena for one copy of
+ * a unit is bounded by the unit's geometry, the clipped copy of it (CK5: at most about five times the points) and the quadrilateral:
+ * eight times the geometry and a page.  An over-estimate is a need that is never too small.
+ */
+static GSHCPU_Result measure_tile(const Cpu_Sink * cs, const GSHSCENE_Target * target, unsigned char * area, const Mask_Layout * M,
+    const GSHSCENE_Item * use, GSHGEOM_Map * maps, size_t n, GSHCPU_Arena * arena, size_t * peak, size_t used, size_t base) {
+  GSHSCENE_Pattern pt;
+  if (gshscene_resource_pattern(use->paint.resource, &pt) != GSHSCENE_OK) {
+    return GSHCPU_ERR_INTERNAL;
+  }
+  maps[n - 1] = use->map;
+  maps[n] = pt.map;
+  GSHGEOM_Map composed;
+  if (gshgeom_map_compose_chain(maps, n + 1, &target->map, &composed) != GSHGEOM_OK) {
+    return GSHCPU_OK; /* a use that is refused draws no tile */
+  }
+  composed.t[0] = 0.0;
+  composed.t[1] = 0.0;
+  composed.t[2] = 0.0;
+  GSHSCENE_Target inner = *target;
+  inner.map = composed;
+  const GSHSCENE_List * tile = gshscene_resource_picture(pt.tile);
+  const size_t bytes = gshscene_expansion_bytes(tile);
+  GSHSCENE_Expansion walk;
+  if (used > M->walk || bytes > M->walk - used ||
+      gshscene_expansion_init(&walk, tile, area + M->at_walk + used, bytes) != GSHSCENE_OK) {
+    return GSHCPU_ERR_INTERNAL;
+  }
+  GSHGEOM_Map * tmaps = maps + n + 1u;
+  const GSHSCENE_Item * item;
+  const size_t * chain;
+  size_t m_count;
+  while (gshscene_expansion_next(&walk, &item, &chain, &m_count)) {
+    (void)chain;
+    GSHCPU_Result r;
+    if (item->kind == GSHSCENE_ITEM_INSTANCE) {
+      tmaps[m_count - 1] = item->map;
+      continue;
+    }
+    if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && item->group.soft_mask) {
+      r = measure_mask(cs, &inner, area, M, item, tmaps, m_count, arena, peak, used + bytes);
+    } else {
+      size_t local = 0;
+      r = measure_one(cs, &inner, item, tmaps, m_count, arena, &local);
+      if (r == GSHCPU_OK && local > 0) {
+        size_t scaled;
+        local = gcu_safe_mul_size(local, 8u, &scaled) ? scaled : SIZE_MAX;
+        local = sat_add(sat_add(local, 4096u), base);
+        *peak = local > *peak ? local : *peak;
+      }
+      if (r == GSHCPU_OK && (item->kind == GSHSCENE_ITEM_FILL || item->kind == GSHSCENE_ITEM_STROKE) &&
+          item->paint.kind == GSHSCENE_PAINT_PATTERN) {
+        r = measure_tile(cs, &inner, area, M, item, tmaps, m_count, arena, peak, used + bytes, sat_add(base, local));
+      }
     }
     if (r != GSHCPU_OK) {
       return r;
@@ -845,7 +1097,13 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
     if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && item->group.soft_mask) {
       r = measure_mask(cs, target, memory + M->at, M, item, maps, count, arena, peak, 0);
     } else {
-      r = measure_one(cs, target, item, maps, count, arena, peak);
+      size_t outer = 0;
+      r = measure_one(cs, target, item, maps, count, arena, &outer);
+      *peak = outer > *peak ? outer : *peak;
+      if (r == GSHCPU_OK && (item->kind == GSHSCENE_ITEM_FILL || item->kind == GSHSCENE_ITEM_STROKE) &&
+          item->paint.kind == GSHSCENE_PAINT_PATTERN) {
+        r = measure_tile(cs, target, memory + M->at, M, item, maps, count, arena, peak, 0, outer);
+      }
     }
     if (r != GSHCPU_OK) {
       return r;
@@ -998,8 +1256,8 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   out->mask_native = GSHSCENE_MASK_NATIVE_ALL;
   /* KC1: a group that is non-isolated, or knockout, or both, with or without a mask, so no combination is refused. */
   out->flags |= GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT;
-  /* S22: no GSHSCENE_CAP_PATTERN.  This sink draws no pattern yet, so the planning pass refuses every fill and stroke painted with
-   * one (PATTERN) before the target is touched; the flag is claimed with the drawing, not before it. */
+  /* PC1: a pattern, drawn as defined (PT1 to PT14): every field of it honored, so not PATTERN_RESAMPLED. */
+  out->flags |= GSHSCENE_CAP_PATTERN;
   out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;
   out->cancel_work_bound = work_bound(cs);
   out->work_measure = "cells+points+pixels+texels";
@@ -1014,6 +1272,9 @@ static GSHSCENE_Result op_workspace_bytes(void * impl, const GSHSCENE_Render_Req
 
 /** Refused while drawing (S6): the entry; under strict the render stops here, else the item's block is skipped. */
 static GSHSCENE_Result refuse(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  if (cur_pat(run)) {
+    return GSHSCENE_ERR_LIMIT; /* PC8: inside a tile the sink's limit refuses the use that is painted with the pattern, not the unit */
+  }
   GSHSCENE_Result r = gshscene_job_report(run->job, GSHSCENE_ENTRY_REFUSED, GSHSCENE_REASON_RESOURCE_LIMIT, chain, count);
   if (r != GSHSCENE_OK) {
     return r;
@@ -1058,8 +1319,15 @@ static int same_space(const GSHSCENE_Color_Space * a, const GSHSCENE_Color_Space
 
 /** The pixel (x, y) of a region-sized buffer. */
 static size_t at(const Run * run, int64_t x, int64_t y) {
+  if (run->masked) {
+    const Pat_Run * q = pr(run);
+    return (size_t)(y - q->org_y) * run->layout.width + (size_t)(x - q->org_x);
+  }
   return (size_t)(y - run->layout.region.y0) * run->layout.width + (size_t)(x - run->layout.region.x0);
 }
+
+/** The map the items being drawn are composed with (AD-24): the target's, or inside a pattern's tile the current copy's canonical map (PC3). */
+static const GSHGEOM_Map * target_map(const Run * run);
 
 static void initial_backdrop(const Run * run, size_t i, size_t p, double out[4]);
 
@@ -1216,7 +1484,7 @@ static GSHCPU_Rect reach_of(const Run * run, size_t from, size_t to) {
 
 /** reach_of in the whole render (S4): the extent meet the clips' rectangles there. */
 static GSHCPU_Rect whole_reach_of(const Run * run, size_t from, size_t to) {
-  GSHCPU_Rect r = run->layout.whole;
+  GSHCPU_Rect r = run->masked ? pr(run)->whole_cur : run->layout.whole;
   for (size_t i = from; i < to; i++) {
     r = gshcpu_render_rect_meet(r, run->clips[i].whole);
   }
@@ -1235,9 +1503,9 @@ static uint32_t weigh_clips(const Run * run, size_t from, size_t to, uint32_t m8
  * The fill's source in the layer's space, premultiplied (N7, N10, N14): converted once.  The color is shape-scene's one
  * resolution of the paint (a missing palette entry was refused by the plan and skipped by unit()).
  */
-static void source_of(const Run * run, const GSHSCENE_Item * item, const Frame * frame, double s[4]) {
+static void paint_source(const Run * run, const GSHSCENE_Paint * paint, const Frame * frame, double s[4]) {
   GSHSCENE_Color color;
-  if (gshscene_paint_resolve(&item->paint, &run->foreground, run->palette, &color) != GSHSCENE_OK) {
+  if (gshscene_paint_resolve(paint, &run->foreground, run->palette, &color) != GSHSCENE_OK) {
     memset(&color, 0, sizeof color); /* unreachable: the disposition refused it; transparent draws nothing */
   }
   double rgb[3] = {color.rgba[0], color.rgba[1], color.rgba[2]};
@@ -1253,6 +1521,10 @@ static void source_of(const Run * run, const GSHSCENE_Item * item, const Frame *
   s[1] = rgb[1] * alpha;
   s[2] = rgb[2] * alpha;
   s[3] = alpha;
+}
+
+static void source_of(const Run * run, const GSHSCENE_Item * item, const Frame * frame, double s[4]) {
+  paint_source(run, &item->paint, frame, s);
 }
 
 /**
@@ -1315,7 +1587,17 @@ typedef struct Painter {
   const double * table;      /* the gradient's color table, or NULL: evaluated at each pixel */
   GSHCPU_Direct8 d8;         /* fast8: a solid paint's source, and the layer it is composed into */
   const uint8_t * table8;    /* fast8: the table as premultiplied bytes, four to a point */
+  int pattern;               /* a pattern paint (PC2): lf is its lattice layer */
+  const Frame * lf;
+  int64_t lox, loy;          /* the pixel of the lattice layer's first element (the frame of coordinates of the rectangle it was begun with) */
+  int has_tint;              /* PC7: uncolored; tint is the premultiplied tint, converted once */
+  double tint[4];
+  double alpha;              /* the paint's alpha multiplier */
 } Painter;
+
+static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count, Frame * frame,
+    GSHCPU_Rect rect, GSHCPU_Rect whole);
+static int pattern_pixel(const Painter * p, int64_t x, int64_t y, double s[4]);
 
 /**
  * An image paint made ready (IC1 to IC9): its map composed with the chain by the one composer (AD-24), the filter chosen once
@@ -1336,7 +1618,7 @@ static GSHSCENE_Result image_begin(Painter * p, Run * run, const GSHSCENE_Item *
   GSHGEOM_Map composed;
   run->maps[count - 1] = item->map;
   run->maps[count] = ip.map;
-  if (gshgeom_map_compose_chain(run->maps, count + 1, &run->job->target.map, &composed) != GSHGEOM_OK) {
+  if (gshgeom_map_compose_chain(run->maps, count + 1, target_map(run), &composed) != GSHGEOM_OK) {
     p->refused = 1;
     return refuse(run, item, chain, count);
   }
@@ -1392,7 +1674,9 @@ static GSHSCENE_Result image_begin(Painter * p, Run * run, const GSHSCENE_Item *
   if (taken & GSHCPU_RENDER_TIER_IMAGE_TABLE) {
     gshcpu_stroke_cache_count(run->cs->cache, offsetof(GSHCPU_Render_Counters, image_table));
   }
-  widen_w(run, frame, rect, whole);
+  if (!quiet_of(run)) {
+    widen_w(run, frame, rect, whole);
+  }
   run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
   return GSHSCENE_OK;
 }
@@ -1411,7 +1695,11 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
   p->table8 = NULL;
   p->gradient = item->paint.kind == GSHSCENE_PAINT_GRADIENT;
   p->image = item->paint.kind == GSHSCENE_PAINT_IMAGE;
+  p->pattern = 0;
   count_general_fill(run, frame);
+  if (item->paint.kind == GSHSCENE_PAINT_PATTERN) {
+    return pattern_begin(p, run, item, chain, count, frame, rect, whole);
+  }
   if (p->image) {
     return image_begin(p, run, item, chain, count, frame, rect, whole);
   }
@@ -1431,7 +1719,9 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
       p->d8.dy = -frame->oy;
       gshcpu_direct8_color(&p->d8, c);
     }
-    widen_w(run, frame, rect, whole);
+    if (!quiet_of(run)) {
+      widen_w(run, frame, rect, whole);
+    }
     run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
     return GSHSCENE_OK;
   }
@@ -1452,17 +1742,19 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
   GSHGEOM_Map composed;
   run->maps[count - 1] = item->map;
   run->maps[count] = g.map;
-  if (gshgeom_map_compose_chain(run->maps, count + 1, &run->job->target.map, &composed) != GSHGEOM_OK ||
+  if (gshgeom_map_compose_chain(run->maps, count + 1, target_map(run), &composed) != GSHGEOM_OK ||
       gshcpu_render_gradient_prepare(&p->gr, &g, run->pool + e->first, &composed, item->paint.rgba[3]) != GSHCPU_OK ||
       !gshcpu_render_gradient_in_domain(&p->gr, whole)) {
     p->refused = 1;
     return refuse(run, item, chain, count);
   }
   gshcpu_render_convert_prepare(&p->conv, &e->space, &frame->space);
-  widen_w(run, frame, rect, whole);
+  if (!quiet_of(run)) {
+    widen_w(run, frame, rect, whole);
+  }
   const uint64_t area = (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
   run->work += area;
-  if (run->cs->fast_fill && run->tables) {
+  if (run->cs->fast_fill && run->tables && !cur_pat(run)) {
     /* The fast fill coverage takes the color from a table of the line (made once for the paint, and kept for the next). */
     for (size_t k = 0; k < TABLE_SLOTS && !p->table; k++) {
       const Table_Key * key = &run->table_key[k];
@@ -1595,6 +1887,24 @@ static void painter_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
     return;
   }
   const int clipped = frame->clip_base < run->clip_count;
+  if (p->pattern) {
+    /* PC2: N7 with the source of the lattice layer's pixel (PC7), for each pixel of coverage after the clips. */
+    for (size_t i = 0; i < n; i++) {
+      if (m8[i] == 0) {
+        continue;
+      }
+      const int64_t px = x + (int64_t)i;
+      uint32_t m = clipped ? weigh_clips(run, frame->clip_base, run->clip_count, m8[i], px, y) : m8[i];
+      if (m == 0) {
+        continue;
+      }
+      double s[4];
+      if (pattern_pixel(p, px, y, s)) {
+        painter_pixel(run, frame, px, y, m, s);
+      }
+    }
+    return;
+  }
   if (p->image) {
     const uint64_t before = p->im.visits;
     for (size_t i = 0; i < n; i++) {
@@ -1745,11 +2055,11 @@ static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t
   if (run->item_alloc == &run->arena.self) {
     gshcpu_render_arena_reset(&run->arena);
   }
-  GSHCPU_Result r = gshcpu_render_geometry(item, run->maps, count - 1, &run->job->target.map, run->item_alloc,
+  GSHCPU_Result r = gshcpu_render_geometry(item, run->maps, count - 1, target_map(run), run->item_alloc,
       &run->cs->geometry, &g);
   run->work += g.points;
   /* A run from a font: each glyph's entry (glyph.h, D7); a glyph refused under strict stops the render here (S6). */
-  for (size_t i = 0; r == GSHCPU_OK && g.notes && i < g.count; i++) {
+  for (size_t i = 0; r == GSHCPU_OK && g.notes && i < g.count && !cur_pat(run); i++) {
     if (!g.notes[i].entry_class) {
       continue;
     }
@@ -1784,7 +2094,7 @@ static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t
         walk = *rect;
       }
       if (run->cs->fast_fill && (run->cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && !gshcpu_render_rect_empty(*rect) &&
-          rect->x1 - rect->x0 <= 65000 &&
+          !(sp && sp->item->paint.kind == GSHSCENE_PAINT_PATTERN) && rect->x1 - rect->x0 <= 65000 &&
           gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_deposits) <= run->cs->max_deposits) {
         /* The fast fill coverage: the lean cover of every path at once, into the coverage of the rectangle. */
         const size_t scratch = run->layout.acc_bytes;
@@ -1998,7 +2308,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
   Cpu_Sink * cs = run->cs;
   GSHGEOM_Map composed;
   run->maps[count - 1] = item->map;
-  if (gshgeom_map_compose_chain(run->maps, count, &run->job->target.map, &composed) != GSHGEOM_OK) {
+  if (gshgeom_map_compose_chain(run->maps, count, target_map(run), &composed) != GSHGEOM_OK) {
     return refuse(run, item, chain, count); /* SC4: a composed map that cannot be formed is the sink's own limit */
   }
   if (run->item_alloc == &run->arena.self) {
@@ -2032,7 +2342,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
   GSHCPU_Result r;
   uint8_t * cov = run->coverage;
   GSHCPU_Exact * exact = cs->tiers & GSHCPU_RENDER_TIER_EXACT ? run->exact : NULL; /* UC1 to UC11 (off only as a gate's control) */
-  int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT && item->paint.kind != GSHSCENE_PAINT_IMAGE;
+  int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT && item->paint.kind != GSHSCENE_PAINT_IMAGE && item->paint.kind != GSHSCENE_PAINT_PATTERN;
   if (solid && cs->fast && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits, NULL)) {
     /* The fast stroke coverage: the lean cover, the pixels of its runs composed like the sparse sweep's. */
     double src[4];
@@ -2090,7 +2400,8 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
     gshcpu_render_stroke_close(cache, &s);
     return r == GSHCPU_OK ? GSHSCENE_OK : scene_result(r);
   }
-  if (!solid && cs->fast_fill && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits, NULL)) {
+  if (!solid && item->paint.kind != GSHSCENE_PAINT_PATTERN && cs->fast_fill && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) &&
+      gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits, NULL)) {
     /* A stroke of a gradient with the fast coverage: the lean cover of its outline into the coverage of the rectangle, which the
      * gradient is then painted through as through a fill's. */
     if (run->batch) {
@@ -2852,33 +3163,895 @@ static GSHSCENE_Result group_pop(Run * run, const size_t * chain, size_t count) 
   return r;
 }
 
+/* --- patterns (render.h, PC1 to PC8; masks-images-patterns story R2) ------------------------------------------ */
+
+static const GSHGEOM_Map * target_map(const Run * run) {
+  return cur_pat(run) ? &cur_pat(run)->base : &run->job->target.map;
+}
+
+static Pat_Level * pat_level(const Run * run, size_t k) {
+  return (Pat_Level *)(void *)(pr(run)->pat_mem + k * pr(run)->pat_stride);
+}
+
+/** @p r moved by (@p dx, @p dy). */
+static GSHCPU_Rect rect_moved(GSHCPU_Rect r, int64_t dx, int64_t dy) {
+  r.x0 += dx;
+  r.x1 += dx;
+  r.y0 += dy;
+  r.y1 += dy;
+  return r;
+}
+
+/** Whether every coordinate of the non-empty @p r is one the scan converter takes. */
+static int rect_in_range(GSHCPU_Rect r) {
+  const int64_t m = GSHCPU_RENDER_COORD_LIMIT;
+  return r.x0 > -m && r.y0 > -m && r.x1 < m && r.y1 < m;
+}
+
+/** PC3: one copy of the lattice, as its pass draws it: the canonical map, the whole pixels it is moved by, and its cell in the canonical frame. */
+typedef struct Pat_Copy {
+  GSHGEOM_Map canon;
+  int64_t sx, sy;
+  GSHGEOM_Device_Point quad[4];  /* the cell's quadrilateral under the canonical map, in 26.6 */
+  GSHCPU_Rect qbox;              /* the pixels it touches */
+} Pat_Copy;
+
+static int64_t floor_div64(int64_t v) {
+  const int64_t q = v / 64;
+  return v % 64 != 0 && v < 0 ? q - 1 : q;
+}
+
+/**
+ * PC3: the copy @p (i, j) of the pass @p L: its translation by shape-geometry's one definition, split into whole pixels and a
+ * fraction by S4's one function, its cell's corners under the canonical map; and `L->base` becomes the canonical map, what the
+ * units of the tile are composed with.
+ */
+static GSHSCENE_Result pat_copy_open(Pat_Level * L, int64_t i, int64_t j, Pat_Copy * c) {
+  double w[2];
+  GSHGEOM_Map full = L->C;
+  double q[8];
+  if (gshgeom_lattice_translation(&L->C, &L->lat, i, j, w) != GSHGEOM_OK || gshgeom_lattice_quad(&L->C, &L->lat, q) != GSHGEOM_OK) {
+    return GSHSCENE_ERR_LIMIT;
+  }
+  full.t[0] = w[0];
+  full.t[1] = w[1];
+  if (gshgeom_stroke_canonical_map(&full, &c->canon, &c->sx, &c->sy) != GSHGEOM_OK) {
+    return GSHSCENE_ERR_LIMIT; /* a shifted coordinate past the range the sink draws */
+  }
+  int64_t lo_x = INT64_MAX, lo_y = INT64_MAX, hi_x = INT64_MIN, hi_y = INT64_MIN;
+  for (int k = 0; k < 4; k++) {
+    int32_t px, py;
+    if (gshgeom_round_26_6(q[2 * k] + c->canon.t[0], &px) != GSHGEOM_OK || gshgeom_round_26_6(q[2 * k + 1] + c->canon.t[1], &py) != GSHGEOM_OK) {
+      return GSHSCENE_ERR_LIMIT;
+    }
+    c->quad[k].x = px;
+    c->quad[k].y = py;
+    lo_x = px < lo_x ? px : lo_x;
+    hi_x = px > hi_x ? px : hi_x;
+    lo_y = py < lo_y ? py : lo_y;
+    hi_y = py > hi_y ? py : hi_y;
+  }
+  c->qbox.x0 = floor_div64(lo_x);
+  c->qbox.y0 = floor_div64(lo_y);
+  c->qbox.x1 = floor_div64(hi_x) + 1;
+  c->qbox.y1 = floor_div64(hi_y) + 1;
+  L->base = c->canon;
+  L->sx = c->sx;
+  L->sy = c->sy;
+  return GSHSCENE_OK;
+}
+
+typedef GSHSCENE_Result (*Pat_Copy_Fn)(Run * run, Pat_Level * L, int64_t i, int64_t j, void * ctx);
+
+typedef struct Pat_Each {
+  Run * run;
+  Pat_Level * L;
+  GSHSCENE_Result r;
+  Pat_Copy_Fn fn;
+  void * ctx;
+} Pat_Each;
+
+static int pat_each_row(void * ctx, int64_t j, int64_t lo, int64_t hi) {
+  Pat_Each * e = ctx;
+  for (int64_t i = lo;; i++) {
+    if (gshscene_job_checkpoint(e->run->job)) {
+      e->r = GSHSCENE_ERR_CANCELLED; /* PC11: before every copy */
+      return 1;
+    }
+    e->r = e->fn(e->run, e->L, i, j, e->ctx);
+    if (e->r != GSHSCENE_OK) {
+      return 1;
+    }
+    if (i == hi) {
+      return 0;
+    }
+  }
+}
+
+/** Call @p fn for each copy of the pass whose cell meets @p rect (LT1), in lattice order, or for the one copy of an overlapping pass. */
+static GSHSCENE_Result pat_each(Run * run, Pat_Level * L, GSHCPU_Rect rect, Pat_Copy_Fn fn, void * ctx) {
+  if (L->single) {
+    return fn(run, L, L->ci, L->cj, ctx);
+  }
+  const int64_t r4[4] = {rect.x0, rect.y0, rect.x1, rect.y1};
+  uint64_t n = 0;
+  Pat_Each e = {run, L, GSHSCENE_OK, fn, ctx};
+  const GSHGEOM_Result g = gshgeom_lattice_each(&L->C, &L->lat, r4, GSHGEOM_LATTICE_INDEX_MAX, pat_each_row, &e, &n);
+  if (e.r != GSHSCENE_OK) {
+    return e.r;
+  }
+  return g == GSHGEOM_OK ? GSHSCENE_OK : GSHSCENE_ERR_LIMIT;
+}
+
+/* PC4: the unit's accumulator.  A pixel holds the weights of the copies that touched it (sum8), how many did, and either the one
+ * copy's source or the sum of the sources, each weighed by its 8-bit weight. */
+static inline void pat_add(Pat_Level * L, size_t p, uint32_t m, const double s[4]) {
+  double * a = &L->acc[4u * p];
+  const uint8_t c = L->cnt[p];
+  if (c == 0) {
+    memcpy(a, s, 4u * sizeof(double));
+    L->sum8[p] = m;
+    L->cnt[p] = 1;
+    return;
+  }
+  if (c == 1) {
+    const double m0 = (double)L->sum8[p];
+    for (int i = 0; i < 4; i++) {
+      a[i] = m0 * a[i] + (double)m * s[i];
+    }
+    L->cnt[p] = 2;
+  } else {
+    for (int i = 0; i < 4; i++) {
+      a[i] += (double)m * s[i];
+    }
+    if (c < 255) {
+      L->cnt[p] = (uint8_t)(c + 1);
+    }
+  }
+  L->sum8[p] += m;
+}
+
+/**
+ * PC4: the unit's element, applied to the layer: a pixel only one copy touched is N7 exactly; a pixel several touched takes the
+ * shape `min(255, sum) / 255` and the mean of their sources weighted by their coverages (`m_x / sum`, so the weights are
+ * renormalized above 255).
+ */
+static void pat_finish(Run * run, Pat_Level * L, Frame * frame) {
+  const GSHCPU_Rect u = L->urect;
+  if (gshcpu_render_rect_empty(u)) {
+    return;
+  }
+  widen_w(run, frame, u, u);
+  for (int64_t y = u.y0; y < u.y1; y++) {
+    for (int64_t x = u.x0; x < u.x1; x++) {
+      const size_t p = at(run, x, y);
+      const uint8_t c = L->cnt[p];
+      if (c == 0) {
+        continue;
+      }
+      L->cnt[p] = 0;
+          if (c == 1) {
+        painter_pixel(run, frame, x, y, L->sum8[p], &L->acc[4u * p]);
+        continue;
+      }
+      const uint32_t total = L->sum8[p];
+      double s[4];
+      for (int i = 0; i < 4; i++) {
+        s[i] = L->acc[4u * p + (size_t)i] / (double)total;
+      }
+      painter_pixel(run, frame, x, y, total > 255u ? 255u : total, s);
+    }
+  }
+  run->work += (uint64_t)(u.x1 - u.x0) * (uint64_t)(u.y1 - u.y0);
+  L->urect.x1 = L->urect.x0;
+  L->urect.y1 = L->urect.y0;
+}
+
+/** The source of the pixel (@p x, @p y) of a painter's frame of coordinates; 0 where the paint gives none. */
+static int painter_source(Painter * p, int64_t x, int64_t y, double s[4]) {
+  if (p->pattern) {
+    return pattern_pixel(p, x, y, s);
+  }
+  if (p->image) {
+    gshcpu_render_image_at(&p->im, (double)(int32_t)x + 0.5, (double)(int32_t)y + 0.5, s);
+    return 1;
+  }
+  if (!p->gradient) {
+    memcpy(s, p->src, 4u * sizeof(double));
+    return 1;
+  }
+  double color[4];
+  if (!gshcpu_render_gradient_at(&p->gr, (double)(int32_t)x + 0.5, (double)(int32_t)y + 0.5, color)) {
+    return 0; /* G8 */
+  }
+  gshcpu_render_convert_straight(&p->conv, color, color);
+  s[0] = color[0] * color[3];
+  s[1] = color[1] * color[3];
+  s[2] = color[2] * color[3];
+  s[3] = color[3];
+  return 1;
+}
+
+/** PC7, PC2: the source of a pattern paint at a pixel of its lattice layer. */
+static int pattern_pixel(const Painter * p, int64_t x, int64_t y, double s[4]) {
+  const Frame * f = p->lf;
+  double v[4] = {0.0, 0.0, 0.0, 0.0};
+  if (inside(f->dirty, x, y)) {
+    memcpy(v, &f->layer[4u * ((size_t)(y - p->loy) * p->run->layout.width + (size_t)(x - p->lox))], sizeof v);
+  }
+  if (!p->has_tint) {
+    for (int i = 0; i < 4; i++) {
+      s[i] = v[i] * p->alpha;
+    }
+  } else {
+    const double a = v[3] * p->alpha; /* only the layer's alpha is read: the tile's colors are discarded */
+    for (int i = 0; i < 4; i++) {
+      s[i] = p->tint[i] * a;
+    }
+  }
+  return 1;
+}
+
+/** A flattened path of the cell's quadrilateral (a plane fill in a tile fills its cell). */
+static GSHSCENE_Result quad_path(Run * run, const Pat_Copy * c, GSHGEOM_Flat_Path ** out) {
+  const GSHGEOM_Flat_Subpath sub = {0, 4, 1};
+  const GSHGEOM_Result r = gshgeom_flat_path_from_points(c->quad, 4, &sub, 1, run->item_alloc, &run->cs->geometry, out);
+  return r == GSHGEOM_OK ? GSHSCENE_OK : r == GSHGEOM_ERR_OOM ? GSHSCENE_ERR_OOM : GSHSCENE_ERR_LIMIT;
+}
+
+/**
+ * PC3: the coverage of the item in the copy @p c, in the canonical frame: its outline under the canonical map, each path clipped to
+ * the cell's quadrilateral by CK1, scan converted over the pixels the copy reaches (the region moved by the copy's shift).  @p rc
+ * is the rectangle the coverage is written for, @p wc what the whole render draws of the copy (where cells are counted).
+ */
+static GSHSCENE_Result pat_cover(Run * run, Pat_Level * L, const GSHSCENE_Item * item, GSHGEOM_Map * maps, size_t count, const Pat_Copy * c,
+    GSHCPU_Rect * rc, GSHCPU_Rect * wc, uint8_t * out, int * have) {
+  Cpu_Sink * cs = run->cs;
+  *have = 0;
+  if (run->item_alloc == &run->arena.self) {
+    gshcpu_render_arena_rewind(&run->arena, L->arena_mark);
+  }
+  GSHCPU_Item_Geometry g;
+  memset(&g, 0, sizeof g);
+  GSHGEOM_Flat_Path * plane = NULL;
+  const GSHGEOM_Flat_Path * const * paths = NULL;
+  size_t n = 0;
+  GSHGEOM_Flat_Path ** clipped = NULL;
+  GSHSCENE_Result result = GSHSCENE_OK;
+  GSHCPU_Rect box = c->qbox;
+  if (gshscene_resource_kind(item->resource) == GSHSCENE_RESOURCE_PLANE) {
+    result = quad_path(run, c, &plane);
+    if (result != GSHSCENE_OK) {
+      return result;
+    }
+    paths = (const GSHGEOM_Flat_Path * const *)(void *)&plane;
+    n = 1;
+  } else {
+    GSHCPU_Result r = gshcpu_render_geometry(item, maps, count - 1, &L->base, run->item_alloc, &cs->geometry, &g);
+    run->work += g.points;
+    if (r != GSHCPU_OK) {
+      gshcpu_render_geometry_release(&g, run->item_alloc);
+      return scene_result(r);
+    }
+    box = gshcpu_render_rect_meet(g.box, c->qbox);
+    clipped = run->item_alloc->calloc_fn(run->item_alloc->ctx, g.count ? g.count : 1u, sizeof *clipped);
+    if (!clipped) {
+      gshcpu_render_geometry_release(&g, run->item_alloc);
+      return GSHSCENE_ERR_OOM;
+    }
+    for (size_t k = 0; k < g.count && result == GSHSCENE_OK; k++) {
+      if (!g.paths[k]) {
+        continue;
+      }
+      GSHGEOM_Flat_Path * cut = NULL;
+      const GSHGEOM_Result gr = gshgeom_flat_path_clip_convex(g.paths[k], c->quad, run->item_alloc, &cs->geometry, &cut);
+      if (gr != GSHGEOM_OK) {
+        result = gr == GSHGEOM_ERR_OOM ? GSHSCENE_ERR_OOM : GSHSCENE_ERR_LIMIT;
+        break;
+      }
+      if (gshgeom_flat_path_subpath_count(cut) == 0) {
+        gshgeom_flat_path_destroy(cut);
+        continue;
+      }
+      clipped[n++] = cut;
+    }
+    paths = (const GSHGEOM_Flat_Path * const *)(void *)clipped;
+  }
+  if (result == GSHSCENE_OK && n > 0) {
+    *rc = gshcpu_render_rect_meet(*rc, box);
+    *wc = gshcpu_render_rect_meet(*wc, box);
+    if (!gshcpu_render_rect_empty(*wc)) {
+      uint64_t cells = 0;
+      GSHCPU_Rect rect = *rc;
+      if (gshcpu_render_rect_empty(rect)) {
+        rect.x1 = rect.x0;
+        rect.y1 = rect.y0;
+      }
+      GSHCPU_Result r = gshcpu_render_cover_counted(paths, n, item->fill_rule, rect, *wc, out, run->acc, cs->max_deposits, &cells);
+      run->acc_zero = 0;
+      run->work += cells;
+      result = scene_result(r);
+      *have = result == GSHSCENE_OK;
+    }
+  }
+  if (clipped) {
+    for (size_t k = 0; k < n; k++) {
+      gshgeom_flat_path_destroy(clipped[k]);
+    }
+    run->item_alloc->free_fn(run->item_alloc->ctx, clipped);
+  }
+  if (plane) {
+    gshgeom_flat_path_destroy(plane);
+  }
+  gshcpu_render_geometry_release(&g, run->item_alloc);
+  return result;
+}
+
+static GSHSCENE_Result pat_copy_coverage(Run * run, Pat_Level * L, const GSHSCENE_Item * item, size_t count, const Pat_Copy * c,
+    GSHCPU_Rect reach, GSHCPU_Rect wreach, GSHCPU_Rect * rc, GSHCPU_Rect * wc, int * have) {
+  *have = 0;
+  *rc = gshcpu_render_rect_meet(rect_moved(reach, -c->sx, -c->sy), c->qbox);
+  *wc = gshcpu_render_rect_meet(rect_moved(wreach, -c->sx, -c->sy), c->qbox);
+  if (gshcpu_render_rect_empty(*wc)) {
+    return GSHSCENE_OK; /* the copy is not in the whole render: nothing to draw, nothing to count */
+  }
+  if (!rect_in_range(*wc)) {
+    return GSHSCENE_ERR_LIMIT;
+  }
+  return pat_cover(run, L, item, run->maps, count, c, rc, wc, run->coverage, have);
+}
+
+/**
+ * PC4: the weight of the unit's coverage @p cov over @p rc in the copy @p c under the clips of the tile in force in @p frame, each
+ * clip made again for this copy (its outline under the copy's canonical map, cut to the cell): D8's fold with the copy's own clips.
+ */
+static GSHSCENE_Result pat_fold_clips(Run * run, Pat_Level * L, const Frame * frame, const Pat_Copy * c, GSHCPU_Rect rc, uint8_t * cov) {
+  const size_t n = (size_t)(rc.x1 - rc.x0) * (size_t)(rc.y1 - rc.y0);
+  for (size_t k = frame->clip_base; k < run->clip_count; k++) {
+    const Pat_Clip * pc = &L->pclips[k];
+    GSHCPU_Rect r = rc;
+    GSHCPU_Rect w = rc;
+    int have = 0;
+    memset(L->tmp, 0, n);
+    GSHSCENE_Result res = pat_cover(run, L, pc->item, pc->maps, pc->count, c, &r, &w, L->tmp, &have);
+    if (res != GSHSCENE_OK) {
+      return res;
+    }
+    if (!have) {
+      memset(cov, 0, n); /* the clip holds nothing of this copy here */
+      return GSHSCENE_OK;
+    }
+    /* pat_cover wrote L->tmp over r, a rectangle inside rc; the pixels of rc outside r are 0. */
+    if (r.x0 != rc.x0 || r.y0 != rc.y0 || r.x1 != rc.x1 || r.y1 != rc.y1) {
+      const size_t rw = (size_t)(r.x1 - r.x0);
+      const size_t cw = (size_t)(rc.x1 - rc.x0);
+      for (int64_t y = rc.y0; y < rc.y1; y++) {
+        for (int64_t x = rc.x0; x < rc.x1; x++) {
+          const uint32_t m = (x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) ? L->tmp[(size_t)(y - r.y0) * rw + (size_t)(x - r.x0)] : 0u;
+          uint8_t * at_cov = &cov[(size_t)(y - rc.y0) * cw + (size_t)(x - rc.x0)];
+          *at_cov = (uint8_t)gshcpu_render_weigh(*at_cov, m);
+        }
+      }
+    } else {
+      for (size_t i = 0; i < n; i++) {
+        cov[i] = (uint8_t)gshcpu_render_weigh(cov[i], L->tmp[i]);
+      }
+    }
+  }
+  return GSHSCENE_OK;
+}
+
+typedef struct Pat_Unit {
+  const GSHSCENE_Item * item;
+  const size_t * chain;
+  size_t count;
+  Frame * frame;
+  GSHCPU_Rect reach, wreach;
+} Pat_Unit;
+
+/** The weights of the coverage @p cov of the copy @p c, folded with the clips in force (D8) and painted by the item's paint at the canonical position (PC3), added to the unit. */
+static GSHSCENE_Result pat_paint_copy(Run * run, Pat_Level * L, const Pat_Unit * u, const Pat_Copy * c, GSHCPU_Rect rc, GSHCPU_Rect wc,
+    uint8_t * cov) {
+  Painter p;
+  if (!gshcpu_render_rect_empty(rc) && u->frame->clip_base < run->clip_count) {
+    const GSHSCENE_Result f = pat_fold_clips(run, L, u->frame, c, rc, cov);
+    if (f != GSHSCENE_OK) {
+      return f;
+    }
+  }
+  pr(run)->quiet = 1;
+  pr(run)->pshx = c->sx;
+  pr(run)->pshy = c->sy;
+  GSHSCENE_Result r = painter_begin(&p, run, u->item, u->chain, u->count, u->frame, rc, wc);
+  pr(run)->quiet = 0;
+  pr(run)->pshx = 0;
+  pr(run)->pshy = 0;
+  if (r != GSHSCENE_OK || p.refused) {
+    return r;
+  }
+  const size_t w = (size_t)(rc.x1 - rc.x0);
+  for (int64_t y = rc.y0; y < rc.y1; y++) {
+    for (int64_t x = rc.x0; x < rc.x1; x++) {
+      const uint32_t m8 = cov[(size_t)(y - rc.y0) * w + (size_t)(x - rc.x0)];
+      if (m8 == 0) {
+        continue;
+      }
+      const int64_t dx = x + c->sx;
+      const int64_t dy = y + c->sy;
+      const uint32_t m = m8; /* already weighed by this copy's clips (pat_fold_clips) */
+      double s[4];
+      if (painter_source(&p, x, y, s)) {
+              pat_add(L, at(run, dx, dy), m, s);
+      }
+    }
+  }
+  if (p.image) {
+    run->work += p.im.visits;
+  }
+  L->urect = gshcpu_render_rect_join(L->urect, rect_moved(rc, c->sx, c->sy));
+  L->copies++;
+  return GSHSCENE_OK;
+}
+
+static GSHSCENE_Result pat_fill_copy(Run * run, Pat_Level * L, int64_t i, int64_t j, void * ctx) {
+  const Pat_Unit * u = ctx;
+  Pat_Copy c;
+  GSHSCENE_Result r = pat_copy_open(L, i, j, &c);
+  if (r != GSHSCENE_OK) {
+    return r;
+  }
+  GSHCPU_Rect rc, wc;
+  int have;
+  r = pat_copy_coverage(run, L, u->item, u->count, &c, u->reach, u->wreach, &rc, &wc, &have);
+  if (r != GSHSCENE_OK || !have) {
+    return r;
+  }
+  return pat_paint_copy(run, L, u, &c, rc, wc, run->coverage);
+}
+
+/** PC4: a fill of the tile: one element over all the copies. */
+static GSHSCENE_Result pat_fill(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  Pat_Level * L = pr(run)->pat;
+  Frame * frame = &run->frames[run->top];
+  Pat_Unit u = {item, chain, count, frame, reach_of(run, frame->clip_base, run->clip_count),
+      whole_reach_of(run, frame->clip_base, run->clip_count)};
+  if (gshcpu_render_rect_empty(u.reach)) {
+    return GSHSCENE_OK;
+  }
+  L->urect.x1 = L->urect.x0;
+  L->urect.y1 = L->urect.y0;
+  GSHSCENE_Result r = pat_each(run, L, u.reach, pat_fill_copy, &u);
+  L->base = L->base0;
+  if (r == GSHSCENE_OK) {
+    pat_finish(run, L, frame);
+  }
+  return r;
+}
+
+static GSHSCENE_Result pat_clip_copy(Run * run, Pat_Level * L, int64_t i, int64_t j, void * ctx) {
+  const Pat_Unit * u = ctx;
+  Clip * clip = &run->clips[run->clip_count];
+  Pat_Copy c;
+  GSHSCENE_Result r = pat_copy_open(L, i, j, &c);
+  if (r != GSHSCENE_OK) {
+    return r;
+  }
+  GSHCPU_Rect rc, wc;
+  int have;
+  r = pat_copy_coverage(run, L, u->item, u->count, &c, u->reach, u->wreach, &rc, &wc, &have);
+  if (r != GSHSCENE_OK || !have) {
+    return r;
+  }
+  const size_t w = (size_t)(rc.x1 - rc.x0);
+  const size_t cw = (size_t)(clip->rect.x1 - clip->rect.x0);
+  for (int64_t y = rc.y0; y < rc.y1; y++) {
+    for (int64_t x = rc.x0; x < rc.x1; x++) {
+      const uint32_t m8 = run->coverage[(size_t)(y - rc.y0) * w + (size_t)(x - rc.x0)];
+      if (m8 == 0) {
+        continue;
+      }
+      uint8_t * at_clip = &clip->coverage[(size_t)(y + c.sy - clip->rect.y0) * cw + (size_t)(x + c.sx - clip->rect.x0)];
+      const uint32_t sum = (uint32_t)*at_clip + m8;
+      *at_clip = (uint8_t)(sum > 255u ? 255u : sum); /* PC4: a clip is the union of its copies' restricted regions */
+    }
+  }
+  run->work += (uint64_t)w * (uint64_t)(rc.y1 - rc.y0);
+  return GSHSCENE_OK;
+}
+
+static GSHSCENE_Result pat_clip_push(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  Pat_Level * L = pr(run)->pat;
+  Frame * frame = &run->frames[run->top];
+  Clip * clip = &run->clips[run->clip_count];
+  clip->coverage = run->clip_memory + run->clip_count * run->layout.pixels;
+  clip->rect = reach_of(run, frame->clip_base, run->clip_count);
+  clip->whole = whole_reach_of(run, frame->clip_base, run->clip_count);
+  Pat_Unit u = {item, chain, count, frame, clip->rect, clip->whole};
+  {
+    /* PC4: kept, so that the unit's weight in any copy can use this clip's coverage in that copy. */
+    Pat_Clip * pc = &L->pclips[run->clip_count];
+    pc->item = item;
+    pc->count = count;
+    pc->maps = L->pmaps + run->clip_count * (run->layout.levels + 2u);
+    memcpy(pc->maps, run->maps, count * sizeof *pc->maps);
+  }
+  if (gshcpu_render_rect_empty(clip->rect)) {
+    clip->rect.x1 = clip->rect.x0;
+    clip->rect.y1 = clip->rect.y0;
+  } else {
+    memset(clip->coverage, 0, (size_t)(clip->rect.x1 - clip->rect.x0) * (size_t)(clip->rect.y1 - clip->rect.y0));
+    GSHSCENE_Result r = pat_each(run, L, clip->rect, pat_clip_copy, &u);
+    L->base = L->base0;
+    if (r != GSHSCENE_OK) {
+      return r;
+    }
+  }
+  run->clip_count++;
+  return GSHSCENE_OK;
+}
+
+static GSHSCENE_Result pat_stroke_copy(Run * run, Pat_Level * L, int64_t i, int64_t j, void * ctx) {
+  const Pat_Unit * u = ctx;
+  const GSHSCENE_Item * item = u->item;
+  Cpu_Sink * cs = run->cs;
+  Pat_Copy c;
+  GSHSCENE_Result result = pat_copy_open(L, i, j, &c);
+  if (result != GSHSCENE_OK) {
+    return result;
+  }
+  GSHCPU_Rect reach = gshcpu_render_rect_meet(rect_moved(u->reach, -c.sx, -c.sy), c.qbox);
+  GSHCPU_Rect wreach = gshcpu_render_rect_meet(rect_moved(u->wreach, -c.sx, -c.sy), c.qbox);
+  if (gshcpu_render_rect_empty(wreach)) {
+    return GSHSCENE_OK;
+  }
+  if (!rect_in_range(wreach)) {
+    return GSHSCENE_ERR_LIMIT;
+  }
+  GSHGEOM_Map composed;
+  run->maps[u->count - 1] = item->map;
+  if (gshgeom_map_compose_chain(run->maps, u->count, &L->base, &composed) != GSHGEOM_OK) {
+    return GSHSCENE_ERR_LIMIT;
+  }
+  if (run->item_alloc == &run->arena.self) {
+    gshcpu_render_arena_rewind(&run->arena, L->arena_mark);
+  }
+  GSHCPU_Stroke_Cache * cache = !run->caller && (cs->tiers & GSHCPU_RENDER_TIER_CACHE) ? cs->cache : NULL;
+  GSHCPU_Stroke s;
+  const GSHCPU_Result opened = gshcpu_render_stroke_open(cache, run->item_alloc, &cs->geometry, item, &composed, &s);
+  if (opened != GSHCPU_OK) {
+    return opened == GSHCPU_ERR_LIMIT ? GSHSCENE_ERR_LIMIT : scene_result(opened);
+  }
+  if (!s.drawn) {
+    gshcpu_render_stroke_close(cache, &s);
+    return GSHSCENE_OK;
+  }
+  run->work += expansion_work(run, item, &s);
+  GSHCPU_Rect rect, whole;
+  uint64_t cells = 0;
+  uint8_t * cov = run->coverage;
+  GSHCPU_Exact * exact = cs->tiers & GSHCPU_RENDER_TIER_EXACT ? run->exact : NULL;
+  GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result};
+  GSHCPU_Result r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_deposits, run->acc,
+      2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS, exact, (cs->tiers & GSHCPU_RENDER_TIER_JOINT) != 0, &buffers, &cov,
+      &rect, &whole, &cells);
+  run->acc_zero = 0;
+  run->work += cells + exact_work(run);
+  if (r != GSHCPU_OK) {
+    gshcpu_render_stroke_close(cache, &s);
+    return scene_result(r);
+  }
+  gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, strokes));
+  if (!gshcpu_render_rect_empty(rect)) {
+    /* PC5: the stroke is restricted to the cell by the cell's coverage (a stroke's parts are not cut by CK1). */
+    GSHGEOM_Flat_Path * qp = NULL;
+    result = quad_path(run, &c, &qp);
+    if (result == GSHSCENE_OK) {
+      const GSHGEOM_Flat_Path * const qpaths[1] = {qp};
+      uint64_t qcells = 0;
+      r = gshcpu_render_cover_counted(qpaths, 1, GSHGEOM_FILL_NONZERO, rect, rect, L->quad, run->acc, cs->max_deposits, &qcells);
+      run->acc_zero = 0;
+      result = scene_result(r);
+      const size_t n = (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0);
+      for (size_t k = 0; result == GSHSCENE_OK && k < n; k++) {
+        cov[k] = (uint8_t)gshcpu_render_weigh(cov[k], L->quad[k]);
+      }
+    }
+    if (qp) {
+      gshgeom_flat_path_destroy(qp);
+    }
+    if (result == GSHSCENE_OK) {
+      result = pat_paint_copy(run, L, u, &c, rect, whole, cov);
+    }
+  }
+  gshcpu_render_stroke_close(cache, &s);
+  return result;
+}
+
+static GSHSCENE_Result pat_stroke(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  Pat_Level * L = pr(run)->pat;
+  Frame * frame = &run->frames[run->top];
+  Pat_Unit u = {item, chain, count, frame, reach_of(run, frame->clip_base, run->clip_count),
+      whole_reach_of(run, frame->clip_base, run->clip_count)};
+  if (gshcpu_render_rect_empty(u.reach)) {
+    return GSHSCENE_OK;
+  }
+  L->urect.x1 = L->urect.x0;
+  L->urect.y1 = L->urect.y0;
+  GSHSCENE_Result r = pat_each(run, L, u.reach, pat_stroke_copy, &u);
+  L->base = L->base0;
+  if (r == GSHSCENE_OK) {
+    pat_finish(run, L, frame);
+  }
+  return r;
+}
+
+/** Walk the tile's units once (all the copies of the pass, or the one copy of an overlapping pass) into the lattice layer. */
+static GSHSCENE_Result pat_walk(Run * run, Pat_Level * L, const GSHSCENE_List * tile) {
+  Mask_State * ms = ms_of(run);
+  const size_t bytes = gshscene_expansion_bytes(tile);
+  GSHSCENE_Expansion walk;
+  if (ms->walk_used > ms->walk_bytes || bytes > ms->walk_bytes - ms->walk_used ||
+      gshscene_expansion_init(&walk, tile, ms->walk + ms->walk_used, bytes) != GSHSCENE_OK) {
+    return GSHSCENE_ERR_INTERNAL; /* unreachable: the layout counts every walk a pass can have open */
+  }
+  ms->walk_used += bytes;
+  const GSHSCENE_Item * item;
+  const size_t * inner;
+  size_t depth;
+  GSHSCENE_Result result = GSHSCENE_OK;
+  (void)L;
+  while (result == GSHSCENE_OK && gshscene_expansion_next(&walk, &item, &inner, &depth)) {
+    run->work = 0;
+    result = unit(run, item, inner, depth);
+    gshscene_job_work(run->job, run->work);
+    run->work = 0;
+    if (result == GSHSCENE_OK && gshscene_job_checkpoint(run->job)) {
+      result = GSHSCENE_ERR_CANCELLED;
+    }
+  }
+  ms->walk_used -= bytes;
+  return result;
+}
+
+static GSHSCENE_Result pat_overlap_copy(Run * run, Pat_Level * L, int64_t i, int64_t j, void * ctx) {
+  /* PC6: later copies over earlier, in lattice order: the tile drawn for this copy alone, onto the lattice layer. */
+  L->single = 1;
+  L->ci = i;
+  L->cj = j;
+  const GSHSCENE_Result r = pat_walk(run, L, ctx);
+  L->single = 0;
+  return r;
+}
+
+/**
+ * PC2: a pattern paint begun: the lattice layer of the use (the tile's units over the copies, drawn into an isolated layer over
+ * @p rect), which painter_span then reads for each pixel of the fill's coverage.  @p rect and @p whole are in the frame of
+ * coordinates the fill is in (inside a tile, the copy's canonical frame, which `pr(run)->pshx` and `pr(run)->pshy` relate to the pass's).
+ */
+static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count, Frame * frame,
+    GSHCPU_Rect rect, GSHCPU_Rect whole) {
+  Cpu_Sink * cs = run->cs;
+  p->pattern = 1;
+  p->gradient = 0;
+  p->image = 0;
+  p->refused = 0;
+  p->run = run;
+  p->frame = frame;
+  if (gshcpu_render_rect_empty(whole)) {
+    p->refused = 1; /* nothing of it is in the whole render */
+    return GSHSCENE_OK;
+  }
+  GSHSCENE_Pattern pt;
+  if (pr(run)->pat_depth >= pr(run)->pat_levels || gshscene_resource_pattern(item->paint.resource, &pt) != GSHSCENE_OK) {
+    return GSHSCENE_ERR_INTERNAL;
+  }
+  Pat_Level * L = pat_level(run, pr(run)->pat_depth);
+  /* The level's memory (pat_offsets). */
+  Pat_Offsets po;
+  (void)pat_offsets(run->layout.pixels, run->layout.aligned, run->layout.clips, run->layout.levels, &po);
+  unsigned char * lb = (unsigned char *)(void *)L;
+  L->sum8 = (uint32_t *)(void *)(lb + po.at_sum8);
+  L->cnt = lb + po.at_cnt;
+  L->acc = (double *)(void *)(lb + po.at_acc);
+  L->coverage = lb + po.at_coverage;
+  L->cov_aligned = run->layout.aligned ? lb + po.at_aligned : NULL;
+  L->cov_clip = run->layout.aligned ? lb + po.at_clip : NULL;
+  L->cov_result = run->layout.aligned ? lb + po.at_result : NULL;
+  L->quad = lb + po.at_quad;
+  L->tmp = lb + po.at_tmp;
+  L->pclips = (Pat_Clip *)(void *)(lb + po.at_pclips);
+  L->pmaps = (GSHGEOM_Map *)(void *)(lb + po.at_pmaps);
+  L->pat = pt;
+  L->lat.x = pt.x;
+  L->lat.y = pt.y;
+  L->lat.w = pt.w;
+  L->lat.h = pt.h;
+  L->lat.x_step = pt.x_step;
+  L->lat.y_step = pt.y_step;
+  L->lat.repeat_x = pt.repeat_x;
+  L->lat.repeat_y = pt.repeat_y;
+  run->maps[count - 1] = item->map;
+  run->maps[count] = pt.map;
+  if (gshgeom_map_compose_chain(run->maps, count + 1, target_map(run), &L->C) != GSHGEOM_OK) {
+    p->refused = 1;
+    return refuse(run, item, chain, count);
+  }
+  /* PC8: the copies of the use, counted by LT1 over what the whole render draws of it, at every level, summed. */
+  if (pr(run)->pat_depth == 0) {
+    pr(run)->pat_total = 0;
+  }
+  uint64_t remaining = cs->max_pattern_cells;
+  remaining = remaining == UINT64_MAX ? (uint64_t)GSHGEOM_LATTICE_INDEX_MAX : remaining;
+  remaining = remaining > (uint64_t)GSHGEOM_LATTICE_INDEX_MAX ? (uint64_t)GSHGEOM_LATTICE_INDEX_MAX : remaining;
+  remaining = pr(run)->pat_total >= remaining ? 0 : remaining - pr(run)->pat_total;
+  const int64_t cr[4] = {whole.x0, whole.y0, whole.x1, whole.y1};
+  uint64_t n = 0;
+  if (gshgeom_lattice_each(&L->C, &L->lat, cr, remaining, NULL, NULL, &n) != GSHGEOM_OK) {
+    p->refused = 1;
+    return refuse(run, item, chain, count);
+  }
+  pr(run)->pat_total += n;
+  if (n == 0) {
+    p->refused = 1;
+    return GSHSCENE_OK;
+  }
+  /* PC7: the tint converted once. */
+  p->has_tint = pt.has_tint != 0;
+  p->alpha = item->paint.rgba[3];
+  if (p->has_tint) {
+    paint_source(run, &pt.tint, frame, p->tint);
+  }
+  L->base = L->C;
+  L->base.t[0] = 0.0;
+  L->base.t[1] = 0.0;
+  L->base.t[2] = 0.0;
+  L->base0 = L->base;
+  L->rect = rect;
+  L->whole = whole;
+  L->single = 0;
+  L->copies = 0;
+  L->arena_mark = run->item_alloc == &run->arena.self ? run->arena.used : 0;
+  L->urect.x0 = L->urect.x1 = rect.x0;
+  L->urect.y0 = L->urect.y1 = rect.y0;
+  const int overlaps = (pt.repeat_x && pt.x_step < pt.w) || (pt.repeat_y && pt.y_step < pt.h);
+
+  /* The state the pass changes and restores. */
+  Mask_State * ms = ms_of(run);
+  const size_t saved_top = run->top;
+  const size_t saved_clips = run->clip_count;
+  const size_t saved_open = run->groups_open;
+  const Skip saved_skip = run->skip;
+  const GSHCPU_Rect saved_window = ms->window;
+  const GSHCPU_Rect saved_ms_whole = ms->whole_window;
+  const GSHCPU_Rect saved_whole_cur = pr(run)->whole_cur;
+  const int64_t saved_ox = pr(run)->org_x;
+  const int64_t saved_oy = pr(run)->org_y;
+  GSHGEOM_Map * const saved_maps = run->maps;
+  Pat_Level * const saved_pat = pr(run)->pat;
+  uint8_t * const sv_cov = run->coverage;
+  uint8_t * const sv_al = run->cov_aligned;
+  uint8_t * const sv_cl = run->cov_clip;
+  uint8_t * const sv_re = run->cov_result;
+  const double sv_dummy = 0.0;
+  (void)sv_dummy;
+
+  pr(run)->org_x -= pr(run)->pshx;
+  pr(run)->org_y -= pr(run)->pshy;
+  p->lox = pr(run)->org_x;
+  p->loy = pr(run)->org_y;
+  pr(run)->whole_cur = whole;
+  ms->window = rect;
+  ms->whole_window = whole;
+  memset(&run->skip, 0, sizeof run->skip);
+  run->coverage = L->coverage;
+  run->cov_aligned = L->cov_aligned;
+  run->cov_clip = L->cov_clip;
+  run->cov_result = L->cov_result;
+  run->maps = saved_maps + count + 1u;
+  pr(run)->pat = L;
+  pr(run)->pat_depth++;
+  const int64_t sh_x = pr(run)->pshx;
+  const int64_t sh_y = pr(run)->pshy;
+  const int was_quiet = pr(run)->quiet;
+  pr(run)->pshx = 0;
+  pr(run)->pshy = 0;
+  pr(run)->quiet = 0;
+  /* The lattice layer: an isolated layer in the frame's space that starts at (0, 0, 0, 0) (N6), made ready as the units reach it. */
+  Frame * f = &run->frames[++run->top];
+  memset(f, 0, sizeof *f);
+  f->layer = run->layers + (run->top - 1u) * run->layout.pixels * 4u;
+  f->space = frame->space;
+  f->group.opacity = 1.0;
+  f->group.composite = GSHSCENE_COMPOSITE_SRC_OVER;
+  f->group.isolation = GSHSCENE_ISOLATION_ISOLATED;
+  f->clip_base = run->clip_count;
+  if (run->general) {
+    Gen_Frame * g = &gs_of(run)->frames[run->top];
+    memset(g, 0, sizeof *g);
+    g->on = (cs->tiers & GSHCPU_RENDER_FORCE_GENERAL) != 0;
+    f->general = g->on;
+  }
+  memset(&ms->frames[run->top].whole_dirty, 0, sizeof ms->frames[run->top].whole_dirty);
+  L->frame = run->top;
+  for (int64_t y = rect.y0; y < rect.y1; y++) {
+    memset(L->cnt + at(run, rect.x0, y), 0, (size_t)(rect.x1 - rect.x0));
+  }
+  GSHSCENE_Result result;
+  const GSHSCENE_List * tile = gshscene_resource_picture(pt.tile);
+  if (!overlaps) {
+    result = pat_walk(run, L, tile);
+  } else {
+    /* PC6: the copies one at a time, in lattice order. */
+    result = pat_each(run, L, rect, pat_overlap_copy, (void *)(uintptr_t)tile);
+  }
+  /* Restore. */
+  if (run->item_alloc == &run->arena.self) {
+    gshcpu_render_arena_rewind(&run->arena, L->arena_mark);
+  }
+  gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, patterns));
+  gshcpu_stroke_cache_add(cs->cache, offsetof(GSHCPU_Render_Counters, pattern_copies), L->copies);
+  pr(run)->pat = saved_pat;
+  pr(run)->pat_depth--;
+  run->maps = saved_maps;
+  run->coverage = sv_cov;
+  run->cov_aligned = sv_al;
+  run->cov_clip = sv_cl;
+  run->cov_result = sv_re;
+  run->acc_zero = 0;
+  ms->window = saved_window;
+  ms->whole_window = saved_ms_whole;
+  pr(run)->whole_cur = saved_whole_cur;
+  pr(run)->org_x = saved_ox;
+  pr(run)->org_y = saved_oy;
+  run->skip = saved_skip;
+  run->top = saved_top;
+  run->clip_count = saved_clips;
+  run->groups_open = saved_open;
+  pr(run)->pshx = sh_x;
+  pr(run)->pshy = sh_y;
+  pr(run)->quiet = was_quiet;
+  if (result == GSHSCENE_ERR_LIMIT) {
+    p->refused = 1;
+    return refuse(run, item, chain, count);
+  }
+  if (result != GSHSCENE_OK) {
+    return result;
+  }
+  p->lf = &run->frames[saved_top + 1u];
+  if (!quiet_of(run)) {
+    widen_w(run, frame, rect, whole);
+  }
+  run->work += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
+  return GSHSCENE_OK;
+}
+
 /** Go through one unit.  @return ::GSHSCENE_OK to go on, or the result to stop with. */
 static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
   if (skip_step(&run->skip, item, count)) {
     return GSHSCENE_OK;
   }
   GSHSCENE_Disposition d = gshscene_caps_disposition(&run->job->caps, item, run->maps, count - 1,
-      &run->job->target.map, gshscene_job_target_space(run->job), run->palette);
+      target_map(run), gshscene_job_target_space(run->job), run->palette);
   GSHSCENE_Glyph_Route route;
   if (d.entry_class == GSHSCENE_ENTRY_REFUSED ||
-      (gshcpu_render_glyph_route(item, run->maps, count - 1, &run->job->target.map, &route) &&
+      (gshcpu_render_glyph_route(item, run->maps, count - 1, target_map(run), &route) &&
           route.entry_class == GSHSCENE_ENTRY_REFUSED)) {
     /* The planning pass reported it. */
     skip_begin(&run->skip, item, count);
     return GSHSCENE_OK;
   }
   if (item->kind == GSHSCENE_ITEM_STROKE
-          ? gshscene_stroke_notice(item, run->maps, count - 1, &run->job->target.map)
-          : gshscene_paint_notice(item, run->maps, count - 1, &run->job->target.map)) {
+          ? gshscene_stroke_notice(item, run->maps, count - 1, target_map(run))
+          : gshscene_paint_notice(item, run->maps, count - 1, target_map(run))) {
     return GSHSCENE_OK; /* S17, SC4: a gradient fill or a stroke that draws nothing; the plan wrote its notice */
   }
   switch (item->kind) {
     case GSHSCENE_ITEM_FILL:
-      return fill(run, item, chain, count);
+      return cur_pat(run) ? pat_fill(run, item, chain, count) : fill(run, item, chain, count);
     case GSHSCENE_ITEM_STROKE:
-      return stroke(run, item, chain, count);
+      return cur_pat(run) ? pat_stroke(run, item, chain, count) : stroke(run, item, chain, count);
     case GSHSCENE_ITEM_CLIP_PUSH:
-      return clip_push(run, item, chain, count);
+      return cur_pat(run) ? pat_clip_push(run, item, chain, count) : clip_push(run, item, chain, count);
     case GSHSCENE_ITEM_CLIP_POP:
       run->clip_count--;
       return GSHSCENE_OK;
@@ -3043,6 +4216,13 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
     unsigned char * area = base + M.at;
     ms->window = L.region;
     ms->whole_window = L.whole;
+    memset(&ms->P, 0, sizeof ms->P);
+    ms->P.org_x = L.region.x0;
+    ms->P.org_y = L.region.y0;
+    ms->P.whole_cur = L.whole;
+    ms->P.pat_mem = base + M.at_pat;
+    ms->P.pat_levels = M.pat_levels;
+    ms->P.pat_stride = M.pat_stride;
     ms->frames = (Mask_Frame *)(void *)(area + M.at_frames);
     ms->chain = (size_t *)(void *)(area + M.at_chain);
     ms->walk = area + M.at_walk;
@@ -3244,6 +4424,7 @@ static GSHCPU_Result sink_make(const GSHCPU_Allocator * alloc, const GSHSCENE_Li
   cs->max_area_pixel_work = limits && limits->max_area_pixel_work ? limits->max_area_pixel_work
                                                                   : GSHCPU_LIMITS_DEFAULT_MAX_AREA_PIXEL_WORK;
   cs->max_image_work = limits && limits->max_image_work ? limits->max_image_work : GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK;
+  cs->max_pattern_cells = limits && limits->max_pattern_cells ? limits->max_pattern_cells : GSHCPU_LIMITS_DEFAULT_MAX_PATTERN_CELLS;
   gshgeom_limits_default(&cs->geometry);
   if (limits && limits->max_points) {
     cs->geometry.max_points = limits->max_points;

@@ -536,6 +536,9 @@ void gshcpu_render_arena_measure(GSHCPU_Arena * arena, const GSHGEOM_Allocator *
 /** Start again from empty (the peak is kept). */
 void gshcpu_render_arena_reset(GSHCPU_Arena * arena);
 
+/** Release everything allocated after the arena held @p mark bytes (its `used` then): what a pass of a pattern's tile does between copies, so that the item that is painted with the pattern keeps its own memory. */
+void gshcpu_render_arena_rewind(GSHCPU_Arena * arena, size_t mark);
+
 /* --- the geometry of one item (geometry.c) ------------------------------------------- */
 
 /** What became of one glyph of a run from a font (glyph.h): its entry, if it has one. */
@@ -897,6 +900,8 @@ typedef struct GSHCPU_Render_Counters {
   uint64_t general_pops;     /* pops composited by the general step (KC4 to KC6): the group or its parent is a general layer */
   uint64_t group_alpha_slots; /* the most group alpha channels the layout counted for a render (KC8): non-isolated groups open at once */
   uint64_t group_shape_slots; /* ... and group shape channels: groups open at once with a knockout proper ancestor */
+  uint64_t patterns;         /* passes of a pattern's tile drawn (PC2): a lattice layer made, however many copies */
+  uint64_t pattern_copies;   /* the (unit, copy) pairs those passes drew */
 } GSHCPU_Render_Counters;
 
 /** What identifies an expansion in the cache (SC7). */

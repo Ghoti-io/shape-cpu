@@ -49,6 +49,12 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   knockout group composites with the group's initial backdrop and not with the elements before it. Both are composited in `double`,
   with a group alpha and a group shape carried only by the layers that need them and counted exactly by the layout; a list without
   these groups takes none of that code, and the two paths agree where they are the same function.
+  Patterns: a fill or a stroke painted with a pattern is drawn as the pattern is defined, a picture repeated on a lattice: the tile's units
+  are drawn into a layer over the pixels the use covers, each unit one element over all the copies that meet them (a cell-filling background
+  covers every seam once), each copy at a whole-pixel shift of the tile drawn at the translation's fraction, so that a pattern moved by whole
+  pixels moves the same bits and a copy a million cells out has no drift. Gaps, overlaps, one-axis repeats, tints, gradients, images,
+  groups, clips, strokes and patterns inside a tile are drawn; `GSHCPU_Limits.max_pattern_cells` bounds the copies of a use, counted from
+  the lattice before any is drawn. Every use takes the general path: the tier for lattices of whole pixels is not built.
   `gshcpu_render_hash` and `gshcpu_render_dump` spell a render; the
   fixture set's renders are committed goldens, the same on every target.
   `examples/render.c` renders a list; `examples/stroke.c` strokes a path and shows the cache serve a translation;

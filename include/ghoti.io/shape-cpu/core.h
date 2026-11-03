@@ -114,6 +114,9 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
 /** The default of ::GSHCPU_Limits.max_image_work: 2^30. */
 #define GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK ((uint64_t)1 << 30)
 
+/** The default of ::GSHCPU_Limits.max_pattern_cells: 2^22 copies. */
+#define GSHCPU_LIMITS_DEFAULT_MAX_PATTERN_CELLS ((uint64_t)1 << 22)
+
 /** The largest ::GSHCPU_Limits.max_exact_crossings the sink accepts: 2^32.  A larger value is refused at sink creation. */
 #define GSHCPU_LIMITS_MAX_EXACT_CROSSINGS ((uint64_t)1 << 32)
 
@@ -228,6 +231,15 @@ typedef struct GSHCPU_Limits {
    * what matters.  A `uint64_t` whatever the target.  Read by the sink; the coverage functions ignore it.
    */
   uint64_t max_dash_steps;
+  /**
+   * The most copies of a pattern (render.h, PC8) one use may have, counted by shape-geometry's lattice enumeration at every
+   * nesting level and summed: the copies whose cell meets what the whole render draws of the use.  The count is a function of the
+   * list and the target alone, so it is the same whatever tier draws, whatever the cache holds and whatever the damage; one more is
+   * ::GSHSCENE_REASON_RESOURCE_LIMIT for the fill or stroke painted with the pattern.  0 is
+   * ::GSHCPU_LIMITS_DEFAULT_MAX_PATTERN_CELLS (2^22), `UINT64_MAX` no cap.  A `uint64_t` whatever the target.  Read by the sink;
+   * the coverage functions ignore it.
+   */
+  uint64_t max_pattern_cells;
 } GSHCPU_Limits;
 
 /** ::GSHCPU_Limits.fill_coverage: the exact area of a fill (the default). */
