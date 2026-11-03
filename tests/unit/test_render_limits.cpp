@@ -1312,7 +1312,25 @@ TEST(RenderMemory, EveryAllocationOfEveryFixturesRenderCanFail) {
     bool reached = false;
     int ooms = 0;
     int named = 0; // failures inside a unit, which the failure's chain names
-    for (long fail = 0; fail < 2000 && !reached; fail++) {
+    // A pattern fixture allocates for each copy of each unit (tens of thousands of times): every allocation up to 2000, then a stride
+    // that visits 300 more, and the last 40 before the render is whole; every other fixture, every allocation.
+    const bool pattern = std::strncmp(RF_FIXTURES[i].name, "pattern-", 8) == 0;
+    long total = 0;
+    if (pattern) {
+      tracker::Tracker t;
+      GSHSCENE_Allocator alloc = tracker::allocator_for(&t);
+      SinkRef sink(nullptr, &alloc);
+      RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+      ReportRef report;
+      GSHSCENE_Target target = target_of(r.raster, &fx.ctx.target_map);
+      GSHSCENE_Render_Request req = request_of(fx.list, &target, report.report);
+      t.fail_from = -1;
+      ASSERT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_OK);
+      total = t.calls;
+    }
+    const long stride = pattern ? (total / 300 > 0 ? total / 300 : 1) : 1;
+    for (long fail = 0; (pattern ? fail <= total + 1 : fail < 2000) && !reached;
+         fail += (pattern && fail >= 2000 && fail < total - 40) ? stride : 1) {
       tracker::Tracker t;
       GSHSCENE_Allocator alloc = tracker::allocator_for(&t);
       {

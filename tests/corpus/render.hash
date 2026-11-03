@@ -225,5 +225,25 @@ render group-masked rgba8 f61c55c348b0d3cd
 render group-masked rgba8-premultiplied a27e6a89c28ad46e
 render group-masked rgbaf32 81d91e7022db1e91
 render group-masked rgbaf32-premultiplied 2cb0281b05a56b6a
-hash cf5bb6e84b4a886f
-count 224
+render pattern-lattices rgba8 6cd1c6fc15148aa5
+render pattern-lattices rgba8-premultiplied bed0e53f23dcca72
+render pattern-lattices rgbaf32 2c608b0741ad226c
+render pattern-lattices rgbaf32-premultiplied bbd230a60db19fe7
+render pattern-overlap rgba8 3d50b94d40a50813
+render pattern-overlap rgba8-premultiplied 85fac10851578508
+render pattern-overlap rgbaf32 84c7bb40d5d9697f
+render pattern-overlap rgbaf32-premultiplied ffae05c8b74960b4
+render pattern-content rgba8 9f1df71af2736f9f
+render pattern-content rgba8-premultiplied 092bbeaf4a6d6950
+render pattern-content rgbaf32 852bafc1fd20f09f
+render pattern-content rgbaf32-premultiplied ebf862f565713330
+render pattern-strokes rgba8 33037c761af5141d
+render pattern-strokes rgba8-premultiplied 00f057e412d0f646
+render pattern-strokes rgbaf32 00531c0f5e83f61f
+render pattern-strokes rgbaf32-premultiplied da26e478fbde6188
+render pattern-integer rgba8 e09bb1d93d8d6960
+render pattern-integer rgba8-premultiplied 3ef09d1a76230fbf
+render pattern-integer rgbaf32 f9fb27c4f47ca7f5
+render pattern-integer rgbaf32-premultiplied 02bbf681ad08d756
+hash d637d93c682eb7cc
+count 244

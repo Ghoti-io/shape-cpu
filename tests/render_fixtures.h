@@ -2634,6 +2634,209 @@ static inline GSHSCENE_List * rf_group_masked(RF_Ctx * c) {
   return l;
 }
 
+/* --- patterns (masks-images-patterns story R2) -------------------------------------------------------------- */
+
+/** Intern a pattern of @p tile over the cell (@p x, @p y, @p w, @p h) at steps (@p sx, @p sy), repeating where @p rx and @p ry say, under @p map. */
+static inline const GSHSCENE_Resource * rf_pattern(RF_Ctx * c, const GSHSCENE_Resource * tile, double x, double y, double w, double h,
+    double sx, double sy, uint32_t rx, uint32_t ry, GSHGEOM_Map map, const GSHSCENE_Paint * tint) {
+  GSHSCENE_Pattern p;
+  gshscene_pattern_init(&p);
+  p.tile = tile;
+  p.x = x;
+  p.y = y;
+  p.w = w;
+  p.h = h;
+  p.x_step = sx;
+  p.y_step = sy;
+  p.repeat_x = rx;
+  p.repeat_y = ry;
+  p.map = map;
+  if (tint) {
+    p.has_tint = 1;
+    p.tint = *tint;
+  }
+  const GSHSCENE_Resource * r = NULL;
+  rf_check(c, gshscene_store_intern_pattern(c->store, &p, &r) == GSHSCENE_OK);
+  return rf_hold(c, r);
+}
+
+static inline GSHSCENE_Paint rf_pattern_paint(const GSHSCENE_Resource * pattern, double alpha) {
+  GSHSCENE_Paint p;
+  memset(&p, 0, sizeof p);
+  p.kind = GSHSCENE_PAINT_PATTERN;
+  p.resource = pattern;
+  p.rgba[3] = alpha;
+  return p;
+}
+
+/** A tile of a cell-filling background, a diagonal and a disc: a picture of the cell (0, 0, 6, 6). */
+static inline const GSHSCENE_Resource * rf_tile_basic(RF_Ctx * c) {
+  GSHSCENE_List * t = rf_open(c);
+  rf_fill(c, t, rf_rect(c, 0, 0, 6, 6), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.85, 0.5, 1.0), 0, 0.0);
+  const double tri[6] = {0.5, 0.5, 5.5, 1.5, 2.5, 5.5};
+  rf_fill(c, t, rf_polyline(c, tri, 3, 1), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.15, 0.3, 0.7, 0.9), 0, 0.0);
+  GSHGEOM_Map at = rf_move(4.5, 4.5);
+  rf_fill(c, t, rf_circle(c, 1.7), &at, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.1, 0.2, 0.8), 0, 0.0);
+  return rf_picture_of(c, t);
+}
+
+/** The same tile with no background: its alpha is its shapes', which is all an uncolored pattern reads (PT9). */
+static inline const GSHSCENE_Resource * rf_tile_open(RF_Ctx * c) {
+  GSHSCENE_List * t = rf_open(c);
+  const double tri[6] = {0.5, 0.5, 5.5, 1.5, 2.5, 5.5};
+  rf_fill(c, t, rf_polyline(c, tri, 3, 1), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.15, 0.3, 0.7, 0.9), 0, 0.0);
+  GSHGEOM_Map at = rf_move(4.5, 4.5);
+  rf_fill(c, t, rf_circle(c, 1.7), &at, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.1, 0.2, 0.8), 0, 0.0);
+  return rf_picture_of(c, t);
+}
+
+/** Cells that abut, at a fraction, under a scale and a quarter turn's worth of skew; and the same lattice gapped, as CSS `space`. */
+static inline GSHSCENE_List * rf_pattern_lattices(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.9, 0.95, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * tile = rf_tile_basic(c);
+  const GSHSCENE_Resource * abut = rf_pattern(c, tile, 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.3, 0.45), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 1, 23, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(abut, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * gap = rf_pattern(c, tile, 0, 0, 6, 6, 8.25, 7.5, 1, 1, rf_affine(c, 1.0, 0.0, 0.35, 1.0, 0.1, 0.2), NULL);
+  rf_fill(c, l, rf_rect(c, 25, 1, 47, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(gap, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * scaled = rf_pattern(c, tile, 0, 0, 6, 6, 6, 6, 1, 1, rf_affine(c, 1.7, 0.0, 0.0, 0.85, 0.5, 0.25), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 21, 23, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(scaled, 0.8), 0, 0.0);
+  GSHGEOM_Map turn;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 17.0, &turn);
+  const GSHSCENE_Resource * rot = rf_pattern(c, tile, 0, 0, 6, 6, 6, 6, 1, 1, turn, NULL);
+  GSHGEOM_Map place = rf_move(24.0, 21.0);
+  rf_fill(c, l, rf_rect(c, 0, 0, 22, 18), &place, GSHGEOM_FILL_NONZERO, rf_pattern_paint(rot, 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+/** Overlapping cells (PDF's steps smaller than the cell), one axis only, and a tile that spills over its cell. */
+static inline GSHSCENE_List * rf_pattern_overlap(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1.0, 1.0, 1.0, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * tile = rf_tile_basic(c);
+  const GSHSCENE_Resource * ox = rf_pattern(c, tile, 0, 0, 6, 6, 4.5, 6, 1, 1, rf_move(0.25, 0.5), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 1, 23, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(ox, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * oxy = rf_pattern(c, tile, 0, 0, 6, 6, 4.0, 4.5, 1, 1, rf_move(0.0, 0.0), NULL);
+  rf_fill(c, l, rf_rect(c, 25, 1, 47, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(oxy, 0.9), 0, 0.0);
+  const GSHSCENE_Resource * once = rf_pattern(c, tile, 0, 0, 6, 6, 6, 6, 0, 1, rf_move(2.5, 0.0), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 21, 23, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(once, 1.0), 0, 0.0);
+  GSHSCENE_List * spill = rf_open(c);
+  GSHGEOM_Map big = rf_move(3.0, 3.0);
+  rf_fill(c, spill, rf_circle(c, 5.0), &big, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.6, 0.3, 0.7), 0, 0.0);
+  const GSHSCENE_Resource * sp = rf_pattern(c, rf_picture_of(c, spill), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.0, 0.0), NULL);
+  rf_fill(c, l, rf_rect(c, 25, 21, 47, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(sp, 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+/** What a tile can hold: a gradient, an image, the foreground, a palette entry, a clip block, groups (opacity, knockout, non-isolated). */
+static inline GSHSCENE_List * rf_pattern_content(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  GSHSCENE_Color fg;
+  memset(&fg, 0, sizeof fg);
+  fg.rgba[0] = 0.1;
+  fg.rgba[1] = 0.5;
+  fg.rgba[2] = 0.3;
+  fg.rgba[3] = 1.0;
+  rf_check(c, gshscene_list_set_foreground(l, &fg) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.95, 0.9, 1.0), 0, 0.0);
+  /* A gradient, an image and the foreground in one tile, each across a cell edge. */
+  GSHSCENE_Gradient_Stop stops[3] = {rf_stop(0.0, rf_solid(1, 0, 0, 1)), rf_stop(0.5, rf_solid(0, 1, 0, 0.5)), rf_stop(1.0, rf_solid(0, 0, 1, 1))};
+  const GSHSCENE_Resource * grad = rf_gradient(c, rf_linear(0, 0, 8, 8, 0, 0, GSHSCENE_EXTEND_PAD), stops, 3);
+  GSHSCENE_Color_Space none;
+  memset(&none, 0, sizeof none);
+  const GSHSCENE_Resource * img = rf_image(c, 4, 3, 4, 8, GIMG_ALPHA_STRAIGHT, 0, none);
+  GSHSCENE_Paint ip = rf_image_paint(c, img, rf_place(c, 2.0, 2.0, 1.0, 1.0), GSHSCENE_IMAGE_EXTEND_PAD, GSHSCENE_IMAGE_EXTEND_PAD,
+      GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_LINEAR, none, NULL, 1.0);
+  GSHSCENE_List * t = rf_open(c);
+  rf_fill(c, t, rf_rect(c, 0, 0, 8, 8), NULL, GSHGEOM_FILL_NONZERO, rf_gradient_paint(grad, 1.0), 0, 0.0);
+  rf_fill(c, t, rf_rect(c, 3, 3, 8, 8), NULL, GSHGEOM_FILL_NONZERO, ip, 0, 0.0);
+  GSHSCENE_Paint f = rf_solid(0, 0, 0, 0.6);
+  f.kind = GSHSCENE_PAINT_FOREGROUND;
+  f.rgba[3] = 0.6;
+  GSHGEOM_Map disc_at = rf_move(5.0, 5.0);
+  rf_fill(c, t, rf_circle(c, 2.0), &disc_at, GSHGEOM_FILL_NONZERO, f, 0, 0.0);
+  const GSHSCENE_Resource * tile = rf_picture_of(c, t);
+  const GSHSCENE_Resource * p1 = rf_pattern(c, tile, 0, 0, 8, 8, 8, 8, 1, 1, rf_move(0.4, 0.3), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 1, 23, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(p1, 1.0), 0, 0.0);
+  /* A clip block and groups. */
+  GSHSCENE_List * g = rf_open(c);
+  rf_fill(c, g, rf_rect(c, 0, 0, 6, 6), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.8, 0.2, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_clip_push(g, rf_circle(c, 3.5), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, g, rf_rect(c, 0, 0, 6, 6), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.3, 0.8, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_clip_pop(g) == GSHSCENE_OK);
+  rf_general(c, g, 0, 0, 0.6, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  rf_fill(c, g, rf_rect(c, 1, 1, 5, 5), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.1, 0.1, 1.0), 0, 0.0);
+  rf_pop(c, g);
+  rf_general(c, g, 0, 1, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  rf_fill(c, g, rf_rect(c, 2, 0, 4, 6), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.1, 0.1, 0.5), 0, 0.0);
+  rf_fill(c, g, rf_rect(c, 0, 2, 6, 4), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.9, 0.9, 0.5), 0, 0.0);
+  rf_pop(c, g);
+  rf_general(c, g, 1, 0, 1.0, GSHSCENE_COMPOSITE_MULTIPLY, NULL);
+  rf_fill(c, g, rf_rect(c, 0, 4, 6, 6), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.4, 0.8, 0.9, 1.0), 0, 0.0);
+  rf_pop(c, g);
+  const GSHSCENE_Resource * p2 = rf_pattern(c, rf_picture_of(c, g), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.15, 0.6), NULL);
+  rf_fill(c, l, rf_rect(c, 25, 1, 47, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(p2, 1.0), 0, 0.0);
+  /* Uncolored: a tint over the tile's colors. */
+  GSHSCENE_Paint tint = rf_solid(0.7, 0.1, 0.5, 0.9);
+  const GSHSCENE_Resource * p3 = rf_pattern(c, rf_tile_open(c), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(1.2, 0.2), &tint);
+  rf_fill(c, l, rf_rect(c, 1, 21, 23, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(p3, 0.5), 0, 0.0);
+  GSHSCENE_Paint fgtint = rf_solid(0, 0, 0, 1.0);
+  fgtint.kind = GSHSCENE_PAINT_FOREGROUND;
+  const GSHSCENE_Resource * p4 = rf_pattern(c, rf_tile_open(c), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.6, 1.2), &fgtint);
+  rf_fill(c, l, rf_rect(c, 25, 21, 47, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(p4, 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+/** Strokes in a tile (crossing the cell's edge), a stroke painted with a pattern, and a pattern inside a tile. */
+static inline GSHSCENE_List * rf_pattern_strokes(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1.0, 1.0, 0.97, 1.0), 0, 0.0);
+  GSHSCENE_List * t = rf_open(c);
+  const double line[6] = {-1.0, 2.0, 3.0, 3.5, 7.0, 1.0};
+  rf_stroke(c, t, rf_polyline(c, line, 3, 0), rf_pen(c, 1.3, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND), NULL,
+      rf_solid(0.1, 0.2, 0.5, 1.0));
+  rf_fill(c, t, rf_rect(c, 1, 4, 5, 5), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.7, 0.2, 0.1, 0.8), 0, 0.0);
+  const GSHSCENE_Resource * sq = rf_pattern(c, rf_picture_of(c, t), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.35, 0.2), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 1, 23, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(sq, 1.0), 0, 0.0);
+  /* A stroke painted with a pattern. */
+  const GSHSCENE_Resource * tile = rf_tile_basic(c);
+  const GSHSCENE_Resource * pp = rf_pattern(c, tile, 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.0, 0.5), NULL);
+  const double zig[10] = {26.0, 17.0, 32.0, 3.0, 38.0, 17.0, 43.0, 4.0, 46.0, 15.0};
+  rf_stroke(c, l, rf_polyline(c, zig, 5, 0), rf_pen(c, 5.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), NULL,
+      rf_pattern_paint(pp, 1.0));
+  /* A pattern inside a tile. */
+  GSHSCENE_List * inner = rf_open(c);
+  rf_fill(c, inner, rf_rect(c, 0, 0, 12, 12), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.95, 1.0, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * small = rf_pattern(c, tile, 0, 0, 6, 6, 6, 6, 1, 1, rf_affine(c, 0.5, 0.0, 0.0, 0.5, 0.25, 0.5), NULL);
+  rf_fill(c, inner, rf_rect(c, 1, 1, 9, 11), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(small, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * outer = rf_pattern(c, rf_picture_of(c, inner), 0, 0, 12, 12, 12, 12, 1, 1, rf_move(0.5, 0.25), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 21, 47, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(outer, 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+/** Lattices whose steps are whole pixels: an axis-aligned one, a skewed one (steps (8, 3) and (0, 5)), and one rotated a quarter turn. */
+static inline GSHSCENE_List * rf_pattern_integer(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.97, 0.97, 0.97, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * tile = rf_tile_basic(c);
+  const GSHSCENE_Resource * a = rf_pattern(c, tile, 0, 0, 6, 6, 8, 8, 1, 1, rf_move(2.0, 1.0), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 1, 23, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(a, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * s = rf_pattern(c, tile, 0, 0, 6, 6, 1, 1, 1, 1, rf_affine(c, 8.0, 3.0, 0.0, 5.0, 0.0, 0.0), NULL);
+  (void)s;
+  const GSHSCENE_Resource * k = rf_pattern(c, tile, 0, 0, 6, 6, 1, 1, 1, 1, rf_affine(c, 8.0, 0.0, 3.0, 5.0, 1.0, 1.0), NULL);
+  rf_fill(c, l, rf_rect(c, 25, 1, 47, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(k, 1.0), 0, 0.0);
+  GSHGEOM_Map quarter;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 90.0, &quarter);
+  const GSHSCENE_Resource * q = rf_pattern(c, tile, 0, 0, 6, 6, 6, 6, 1, 1, quarter, NULL);
+  rf_fill(c, l, rf_rect(c, 1, 21, 23, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(q, 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
 typedef struct RF_Fixture {
   const char * name;
   RF_Build build;
@@ -2696,6 +2899,11 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"group-operators", rf_group_operators},
     {"group-elements", rf_group_elements},
     {"group-masked", rf_group_masked},
+    {"pattern-lattices", rf_pattern_lattices},
+    {"pattern-overlap", rf_pattern_overlap},
+    {"pattern-content", rf_pattern_content},
+    {"pattern-strokes", rf_pattern_strokes},
+    {"pattern-integer", rf_pattern_integer},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

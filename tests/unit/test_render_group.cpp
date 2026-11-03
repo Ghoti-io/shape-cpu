@@ -638,6 +638,16 @@ size_t first_general_fixture() {
   return RF_FIXTURE_COUNT;
 }
 
+/** One past the last group fixture: the pattern fixtures that follow hold groups only inside a tile, and are the pattern tests'. */
+size_t end_general_fixture() {
+  for (size_t i = first_general_fixture(); i < RF_FIXTURE_COUNT; i++) {
+    if (std::strncmp(RF_FIXTURES[i].name, "group-", 6) != 0) {
+      return i;
+    }
+  }
+  return RF_FIXTURE_COUNT;
+}
+
 /** Fixture @p index drawn with tiers @p tiers, an optional @p damage and an optional counting allocator, onto a raster of @p format. */
 struct Fixture {
   int result = -1;
@@ -682,7 +692,7 @@ TEST(RenderGroup, InsideADamageTheRenderOfAGeneralGroupEqualsTheWholeRender) {
   const size_t first = first_general_fixture();
   ASSERT_LT(first, RF_FIXTURE_COUNT);
   const GSHSCENE_Rect damages[3] = {{5, 4, 29, 21}, {0, 0, 7, 40}, {20, 15, 48, 40}};
-  for (size_t i = first; i < RF_FIXTURE_COUNT; i++) {
+  for (size_t i = first; i < end_general_fixture(); i++) {
     for (GSHCPU_Format format : {GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, GSHCPU_FORMAT_RGBAF32_STRAIGHT}) {
       Fixture whole = draw_fixture(i, format, GSHCPU_RENDER_TIERS_ALL);
       ASSERT_EQ(whole.result, (int)GSHSCENE_OK) << RF_FIXTURES[i].name;
@@ -706,7 +716,7 @@ TEST(RenderGroup, InsideADamageTheRenderOfAGeneralGroupEqualsTheWholeRender) {
 
 TEST(RenderGroup, TheMemoryOfGeneralGroupsIsExactAndNeverAllocated) {
   const size_t first = first_general_fixture();
-  for (size_t i = first; i < RF_FIXTURE_COUNT; i++) {
+  for (size_t i = first; i < end_general_fixture(); i++) {
     RF_Ctx c;
     rf_begin(&c);
     GSHSCENE_List * list = RF_FIXTURES[i].build(&c);
@@ -814,7 +824,7 @@ TEST(RenderGroup, AListWithoutNonIsolatedOrKnockoutGroupsTakesNoneOfTheGeneralSt
     EXPECT_EQ(f.counters.group_alpha_slots, 0u) << RF_FIXTURES[i].name;
     EXPECT_EQ(f.counters.group_shape_slots, 0u) << RF_FIXTURES[i].name;
   }
-  for (size_t i = first; i < RF_FIXTURE_COUNT; i++) {
+  for (size_t i = first; i < end_general_fixture(); i++) {
     Fixture f = draw_fixture(i, GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, GSHCPU_RENDER_TIERS_ALL);
     EXPECT_GT(f.counters.general_layers, 0u) << RF_FIXTURES[i].name << " uses the groups it is named for";
     EXPECT_GT(f.counters.general_pops, 0u) << RF_FIXTURES[i].name;
@@ -951,7 +961,7 @@ TEST(RenderGroup, AGeneralGroupUnderTheFastFillCoverageIsDrawnInDoublesAndNotInB
   fast.stroke_coverage = GSHCPU_STROKE_COVERAGE_FAST;
   const size_t first = first_general_fixture();
   int worst = 0;
-  for (size_t i = first; i < RF_FIXTURE_COUNT; i++) {
+  for (size_t i = first; i < end_general_fixture(); i++) {
     RF_Ctx c;
     rf_begin(&c);
     GSHSCENE_List * list = RF_FIXTURES[i].build(&c);
