@@ -730,6 +730,7 @@ general tier (which can be forced, and is the oracle):
 
 | Tier | Detection | Counter |
 | --- | --- | --- |
+| FT-U1 union clip, disjoint members | the planning predicate shows the members' device boxes interior-disjoint (shape-scene `clip_union.h`, CU16) | `union_fast` (pushes), `union_sweeps` (members), `union_tests` (comparisons) |
 | FT-1 cached expansion | the key is in the cache | `cache_hits` |
 | FT-2 sparse composite, solid hairline | a solid paint, one part, a bound of the deposits from the edges alone within a sixteenth of the rectangle's pixels and within `max_cells`; device width 1 | `sparse_hairline` |
 | FT-2 sparse composite, plain solid stroke | the same, any other width | `sparse_plain` |
@@ -862,6 +863,37 @@ measured by the same conversion; the stroke cache is not used by such a render (
 channels as values (a byte, or a `float`'s bit pattern as `u32`), so that a
 big-endian host hashes the same render the same. `tools/gen-render-vectors.py`
 restates it.
+
+### Union clips (shapes story A3: CU18 to CU22)
+
+A clip push may name a clip union (shape-scene `clip_union.h`). The sink claims `CLIP_UNION` while `GSHCPU_RENDER_TIER_UNION` is on and never
+`CLIP_UNION_GENERAL`, so the planning pass refuses a union whose members it cannot show disjoint (`UNION_OVERLAP`) and `clip_push` only
+ever sees a union it can draw exactly. **The arithmetic (CU18).** Each member, taken through `gshscene_clip_union_member_item`, is
+swept by the dense cover with the **magnitude fold and no final shift** (`fold_area`, the rule-reduced area in 1/8192 pixel, the number
+the byte is the shift of) and added into one `uint16` plane over the union's rectangle, each pixel held at 8192; when the last member
+is in, each plane value `s` becomes the clip's byte `min(255, s >> 5)`: the sum is quantized once. The byte path of the cover calls the same
+`fold_area` and its bits do not move. The union never uses `GSHCPU_FILL_COVERAGE_FAST`: that mode rounds to 255ths and holds the
+magnitude, and a union drawn by it would be a second definition. The fold is of the magnitude, so a member wound the other way gives
+the same union (a single clip's signed fold differs by one level in a pixel that is not a whole level; that is recorded as a defect to be
+fixed in its own story, not changed here).
+
+**The push (CU19).** `unit()` bills the predicate's comparisons of every union push that is not inside a skipped block, in unit order and
+whatever the damage excludes, against `GSHCPU_Limits.max_union_tests` (default 2^26, `UINT64_MAX` no cap); the push at which the running
+total passes the limit is `RESOURCE_LIMIT`, and strict fails there. `union_push` sizes the plane from the members' device boxes
+(`gshscene_clip_union_member_box`, CU15) met with the clips in force, sweeps one member at a time through the item arena (the geometry of
+one member is live at a time) with the cell cap met over the whole render per member, so a damaged render refuses what the whole render refuses,
+and a member over a cap refuses the whole push: a union is never drawn with a member left out.
+
+**Memory (CU20).** The plane lives in the item arena (so a list with no union has the memory, the work counts and the pixels it
+had): `measure_one` counts the plane (two bytes for each pixel of the region) and then the geometry of the member that takes the most.
+**Not built: a union in a pattern's tile (CU21).** `pat_clip_push` answers `ERR_LIMIT` for one, which is the sink's resource limit (PC8)
+for the use painted with the pattern, never a union drawn with a member left out; the per-copy plane is a story of its own.
+A union in a mask's picture or around or inside a non-isolated or knockout group is an ordinary clip of an ordinary unit: the clip is a
+byte coverage by the time a group sees it.
+
+**Tier bookkeeping (CU22).** FT-U1: detection is the planning predicate's verdict; the counters are `union_fast`, `union_sweeps` and
+`union_tests`; `GSHCPU_RENDER_TIER_UNION` forces the tier off (the sink then does not claim `CLIP_UNION` and every union is refused
+`CLIP_UNION`); the AD-13 pairing, until a general tier exists, is the independent oracle (`tools/clip-union-oracle.py` in shape-scene).
 
 ## Tests and gates
 

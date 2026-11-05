@@ -117,6 +117,9 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
 /** The default of ::GSHCPU_Limits.max_pattern_cells: 2^22 copies. */
 #define GSHCPU_LIMITS_DEFAULT_MAX_PATTERN_CELLS ((uint64_t)1 << 22)
 
+/** The default of ::GSHCPU_Limits.max_union_tests: 2^26 comparisons. */
+#define GSHCPU_LIMITS_DEFAULT_MAX_UNION_TESTS ((uint64_t)1 << 26)
+
 /** The largest ::GSHCPU_Limits.max_exact_crossings the sink accepts: 2^32.  A larger value is refused at sink creation. */
 #define GSHCPU_LIMITS_MAX_EXACT_CROSSINGS ((uint64_t)1 << 32)
 
@@ -199,7 +202,8 @@ typedef struct GSHCPU_Limits {
   uint64_t stroke_coverage;
   /**
    * How the sink makes the coverage of a fill or a clip (render.h): ::GSHCPU_FILL_COVERAGE_EXACT (0, the default) makes it
-   * the exact area of the region the rule selects, to the unit of the lattice; ::GSHCPU_FILL_COVERAGE_FAST sums the area and
+   * the area of the region the rule selects, to the unit of the lattice (the exact area where the outline does not overlap itself inside
+   * a pixel; where it does, the saturating sum of the winding area that AD-12 defines for one shape); ::GSHCPU_FILL_COVERAGE_FAST sums the area and
    * cover each edge leaves in the cells it crosses, in integers, and holds the magnitude at one (nonzero) or folds it
    * (even-odd), which is what the rasterizers it is compared with do, and costs a fraction of the time.  It differs from the
    * exact coverage only where pieces of the outline overlap and in the rounding of a fraction of a level.  Another value is
@@ -240,6 +244,13 @@ typedef struct GSHCPU_Limits {
    * the coverage functions ignore it.
    */
   uint64_t max_pattern_cells;
+  /**
+   * The most box comparisons (clip_union.h, CU17) the planning predicate may cost over every union clip push of one render, counted
+   * for every union push in unit order whatever the damage excludes, so that the point of refusal never depends on the damage; the
+   * push at which the running total passes the limit is ::GSHSCENE_REASON_RESOURCE_LIMIT (CU19).  0 is
+   * ::GSHCPU_LIMITS_DEFAULT_MAX_UNION_TESTS (2^26), `UINT64_MAX` no cap.  A `uint64_t` whatever the target.
+   */
+  uint64_t max_union_tests;
 } GSHCPU_Limits;
 
 /** ::GSHCPU_Limits.fill_coverage: the exact area of a fill (the default). */

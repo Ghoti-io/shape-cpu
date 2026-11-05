@@ -245,6 +245,16 @@ GSHCPU_Result gshcpu_render_cover(const GSHGEOM_Flat_Path * const * paths, size_
  * the damage).  @p out is what ::gshcpu_render_cover over @p rect writes; @p cells is what it counts over @p walk.
  * @p rect may be empty (nothing is drawn, and @p walk is counted).
  */
+/**
+ * CU18: the dense sweep of @p paths with the magnitude fold and without the final shift, added into a shared plane.  @p plane holds a
+ * `uint16` for each pixel of @p prect (row by row, `prect.x1 - prect.x0` to a row), which contains @p rect; each pixel of @p rect gets
+ * `min(8192, plane + a)`, `a` the rule-reduced area of the paths there in units of 1/8192 of a pixel.  Otherwise as
+ * ::gshcpu_render_cover_counted: @p walk, @p acc, @p max_deposits and @p cells are the same; ::GSHCPU_ERR_LIMIT past the cap.
+ */
+GSHCPU_Result gshcpu_render_cover_area(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, uint16_t * plane, GSHCPU_Rect prect, int64_t * acc, uint64_t max_deposits,
+    uint64_t * cells);
+
 GSHCPU_Result gshcpu_render_cover_counted(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
     GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells);
 
@@ -862,8 +872,13 @@ void gshcpu_render_image_texel(const GSHCPU_Image * im, uint32_t x, uint32_t y, 
  * rest of the layer from it by integer arithmetic (the cache of PC10 keeps the period under TIER_CACHE).  Off, the general tier draws every copy.
  */
 #define GSHCPU_RENDER_TIER_PERIOD 1024u
+/**
+ * FT-U1 (CU22): a union clip whose members the planning predicate shows disjoint is drawn by summing the members' areas in a shared
+ * plane and quantizing once.  Off, the sink does not claim ::GSHSCENE_CAP_CLIP_UNION, so every union clip is refused, `CLIP_UNION`.
+ */
+#define GSHCPU_RENDER_TIER_UNION 2048u
 #define GSHCPU_RENDER_TIERS_ALL \
-  (GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE | GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT | \
+  (GSHCPU_RENDER_TIER_UNION | GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE | GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT | \
       GSHCPU_RENDER_TIER_IMAGE_COPY | GSHCPU_RENDER_TIER_IMAGE_SEPARABLE | GSHCPU_RENDER_TIER_IMAGE_TABLE | \
       GSHCPU_RENDER_TIER_MASK_OUTSIDE | GSHCPU_RENDER_TIER_MASK_IDENTITY | GSHCPU_RENDER_TIER_PERIOD)
 /** What the general tier is: the coverage (the exact step and UC8), none of the fast tiers. */
@@ -912,6 +927,9 @@ typedef struct GSHCPU_Render_Counters {
   uint64_t period_hits;      /* PC10: a period raster found in the cache */
   uint64_t period_misses;    /* ... a window rendered because the cache had none (and the cache was in use) */
   uint64_t period_kept;      /* ... and kept */
+  uint64_t union_fast;       /* FT-U1 (CU22): union clip pushes drawn by the fast tier */
+  uint64_t union_sweeps;     /* ... the members swept into a plane */
+  uint64_t union_tests;      /* ... the box comparisons of the predicate, summed over the pushes */
 } GSHCPU_Render_Counters;
 
 /**

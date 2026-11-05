@@ -547,16 +547,26 @@ static void edge(Cover * c, Point from, Point to) {
  * @p magnitude folds the area's magnitude, reduced by the rule before it is shifted, so that the coverage is the floor of
  * the level of the area of the region either way round (the fold of UC7).
  */
+/**
+ * CU18: the rule-reduced magnitude of an accumulated area, in units of 1/8192 of a pixel, `0 <= result <= 8192`: what the byte is the
+ * shift of.  A union adds these over its members and shifts once.
+ */
+static uint32_t fold_area(int64_t area, GSHGEOM_Fill_Rule rule) {
+  uint64_t m = (uint64_t)(area < 0 ? -area : area);
+  if (rule == GSHGEOM_FILL_EVEN_ODD) {
+    m &= 16383u; /* 2 * 2^13: the winding's parity repeats every two pixels' area */
+    if (m > 8192u) {
+      m = 16384u - m;
+    }
+  } else if (m > 8192u) {
+    m = 8192u; /* nonzero: a pixel's area held at the whole pixel */
+  }
+  return (uint32_t)m;
+}
+
 static uint8_t fold(int64_t area, GSHGEOM_Fill_Rule rule, int magnitude) {
   if (magnitude) {
-    uint64_t m = (uint64_t)(area < 0 ? -area : area);
-    if (rule == GSHGEOM_FILL_EVEN_ODD) {
-      m &= 16383u; /* 2 * 2^13: the winding's parity repeats every two pixels' area */
-      if (m > 8192u) {
-        m = 16384u - m;
-      }
-    }
-    uint64_t level = m >> AREA_SHIFT;
+    uint64_t level = fold_area(area, rule) >> AREA_SHIFT;
     return (uint8_t)(level >= 256u ? 255u : level);
   }
   int64_t value = area >> AREA_SHIFT;
@@ -990,9 +1000,13 @@ GSHCPU_Result gshcpu_render_cover_counted(const GSHGEOM_Flat_Path * const * path
   return gshcpu_render_cover_exact(paths, count, rule, rect, walk, out, acc, max_deposits, cells, NULL);
 }
 
-GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
-    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells,
-    GSHCPU_Exact * ex) {
+/**
+ * The dense sweep of @p paths over @p rect.  With @p plane NULL the bytes go to @p out; else the rule-reduced area of each pixel
+ * (fold_area, CU18) is added into @p plane, a `uint16` per pixel of @p prect (which holds @p rect), each held at 8192.
+ */
+static GSHCPU_Result cover_run(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule, GSHCPU_Rect rect,
+    GSHCPU_Rect walk, uint8_t * out, uint16_t * plane, GSHCPU_Rect prect, int64_t * acc, uint64_t max_deposits,
+    uint64_t * cells, GSHCPU_Exact * ex) {
   Cover c;
   memset(&c, 0, sizeof c);
   c.rect = rect;
@@ -1047,8 +1061,17 @@ GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths,
     for (int64_t r = 0; r < c.rows; r++) {
       const int64_t * cv = c.cover + r * c.stride;
       const int64_t * ar = c.area + r * c.stride;
-      uint8_t * line = out + (size_t)((band - rect.y0 + r) * width);
       int64_t accumulated = cv[0] * (ONE_PIXEL * 2);
+      if (plane) {
+        uint16_t * row = plane + (size_t)((band - prect.y0 + r) * (prect.x1 - prect.x0) + (rect.x0 - prect.x0));
+        for (int64_t j = 1; j <= width; j++) {
+          accumulated += cv[j] * (ONE_PIXEL * 2);
+          uint32_t sum = (uint32_t)row[j - 1] + fold_area(accumulated - ar[j], rule);
+          row[j - 1] = (uint16_t)(sum > 8192u ? 8192u : sum); /* CU18: saturated at the whole pixel */
+        }
+        continue;
+      }
+      uint8_t * line = out + (size_t)((band - rect.y0 + r) * width);
       for (int64_t j = 1; j <= width; j++) {
         accumulated += cv[j] * (ONE_PIXEL * 2);
         line[j - 1] = fold(accumulated - ar[j], rule, ex != NULL);
@@ -1057,6 +1080,19 @@ GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths,
   }
   *cells = c.cells;
   return GSHCPU_OK;
+}
+
+GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells,
+    GSHCPU_Exact * ex) {
+  GSHCPU_Rect none = {0, 0, 0, 0};
+  return cover_run(paths, count, rule, rect, walk, out, NULL, none, acc, max_deposits, cells, ex);
+}
+
+GSHCPU_Result gshcpu_render_cover_area(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, uint16_t * plane, GSHCPU_Rect prect, int64_t * acc, uint64_t max_deposits,
+    uint64_t * cells) {
+  return cover_run(paths, count, rule, rect, walk, NULL, plane, prect, acc, max_deposits, cells, NULL);
 }
 
 /* --- a bound of the cells, from the edges alone ------------------------------------------------------- */
