@@ -1835,7 +1835,7 @@ def do_plant(plant, control_objs):
 # the limits and the chain (PC8), the period tier: its detection, its window, the limits it cannot vouch for and the give-up (PC9), the cache: its
 # key, its table and its raster (PC10), the facts a tile is asked (PC9, PC10) and what a pass keeps and restores (PC11).  `make check-planted
 # PLANT_ONLY='^rp-'` runs them.  Written with the story; the survivors are in SURVIVORS with their cause.
-RP_TESTS = ["testRender_pattern", "testRender_pattern_period", "testRender_pattern_vectors", "testRender_limits", "testRender_conformance", "probe"]
+RP_TESTS = ["testRender_pattern", "testRender_pattern_period", "testRender_pattern_rules", "testRender_pattern_keys", "testRender_pattern_vectors", "testRender_limits", "testRender_conformance", "probe"]
 PLANTS += [
     ('rp-claim-dropped', "src", RS, '  out->flags |= GSHSCENE_CAP_PATTERN;', '', RP_TESTS),
     ('rp-pixel-alpha-multiplier-dropped', "src", RS, '      s[i] = v[i] * p->alpha;', '      s[i] = v[i];', RP_TESTS),
@@ -1854,8 +1854,6 @@ PLANTS += [
     ('rp-copy-qbox-y1-floor', "src", RS, '  c->qbox.y1 = floor_div64(hi_y) + 1;', '  c->qbox.y1 = floor_div64(hi_y);', RP_TESTS),
     ('rp-copy-qbox-x1-floor', "src", RS, '  c->qbox.x1 = floor_div64(hi_x) + 1;', '  c->qbox.x1 = floor_div64(hi_x);', RP_TESTS),
     ('rp-copy-base-is-the-chain', "src", RS, '  L->cur_qbox = c->qbox;\n  L->base = c->canon;', '  L->cur_qbox = c->qbox;\n  L->base = L->C;', RP_TESTS),
-    ('rp-copy-shift-x-sign', "src", RS, '  L->sx = c->sx;\n  L->sy = c->sy;\n  return GSHSCENE_OK;', '  L->sx = -c->sx;\n  L->sy = c->sy;\n  return GSHSCENE_OK;', RP_TESTS),
-    ('rp-copy-shift-y-lost', "src", RS, '  L->sx = c->sx;\n  L->sy = c->sy;\n  return GSHSCENE_OK;', '  L->sx = c->sx;\n  L->sy = 0;\n  return GSHSCENE_OK;', RP_TESTS),
     ('rp-copy-canonical-error-lost', "src", RS, '  if (gshgeom_lattice_canonical(&L->C, &L->lat, i, j, &c->canon, &c->sx, &c->sy) != GSHGEOM_OK) {\n    return GSHSCENE_ERR_LIMIT; /* a shifted coordinate past the range the sink draws */\n  }', '  (void)gshgeom_lattice_canonical(&L->C, &L->lat, i, j, &c->canon, &c->sx, &c->sy);', RP_TESTS),
     ('rp-copy-quad-error-lost', "src", RS, '  if (gshgeom_lattice_quad(&L->C, &L->lat, q) != GSHGEOM_OK) {\n    return GSHSCENE_ERR_LIMIT;\n  }\n  /* LT5', '  (void)gshgeom_lattice_quad(&L->C, &L->lat, q);\n  /* LT5', RP_TESTS),
     ('rp-copy-moved-back-region-x', "src", RS, '  *rc = gshcpu_render_rect_meet(rect_moved(reach, -c->sx, -c->sy), c->qbox);', '  *rc = gshcpu_render_rect_meet(rect_moved(reach, c->sx, -c->sy), c->qbox);', RP_TESTS),
@@ -1975,7 +1973,7 @@ PLANTS += [
     ('rp-tier-guard-off', "src", RS, '    L->guard = L->period;\n    result = pat_pass(run, L, tile, overlaps, prect);', '    L->guard = 0;\n    result = pat_pass(run, L, tile, overlaps, prect);', RP_TESTS),
     ('rp-tier-guard-left-on', "src", RS, '    result = pat_pass(run, L, tile, overlaps, prect);\n    L->guard = 0;', '    result = pat_pass(run, L, tile, overlaps, prect);', RP_TESTS),
     ('rp-tier-cells-guard-range-lost', "src", RS, '  if (!rect_in_range(c->qbox) ||\n      gshcpu_render_cells_bound(paths, n, c->qbox, run->cs->max_deposits) > run->cs->max_deposits) {', '  if (gshcpu_render_cells_bound(paths, n, c->qbox, run->cs->max_deposits) > run->cs->max_deposits) {', RP_TESTS),
-    ('rp-tier-cells-guard-bound-over-the-window', "src", RS, 'gshcpu_render_cells_bound(paths, n, c->qbox, run->cs->max_deposits) > run->cs->max_deposits) {\n    L->abort_tier = 1;', 'gshcpu_render_cells_bound(paths, n, L->rect, run->cs->max_deposits) > run->cs->max_deposits) {\n    L->abort_tier = 1;', RP_TESTS),
+    ('rp-tier-cells-guard-bound-over-the-window', "src", RS, 'gshcpu_render_cells_bound(paths, n, c->qbox, run->cs->max_deposits) > run->cs->max_deposits) {\n    L->abort_tier = 1;', 'gshcpu_render_cells_bound(paths, n, run->layout.region, run->cs->max_deposits) > run->cs->max_deposits) {\n    L->abort_tier = 1;', RP_TESTS),
     ('rp-tier-cells-guard-at-the-cap', "src", RS, 'gshcpu_render_cells_bound(paths, n, c->qbox, run->cs->max_deposits) > run->cs->max_deposits) {\n    L->abort_tier = 1;', 'gshcpu_render_cells_bound(paths, n, c->qbox, run->cs->max_deposits) >= run->cs->max_deposits) {\n    L->abort_tier = 1;', RP_TESTS),
     ('rp-tier-cells-guard-not-called', "src", RS, '  if (result == GSHSCENE_OK && n > 0 && L->guard) {\n    period_guard_cells(run, L, paths, n, c);\n  }', '', RP_TESTS),
     ('rp-tier-stroke-guard-not-called', "src", RS, '  if (L->guard) {\n    period_guard_stroke(run, L, &s);\n  }', '', RP_TESTS),
@@ -1994,9 +1992,8 @@ PLANTS += [
     ('rp-tier-giveup-only-on-ok', "src", RS, '    if (L->period && L->abort_tier && (result == GSHSCENE_OK || result == GSHSCENE_ERR_LIMIT)) {', '    if (L->period && L->abort_tier && result == GSHSCENE_OK) {', RP_TESTS),
     ('rp-tier-giveup-never', "src", RS, '    if (L->period && L->abort_tier && (result == GSHSCENE_OK || result == GSHSCENE_ERR_LIMIT)) {', '    if (0) {', RP_TESTS),
     ('rp-tier-giveup-ignores-the-flag', "src", RS, '    if (L->period && L->abort_tier && (result == GSHSCENE_OK || result == GSHSCENE_ERR_LIMIT)) {', '    if (L->period && (result == GSHSCENE_OK || result == GSHSCENE_ERR_LIMIT)) {', RP_TESTS),
-    ('rp-tier-giveup-keeps-the-window', "src", RS, '      L->period = 0;\n      L->abort_tier = 0;\n      L->copies = 0;\n      prect = rect;\n      L->rect = rect;\n      ms->window = rect;', '      L->period = 0;\n      L->abort_tier = 0;\n      L->copies = 0;\n      L->rect = rect;\n      ms->window = rect;', RP_TESTS),
-    ('rp-tier-giveup-keeps-the-pass-rectangle', "src", RS, '      prect = rect;\n      L->rect = rect;\n      ms->window = rect;', '      prect = rect;\n      L->rect = rect;', RP_TESTS),
     ('rp-tier-giveup-keeps-the-period-flag', "src", RS, '      L->period = 0;\n      L->abort_tier = 0;\n      L->copies = 0;', '      L->abort_tier = 0;\n      L->copies = 0;', RP_TESTS),
+    ('rp-tier-giveup-keeps-the-window-rectangle', "src", RS, '      ms->window = rect;\n      run->top = L->frame;', '      run->top = L->frame;', RP_TESTS),
     ('rp-tier-giveup-keeps-the-layer', "src", RS, '      memset(&f->dirty, 0, sizeof f->dirty);\n      memset(&ms->frames[run->top].whole_dirty, 0, sizeof ms->frames[run->top].whole_dirty);', '      memset(&ms->frames[run->top].whole_dirty, 0, sizeof ms->frames[run->top].whole_dirty);', RP_TESTS),
     ('rp-tier-giveup-keeps-the-counts', "src", RS, '      for (int64_t y = rect.y0; y < rect.y1; y++) {\n        memset(L->cnt + at(run, rect.x0, y), 0, (size_t)(rect.x1 - rect.x0));\n      }\n      result = pat_pass(run, L, tile, overlaps, rect);', '      result = pat_pass(run, L, tile, overlaps, rect);', RP_TESTS),
     ('rp-tier-giveup-passes-the-window-again', "src", RS, '      result = pat_pass(run, L, tile, overlaps, rect);\n    } else if (L->period && result == GSHSCENE_OK) {', '      result = pat_pass(run, L, tile, overlaps, prect);\n    } else if (L->period && result == GSHSCENE_OK) {', RP_TESTS),
@@ -2108,8 +2105,6 @@ PLANTS += [
 # equivalent in the design; the others are not shown to be, and each names the case a test would have to build.
 SURVIVORS = {
     # masks-images-patterns story R2 (rp-): the hand plants of the pattern code that no test sees, each with the case a test would have to build.
-    'rp-copy-shift-x-sign': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
-    'rp-copy-shift-y-lost': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-copy-canonical-error-lost': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-copy-quad-error-lost': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-copy-range-unchecked': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
@@ -2118,7 +2113,6 @@ SURVIVORS = {
     'rp-unit-empty-region-applies': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-unit-work-not-counted': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-unit-region-not-reset': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
-    'rp-unit-source-refused-added': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-clip-fold-tmp-not-cleared': "not seen: needs several clips in force in a tile over several copies, and a group around a clip block, with the per-copy fold, the union's saturation and the shifts told apart",
     'rp-clip-union-unsaturated': "not seen: needs several clips in force in a tile over several copies, and a group around a clip block, with the per-copy fold, the union's saturation and the shifts told apart",
     'rp-clip-union-last-copy-only': "not seen: needs several clips in force in a tile over several copies, and a group around a clip block, with the per-copy fold, the union's saturation and the shifts told apart",
@@ -2126,11 +2120,8 @@ SURVIVORS = {
     'rp-clip-memory-not-cleared': "not seen: needs several clips in force in a tile over several copies, and a group around a clip block, with the per-copy fold, the union's saturation and the shifts told apart",
     'rp-clip-not-kept-for-the-copies': "not seen: needs several clips in force in a tile over several copies, and a group around a clip block, with the per-copy fold, the union's saturation and the shifts told apart",
     'rp-clip-maps-short': "not seen: needs several clips in force in a tile over several copies, and a group around a clip block, with the per-copy fold, the union's saturation and the shifts told apart",
-    'rp-order-cancel-not-checked': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-stroke-cut-nothing-drawn-anyway': "not seen: the stroke cut's bookkeeping (the part's meta, box, bound and presence) only widens or narrows the rectangle covered; a stroke whose cut part is empty, and an aligned stroke in a tile, are not in the tests",
-    'rp-stroke-cut-aligned-skipped': "not seen: the stroke cut's bookkeeping (the part's meta, box, bound and presence) only widens or narrows the rectangle covered; a stroke whose cut part is empty, and an aligned stroke in a tile, are not in the tests",
     'rp-stroke-cut-of-the-uncut-part': "not seen: the stroke cut's bookkeeping (the part's meta, box, bound and presence) only widens or narrows the rectangle covered; a stroke whose cut part is empty, and an aligned stroke in a tile, are not in the tests",
-    'rp-stroke-cut-empty-part-kept': "not seen: the stroke cut's bookkeeping (the part's meta, box, bound and presence) only widens or narrows the rectangle covered; a stroke whose cut part is empty, and an aligned stroke in a tile, are not in the tests",
     'rp-stroke-cut-empty-part-still-present': "not seen: the stroke cut's bookkeeping (the part's meta, box, bound and presence) only widens or narrows the rectangle covered; a stroke whose cut part is empty, and an aligned stroke in a tile, are not in the tests",
     'rp-stroke-cut-meta-stale-lo-x': "not seen: the stroke cut's bookkeeping (the part's meta, box, bound and presence) only widens or narrows the rectangle covered; a stroke whose cut part is empty, and an aligned stroke in a tile, are not in the tests",
     'rp-stroke-cut-meta-stale-hi-y': "not seen: the stroke cut's bookkeeping (the part's meta, box, bound and presence) only widens or narrows the rectangle covered; a stroke whose cut part is empty, and an aligned stroke in a tile, are not in the tests",
@@ -2142,14 +2133,7 @@ SURVIVORS = {
     'rp-stroke-box-limit-unchecked': "not seen: the stroke cut's bookkeeping (the part's meta, box, bound and presence) only widens or narrows the rectangle covered; a stroke whose cut part is empty, and an aligned stroke in a tile, are not in the tests",
     'rp-overlap-unused-step-counts': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-overlap-single-not-cleared': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
-    'rp-count-total-not-reset': 'not seen: the nested counting (summed over levels, reset at depth 0, the unlimited ceiling) needs a pattern in a tile at a limit; no test sets one',
-    'rp-count-total-not-summed': 'not seen: the nested counting (summed over levels, reset at depth 0, the unlimited ceiling) needs a pattern in a tile at a limit; no test sets one',
-    'rp-count-total-overwritten': 'not seen: the nested counting (summed over levels, reset at depth 0, the unlimited ceiling) needs a pattern in a tile at a limit; no test sets one',
-    'rp-count-remaining-not-reduced': 'not seen: the nested counting (summed over levels, reset at depth 0, the unlimited ceiling) needs a pattern in a tile at a limit; no test sets one',
     'rp-count-remaining-underflows': 'not seen: the nested counting (summed over levels, reset at depth 0, the unlimited ceiling) needs a pattern in a tile at a limit; no test sets one',
-    'rp-count-unlimited-capped': 'not seen: the nested counting (summed over levels, reset at depth 0, the unlimited ceiling) needs a pattern in a tile at a limit; no test sets one',
-    'rp-count-limit-ceiling-lost': 'not seen: the nested counting (summed over levels, reset at depth 0, the unlimited ceiling) needs a pattern in a tile at a limit; no test sets one',
-    'rp-count-nothing-is-drawn-anyway': 'not seen: the nested counting (summed over levels, reset at depth 0, the unlimited ceiling) needs a pattern in a tile at a limit; no test sets one',
     'rp-chain-singular-not-refused': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-lattice-cell-x-from-y': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-tier-window-width-strict': "not seen: needs a window exactly the rectangle's width (or height) for an eligible lattice",
@@ -2172,7 +2156,6 @@ SURVIVORS = {
     'rp-tier-image-work-guard-over-the-drawn-rect': "not seen: needs a limit (deposits, domain or area work) that a whole cell fails or passes while the window's copies decide otherwise, for this kind of unit",
     'rp-tier-image-guard-for-other-filters': "not seen: needs a limit (deposits, domain or area work) that a whole cell fails or passes while the window's copies decide otherwise, for this kind of unit",
     'rp-tier-giveup-only-on-ok': "not seen: the give-up's reset is observed only through a render whose general tier then differs if the reset is incomplete; needs a tile and a cap that fail after a unit has drawn into the window",
-    'rp-tier-giveup-keeps-the-window': "not seen: the give-up's reset is observed only through a render whose general tier then differs if the reset is incomplete; needs a tile and a cap that fail after a unit has drawn into the window",
     'rp-tier-giveup-keeps-the-layer': "not seen: the give-up's reset is observed only through a render whose general tier then differs if the reset is incomplete; needs a tile and a cap that fail after a unit has drawn into the window",
     'rp-tier-giveup-passes-the-window-again': "not seen: the give-up's reset is observed only through a render whose general tier then differs if the reset is incomplete; needs a tile and a cap that fail after a unit has drawn into the window",
     'rp-tier-giveup-keeps-the-stack': "not seen: the give-up's reset is observed only through a render whose general tier then differs if the reset is incomplete; needs a tile and a cap that fail after a unit has drawn into the window",
@@ -2220,7 +2203,6 @@ SURVIVORS = {
     'rp-table-store-held-not-added': "not seen: the table's bookkeeping (pins, the bound, duplicate keys, bucket choice, accounting) is exercised only through renders; no test drives its functions directly",
     'rp-table-evict-tile-id-missed': "not seen: the table's bookkeeping (pins, the bound, duplicate keys, bucket choice, accounting) is exercised only through renders; no test drives its functions directly",
     'rp-table-bucket-ignores-the-fraction': "not seen: the table's bookkeeping (pins, the bound, duplicate keys, bucket choice, accounting) is exercised only through renders; no test drives its functions directly",
-    'rp-limit-refusal-not-reported': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-pass-work-not-counted': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-pass-layer-not-isolated': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',
     'rp-pass-layer-opacity': 'not seen: a bookkeeping branch of the pass (a region reset, a counter, work, a field no render reads back) that no test of this library separates from the right code',

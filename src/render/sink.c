@@ -314,9 +314,6 @@ struct Pat_Level {
   GSHGEOM_Map C;             /* pattern space to the pass's frame of coordinates: T I_1 .. I_k M G, composed once (AD-24) */
   GSHGEOM_Map base;          /* what the tile's items are composed with: the current copy's canonical map (PC3) */
   GSHGEOM_Map base0;         /* the linear part with no translation: what the disposition of a unit is decided under */
-  int64_t sx, sy;            /* the current copy's whole-pixel shift: a pixel (x, y) of its frame is (x + sx, y + sy) of the pass's */
-  GSHCPU_Rect rect;          /* the lattice layer's pixels, and the pixels of the use in the whole render */
-  GSHCPU_Rect whole;
   size_t frame;              /* the lattice layer's frame */
   int single;                /* overlapping cells (PC6): one copy at a time, in lattice order */
   int64_t ci, cj;
@@ -3265,8 +3262,6 @@ static GSHSCENE_Result pat_copy_open(Pat_Level * L, int64_t i, int64_t j, Pat_Co
   c->qbox.y1 = floor_div64(hi_y) + 1;
   L->cur_qbox = c->qbox;
   L->base = c->canon;
-  L->sx = c->sx;
-  L->sy = c->sy;
   return GSHSCENE_OK;
 }
 
@@ -4120,8 +4115,6 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
   L->base.t[1] = 0.0;
   L->base.t[2] = 0.0;
   L->base0 = L->base;
-  L->rect = rect;
-  L->whole = whole;
   L->single = 0;
   L->copies = 0;
   L->arena_mark = run->item_alloc == &run->arena.self ? run->arena.used : 0;
@@ -4139,7 +4132,6 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
   if (L->period) {
     prect.x1 = prect.x0 + L->per.p;
     prect.y1 = prect.y0 + L->per.s;
-    L->rect = prect;
   }
 
   /* The state the pass changes and restores. */
@@ -4232,8 +4224,6 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
       L->period = 0;
       L->abort_tier = 0;
       L->copies = 0;
-      prect = rect;
-      L->rect = rect;
       ms->window = rect;
       run->top = L->frame;
       run->clip_count = f->clip_base;

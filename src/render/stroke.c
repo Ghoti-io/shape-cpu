@@ -420,12 +420,24 @@ void gshcpu_render_stroke_close(GSHCPU_Stroke_Cache * cache, GSHCPU_Stroke * s) 
 
 GSHCPU_Result gshcpu_render_stroke_cut(GSHCPU_Stroke * s, const GSHGEOM_Device_Point quad[4], const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits) {
+  /* The outline is in its canonical frame and the device's is that frame shifted by whole pixels (SC3), so the cell, which is the device's, is
+   * moved back into the outline's frame before the cut; a stroke under an item map that translates by whole pixels has a shift. */
+  GSHGEOM_Device_Point frame[4];
+  for (int k = 0; k < 4; k++) {
+    const int64_t x = (int64_t)quad[k].x - 64 * s->shift_x;
+    const int64_t y = (int64_t)quad[k].y - 64 * s->shift_y;
+    if (x < INT32_MIN || x > INT32_MAX || y < INT32_MIN || y > INT32_MAX) {
+      return GSHCPU_ERR_LIMIT;
+    }
+    frame[k].x = (int32_t)x;
+    frame[k].y = (int32_t)y;
+  }
   for (int p = GSHCPU_STROKE_BODY; p <= GSHCPU_STROKE_ALIGNED; p++) {
     if (!s->meta.present[p]) {
       continue;
     }
     GSHGEOM_Flat_Path * cut = NULL;
-    const GSHGEOM_Result g = gshgeom_flat_path_clip_convex(cover_of(s->outline, p), quad, alloc, limits, &cut);
+    const GSHGEOM_Result g = gshgeom_flat_path_clip_convex(cover_of(s->outline, p), frame, alloc, limits, &cut);
     if (g != GSHGEOM_OK) {
       return g == GSHGEOM_ERR_OOM ? GSHCPU_ERR_OOM : g == GSHGEOM_ERR_LIMIT ? GSHCPU_ERR_LIMIT : GSHCPU_ERR_INTERNAL;
     }

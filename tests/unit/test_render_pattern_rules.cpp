@@ -1,0 +1,756 @@
+/*
+ * SPDX-License-Identifier: LGPL-3.0-only
+ *
+ * Copyright (C) 2026 Corey Pennycuff
+ *
+ * This file is part of Ghoti.io Shape CPU.
+ *
+ * Ghoti.io Shape CPU is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * Ghoti.io Shape CPU is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
+ * License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * The rules of the pattern code, one by one (masks-images-patterns story R2; render.h, PC3 to PC11): what a copy, a unit, a clip, a stroke,
+ * the limits, the period tier's give-up, its key and the table that holds it must each do, told from a plausible wrong by a case built for it.
+ * The checks against another way of drawing the same thing are the strongest: a tile whose content stays inside its cell is the same picture as
+ * the picture drawn once for each copy as an instance (the lattice adds nothing but positions), and a stroke cut to its cell is the stroke under a
+ * clip of the cell.  The plants of tools/check-planted.py (`rp-`) are what these tests answer to.
+ */
+
+#include <gtest/gtest.h>
+
+#include "../../src/render/render_internal.h"
+#include "../render_helpers.h"
+
+#include <ghoti.io/shape-cpu/shape-cpu.h>
+#include <ghoti.io/shape-geometry/shape-geometry.h>
+#include <ghoti.io/shape-scene/shape-scene.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+
+using namespace rh;
+
+namespace {
+
+struct TSink {
+  GSHSCENE_Sink * sink = nullptr;
+  GSHCPU_Render_Counters counters{};
+  explicit TSink(unsigned tiers = GSHCPU_RENDER_TIERS_ALL, const GSHCPU_Limits * limits = nullptr, const GSHSCENE_Allocator * alloc = nullptr) {
+    EXPECT_EQ(gshcpu_render_sink_create_tiered(alloc, nullptr, limits, tiers, &counters, nullptr, nullptr, &sink), GSHCPU_OK);
+  }
+  ~TSink() {
+    EXPECT_EQ(gshscene_sink_destroy(sink), GSHSCENE_OK);
+  }
+  TSink(const TSink &) = delete;
+  TSink & operator=(const TSink &) = delete;
+};
+
+constexpr unsigned kAll = GSHCPU_RENDER_TIERS_ALL;
+constexpr unsigned kNoPeriod = GSHCPU_RENDER_TIERS_ALL & ~(unsigned)GSHCPU_RENDER_TIER_PERIOD;
+constexpr unsigned kNoCache = GSHCPU_RENDER_TIERS_ALL & ~(unsigned)GSHCPU_RENDER_TIER_CACHE;
+
+struct Out {
+  GSHSCENE_Result result = GSHSCENE_ERR_INTERNAL;
+  std::string bytes;
+  GSHSCENE_Report_Summary summary{};
+  size_t entries = 0;
+};
+
+Out draw(GSHSCENE_Sink * sink, const GSHSCENE_List * list, uint32_t w, uint32_t h, GSHCPU_Format format = GSHCPU_FORMAT_RGBA8_STRAIGHT,
+    uint32_t flags = 0, GSHSCENE_Cancel * cancel = nullptr, const GSHSCENE_Color_Space * target_space = nullptr) {
+  RasterRef raster(rf_raster(format, w, h));
+  unsigned char * px = (unsigned char *)gimg_raster_pixels(raster.raster);
+  for (size_t i = 0; i < gimg_raster_stride_bytes(raster.raster) * h; i++) {
+    px[i] = (unsigned char)(i * 7 + 3); // a backdrop that shows a pixel nothing wrote
+  }
+  if (format == GSHCPU_FORMAT_RGBAF32_STRAIGHT || format == GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED) {
+    std::memset(px, 0, gimg_raster_stride_bytes(raster.raster) * h);
+  }
+  ReportRef report;
+  GSHSCENE_Target t = target_of(raster.raster);
+  if (target_space) {
+    t.blend_space = *target_space;
+  }
+  GSHSCENE_Render_Request req = request_of(list, &t, report.report);
+  req.flags = flags;
+  req.cancel = cancel;
+  Out o;
+  o.result = gshscene_sink_render(sink, &req);
+  o.bytes = raster.bytes();
+  o.summary = report.summary();
+  o.entries = gshscene_report_count(report.report);
+  return o;
+}
+
+/** The largest difference of one premultiplied sample in 1/255 (a straight 8-bit color is compared premultiplied). */
+double max_levels(const std::string & sa, const std::string & sb, GSHCPU_Format format) {
+  const bool wide = format == GSHCPU_FORMAT_RGBAF32_STRAIGHT || format == GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED;
+  const bool straight = format == GSHCPU_FORMAT_RGBA8_STRAIGHT || format == GSHCPU_FORMAT_RGBAF32_STRAIGHT;
+  if (sa.size() != sb.size()) {
+    return 1e9;
+  }
+  const size_t sample = wide ? 4u : 1u;
+  double worst = 0.0;
+  for (size_t i = 0; i + 4 * sample <= sa.size(); i += 4 * sample) {
+    double va[4], vb[4];
+    for (int k = 0; k < 4; k++) {
+      if (wide) {
+        float x, y;
+        std::memcpy(&x, sa.data() + i + 4u * (size_t)k, 4);
+        std::memcpy(&y, sb.data() + i + 4u * (size_t)k, 4);
+        va[k] = (double)x * 255.0;
+        vb[k] = (double)y * 255.0;
+      } else {
+        va[k] = (double)(unsigned char)sa[i + (size_t)k];
+        vb[k] = (double)(unsigned char)sb[i + (size_t)k];
+      }
+    }
+    for (int k = 0; k < 3 && straight; k++) {
+      va[k] = va[k] * va[3] / 255.0;
+      vb[k] = vb[k] * vb[3] / 255.0;
+    }
+    for (int k = 0; k < 4; k++) {
+      worst = std::max(worst, std::fabs(va[k] - vb[k]));
+    }
+  }
+  return worst;
+}
+
+/** A tile of cell (0, 0, 8, 8) whose content stays 1.5 pixels inside it: variant @p v. */
+const GSHSCENE_Resource * interior_tile(RF_Ctx * c, int v) {
+  GSHSCENE_List * t = rf_open(c);
+  GSHSCENE_Gradient_Stop stops[2] = {rf_stop(0.0, rf_solid(1, 1, 0, 1)), rf_stop(1.0, rf_solid(0, 0.2, 0.9, 0.7))};
+  switch (v) {
+    case 0: // solid and linear gradient
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 4.0), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.3, 0.1, 0.8), 0, 0.0);
+      rf_fill(c, t, rf_rect(c, 2.0, 4.5, 6.0, 6.5), nullptr, GSHGEOM_FILL_NONZERO,
+          rf_gradient_paint(rf_gradient(c, rf_linear(2, 0, 6, 0, 0, 0, GSHSCENE_EXTEND_PAD), stops, 2), 0.9), 0, 0.0);
+      break;
+    case 1: // a gradient that draws nothing outside its strip (G8): a cone of equal circles
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO,
+          rf_gradient_paint(rf_gradient(c, rf_radial(2.5, 2.5, 1.0, 5.5, 5.0, 1.0, GSHSCENE_EXTEND_PAD), stops, 2), 1.0), 0, 0.0);
+      rf_fill(c, t, rf_rect(c, 3.0, 5.0, 6.0, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.5, 0.2, 0.6), 0, 0.0);
+      break;
+    case 2: { // a clip block, a group around it, and a group inside
+      rf_general(c, t, 0, 0, 0.7, GSHSCENE_COMPOSITE_SRC_OVER, nullptr);
+      rf_check(c, gshscene_list_clip_push(t, rf_circle(c, 2.3), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      GSHGEOM_Map at = rf_move(4.0, 4.0);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK); // an empty block first
+      rf_check(c, gshscene_list_clip_push(t, rf_circle(c, 2.3), &at, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.2, 0.9, 1.0), 0, 0.0);
+      rf_check(c, gshscene_list_clip_push(t, rf_rect(c, 3, 3, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.8, 0.1, 0.9), 0, 0.0);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      rf_pop(c, t);
+      break;
+    }
+    case 3: { // two clips in force over a fill, and a second block after the first
+      rf_check(c, gshscene_list_clip_push(t, rf_rect(c, 1.5, 1.5, 5.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_check(c, gshscene_list_clip_push(t, rf_rect(c, 2.5, 1.5, 6.5, 5.5), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.7, 0.2, 0.5, 0.9), 0, 0.0);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      rf_fill(c, t, rf_rect(c, 5.0, 5.0, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.1, 0.1, 1.0), 0, 0.0);
+      break;
+    }
+    case 4: { // a stroke inside the cell (centered, inside and outside alignment), a fill over it
+      const double line[4] = {2.0, 2.5, 6.0, 2.5};
+      rf_stroke(c, t, rf_polyline(c, line, 2, 0), rf_pen(c, 1.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), nullptr, rf_solid(0.1, 0.1, 0.5, 1.0));
+      const double sq[8] = {2.5, 4.0, 5.5, 4.0, 5.5, 6.0, 2.5, 6.0};
+      rf_stroke(c, t, rf_polyline(c, sq, 4, 1),
+          rf_style(c, 0.8, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT, GSHSCENE_STROKE_DEGENERATE_DRAW, nullptr, 0,
+              0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_INSIDE, GSHGEOM_FILL_NONZERO),
+          nullptr, rf_solid(0.6, 0.1, 0.1, 0.8));
+      break;
+    }
+    case 6: { // a pattern in the tile (the inner lattice follows the copy)
+      GSHSCENE_List * in = rf_open(c);
+      rf_fill(c, in, rf_rect(c, 0.25, 0.25, 1.75, 1.75), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.4, 0.8, 1.0), 0, 0.0);
+      const GSHSCENE_Resource * inner = rf_pattern(c, rf_picture_of(c, in), 0, 0, 2, 2, 2, 2, 1, 1, rf_move(0.5, 0.25), nullptr);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(inner, 1.0), 0, 0.0);
+      break;
+    }
+    case 7: { // two blocks of clips one after the other, with different footprints, and a fill after each
+      rf_check(c, gshscene_list_clip_push(t, rf_circle(c, 1.2), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      GSHGEOM_Map at = rf_move(3.0, 3.0);
+      rf_check(c, gshscene_list_clip_push(t, rf_circle(c, 1.3), &at, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.2, 0.2, 1.0), 0, 0.0);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      GSHGEOM_Map at2 = rf_move(5.0, 5.0);
+      rf_check(c, gshscene_list_clip_push(t, rf_circle(c, 1.4), &at2, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.2, 0.9, 1.0), 0, 0.0);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      break;
+    }
+    case 8: { // an instanced picture, under a map, that holds a clip and a fill
+      GSHSCENE_List * in = rf_open(c);
+      rf_check(c, gshscene_list_clip_push(in, rf_circle(c, 2.0), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(c, in, rf_rect(c, -2, -2, 2, 2), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.3, 0.6, 0.2, 0.9), 0, 0.0);
+      rf_check(c, gshscene_list_clip_pop(in) == GSHSCENE_OK);
+      GSHGEOM_Map at = rf_move(3.5, 4.5);
+      rf_check(c, gshscene_list_instance(t, rf_picture_of(c, in), &at, 0, 0.0) == GSHSCENE_OK);
+      break;
+    }
+    case 9: { // a stroke under an item map that moves it by whole pixels, and a wide one past the cell (cut)
+      const double line[4] = {0.0, 0.0, 4.0, 1.0};
+      GSHGEOM_Map at = rf_move(2.0, 3.0);
+      rf_stroke(c, t, rf_polyline(c, line, 2, 0), rf_pen(c, 1.2, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_ROUND), &at, rf_solid(0.1, 0.5, 0.5, 1.0));
+      break;
+    }
+    case 5: { // an image paint and the foreground
+      GSHSCENE_Color_Space none;
+      std::memset(&none, 0, sizeof none);
+      const GSHSCENE_Resource * img = rf_image(c, 4, 3, 4, 8, GIMG_ALPHA_STRAIGHT, 0, none);
+      GSHSCENE_Paint ip = rf_image_paint(c, img, rf_place(c, 1.0, 1.0, 1.5, 1.5), GSHSCENE_IMAGE_EXTEND_PAD, GSHSCENE_IMAGE_EXTEND_PAD,
+          GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA, none, nullptr, 1.0);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 5.5, 4.5), nullptr, GSHGEOM_FILL_NONZERO, ip, 0, 0.0);
+      GSHSCENE_Paint f = rf_solid(0, 0, 0, 0.7);
+      f.kind = GSHSCENE_PAINT_FOREGROUND;
+      f.rgba[3] = 0.7;
+      rf_fill(c, t, rf_rect(c, 3.0, 5.0, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, f, 0, 0.0);
+      break;
+    }
+    default:
+      break;
+  }
+  return rf_picture_of(c, t);
+}
+
+/** The pattern, and the list that fills the rectangle (4, 3, 68, 51) with it, against the list that draws one instance of the tile for each copy under a clip of that rectangle. */
+struct Twin {
+  RF_Ctx ctx;
+  GSHSCENE_List * pattern = nullptr;
+  GSHSCENE_List * explicit_copies = nullptr;
+  Twin(int variant, double step_x, double step_y, double tx, double ty, int outer_clip = 0, double cx = 0.0, double cy = 0.0) {
+    rf_begin(&ctx);
+    GSHSCENE_Color fg;
+    std::memset(&fg, 0, sizeof fg);
+    fg.rgba[0] = 0.2;
+    fg.rgba[1] = 0.7;
+    fg.rgba[2] = 0.3;
+    fg.rgba[3] = 1.0;
+    const GSHSCENE_Resource * tile = interior_tile(&ctx, variant);
+    const GSHSCENE_Resource * pat = rf_pattern(&ctx, tile, cx, cy, 8, 8, step_x, step_y, 1, 1, rf_move(tx, ty), nullptr);
+    pattern = rf_open(&ctx);
+    rf_check(&ctx, gshscene_list_set_foreground(pattern, &fg) == GSHSCENE_OK);
+    rf_fill(&ctx, pattern, rf_rect(&ctx, 0, 0, 72, 56), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.95, 0.9, 1.0), 0, 0.0);
+    if (outer_clip) {
+      GSHGEOM_Map at = rf_move(36.0, 28.0);
+      rf_check(&ctx, gshscene_list_clip_push(pattern, rf_circle(&ctx, 22.0), &at, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+    }
+    rf_fill(&ctx, pattern, rf_rect(&ctx, 4, 3, 68, 51), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+    if (outer_clip) {
+      rf_check(&ctx, gshscene_list_clip_pop(pattern) == GSHSCENE_OK);
+    }
+    rf_close(&ctx, pattern);
+    explicit_copies = rf_open(&ctx);
+    rf_check(&ctx, gshscene_list_set_foreground(explicit_copies, &fg) == GSHSCENE_OK);
+    rf_fill(&ctx, explicit_copies, rf_rect(&ctx, 0, 0, 72, 56), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.95, 0.9, 1.0), 0, 0.0);
+    if (outer_clip) {
+      GSHGEOM_Map at = rf_move(36.0, 28.0);
+      rf_check(&ctx, gshscene_list_clip_push(explicit_copies, rf_circle(&ctx, 22.0), &at, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+    }
+    rf_check(&ctx, gshscene_list_clip_push(explicit_copies, rf_rect(&ctx, 4, 3, 68, 51), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+    for (int j = -3; j <= 16; j++) {
+      for (int i = -3; i <= 16; i++) {
+        const double x = tx + i * step_x, y = ty + j * step_y;
+        if (x + 8 < 4 || x > 68 || y + 8 < 3 || y > 51) {
+          continue;
+        }
+        GSHGEOM_Map at = rf_move(x, y);
+        rf_check(&ctx, gshscene_list_instance(explicit_copies, tile, &at, 0, 0.0) == GSHSCENE_OK);
+      }
+    }
+    rf_check(&ctx, gshscene_list_clip_pop(explicit_copies) == GSHSCENE_OK);
+    if (outer_clip) {
+      rf_check(&ctx, gshscene_list_clip_pop(explicit_copies) == GSHSCENE_OK);
+    }
+    rf_close(&ctx, explicit_copies);
+  }
+  ~Twin() {
+    rf_release(&ctx);
+  }
+  Twin(const Twin &) = delete;
+  Twin & operator=(const Twin &) = delete;
+};
+
+} // namespace
+
+TEST(RenderPatternRules, ATileInsideItsCellIsThePictureDrawnOnceForEachCopy) {
+  // PC3 to PC6: with nothing at a seam, the lattice adds positions and nothing else.  The tiles hold a gradient that draws nothing in places (G8), clips
+  // (two in force at once, a block after a block, a clip inside a group), groups, strokes of every alignment and an image: every bookkeeping of a unit's
+  // accumulator, its clips, its shifts and its weights is told from a wrong one by the pixels.
+  const double lattices[4][4] = {{8, 8, 0.3, 0.45}, {10, 9, 0.7, 0.2}, {6, 6, 0.25, 0.5}, {8, 8, 0.0, 0.0}};
+  for (int variant = 0; variant < 10; variant++) {
+    for (const auto & l : lattices) {
+      Twin tw(variant, l[0], l[1], l[2], l[3]);
+      for (GSHCPU_Format format : {GSHCPU_FORMAT_RGBA8_STRAIGHT, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED}) {
+        TSink a(kAll), b(kAll);
+        Out p = draw(a.sink, tw.pattern, 72, 56, format);
+        Out e = draw(b.sink, tw.explicit_copies, 72, 56, format);
+        ASSERT_EQ(p.result, GSHSCENE_OK);
+        ASSERT_EQ(e.result, GSHSCENE_OK);
+        EXPECT_LE(max_levels(p.bytes, e.bytes, format), format == GSHCPU_FORMAT_RGBA8_STRAIGHT ? 1.0 : 0.02)
+            << "variant " << variant << " lattice " << l[0] << "," << l[1] << " at " << l[2] << "," << l[3] << " " << gshcpu_format_string(format);
+      }
+    }
+  }
+}
+
+TEST(RenderPatternRules, ZeroCopiesLeaveTheTargetAsItWas) {
+  // PC8: a use none of whose copies meets the region draws nothing and writes nothing: the backdrop's bytes are the target's.
+  RF_Ctx c;
+  rf_begin(&c);
+  const GSHSCENE_Resource * tile = interior_tile(&c, 0);
+  const GSHSCENE_Resource * far = rf_pattern(&c, tile, 0, 0, 8, 8, 8, 8, 0, 0, rf_move(500.0, 500.0), nullptr); // one copy, far off
+  GSHSCENE_List * l = rf_open(&c);
+  rf_fill(&c, l, rf_rect(&c, 4, 3, 40, 30), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(far, 1.0), 0, 0.0);
+  rf_close(&c, l);
+  GSHSCENE_List * empty = rf_open(&c);
+  rf_close(&c, empty);
+  for (GSHCPU_Format format : RF_FORMATS) {
+    TSink a(kAll), b(kAll);
+    Out p = draw(a.sink, l, 72, 56, format);
+    Out e = draw(b.sink, empty, 72, 56, format);
+    EXPECT_EQ(p.result, GSHSCENE_OK);
+    EXPECT_EQ(p.bytes, e.bytes) << gshcpu_format_string(format);
+  }
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, NestedCopiesAreCountedAndSummedAtEveryLevelAndEachUseStartsAtZero) {
+  // PC8: the copies of a use are counted by LT1 at every level of nesting and summed.  The outer use is the rectangle [0, 16]^2 of 8-pixel cells at the
+  // origin: 4 x 4 cells meet it (the touching ones too), four of them (the cells [0, 16]) are drawn, and in each the inner use is the rectangle
+  // [1, 7]^2 of 2-pixel cells: 4 x 4.  So 16 + 4 * 16 = 80 copies are counted, and 80 is the limit that passes and 79 the first that refuses.
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_List * inner_tile = rf_open(&c);
+  rf_fill(&c, inner_tile, rf_rect(&c, 0.25, 0.25, 1.75, 1.75), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.4, 0.8, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * inner = rf_pattern(&c, rf_picture_of(&c, inner_tile), 0, 0, 2, 2, 2, 2, 1, 1, rf_move(0, 0), nullptr);
+  GSHSCENE_List * outer_tile = rf_open(&c);
+  rf_fill(&c, outer_tile, rf_rect(&c, 1, 1, 7, 7), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(inner, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * outer = rf_pattern(&c, rf_picture_of(&c, outer_tile), 0, 0, 8, 8, 8, 8, 1, 1, rf_move(0, 0), nullptr);
+  GSHSCENE_List * nested = rf_open(&c);
+  rf_fill(&c, nested, rf_rect(&c, 0, 0, 16, 16), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(outer, 1.0), 0, 0.0);
+  rf_close(&c, nested);
+  for (uint64_t limit : {uint64_t(15), uint64_t(16), uint64_t(17), uint64_t(20), uint64_t(40), uint64_t(79), uint64_t(80), uint64_t(81), uint64_t(1000)}) {
+    GSHCPU_Limits limits;
+    gshcpu_limits_default(&limits);
+    limits.max_pattern_cells = limit;
+    TSink s(kAll, &limits);
+    Out o = draw(s.sink, nested, 16, 16);
+    EXPECT_EQ(o.summary.by_class[GSHSCENE_ENTRY_REFUSED], limit < 80 ? 1u : 0u) << limit;
+  }
+  // Two uses in one list: each starts at zero, so a limit of exactly one use's count passes both.
+  GSHSCENE_List * two = rf_open(&c);
+  rf_fill(&c, two, rf_rect(&c, 0, 0, 16, 16), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(outer, 1.0), 0, 0.0);
+  rf_fill(&c, two, rf_rect(&c, 0, 0, 16, 16), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(outer, 0.5), 0, 0.0);
+  rf_close(&c, two);
+  GSHCPU_Limits exact;
+  gshcpu_limits_default(&exact);
+  exact.max_pattern_cells = 80;
+  TSink s2(kAll, &exact);
+  Out o2 = draw(s2.sink, two, 16, 16);
+  EXPECT_EQ(o2.summary.by_class[GSHSCENE_ENTRY_REFUSED], 0u);
+  // A limit past 2^53 (and "no limit") is the same as a large one: the lattice enumeration's own range is not the sink's limit.
+  for (uint64_t limit : {uint64_t(1) << 60, UINT64_MAX}) {
+    GSHCPU_Limits big;
+    gshcpu_limits_default(&big);
+    big.max_pattern_cells = limit;
+    TSink sb(kAll, &big);
+    Out ob = draw(sb.sink, nested, 16, 16);
+    EXPECT_EQ(ob.summary.by_class[GSHSCENE_ENTRY_REFUSED], 0u) << limit;
+    EXPECT_EQ(ob.result, GSHSCENE_OK);
+  }
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, NoLimitMeansNoLimitForMoreThanAMillionCopies) {
+  // PC8: UINT64_MAX is no cap: 2^20 + 1 copies of a one-row lattice are counted and drawn.
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_List * t = rf_open(&c);
+  rf_fill(&c, t, rf_rect(&c, 0, 0, 1.0 / 64.0, 1), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.4, 0.8, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * p = rf_pattern(&c, rf_picture_of(&c, t), 0, 0, 1.0 / 64.0, 1, 1.0 / 64.0, 1, 1, 0, rf_move(0.0, 0.0), nullptr);
+  GSHSCENE_List * l = rf_open(&c);
+  rf_fill(&c, l, rf_rect(&c, 0, 0, 16385, 1), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(p, 1.0), 0, 0.0);
+  rf_close(&c, l);
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  limits.max_pattern_cells = UINT64_MAX;
+  limits.max_dimension = 20000;
+  TSink s(kAll, &limits);
+  Out o = draw(s.sink, l, 16385, 1);
+  EXPECT_EQ(o.result, GSHSCENE_OK);
+  EXPECT_EQ(o.summary.by_class[GSHSCENE_ENTRY_REFUSED], 0u);
+  rf_release(&c);
+}
+
+/** An allocator that sets @p cancel at its @p at-th allocation and counts every call. */
+struct CancelAlloc {
+  GSHSCENE_Cancel * cancel;
+  long at;
+  long calls = 0;
+  long after = 0;
+  bool fired = false;
+};
+
+namespace {
+void * ca_malloc(void * ctx, size_t n) {
+  CancelAlloc * a = (CancelAlloc *)ctx;
+  a->calls++;
+  if (a->fired) {
+    a->after++;
+  } else if (a->calls == a->at) {
+    gshscene_cancel_set(a->cancel);
+    a->fired = true;
+  }
+  return std::malloc(n ? n : 1);
+}
+void * ca_calloc(void * ctx, size_t k, size_t n) {
+  CancelAlloc * a = (CancelAlloc *)ctx;
+  a->calls++;
+  if (a->fired) {
+    a->after++;
+  } else if (a->calls == a->at) {
+    gshscene_cancel_set(a->cancel);
+    a->fired = true;
+  }
+  return std::calloc(k ? k : 1, n ? n : 1);
+}
+void * ca_realloc(void * ctx, void * p, size_t n) {
+  (void)ctx;
+  return std::realloc(p, n ? n : 1);
+}
+void ca_free(void * ctx, void * p) {
+  (void)ctx;
+  std::free(p);
+}
+} // namespace
+
+TEST(RenderPatternRules, ACancelInsideAPassStopsBeforeTheNextCopyAndTheWorkIsCounted) {
+  // PC11: cancel is checked before every copy of every unit, so a token set in the middle of a pass stops it within a copy, not after the whole
+  // lattice; and the pass's work (each unit's pixels, the layer's apply) is in the report's `work_max`.
+  RF_Ctx c;
+  rf_begin(&c);
+  const GSHSCENE_Resource * tile = interior_tile(&c, 0);
+  const GSHSCENE_Resource * pat = rf_pattern(&c, tile, 0, 0, 8, 8, 8, 8, 1, 1, rf_move(0.3, 0.45), nullptr);
+  GSHSCENE_List * l = rf_open(&c);
+  rf_fill(&c, l, rf_rect(&c, 0, 0, 200, 150), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  rf_close(&c, l);
+  {
+    TSink plain(kNoPeriod);
+    Out o = draw(plain.sink, l, 200, 150);
+    ASSERT_EQ(o.result, GSHSCENE_OK);
+    EXPECT_GE(o.summary.work_max, 200u * 150u) << "the pass's pixels are counted";
+  }
+  long full = 0;
+  {
+    CancelAlloc counting{nullptr, 1L << 40};
+    GSHSCENE_Allocator al = {&counting, ca_malloc, ca_calloc, ca_realloc, ca_free};
+    TSink s(kNoPeriod, nullptr, &al);
+    draw(s.sink, l, 200, 150);
+    full = counting.calls;
+  }
+  ASSERT_GT(full, 200);
+  GSHSCENE_Cancel cancel;
+  gshscene_cancel_init(&cancel);
+  CancelAlloc ca{&cancel, full / 4};
+  GSHSCENE_Allocator al = {&ca, ca_malloc, ca_calloc, ca_realloc, ca_free};
+  TSink s(kNoPeriod, nullptr, &al);
+  Out o = draw(s.sink, l, 200, 150, GSHCPU_FORMAT_RGBA8_STRAIGHT, 0, &cancel);
+  EXPECT_EQ(o.result, GSHSCENE_ERR_CANCELLED);
+  EXPECT_LT(ca.after, full / 40) << "the pass went on for " << ca.after << " allocations after the token was set, of " << full;
+}
+
+TEST(RenderPatternRules, AStrokeCutToItsCellIsTheStrokeUnderAClipOfTheCell) {
+  // PC5: a stroke that runs past the cell edge (centered, inside and outside aligned, with round, square and butt caps and a join) in a gapped
+  // lattice is the stroke under a clip of the cell, to the two engines' rounding: the body, the aligned part and the clip path are each cut.
+  struct Case {
+    uint32_t align, cap;
+    double width;
+  };
+  const Case cases[] = {{GSHSCENE_STROKE_ALIGN_CENTER, GSHSCENE_STROKE_CAP_BUTT, 2.0}, {GSHSCENE_STROKE_ALIGN_CENTER, GSHSCENE_STROKE_CAP_ROUND, 2.5},
+      {GSHSCENE_STROKE_ALIGN_INSIDE, GSHSCENE_STROKE_CAP_SQUARE, 1.5}, {GSHSCENE_STROKE_ALIGN_OUTSIDE, GSHSCENE_STROKE_CAP_BUTT, 1.5}};
+  for (const Case & k : cases) {
+    RF_Ctx c;
+    rf_begin(&c);
+    const GSHSCENE_Resource * path;
+    {
+      const double zig[10] = {-2.0, 3.0, 3.0, 6.5, 6.0, 1.0, 10.0, 7.0, 12.0, 4.0};
+      path = rf_polyline(&c, zig, 5, k.align != GSHSCENE_STROKE_ALIGN_CENTER);
+    }
+    const GSHSCENE_Resource * style = rf_style(&c, k.width, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, k.cap, GSHSCENE_STROKE_DEGENERATE_DRAW,
+        nullptr, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH, k.align, GSHGEOM_FILL_NONZERO);
+    GSHSCENE_List * t = rf_open(&c);
+    rf_stroke(&c, t, path, style, nullptr, rf_solid(0.1, 0.2, 0.6, 0.8));
+    const GSHSCENE_Resource * tile = rf_picture_of(&c, t);
+    const GSHSCENE_Resource * pat = rf_pattern(&c, tile, 0, 0, 8, 8, 12, 12, 1, 1, rf_move(0.25, 0.5), nullptr); // a gap: no copy continues another
+    GSHSCENE_List * l1 = rf_open(&c);
+    rf_fill(&c, l1, rf_rect(&c, 0, 0, 60, 48), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+    rf_close(&c, l1);
+    GSHSCENE_List * l2 = rf_open(&c);
+    for (int j = -1; j < 5; j++) {
+      for (int i = -1; i < 6; i++) {
+        const double x = 0.25 + 12.0 * i, y = 0.5 + 12.0 * j;
+        GSHGEOM_Map at = rf_move(x, y);
+        rf_check(&c, gshscene_list_clip_push(l2, rf_rect(&c, 0, 0, 8, 8), &at, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+        rf_check(&c, gshscene_list_instance(l2, tile, &at, 0, 0.0) == GSHSCENE_OK);
+        rf_check(&c, gshscene_list_clip_pop(l2) == GSHSCENE_OK);
+      }
+    }
+    rf_close(&c, l2);
+    for (GSHCPU_Format format : {GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED}) {
+      TSink a(kAll), b(kAll);
+      Out p = draw(a.sink, l1, 60, 48, format);
+      Out e = draw(b.sink, l2, 60, 48, format);
+      ASSERT_EQ(p.result, GSHSCENE_OK);
+      ASSERT_EQ(e.result, GSHSCENE_OK);
+      if (std::getenv("RULES_DEBUG") && format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED) {
+        int shown = 0;
+        for (size_t i = 0; i + 4 <= p.bytes.size() && shown < 12; i += 4) {
+          if (std::memcmp(p.bytes.data() + i, e.bytes.data() + i, 4) != 0) {
+            std::printf("px (%zu,%zu) pattern %02x%02x%02x%02x explicit %02x%02x%02x%02x\n", (i / 4) % 60, (i / 4) / 60, (unsigned char)p.bytes[i], (unsigned char)p.bytes[i + 1],
+                (unsigned char)p.bytes[i + 2], (unsigned char)p.bytes[i + 3], (unsigned char)e.bytes[i], (unsigned char)e.bytes[i + 1], (unsigned char)e.bytes[i + 2], (unsigned char)e.bytes[i + 3]);
+            shown++;
+          }
+        }
+      }
+      EXPECT_LE(max_levels(p.bytes, e.bytes, format), 40.0)
+          << "align " << k.align << " cap " << k.cap << " " << gshcpu_format_string(format);
+    }
+    rf_release(&c);
+  }
+}
+
+
+TEST(RenderPatternRules, AnOuterClipWeighsTheFillOnceAndTheCellOriginIsHonored) {
+  // PC2: the clips in force around the use weigh the fill and never a copy (so the edge of an outer clip is its coverage once, not squared); and
+  // the cell's own origin (x, y) places the cell: a tile whose content straddles a cell that is not at the origin is cut where the cell is.
+  for (int variant : {0, 2, 3}) {
+    Twin tw(variant, 8, 8, 0.3, 0.45, 1);
+    TSink a(kAll), b(kAll);
+    Out p = draw(a.sink, tw.pattern, 72, 56);
+    Out e = draw(b.sink, tw.explicit_copies, 72, 56);
+    ASSERT_EQ(p.result, GSHSCENE_OK);
+    EXPECT_LE(max_levels(p.bytes, e.bytes, GSHCPU_FORMAT_RGBA8_STRAIGHT), 2.0) << variant;
+  }
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_List * t = rf_open(&c);
+  rf_fill(&c, t, rf_rect(&c, 3, 2, 9, 8), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.3, 0.8, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * tile = rf_picture_of(&c, t);
+  const GSHSCENE_Resource * pat = rf_pattern(&c, tile, 2.0, 1.0, 8, 8, 12, 12, 1, 1, rf_move(1.0, 2.0), nullptr);
+  GSHSCENE_List * l1 = rf_open(&c);
+  rf_fill(&c, l1, rf_rect(&c, 0, 0, 60, 48), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  rf_close(&c, l1);
+  GSHSCENE_List * l2 = rf_open(&c);
+  for (int j = -1; j < 5; j++) {
+    for (int i = -1; i < 6; i++) {
+      GSHGEOM_Map at = rf_move(1.0 + 12.0 * i, 2.0 + 12.0 * j);
+      rf_fill(&c, l2, rf_rect(&c, 3, 2, 9, 8), &at, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.3, 0.8, 1.0), 0, 0.0);
+    }
+  }
+  rf_close(&c, l2);
+  TSink a(kAll), b(kAll);
+  Out p = draw(a.sink, l1, 60, 48);
+  Out e = draw(b.sink, l2, 60, 48);
+  // the cell [2, 10] x [1, 9] cuts the fill [3, 9] x [2, 8] not at all: the copies are the fills
+  // the pass rewrites an uncovered pixel of the use through the layer (a straight pixel of the arbitrary backdrop may move by a level in the round trip), so
+  // the bar is one level, as for the twin; a copy a cell off, or a cell cut where it is not, moves a pixel by far more
+  EXPECT_LE(max_levels(p.bytes, e.bytes, GSHCPU_FORMAT_RGBA8_STRAIGHT), 1.0);
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, AGroupAroundAClipBlockTakesTheUnionOfTheCopiesClips) {
+  // PC4: a clip block that reaches the cell's edges, around a group, weighs the group at its pop by the saturating union of its copies' restricted
+  // regions: where two cells share a pixel their coverages sum and are held at 255, so the seam is not a hole.  A tile that is only the cell's fill
+  // is the reference: the same picture to a rounding.  (A clip block with no group is a mask of its own whose edge multiplies the cell's cut copy by copy,
+  // which is the rule for a clip, not for a group, and is not compared.)
+  for (double tx : {0.25, 0.3, 0.5, 0.77}) {
+    RF_Ctx c;
+    rf_begin(&c);
+    const GSHSCENE_Resource * tiles[2];
+    for (int k = 0; k < 2; k++) {
+      GSHSCENE_List * t = rf_open(&c);
+      if (k) {
+        rf_check(&c, gshscene_list_clip_push(t, rf_rect(&c, 0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+        rf_general(&c, t, 0, 0, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, nullptr);
+      }
+      rf_fill(&c, t, rf_rect(&c, 0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.5, 0.8, 1.0), 0, 0.0);
+      if (k) {
+        rf_pop(&c, t);
+        rf_check(&c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      }
+      tiles[k] = rf_picture_of(&c, t);
+    }
+    Out outs[2];
+    for (int k = 0; k < 2; k++) {
+      const GSHSCENE_Resource * pat = rf_pattern(&c, tiles[k], 0, 0, 8, 8, 8, 8, 1, 1, rf_move(tx, 0.4), nullptr);
+      GSHSCENE_List * l = rf_open(&c);
+      rf_fill(&c, l, rf_rect(&c, 0, 0, 40, 32), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+      rf_close(&c, l);
+      TSink s(kAll);
+      outs[k] = draw(s.sink, l, 40, 32);
+      ASSERT_EQ(outs[k].result, GSHSCENE_OK);
+    }
+    EXPECT_LE(max_levels(outs[0].bytes, outs[1].bytes, GSHCPU_FORMAT_RGBA8_STRAIGHT), 3.0) << tx;
+    // and the seam is covered: every pixel of the use is opaque
+    for (size_t i = 3; i < outs[1].bytes.size(); i += 4) {
+      const size_t px = i / 4, x = px % 40, y = px / 40;
+      if (x >= 1 && x < 39 && y >= 1 && y < 31) {
+        ASSERT_EQ((unsigned char)outs[1].bytes[i], 255) << x << "," << y << " tx " << tx;
+      }
+    }
+    rf_release(&c);
+  }
+}
+
+TEST(RenderPatternRules, AnEmptyTileStillPaysForTheLayerAndAUseOutsideTheExtentDrawsNothing) {
+  // PC11, PC2: the pass's apply over the use's pixels is work even when the tile draws nothing; and a use none of whose pixels is in the extent is
+  // skipped without a refusal, the target as it was.
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_List * t = rf_open(&c);
+  const GSHSCENE_Resource * empty = rf_pattern(&c, rf_picture_of(&c, t), 0, 0, 8, 8, 8, 8, 1, 1, rf_move(0.3, 0.45), nullptr);
+  GSHSCENE_List * l = rf_open(&c);
+  rf_fill(&c, l, rf_rect(&c, 0, 0, 200, 150), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(empty, 1.0), 0, 0.0);
+  rf_close(&c, l);
+  TSink s(kNoPeriod);
+  Out o = draw(s.sink, l, 200, 150);
+  EXPECT_EQ(o.result, GSHSCENE_OK);
+  EXPECT_GE(o.summary.work_max, 200u * 150u);
+  const GSHSCENE_Resource * tile = interior_tile(&c, 0);
+  const GSHSCENE_Resource * pat = rf_pattern(&c, tile, 0, 0, 8, 8, 8, 8, 1, 1, rf_move(0.0, 0.0), nullptr);
+  GSHSCENE_List * out_of_extent = rf_open(&c);
+  rf_fill(&c, out_of_extent, rf_rect(&c, 40, 30, 70, 50), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  rf_close(&c, out_of_extent);
+  GSHSCENE_List * none = rf_open(&c);
+  rf_close(&c, none);
+  RasterRef ra(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 72, 56)), rb(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 72, 56));
+  for (RasterRef * r : {&ra, &rb}) {
+    unsigned char * px = (unsigned char *)gimg_raster_pixels(r->raster);
+    for (size_t i = 0; i < gimg_raster_stride_bytes(r->raster) * 56; i++) {
+      px[i] = (unsigned char)(i * 5 + 1);
+    }
+  }
+  TSink sa(kAll), sb(kAll);
+  ReportRef rep;
+  GSHSCENE_Target ta = target_of(ra.raster);
+  ta.extent.x0 = 0;
+  ta.extent.y0 = 0;
+  ta.extent.x1 = 30;
+  ta.extent.y1 = 25;
+  GSHSCENE_Render_Request qa = request_of(out_of_extent, &ta, rep.report);
+  EXPECT_EQ(gshscene_sink_render(sa.sink, &qa), GSHSCENE_OK);
+  EXPECT_EQ(rep.summary().by_class[GSHSCENE_ENTRY_REFUSED], 0u);
+  GSHSCENE_Target tb = target_of(rb.raster);
+  tb.extent = ta.extent;
+  GSHSCENE_Render_Request qb = request_of(none, &tb, rep.report);
+  EXPECT_EQ(gshscene_sink_render(sb.sink, &qb), GSHSCENE_OK);
+  EXPECT_EQ(ra.bytes(), rb.bytes());
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, AHugeTranslationOrCellIsTheSameRefusalUnderBothTiers) {
+  // PC3, PC8: a lattice translated past 2^40 pixels has no canonical position for its copies (RESOURCE_LIMIT), and cells wider than the range the sink draws in, at
+  // a step too large to take the tier, are refused for the coordinates they would need; both tiers say the same and draw nothing.
+  RF_Ctx c;
+  rf_begin(&c);
+  const GSHSCENE_Resource * tile = interior_tile(&c, 0);
+  const GSHSCENE_Resource * far = rf_pattern(&c, tile, 0, 0, 8, 8, 8, 8, 1, 1, rf_move(2199023255552.0 * 2.0, 0.0), nullptr);
+  GSHSCENE_List * l = rf_open(&c);
+  rf_fill(&c, l, rf_rect(&c, 0, 0, 40, 30), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(far, 1.0), 0, 0.0);
+  rf_close(&c, l);
+  GSHSCENE_List * big = rf_open(&c);
+  rf_fill(&c, big, rf_rect(&c, 0, 0, 33554432, 33554432), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.4, 0.8, 0.5), 0, 0.0);
+  const GSHSCENE_Resource * wide = rf_pattern(&c, rf_picture_of(&c, big), 0, 0, 33554432, 33554432, 16777216, 16777216, 1, 1, rf_move(0.0, 0.0), nullptr);
+  GSHSCENE_List * l2 = rf_open(&c);
+  rf_fill(&c, l2, rf_rect(&c, 0, 0, 40, 30), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(wide, 1.0), 0, 0.0);
+  rf_close(&c, l2);
+  for (GSHSCENE_List * list : {l, l2}) {
+    TSink on(kAll), off(kNoPeriod);
+    Out a = draw(on.sink, list, 40, 30);
+    Out b = draw(off.sink, list, 40, 30);
+    EXPECT_EQ(a.result, b.result);
+    EXPECT_EQ(a.bytes, b.bytes);
+    EXPECT_EQ(a.summary.by_class[GSHSCENE_ENTRY_REFUSED], b.summary.by_class[GSHSCENE_ENTRY_REFUSED]);
+    EXPECT_GE(a.summary.by_class[GSHSCENE_ENTRY_REFUSED], 1u) << "a limit, reported";
+  }
+  rf_release(&c);
+}
+
+/** An allocator that counts what is live. */
+struct LiveAlloc {
+  long live = 0;
+};
+
+namespace {
+void * la_malloc(void * ctx, size_t n) {
+  ((LiveAlloc *)ctx)->live++;
+  return std::malloc(n ? n : 1);
+}
+void * la_calloc(void * ctx, size_t k, size_t n) {
+  ((LiveAlloc *)ctx)->live++;
+  return std::calloc(k ? k : 1, n ? n : 1);
+}
+void * la_realloc(void * ctx, void * p, size_t n) {
+  if (!p) {
+    ((LiveAlloc *)ctx)->live++;
+  }
+  return std::realloc(p, n ? n : 1);
+}
+void la_free(void * ctx, void * p) {
+  if (p) {
+    ((LiveAlloc *)ctx)->live--;
+  }
+  std::free(p);
+}
+} // namespace
+
+TEST(RenderPatternRules, ARasterReadFromTheTableIsReleasedSoThatAnEvictionFreesIt) {
+  // PC10: a hit pins the entry for the copy and releases it; an entry whose pin were never released would survive its eviction and be a leak.
+  LiveAlloc live;
+  {
+    GSHSCENE_Allocator al = {&live, la_malloc, la_calloc, la_realloc, la_free};
+    TSink s(kAll, nullptr, &al);
+    RF_Ctx c;
+    rf_begin(&c);
+    const GSHSCENE_Resource * tile = interior_tile(&c, 0);
+    const GSHSCENE_Resource * pat = rf_pattern(&c, tile, 0, 0, 8, 8, 8, 8, 1, 1, rf_move(0.25, 0.5), nullptr);
+    GSHSCENE_List * l = rf_open(&c);
+    rf_fill(&c, l, rf_rect(&c, 0, 0, 72, 56), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+    rf_close(&c, l);
+    draw(s.sink, l, 72, 56);
+    draw(s.sink, l, 72, 56);
+    EXPECT_GE(s.counters.period_hits, 1u);
+    EXPECT_EQ(gshscene_sink_evict(s.sink, gshscene_resource_id(pat)), GSHSCENE_OK);
+    uint64_t held = 0;
+    gshscene_sink_static_bytes(s.sink, &held);
+    EXPECT_EQ(held, 0u);
+    rf_release(&c);
+  }
+  EXPECT_EQ(live.live, 0) << "every byte the sink took is given back";
+}
+
+int main(int argc, char ** argv) {
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
