@@ -52,8 +52,10 @@
 #include "render_internal.h"
 
 #include <ghoti.io/shape-geometry/clip.h>
+#include <ghoti.io/shape-geometry/hatch.h>
 #include <ghoti.io/shape-geometry/hash.h>
 #include <ghoti.io/shape-scene/glyph.h>
+#include <ghoti.io/shape-scene/hatch.h>
 #include <ghoti.io/shape-scene/resource.h>
 #include <ghoti.io/shape-scene/stroke.h>
 
@@ -214,16 +216,23 @@ static GSHCPU_Result set_box(GSHCPU_Stroke * s, int p) {
   return GSHCPU_OK;
 }
 
-GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGEOM_Allocator * alloc,
-    const GSHGEOM_Limits * limits, const GSHSCENE_Item * item, const GSHGEOM_Map * composed, GSHCPU_Stroke * out) {
+GSHCPU_Result gshcpu_render_stroke_open_lines(GSHCPU_Stroke_Cache * cache, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, uint64_t max_lines, const GSHSCENE_Item * item, const GSHGEOM_Map * composed, GSHCPU_Stroke * out) {
   memset(out, 0, sizeof *out);
+  /* HX13: a hatch fill is drawn as the stroke of its trimmed, dashed lines: the item's style slot names the hatch, whose own style is the pen. */
+  GSHSCENE_Hatch hatch;
+  const int is_hatch = item->style && gshscene_resource_kind(item->style) == GSHSCENE_RESOURCE_HATCH;
+  if (is_hatch && gshscene_resource_hatch(item->style, &hatch) != GSHSCENE_OK) {
+    return GSHCPU_ERR_INTERNAL;
+  }
+  const GSHSCENE_Resource * pen = is_hatch ? hatch.style : item->style;
   /* SC2: the style, converted row by row by shape-scene's one conversion. */
   GSHGEOM_Stroke params;
   const GSHGEOM_Path * path = gshscene_resource_path(item->resource);
   GSHSCENE_Glyph_Run glyphs;
   memset(&glyphs, 0, sizeof glyphs);
   int is_run = !path && gshscene_resource_glyph_run(item->resource, &glyphs) == GSHSCENE_OK;
-  if ((!path && !is_run) || gshscene_resource_stroke_geometry(item->style, &params) != GSHSCENE_OK) {
+  if ((!path && !is_run) || gshscene_resource_stroke_geometry(pen, &params) != GSHSCENE_OK) {
     return GSHCPU_ERR_INTERNAL; /* a style the store holds passes the check; a run the plan cannot draw is refused by it */
   }
   /* SC3: the canonical map. */
@@ -237,7 +246,12 @@ GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGE
   GSHCPU_Stroke_Key key;
   memset(&key, 0, sizeof key);
   key.path_id = gshscene_resource_id(item->resource);
-  key.style_id = gshscene_resource_id(item->style);
+  key.style_id = gshscene_resource_id(pen);
+  if (is_hatch) {
+    key.hatch_id = gshscene_resource_id(item->style);
+    key.rule = (uint64_t)item->fill_rule;
+    key.hatch_revision = GSHGEOM_HATCH_REVISION;
+  }
   for (int i = 0; i < 4; i++) {
     key.linear[i] = gshgeom_f64_bits(canon.m[i / 2][i % 2]);
   }
@@ -284,8 +298,45 @@ GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGE
       path = built;
     }
     uint64_t run_elements = s.meta.run_elements;
+    uint64_t lines_made = 0;
     size_t note_count = s.meta.note_count;
-    g = gshgeom_stroke_expand(path, &params, &canon, alloc, limits, &outline);
+    if (is_hatch) {
+      /* HX8, HX12: the pieces (counting the lines of the use), then their stroke: shape-geometry's expansion of the hatch. */
+      GSHGEOM_Hatch geom;
+      memset(&geom, 0, sizeof geom);
+      geom.angle_unit = hatch.angle_unit;
+      geom.nesting = hatch.nesting;
+      geom.map = hatch.map;
+      geom.family_count = hatch.family_count;
+      GSHGEOM_Hatch_Family * families = alloc->malloc_fn(alloc->ctx, hatch.family_count * sizeof *families);
+      if (!families) {
+        gshgeom_path_destroy(built);
+        if (made) {
+          alloc->free_fn(alloc->ctx, made);
+        }
+        return GSHCPU_ERR_OOM;
+      }
+      for (size_t i = 0; i < hatch.family_count; i++) {
+        families[i].angle = hatch.families[i].angle;
+        families[i].origin_x = hatch.families[i].origin_x;
+        families[i].origin_y = hatch.families[i].origin_y;
+        families[i].offset_along = hatch.families[i].offset_along;
+        families[i].offset_across = hatch.families[i].offset_across;
+        families[i].dash_count = hatch.families[i].dash_count;
+        families[i].dashes = hatch.families[i].dashes;
+      }
+      geom.families = families;
+      GSHGEOM_Hatch_Pieces * pieces = NULL;
+      g = gshgeom_hatch_pieces(path, item->fill_rule, &geom, &canon, max_lines, alloc, limits, &pieces);
+      if (g == GSHGEOM_OK) {
+        lines_made = gshgeom_hatch_pieces_lines(pieces);
+        g = gshgeom_hatch_expand_pieces(pieces, &params, &canon, GSHGEOM_FLATTEN_TOLERANCE, alloc, limits, &outline);
+      }
+      gshgeom_hatch_pieces_destroy(pieces);
+      alloc->free_fn(alloc->ctx, families);
+    } else {
+      g = gshgeom_stroke_expand(path, &params, &canon, alloc, limits, &outline);
+    }
     gshgeom_path_destroy(built);
     if (g == GSHGEOM_OK && !gshgeom_stroke_outline_aligned(outline)) {
       /* The reduced form is made once, here, before another thread can see the outline; a failure that is not memory leaves
@@ -316,6 +367,7 @@ GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGE
     s.meta.run_elements = run_elements;
     s.meta.note_count = note_count;
     s.meta.notes = made;
+    s.meta.lines = lines_made;
     s.meta.bytes += note_count * sizeof(GSHCPU_Run_Note);
     s.owned = outline;
     s.notes = made;
@@ -353,8 +405,11 @@ GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGE
   s.outline = outline;
   s.shift_x = sx;
   s.shift_y = sy;
-  /* A hit refuses what a miss would (SC7): a part past max_points. */
+  /* A hit refuses what a miss would (SC7): a part past max_points; HX12: a hatch of more lines than the limit. */
   GSHCPU_Result r = GSHCPU_OK;
+  if (is_hatch && s.meta.lines > max_lines) {
+    r = GSHCPU_ERR_LIMIT;
+  }
   for (int p = 0; p < GSHCPU_STROKE_PARTS && r == GSHCPU_OK; p++) {
     if (s.meta.present[p] && limits && s.meta.points[p] > (uint64_t)limits->max_points && limits->max_points != 0) {
       r = GSHCPU_ERR_LIMIT;
@@ -392,6 +447,11 @@ GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGE
   s.hairline = params.width_space == (uint32_t)GSHGEOM_STROKE_WIDTH_DEVICE && params.width == 1.0;
   *out = s;
   return GSHCPU_OK;
+}
+
+GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, const GSHSCENE_Item * item, const GSHGEOM_Map * composed, GSHCPU_Stroke * out) {
+  return gshcpu_render_stroke_open_lines(cache, alloc, limits, UINT64_MAX, item, composed, out);
 }
 
 void gshcpu_render_stroke_close(GSHCPU_Stroke_Cache * cache, GSHCPU_Stroke * s) {

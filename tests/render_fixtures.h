@@ -86,6 +86,10 @@
  * | pattern-period | hatch tiles on lattices of whole-pixel steps, which the period tier draws from one window: abutting at a fraction, skewed (8, 3) and (0, 5), turned by an integer rotation, and gapped |
  * | pattern-period-blend | whole-pixel lattices whose tile blends: overlapping cells under a multiply group and a non-isolated group, an uncolored hatch, the foreground and a gradient |
  * | pattern-hatch | strokes that end at a cell's edge and run on into the next copy, horizontal, vertical and diagonal, with butt and square caps: the lines are unbroken |
+ * | hatch-families | (masks-images-patterns story H1) a single 45 degree family, a translucent crosshatch (one union), dashes, dots under a round cap, a brick stagger, and a line along the region's edge |
+ * | hatch-nesting | three nested squares hatched by the rule (nonzero and even-odd), by the outermost ring and by everything inside the outer loop |
+ * | hatch-curved | a circle with an island, a hairline pen and thick pens with each cap, solid and dashed families |
+ * | hatch-maps | a hatch under a rotation and a non-uniform scale (its own map and the item's), in a translucent group, and in a pattern's tile |
  */
 
 #ifndef GHOTI_IO_GSHCPU_TEST_RENDER_FIXTURES_H
@@ -2953,6 +2957,184 @@ static inline GSHSCENE_List * rf_pattern_hatch(RF_Ctx * c) {
   return l;
 }
 
+
+/* --- hatches (masks-images-patterns story H1) ----------------------------------------------------------------------- */
+
+/** Intern a hatch of @p n families over the pen @p pen, with the ink @p ink. */
+static inline const GSHSCENE_Resource * rf_hatch(RF_Ctx * c, const GSHSCENE_Resource * pen, uint32_t nesting,
+    const GSHSCENE_Hatch_Family * f, size_t n, GSHGEOM_Map map, GSHSCENE_Paint ink) {
+  GSHSCENE_Hatch h;
+  gshscene_hatch_init(&h);
+  h.style = pen;
+  h.nesting = nesting;
+  h.family_count = n;
+  h.families = f;
+  h.map = map;
+  h.ink = ink;
+  const GSHSCENE_Resource * r = NULL;
+  rf_check(c, gshscene_store_intern_hatch(c->store, &h, &r) == GSHSCENE_OK);
+  return rf_hold(c, r);
+}
+
+static inline GSHSCENE_Paint rf_hatch_paint(const GSHSCENE_Resource * hatch, double alpha) {
+  GSHSCENE_Paint p;
+  memset(&p, 0, sizeof p);
+  p.kind = GSHSCENE_PAINT_HATCH;
+  p.resource = hatch;
+  p.rgba[3] = alpha;
+  return p;
+}
+
+static inline const GSHSCENE_Resource * rf_ring_path(RF_Ctx * c, double x0, double y0, double x1, double y1, int levels) {
+  GSHGEOM_Path * p = rf_path(c);
+  double d = 0.0;
+  for (int i = 0; i < levels; i++) {
+    const int flip = i == 1 ? 1 : 0;
+    const double a = x0 + d, b = y0 + d, e = x1 - d, f = y1 - d;
+    gshgeom_path_move_to(p, rf_pt(flip ? a : a, b));
+    if (flip) {
+      gshgeom_path_line_to(p, rf_pt(a, f));
+      gshgeom_path_line_to(p, rf_pt(e, f));
+      gshgeom_path_line_to(p, rf_pt(e, b));
+    } else {
+      gshgeom_path_line_to(p, rf_pt(e, b));
+      gshgeom_path_line_to(p, rf_pt(e, f));
+      gshgeom_path_line_to(p, rf_pt(a, f));
+    }
+    gshgeom_path_close(p);
+    d += 3.0;
+  }
+  return rf_intern(c, p);
+}
+
+/** One hatch panel: the hatch painted over @p region at (@p x, @p y). */
+static inline void rf_hatch_panel(RF_Ctx * c, GSHSCENE_List * l, const GSHSCENE_Resource * region, double x, double y,
+    const GSHSCENE_Resource * hatch, double alpha, GSHGEOM_Fill_Rule rule) {
+  GSHGEOM_Map at = rf_move(x, y);
+  rf_fill(c, l, region, &at, rule, rf_hatch_paint(hatch, alpha), 0, 0.0);
+}
+
+/** Six panels of families: a single 45 degree family, a translucent crosshatch (one union), dashes, dots, a brick stagger, a line along the edge. */
+static inline GSHSCENE_List * rf_hatch_families(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1.0, 1.0, 0.97, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * box = rf_rect(c, 0.0, 0.0, 14.0, 11.0);
+  const GSHSCENE_Resource * pen = rf_pen(c, 0.7, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT);
+  const GSHSCENE_Resource * round = rf_pen(c, 1.0, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND);
+  const GSHSCENE_Resource * square = rf_pen(c, 0.9, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_SQUARE);
+  static const double dash[2] = {3.0, -1.5};
+  static const double dots[2] = {0.0, -2.0};
+  static const double brick[2] = {3.5, -1.0};
+  GSHSCENE_Hatch_Family f1[1] = {{45.0, 0.0, 0.0, 0.0, 2.0, 0, NULL}};
+  GSHSCENE_Hatch_Family f2[2] = {{45.0, 0.0, 0.0, 0.0, 2.5, 0, NULL}, {135.0, 0.0, 0.0, 0.0, 2.5, 0, NULL}};
+  GSHSCENE_Hatch_Family f3[1] = {{0.0, 0.0, 0.5, 0.0, 2.0, 2, dash}};
+  GSHSCENE_Hatch_Family f4[1] = {{0.0, 0.0, 0.5, 0.0, 2.0, 2, dots}};
+  GSHSCENE_Hatch_Family f5[1] = {{0.0, 0.0, 0.5, 2.25, 2.0, 2, brick}};
+  GSHSCENE_Hatch_Family f6[1] = {{0.0, 0.0, 0.0, 0.0, 5.5, 0, NULL}};
+  GSHGEOM_Map id = rf_move(0.0, 0.0);
+  const GSHSCENE_Resource * h1 = rf_hatch(c, pen, 0, f1, 1, id, rf_solid(0.1, 0.2, 0.6, 1.0));
+  const GSHSCENE_Resource * h2 = rf_hatch(c, pen, 0, f2, 2, id, rf_solid(0.7, 0.1, 0.1, 1.0));
+  const GSHSCENE_Resource * h3 = rf_hatch(c, square, 0, f3, 1, id, rf_solid(0.1, 0.5, 0.2, 1.0));
+  const GSHSCENE_Resource * h4 = rf_hatch(c, round, 0, f4, 1, id, rf_solid(0.4, 0.1, 0.5, 1.0));
+  const GSHSCENE_Resource * h5 = rf_hatch(c, pen, 0, f5, 1, id, rf_solid(0.1, 0.1, 0.1, 1.0));
+  const GSHSCENE_Resource * h6 = rf_hatch(c, pen, 0, f6, 1, id, rf_solid(0.8, 0.4, 0.0, 1.0));
+  const GSHSCENE_Resource * hs[6] = {h1, h2, h3, h4, h5, h6};
+  for (int i = 0; i < 6; i++) {
+    rf_hatch_panel(c, l, box, 2.0 + 15.5 * (double)(i % 3), 3.0 + 18.0 * (double)(i / 3), hs[i], i == 1 ? 0.55 : 1.0, GSHGEOM_FILL_NONZERO);
+  }
+  rf_close(c, l);
+  return l;
+}
+
+/** The nesting styles over three nested squares: the rule nonzero and even-odd, the outermost ring and everything inside the outer loop. */
+static inline GSHSCENE_List * rf_hatch_nesting(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.98, 0.98, 1.0, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * rings = rf_ring_path(c, 0.0, 0.0, 17.0, 17.0, 3);
+  const GSHSCENE_Resource * pen = rf_pen(c, 0.6, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT);
+  GSHSCENE_Hatch_Family f[1] = {{0.0, 0.0, 0.25, 0.0, 1.5, 0, NULL}};
+  GSHGEOM_Map id = rf_move(0.0, 0.0);
+  for (int i = 0; i < 4; i++) {
+    const GSHSCENE_Resource * h = rf_hatch(c, pen, (uint32_t)(i < 2 ? 0 : i - 1), f, 1, id, rf_solid(0.1 + 0.2 * i, 0.2, 0.6 - 0.1 * i, 1.0));
+    rf_hatch_panel(c, l, rings, 4.0 + 22.0 * (double)(i % 2), 2.0 + 20.0 * (double)(i / 2), h, 1.0,
+        i == 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO);
+  }
+  rf_close(c, l);
+  return l;
+}
+
+/** A circle with an island, hatched with a hairline and with thick pens of each cap, and a dashed family at the boundary. */
+static inline GSHSCENE_List * rf_hatch_curved(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1.0, 0.99, 0.95, 1.0), 0, 0.0);
+  GSHGEOM_Path * p = rf_path(c);
+  gshgeom_path_add_ellipse(p, 7.0, 7.0, 6.5, 6.5, 0, 0);
+  gshgeom_path_add_ellipse(p, 7.0, 7.0, 2.5, 2.5, 1, 0);
+  const GSHSCENE_Resource * disc = rf_intern(c, p);
+  static const double dash[2] = {2.5, -1.0};
+  GSHSCENE_Hatch_Family solid_fam[1] = {{60.0, 0.0, 0.0, 0.0, 1.75, 0, NULL}};
+  GSHSCENE_Hatch_Family dashed_fam[1] = {{30.0, 0.0, 0.0, 0.0, 1.75, 2, dash}};
+  GSHGEOM_Map id = rf_move(0.0, 0.0);
+  const GSHSCENE_Resource * pens[6];
+  pens[0] = rf_style(c, 1.0, GSHSCENE_STROKE_WIDTH_DEVICE, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+      GSHSCENE_STROKE_DEGENERATE_DRAW, NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO);
+  pens[1] = rf_pen(c, 1.1, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT);
+  pens[2] = rf_pen(c, 1.1, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_ROUND);
+  pens[3] = rf_pen(c, 1.1, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_SQUARE);
+  pens[4] = rf_pen(c, 0.9, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_ROUND);
+  pens[5] = rf_pen(c, 0.9, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT);
+  for (int i = 0; i < 6; i++) {
+    const GSHSCENE_Resource * h = rf_hatch(c, pens[i], 0, i >= 4 ? dashed_fam : solid_fam, 1, id, rf_solid(0.1, 0.3 + 0.1 * (double)i, 0.5, 1.0));
+    rf_hatch_panel(c, l, disc, 1.0 + 15.5 * (double)(i % 3), 1.0 + 19.0 * (double)(i / 3), h, 1.0, GSHGEOM_FILL_NONZERO);
+  }
+  rf_close(c, l);
+  return l;
+}
+
+/** A hatch under a rotation and a non-uniform scale, in an opaque and a translucent group, and in a pattern's tile. */
+static inline GSHSCENE_List * rf_hatch_maps(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.97, 1.0, 0.97, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * box = rf_rect(c, 0.0, 0.0, 12.0, 9.0);
+  const GSHSCENE_Resource * pen = rf_pen(c, 0.5, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_SQUARE);
+  static const double dash[2] = {2.0, -1.0};
+  GSHSCENE_Hatch_Family f[2] = {{0.0, 0.0, 0.0, 0.0, 2.25, 2, dash}, {90.0, 0.0, 0.0, 0.0, 3.0, 0, NULL}};
+  GSHGEOM_Map hm;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 30.0, &hm);
+  const GSHSCENE_Resource * turned = rf_hatch(c, pen, 0, f, 2, hm, rf_solid(0.1, 0.2, 0.6, 1.0));
+  /* the hatch map stretches hatch space; the item's map turns the region */
+  GSHGEOM_Map stretch;
+  gshgeom_map_scale(2, 1.0, 0.6, 1.0, &stretch);
+  const GSHSCENE_Resource * stretched = rf_hatch(c, pen, 0, f, 2, stretch, rf_solid(0.6, 0.1, 0.1, 1.0));
+  GSHGEOM_Map a, b, rot, mv;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 15.0, &rot);
+  mv = rf_move(8.0, 4.0);
+  gshgeom_map_compose(&mv, &rot, &a);
+  rf_fill(c, l, box, &a, GSHGEOM_FILL_NONZERO, rf_hatch_paint(turned, 1.0), 0, 0.0);
+  gshgeom_map_scale(2, 1.6, 0.8, 1.0, &b);
+  GSHGEOM_Map mv2 = rf_move(26.0, 3.0);
+  GSHGEOM_Map b2;
+  gshgeom_map_compose(&mv2, &b, &b2);
+  rf_fill(c, l, box, &b2, GSHGEOM_FILL_NONZERO, rf_hatch_paint(stretched, 1.0), 0, 0.0);
+  /* a translucent group of two overlapping hatched squares */
+  GSHSCENE_Group half = rf_group(0.6, GSHSCENE_COMPOSITE_SRC_OVER);
+  rf_check(c, gshscene_list_group_push(l, &half, 0, 0.0) == GSHSCENE_OK);
+  GSHGEOM_Map p1 = rf_move(3.0, 21.0), p2 = rf_move(9.0, 25.0);
+  rf_fill(c, l, box, &p1, GSHGEOM_FILL_NONZERO, rf_hatch_paint(turned, 1.0), 0, 0.0);
+  rf_fill(c, l, box, &p2, GSHGEOM_FILL_NONZERO, rf_hatch_paint(stretched, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  /* a pattern whose tile is a hatch fill: the tile repeats, and the lines are cut at its cell */
+  GSHSCENE_List * t = rf_open(c);
+  GSHSCENE_Hatch_Family tf[1] = {{45.0, 0.0, 0.0, 0.0, 2.75, 0, NULL}};
+  const GSHSCENE_Resource * thatch = rf_hatch(c, rf_pen(c, 0.6, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), 0, tf, 1,
+      rf_move(0.0, 0.0), rf_solid(0.2, 0.2, 0.2, 1.0));
+  rf_fill(c, t, rf_rect(c, 0, 0, 5, 5), NULL, GSHGEOM_FILL_NONZERO, rf_hatch_paint(thatch, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * pat = rf_pattern(c, rf_picture_of(c, t), 0, 0, 5, 5, 6, 6, 1, 1, rf_move(0.0, 0.0), NULL);
+  rf_fill(c, l, rf_rect(c, 28, 22, 46, 38), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
 typedef struct RF_Fixture {
   const char * name;
   RF_Build build;
@@ -3023,6 +3205,10 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"pattern-period", rf_pattern_period},
     {"pattern-period-blend", rf_pattern_period_blend},
     {"pattern-hatch", rf_pattern_hatch},
+    {"hatch-families", rf_hatch_families},
+    {"hatch-nesting", rf_hatch_nesting},
+    {"hatch-curved", rf_hatch_curved},
+    {"hatch-maps", rf_hatch_maps},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

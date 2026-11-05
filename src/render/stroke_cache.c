@@ -84,6 +84,8 @@ static size_t bucket_of(const GSHCPU_Stroke_Key * k) {
   }
   h = (h ^ k->fraction[0]) * UINT64_C(0x100000001B3);
   h = (h ^ k->fraction[1]) * UINT64_C(0x100000001B3);
+  h = (h ^ k->hatch_id) * UINT64_C(0x100000001B3);
+  h = (h ^ k->rule) * UINT64_C(0x100000001B3);
   h ^= h >> 29;
   return (size_t)(h & (BUCKETS - 1u));
 }
@@ -106,7 +108,8 @@ static size_t bucket_of_entry(const Entry * e) {
 
 static int key_equal(const GSHCPU_Stroke_Key * a, const GSHCPU_Stroke_Key * b) {
   return a->path_id == b->path_id && a->style_id == b->style_id && memcmp(a->linear, b->linear, sizeof a->linear) == 0 &&
-      memcmp(a->fraction, b->fraction, sizeof a->fraction) == 0 && a->revision == b->revision;
+      memcmp(a->fraction, b->fraction, sizeof a->fraction) == 0 && a->revision == b->revision &&
+      a->hatch_revision == b->hatch_revision && a->hatch_id == b->hatch_id && a->rule == b->rule;
 }
 
 static int period_key_equal(const GSHCPU_Period_Key * a, const GSHCPU_Period_Key * b) {
@@ -197,7 +200,7 @@ void gshcpu_stroke_cache_evict(GSHCPU_Stroke_Cache * c, uint64_t id) {
     Entry * e = c->buckets[b];
     while (e) {
       Entry * next = e->chain;
-      if (e->kind ? (e->pkey.pattern_id == id || e->pkey.tile_id == id) : (e->key.path_id == id || e->key.style_id == id)) {
+      if (e->kind ? (e->pkey.pattern_id == id || e->pkey.tile_id == id) : (e->key.path_id == id || e->key.style_id == id || (e->key.hatch_id != 0 && e->key.hatch_id == id))) {
         unlink_entry(c, e);
         if (c->counters) {
           c->counters->cache_evictions++;

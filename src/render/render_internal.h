@@ -920,6 +920,8 @@ typedef struct GSHCPU_Render_Counters {
   uint64_t general_pops;     /* pops composited by the general step (KC4 to KC6): the group or its parent is a general layer */
   uint64_t group_alpha_slots; /* the most group alpha channels the layout counted for a render (KC8): non-isolated groups open at once */
   uint64_t group_shape_slots; /* ... and group shape channels: groups open at once with a knockout proper ancestor */
+  uint64_t hatches;          /* hatch fills drawn (their expansion drew something): HX13 */
+  uint64_t hatch_lines;      /* the lines of the use of those fills, added up (HX12) */
   uint64_t patterns;         /* passes of a pattern's tile drawn (PC2): a lattice layer made, however many copies */
   uint64_t pattern_copies;   /* the (unit, copy) pairs those passes drew */
   uint64_t pattern_period;   /* ... of the passes, those drawn by the period tier (PC9): the layer read from a window of one period */
@@ -960,6 +962,9 @@ typedef struct GSHCPU_Stroke_Key {
   uint64_t linear[4];        /* the bit patterns of the canonical map's linear part, row major */
   uint64_t fraction[2];      /* ... and of its translation, in [0, 1) */
   int32_t revision;          /* GSHGEOM_STROKE_REVISION */
+  int32_t hatch_revision;    /* GSHGEOM_HATCH_REVISION for a hatch fill, else 0 */
+  uint64_t hatch_id;         /* a hatch fill: the hatch resource's id (its path_id is the region's); 0 for a stroke */
+  uint64_t rule;             /* ... and the fill rule (HX4: RULE reads it); 0 for a stroke */
 } GSHCPU_Stroke_Key;
 
 /** The parts of an outline, in the order of its accessors. */
@@ -984,6 +989,7 @@ typedef struct GSHCPU_Stroke_Meta {
   uint64_t bound[GSHCPU_STROKE_PARTS]; /* each part's bound of deposits (gshcpu_render_cells_bound) over its own box in the canonical frame */
   size_t bytes;              /* what the cache accounts for it (stroke_cache.c) */
   uint64_t run_elements;     /* a run: the elements of its centerline (0 for a path) */
+  uint64_t lines;            /* a hatch fill: the lines of the use (HX12), which a hit replays; 0 for a stroke */
   size_t note_count;         /* a run: the glyphs that have an entry */
   const GSHCPU_Run_Note * notes; /* ... and their notes; the cache entry's own, valid while pinned (else the stroke's) */
 } GSHCPU_Stroke_Meta;
@@ -1110,6 +1116,15 @@ typedef struct GSHCPU_Stroke {
  *   `max_points`, the depth cap, a shifted coordinate past ::GSHCPU_RENDER_COORD_LIMIT: the sink's resource limit);
  *   ::GSHCPU_ERR_OOM; ::GSHCPU_ERR_INTERNAL.  Nothing is held on failure.
  */
+/**
+ * HX13: a hatch fill opened as a stroke.  @p item is the synthetic stroke item a hatch fill is drawn as (hatch_fill_item in sink.c): its
+ * `style` names the hatch resource, its `resource` the region, its `fill_rule` the rule, its paint the ink times the hatch paint's alpha.  The
+ * expansion is shape-geometry's hatch expansion at the canonical map, cached under a key that has the hatch and the rule; `meta.lines` is
+ * the lines of the use, which more than @p max_lines refuses (::GSHCPU_ERR_LIMIT), on a hit as on a miss.
+ */
+GSHCPU_Result gshcpu_render_stroke_open_lines(GSHCPU_Stroke_Cache * cache, const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, uint64_t max_lines, const GSHSCENE_Item * item, const GSHGEOM_Map * composed, GSHCPU_Stroke * out);
+
 GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits, const GSHSCENE_Item * item, const GSHGEOM_Map * composed, GSHCPU_Stroke * out);
 

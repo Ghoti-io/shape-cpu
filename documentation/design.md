@@ -447,6 +447,26 @@ pass either limit (the function of the outline alone that decides the damage-ind
 tier; at the default limits that is no stroke a render draws today. Found by mutating the render fuzzer's seeds; the input is
 `regression-sparse-partial-under-budget.bin`.
 
+### Hatches (HX13; masks-images-patterns story H1)
+
+A hatch fill is drawn as the stroke of its trimmed, dashed lines: shape-geometry's hatch (HX4 to HX8) makes the pieces and their outline,
+and everything after the outline is the stroke's (SC3 to SC8: the canonical map and its whole-pixel shift, the cache, the cover, the
+sparse composite, the clips and the operator). Nothing about the lines is decided in this library; a second implementation of the trim, the
+dashes or the pen would be the drift the shared code exists to prevent, and `test_render_hatch.cpp` shows the identity instead: a hatch fill
+and the stroke of the same pieces as one explicit path are the same bytes.
+
+The sink does four things of its own. It makes a **synthetic stroke item** (`hatch_fill_item`): the region as the centerline, the hatch in
+the style slot (`gshcpu_render_stroke_open_lines` reads the pen from the hatch there), the fill's rule, and as the paint the hatch's ink with
+its alpha times the hatch paint's multiplier; the fill's own coverage is not multiplied in, as a stroke's centerline is not. It **keys
+the cache** with the hatch's id, the fill rule (the rule `RULE` nesting reads) and the hatch revision besides a stroke's key, so a hatch, a
+rule or a fraction changed with the rest held draws the new picture; `evict(id)` takes the hatch's id too. It **counts the lines of the use**
+once, from the pieces (or from the entry's meta on a hit, so a hit refuses what a miss would), against `max_hatch_lines`, and keeps the count
+in `hatch_lines` beside `hatches` for the tests. And its work bound grows by one step per line per region element, since a line's trim
+visits the region.
+
+A hatch inside a pattern's tile is a stroke of the tile (`pat_stroke`), cut to the cell by the same exact clip, so the lines end at the cell
+and run on in the next copy.
+
 ### Placeholders (color-paint story P5)
 
 Nothing draws a placeholder (shape-scene's list.h, PH1) and the planning pass reports it (PH3), so the sink has no code

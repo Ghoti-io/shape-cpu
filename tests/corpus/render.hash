@@ -257,5 +257,21 @@ render pattern-hatch rgba8 9d22fd7560e29800
 render pattern-hatch rgba8-premultiplied b72ef4a92346d0c3
 render pattern-hatch rgbaf32 be486e1e9b6d2f6d
 render pattern-hatch rgbaf32-premultiplied c53414326060004a
-hash 4b49a988dc7fe128
-count 256
+render hatch-families rgba8 a0018e28d4513df5
+render hatch-families rgba8-premultiplied d9de3d6b980c2c42
+render hatch-families rgbaf32 7586d4e4359a443b
+render hatch-families rgbaf32-premultiplied 4e9640237f3707d4
+render hatch-nesting rgba8 554766f1e2aae7a8
+render hatch-nesting rgba8-premultiplied e37b288c59dbef53
+render hatch-nesting rgbaf32 aa798db23c8ed737
+render hatch-nesting rgbaf32-premultiplied e84d6c61c795d004
+render hatch-curved rgba8 de29d8cabcd871e9
+render hatch-curved rgba8-premultiplied 73ba60e13ee1cc8a
+render hatch-curved rgbaf32 9721af532da324b2
+render hatch-curved rgbaf32-premultiplied ed66b27b64c07175
+render hatch-maps rgba8 3f892b1e9b47ce32
+render hatch-maps rgba8-premultiplied 237b27e0e121f461
+render hatch-maps rgbaf32 9ed84a1c5acd94e4
+render hatch-maps rgbaf32-premultiplied 48b0a5f3539b4973
+hash 36ba67e4d3f11bbe
+count 272

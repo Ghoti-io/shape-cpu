@@ -43,6 +43,7 @@
 #include <ghoti.io/shape-geometry/lattice.h>
 #include <ghoti.io/shape-geometry/stroke.h>
 #include <ghoti.io/shape-scene/clip_union.h>
+#include <ghoti.io/shape-scene/hatch.h>
 #include <ghoti.io/shape-scene/pattern.h>
 #include <ghoti.io/shape-scene/resource.h>
 #include <ghoti.io/shape-scene/stroke.h>
@@ -76,6 +77,7 @@ typedef struct Cpu_Sink {
   uint64_t max_area_pixel_work;     /* IC9: the most texels and cells one pixel of AREA visits */
   uint64_t max_image_work;          /* IC9: the most one image item visits over the whole render */
   uint64_t max_pattern_cells;       /* PC8: the most copies of one use of a pattern, summed over the nesting */
+  uint64_t max_hatch_lines;         /* HX12: the most lines of one hatch fill */
   uint64_t max_union_tests;         /* CU19: the most box comparisons of the predicate over all the union pushes of a render */
 } Cpu_Sink;
 
@@ -451,6 +453,25 @@ static size_t sat_add(size_t a, size_t b) {
 }
 
 /**
+ * HX13: a hatch fill is drawn as the stroke of its trimmed, dashed lines, by the stroke's own machinery.  @p out is the synthetic stroke item:
+ * the region as the centerline, the hatch resource in the style slot (which gshcpu_render_stroke_open_lines reads), the fill's rule, and as
+ * the paint the hatch's ink with its alpha times the hatch paint's multiplier (HX3).  @return 1 when @p item is a hatch fill.
+ */
+static int hatch_fill_item(const GSHSCENE_Item * item, GSHSCENE_Item * out) {
+  GSHSCENE_Hatch h;
+  if (item->kind != GSHSCENE_ITEM_FILL || item->paint.kind != GSHSCENE_PAINT_HATCH || !item->paint.resource ||
+      gshscene_resource_hatch(item->paint.resource, &h) != GSHSCENE_OK) {
+    return 0;
+  }
+  *out = *item;
+  out->kind = GSHSCENE_ITEM_STROKE;
+  out->style = item->paint.resource;
+  out->paint = h.ink;
+  out->paint.rgba[3] = h.ink.rgba[3] * item->paint.rgba[3];
+  return 1;
+}
+
+/**
  * The most groups and clips open at once in @p list's expansion, a picture's counting where it is drawn; and its
  * gradient fills and their stops added to @p gradients and @p stops (0 when a sum would overflow).
  */
@@ -599,6 +620,13 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
     }
     if (item->kind == GSHSCENE_ITEM_STROKE) {
       *strokes = 1; /* UC9: the exact step's counts and pool */
+    }
+    if (item->kind == GSHSCENE_ITEM_FILL && item->paint.kind == GSHSCENE_PAINT_HATCH) {
+      GSHSCENE_Item hatched;
+      *strokes = 1; /* HX13: drawn as a stroke, so the exact step's counts and pool too */
+      if (hatch_fill_item(item, &hatched)) {
+        *wide = *wide || out_of_range(&hatched.paint);
+      }
     }
     if (item->kind == GSHSCENE_ITEM_STROKE && gshscene_resource_stroke_style(item->style, &style) == GSHSCENE_OK &&
         style.alignment != (uint32_t)GSHSCENE_STROKE_ALIGN_CENTER) {
@@ -928,11 +956,17 @@ static int skip_step(Skip * s, const GSHSCENE_Item * item, size_t count) {
  */
 static GSHCPU_Result measure_one(const Cpu_Sink * cs, const GSHSCENE_Target * target, const GSHSCENE_Item * item,
     GSHGEOM_Map * maps, size_t count, GSHCPU_Arena * arena, size_t * peak) {
-  if (item->kind == GSHSCENE_ITEM_STROKE) {
+  GSHSCENE_Item hatched;
+  const int is_hatch = hatch_fill_item(item, &hatched);
+  if (item->kind == GSHSCENE_ITEM_STROKE || is_hatch) {
     /* A stroke that is drawn is expanded once through the arena (no cache under CALLER_MEMORY: SC7); its expansion
-     * is what an item's geometry is for a fill, so the caller's memory holds the most any item takes. */
-    if (gshscene_stroke_notice(item, maps, count - 1, &target->map)) {
+     * is what an item's geometry is for a fill, so the caller's memory holds the most any item takes.  A hatch fill is one (HX13). */
+    if (is_hatch ? gshscene_paint_notice(item, maps, count - 1, &target->map)
+                 : gshscene_stroke_notice(item, maps, count - 1, &target->map)) {
       return GSHCPU_OK; /* a stroke that draws nothing */
+    }
+    if (is_hatch) {
+      item = &hatched;
     }
     GSHGEOM_Map composed;
     maps[count - 1] = item->map;
@@ -944,7 +978,7 @@ static GSHCPU_Result measure_one(const Cpu_Sink * cs, const GSHSCENE_Target * ta
     arena->peak = 0;
     /* A run's centerline, its glyphs' outlines and its notes are allocated here in the order the drawing takes them
      * (ST8), so the memory asked for is exact. */
-    GSHCPU_Result sr = gshcpu_render_stroke_open(NULL, &arena->self, &cs->geometry, item, &composed, &st);
+    GSHCPU_Result sr = gshcpu_render_stroke_open_lines(NULL, &arena->self, &cs->geometry, cs->max_hatch_lines, item, &composed, &st);
     if (sr == GSHCPU_OK) {
       gshcpu_render_stroke_close(NULL, &st);
     }
@@ -1237,6 +1271,10 @@ static uint64_t work_bound(const Cpu_Sink * cs) {
       !gcu_safe_add_u64(b, cs->max_deposits, &b) || !gcu_safe_add_u64(b, pixels, &b) || !gcu_safe_add_u64(b, expansion, &b)) {
     return UINT64_MAX;
   }
+  uint64_t trim;
+  if (!gcu_safe_mul_u64(cs->max_hatch_lines, (uint64_t)cs->elements, &trim) || !gcu_safe_add_u64(b, trim, &b)) {
+    return UINT64_MAX; /* HX12: the lines of a hatch fill, each tested against the region's elements */
+  }
   /* UC9: and the exact step's, over the pieces of the item's three parts (its deposits, which the cap counts, and the
    * horizontal pieces on cells' left sides, at most one for each point and each column of the widest raster), a cell of
    * an aligned stroke holding the pieces of all three. */
@@ -1298,6 +1336,8 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   out->flags |= GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT;
   /* PC1: a pattern, drawn as defined (PT1 to PT14): every field of it honored, so not PATTERN_RESAMPLED. */
   out->flags |= GSHSCENE_CAP_PATTERN;
+  /* HX13: a hatch, drawn as the stroke of its trimmed lines. */
+  out->flags |= GSHSCENE_CAP_HATCH;
   /* CU22: a union clip whose members the predicate shows disjoint, the fast tier FT-U1; never the general tier (CU25). */
   if (cs->tiers & GSHCPU_RENDER_TIER_UNION) {
     out->flags |= GSHSCENE_CAP_CLIP_UNION;
@@ -2350,7 +2390,15 @@ static uint64_t expansion_work(const Run * run, const GSHSCENE_Item * item, cons
   if (elements > run->cs->elements) {
     elements = run->cs->elements;
   }
-  return points + elements * (uint64_t)GSHGEOM_STROKE_MAX_DEPTH + (path ? 0u : elements);
+  uint64_t work = points + elements * (uint64_t)GSHGEOM_STROKE_MAX_DEPTH + (path ? 0u : elements);
+  if (item->style && gshscene_resource_kind(item->style) == GSHSCENE_RESOURCE_HATCH) {
+    /* HX12: each line of the use is tested against the region's elements (the lines are counted whether the expansion was made or found) */
+    uint64_t trim;
+    if (!gcu_safe_mul_u64(s->meta.lines, elements ? elements : 1u, &trim) || !gcu_safe_add_u64(work, trim, &work)) {
+      return UINT64_MAX;
+    }
+  }
+  return work;
 }
 
 /**
@@ -2394,12 +2442,17 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
   /* SC7: the cache serves a render that allocates, never one that takes its memory from the caller (S9). */
   GSHCPU_Stroke_Cache * cache = !run->caller && (cs->tiers & GSHCPU_RENDER_TIER_CACHE) ? cs->cache : NULL;
   GSHCPU_Stroke s;
-  GSHCPU_Result opened = gshcpu_render_stroke_open(cache, run->item_alloc, &cs->geometry, item, &composed, &s);
+  GSHCPU_Result opened =
+      gshcpu_render_stroke_open_lines(cache, run->item_alloc, &cs->geometry, cs->max_hatch_lines, item, &composed, &s);
   if (opened == GSHCPU_ERR_LIMIT) {
     return refuse(run, item, chain, count);
   }
   if (opened != GSHCPU_OK) {
     return scene_result(opened);
+  }
+  if (item->style && gshscene_resource_kind(item->style) == GSHSCENE_RESOURCE_HATCH && s.drawn) {
+    gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, hatches));
+    gshcpu_stroke_cache_add(cs->cache, offsetof(GSHCPU_Render_Counters, hatch_lines), s.meta.lines);
   }
   GSHSCENE_Result noted = report_run_notes(run, &s, chain, count);
   if (noted != GSHSCENE_OK) {
@@ -3976,9 +4029,14 @@ static GSHSCENE_Result pat_stroke_copy(Run * run, Pat_Level * L, int64_t i, int6
   }
   GSHCPU_Stroke_Cache * cache = !run->caller && (cs->tiers & GSHCPU_RENDER_TIER_CACHE) ? cs->cache : NULL;
   GSHCPU_Stroke s;
-  const GSHCPU_Result opened = gshcpu_render_stroke_open(cache, run->item_alloc, &cs->geometry, item, &composed, &s);
+  const GSHCPU_Result opened =
+      gshcpu_render_stroke_open_lines(cache, run->item_alloc, &cs->geometry, cs->max_hatch_lines, item, &composed, &s);
   if (opened != GSHCPU_OK) {
     return opened == GSHCPU_ERR_LIMIT ? GSHSCENE_ERR_LIMIT : scene_result(opened);
+  }
+  if (item->style && gshscene_resource_kind(item->style) == GSHSCENE_RESOURCE_HATCH && s.drawn) {
+    gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, hatches));
+    gshcpu_stroke_cache_add(cs->cache, offsetof(GSHCPU_Render_Counters, hatch_lines), s.meta.lines);
   }
   if (!s.drawn) {
     gshcpu_render_stroke_close(cache, &s);
@@ -4554,8 +4612,14 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
     }
   }
   switch (item->kind) {
-    case GSHSCENE_ITEM_FILL:
+    case GSHSCENE_ITEM_FILL: {
+      GSHSCENE_Item hatched;
+      if (hatch_fill_item(item, &hatched)) {
+        /* HX13: drawn as a stroke of its lines; the chain, the clips and the layer are the fill's. */
+        return cur_pat(run) ? pat_stroke(run, &hatched, chain, count) : stroke(run, &hatched, chain, count);
+      }
       return cur_pat(run) ? pat_fill(run, item, chain, count) : fill(run, item, chain, count);
+    }
     case GSHSCENE_ITEM_STROKE:
       return cur_pat(run) ? pat_stroke(run, item, chain, count) : stroke(run, item, chain, count);
     case GSHSCENE_ITEM_CLIP_PUSH:
@@ -4933,6 +4997,7 @@ static GSHCPU_Result sink_make(const GSHCPU_Allocator * alloc, const GSHSCENE_Li
                                                                   : GSHCPU_LIMITS_DEFAULT_MAX_AREA_PIXEL_WORK;
   cs->max_image_work = limits && limits->max_image_work ? limits->max_image_work : GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK;
   cs->max_pattern_cells = limits && limits->max_pattern_cells ? limits->max_pattern_cells : GSHCPU_LIMITS_DEFAULT_MAX_PATTERN_CELLS;
+  cs->max_hatch_lines = limits && limits->max_hatch_lines ? limits->max_hatch_lines : GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES;
   cs->max_union_tests = limits && limits->max_union_tests ? limits->max_union_tests : GSHCPU_LIMITS_DEFAULT_MAX_UNION_TESTS;
   gshgeom_limits_default(&cs->geometry);
   if (limits && limits->max_points) {

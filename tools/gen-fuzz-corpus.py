@@ -493,6 +493,35 @@ def scripted():
         out["scripted-pattern-%s.bin" % name] = header(request=0) + body_with_line(items)
         out["scripted-pattern-%s-float.bin" % name] = header(target=T64 | 3) + body_with_line(items)
         out["scripted-pattern-%s-memory-damage.bin" % name] = header(request=CALLER_MEMORY | DAMAGE) + body_with_line(items)
+    # Masks-images-patterns story H1: a fill whose rule byte is 0xF0 to 0xF5 (0xF6 and 0xF7 are strokes) takes a hatch from the bytes that
+    # follow it (fuzz_render.c, hatch_of): a head byte (nesting is head % 3, the families 1 + (head >> 2) % 2), per family an angle byte
+    # (index into the angle table, the origin in its next bits) and a byte of the along-offset index (bits 0, 1), the spacing index (bits 2
+    # to 4) and the dash pattern (bits 4 to 7, % 7), then the pen byte (width index, width space, cap, join) and the map byte (kind 0
+    # identity, 1 stretch, 2 rotation, 3 singular).
+    def hatch_fill(head, families, pen, mp, pick=0, rule=0xF0):
+        body_bytes = bytes([head])
+        for a, b in families:
+            body_bytes += bytes([a, b])
+        return fill(pick, rule=rule, style=body_bytes + bytes([pen, mp]))
+
+    hatches = {
+        "families": hatch_fill(4, [(1, 4), (2, 0x3C)], 0, 0),            # a vertical solid family and a dashed one at 45 degrees
+        "nesting": hatch_fill(1, [(2, 0x3C)], 0, 0),                      # the outer nesting
+        "dots": hatch_fill(0, [(0, 0x64)], 0x20, 0),                      # dots under a square cap
+        "stretch": hatch_fill(0, [(3, 0x08 | 0x04)], 0, 1),               # a stretched hatch map
+        "rotated": hatch_fill(0, [(2, 0x2C)], 0x10, 2),                   # a rotated hatch map under a round cap
+        "no-width": hatch_fill(0, [(2, 0x04)], 1, 0),                     # a pen of width 0: noticed
+        "singular": hatch_fill(0, [(2, 0x04)], 0, 3),                     # a singular hatch map: noticed
+        "no-spacing": hatch_fill(0, [(2, 0x08)], 0, 0),                   # a spacing of 0: noticed
+    }
+    for name, item in hatches.items():
+        items = [fill(0), item, fill(1)]
+        out["scripted-hatch-%s.bin" % name] = header(request=0) + body_with_line(items)
+        out["scripted-hatch-%s-float.bin" % name] = header(target=T64 | 3) + body_with_line(items)
+        out["scripted-hatch-%s-memory-damage.bin" % name] = header(request=CALLER_MEMORY | DAMAGE) + body_with_line(items)
+    out["scripted-hatch-cached.bin"] = header(request=0) + body_with_line([fill(0), hatches["families"], hatches["families"], fill(1)])
+    out["scripted-hatch-lines-limit.bin"] = header(limit=0x40) + body_with_line([fill(0), hatches["families"], fill(1)])
+    out["scripted-hatch-lines-limit-strict.bin"] = header(request=STRICT, limit=0x40 | 3 << 3) + body_with_line([fill(0), hatches["stretch"], fill(1)])
     out["scripted-pattern-limit.bin"] = header(limit=3 << 3) + body_with_line([fill(0), lattices["overlap"], fill(1)])
     out["scripted-pattern-limit-strict.bin"] = header(request=STRICT, limit=5 << 3) + body_with_line([fill(0), lattices["gapped"], fill(1)])
     out["scripted-pattern-cell-cap.bin"] = header(limit=2 | 16) + body_with_line([fill(0), lattices["period"], fill(1)])

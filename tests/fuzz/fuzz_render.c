@@ -117,7 +117,8 @@ enum {
   OUT_MASK_REFUSED_INSIDE, OUT_MASK_TIERS_EQUAL, OUT_MASK_DAMAGE, OUT_MASK_CALLER_MEMORY, OUT_NON_ISOLATED, OUT_KNOCKOUT, OUT_GENERAL_MASKED, OUT_GENERAL_SHAPE,
   OUT_GENERAL_NESTED, OUT_GENERAL_CALLER_MEMORY, OUT_GENERAL_DAMAGE, OUT_GENERAL_STROKE,
   OUT_PATTERN_DRAWN, OUT_PATTERN_OVERLAP, OUT_PATTERN_PERIOD, OUT_PATTERN_TIERS_EQUAL, OUT_PATTERN_CACHED, OUT_PATTERN_NESTED,
-  OUT_PATTERN_STROKE, OUT_PATTERN_LIMIT, OUT_PATTERN_CALLER_MEMORY, OUT_PATTERN_DAMAGE, OUT_PATTERN_GAVE_UP, OUT_COUNT
+  OUT_PATTERN_STROKE, OUT_PATTERN_LIMIT, OUT_PATTERN_CALLER_MEMORY, OUT_PATTERN_DAMAGE, OUT_PATTERN_GAVE_UP,
+  OUT_HATCH_DRAWN, OUT_HATCH_DASHED, OUT_HATCH_NESTING, OUT_HATCH_CACHED, OUT_HATCH_CALLER_MEMORY, OUT_HATCH_NOTICE, OUT_HATCH_LINES_LIMIT, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -150,7 +151,10 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a pattern render equal to the render with the period tier off (PC9)", "a period raster served from the cache (PC10)",
     "a pattern nested in a pattern's tile (PC5)", "a stroke in a pattern's tile (PC5)", "a pattern use refused for a sink limit (PC8)",
     "a pattern render in caller memory (PC11)", "a damage-limited render of a pattern equal to the whole render (PC11)",
-    "the period tier given up for the general tier (PC9)"};
+    "the period tier given up for the general tier (PC9)",
+    "a render with a hatch fill drawn (HX13)", "a hatch with a dashed family drawn (HX6)", "a hatch of the outer or ignore nesting drawn (HX4)",
+    "a hatch expansion served from the cache (HX13)", "a hatch render in caller memory (HX13)", "a hatch fill that draws nothing, noticed (HX9)",
+    "a hatch refused for the lines limit (HX12)"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -282,6 +286,10 @@ typedef struct World {
   size_t pattern_integers;           /* ... whose step vectors are whole device pixels under the identity or a translation (PC9) */
   size_t pattern_nested;             /* ... holding a pattern in the tile */
   size_t pattern_strokes;            /* ... holding a stroke in the tile */
+  size_t hatches;                    /* fills recorded with a hatch paint (H1: a rule byte of 0xF0 to 0xF7 that is not a stroke) */
+  size_t hatch_dashed;               /* ... with a dashed family */
+  size_t hatch_nested;               /* ... of the outer or ignore nesting */
+  size_t hatch_nothing;              /* ... that draw nothing (a spacing of 0, a width of 0, a singular map) */
   const GSHSCENE_Resource * tile_style; /* the style of a tile's stroke, made on first use */
 } World;
 
@@ -1053,6 +1061,84 @@ static const GSHSCENE_Resource * pattern_of(Input * in, World * w, int depth) {
   return pattern;
 }
 
+/**
+ * A hatch from the bytes (masks-images-patterns story H1), or NULL where nothing can be made of it.  Bytes: the nesting and the number of
+ * families (nesting = b % 3, 1 + (b >> 2) % 2 families), then for each family its angle (table index), spacing (table, with a 0 and a
+ * negative), stagger (table) and dash pattern (table, with none, dots and a pattern that has no pen-down element), then the pen (a table
+ * of widths, the width space, the cap) and the hatch map (identity, a stretch, a rotation, a singular map).
+ */
+static const GSHSCENE_Resource * hatch_of(Input * in, World * w) {
+  static const double angles[8] = {0.0, 90.0, 45.0, 30.0, 135.0, 180.0, 17.0, 1.0e6};
+  static const double spacings[8] = {2.0, 3.5, 0.0, 1.25, -2.0, 7.0, 0.5, 5.0};
+  static const double staggers[4] = {0.0, 0.75, -1.0, 2.5};
+  static const double patterns[7][4] = {{0, 0, 0, 0}, {3, -1, 0, 0}, {0, -2, 0, 0}, {2, -1, 0.5, -1}, {-1, -2, 0, 0}, {1.5, 0, 0, 0}, {0, -1, 1, 0}};
+  static const unsigned counts[7] = {0, 2, 2, 4, 2, 1, 3};
+  const uint8_t head = next(in);
+  const size_t nf = 1 + (head >> 2) % 2u;
+  GSHSCENE_Hatch_Family fam[2];
+  for (size_t i = 0; i < nf; i++) {
+    const uint8_t a = next(in);
+    const uint8_t b = next(in);
+    const unsigned p = (b >> 4) % 7u;
+    fam[i].angle = angles[a & 7];
+    fam[i].origin_x = (double)(int)((a >> 3) & 7) / 2.0;
+    fam[i].origin_y = (double)(int)((a >> 6) & 3);
+    fam[i].offset_along = staggers[b & 3];
+    fam[i].offset_across = spacings[(b >> 2) & 7];
+    fam[i].dash_count = counts[p];
+    fam[i].dashes = counts[p] ? patterns[p] : NULL;
+  }
+  const uint8_t pen = next(in);
+  const uint8_t mp = next(in);
+  static const double widths[8] = {1.0, 0.0, 0.5, 2.5, 0.0625, 6.0, 1.5, 0.75};
+  GSHSCENE_Stroke_Style st;
+  gshscene_stroke_style_init(&st);
+  st.width = widths[pen & 7];
+  st.width_space = (pen >> 3) & 1;
+  st.cap = (pen >> 4) % 3u;
+  st.join = (pen >> 6) % 3u;
+  const GSHSCENE_Resource * style = NULL;
+  GSHSCENE_Result sr = gshscene_store_intern_stroke_style(w->store, &st, &style);
+  CHECK(sr == GSHSCENE_OK || sr == GSHSCENE_ERR_OOM || sr == GSHSCENE_ERR_LIMIT);
+  if (sr != GSHSCENE_OK) {
+    return NULL;
+  }
+  GSHSCENE_Hatch h;
+  gshscene_hatch_init(&h);
+  h.style = style;
+  h.nesting = head % 3u;
+  h.family_count = nf;
+  h.families = fam;
+  switch (mp & 3u) {
+    case 1:
+      gshgeom_map_scale(2, 1.0, 1.0 + (double)(mp >> 4 & 3) / 2.0, 1.0, &h.map);
+      break;
+    case 2:
+      gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, (double)(mp >> 2 & 31) * 3.0, &h.map);
+      break;
+    case 3:
+      gshgeom_map_scale(2, 0.0, 1.0, 1.0, &h.map);
+      break;
+    default:
+      break;
+  }
+  h.ink.rgba[0] = (double)(mp >> 4 & 3) / 3.0;
+  const GSHSCENE_Resource * hatch = NULL;
+  GSHSCENE_Result r = gshscene_store_intern_hatch(w->store, &h, &hatch);
+  gshscene_resource_release(style);
+  CHECK(r == GSHSCENE_OK || r == GSHSCENE_ERR_OOM || r == GSHSCENE_ERR_LIMIT || r == GSHSCENE_ERR_INVALID || r == GSHSCENE_ERR_UNSUPPORTED);
+  if (r != GSHSCENE_OK) {
+    return NULL;
+  }
+  w->hatches++;
+  for (size_t i = 0; i < nf; i++) {
+    w->hatch_dashed += fam[i].dash_count != 0 && fam[i].dashes[0] > 0.0;
+  }
+  w->hatch_nested += h.nesting != 0;
+  w->hatch_nothing += st.width == 0.0 || (mp & 3u) == 3u;
+  return hatch;
+}
+
 /** Record the list: fills, clips and groups, closed balanced.  @return the deepest group nesting reached. */
 static int record(Input * in, GSHSCENE_List * list, World * w) {
   int clips = 0, groups = 0, open[16], depth = 0, deepest = 0;
@@ -1088,6 +1174,19 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
           memset(&paint, 0, sizeof paint);
           paint.kind = GSHSCENE_PAINT_PATTERN;
           paint.resource = pat;
+          paint.rgba[3] = (double)(1 + (rule >> 1) % 4) / 4.0;
+          past = 0;
+        }
+      }
+      if ((rule & 0xF8) == 0xF0 && (rule & 6) != 6 && w->patterns_on) {
+        /* H1: the paint is a hatch from the bytes that follow (a fill's rule 0xF0, 0xF1, 0xF8 not: 0xF8 is a pattern). */
+        const GSHSCENE_Resource * hat = hatch_of(in, w);
+        if (hat) {
+          gshscene_resource_release(held);
+          held = hat;
+          memset(&paint, 0, sizeof paint);
+          paint.kind = GSHSCENE_PAINT_HATCH;
+          paint.resource = hat;
           paint.rgba[3] = (double)(1 + (rule >> 1) % 4) / 4.0;
           past = 0;
         }
@@ -1432,6 +1531,9 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   if ((limit_byte & 7) == 0 && (limit_byte & 0x38) != 0 && limit_byte < 0x80) {
     limits.max_pattern_cells = 1 + (uint64_t)((limit_byte >> 3) & 7) * 6u; /* PC8: a few copies to a few dozen */
   }
+  if ((limit_byte & 7) == 0 && limit_byte < 0x80 && (limit_byte & 0x40) != 0) {
+    limits.max_hatch_lines = 1 + (uint64_t)((limit_byte >> 3) & 7) * 3u; /* HX12: a few lines to a couple of dozen */
+  }
   const int tightened = (limit_byte & 7) >= 5; /* a limit of the exact step (UC9, UC19) is lowered */
 
   GSHSCENE_Store * store = NULL;
@@ -1629,6 +1731,13 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
         outcomes[OUT_IMAGE_NOTICE] += e.entry_class == GSHSCENE_ENTRY_NOTICE;
       }
     }
+    if (world.hatches > 0 && e.chain_count > 0) {
+      const GSHSCENE_Item * item = NULL;
+      if (gshscene_list_item(list, e.chain[0], &item) == GSHSCENE_OK && item->kind == GSHSCENE_ITEM_FILL && item->paint.kind == GSHSCENE_PAINT_HATCH) {
+        outcomes[OUT_HATCH_NOTICE] += e.entry_class == GSHSCENE_ENTRY_NOTICE;
+        outcomes[OUT_HATCH_LINES_LIMIT] += e.reason == GSHSCENE_REASON_RESOURCE_LIMIT && limits.max_hatch_lines < GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES;
+      }
+    }
     if (e.entry_class == GSHSCENE_ENTRY_NOTICE && world.strokes > 0) {
       const GSHSCENE_Item * item = NULL;
       if (gshscene_list_item(list, e.chain[0], &item) == GSHSCENE_OK && item->kind == GSHSCENE_ITEM_STROKE) {
@@ -1713,6 +1822,11 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   outcomes[OUT_PATTERN_STROKE] += r == GSHSCENE_OK && counters.patterns > 0 && world.pattern_strokes > 0;
   outcomes[OUT_PATTERN_LIMIT] += world.patterns > 0 && (limit_byte & 7) == 0 && limit_byte < 0x80 && (limit_byte & 0x38) != 0 && limit_refused > 0;
   outcomes[OUT_PATTERN_CALLER_MEMORY] += r == GSHSCENE_OK && counters.patterns > 0 && (request.flags & GSHSCENE_RENDER_CALLER_MEMORY);
+  outcomes[OUT_HATCH_DRAWN] += r == GSHSCENE_OK && counters.hatches > 0;
+  outcomes[OUT_HATCH_DASHED] += r == GSHSCENE_OK && counters.hatches > 0 && world.hatch_dashed > 0;
+  outcomes[OUT_HATCH_NESTING] += r == GSHSCENE_OK && counters.hatches > 0 && world.hatch_nested > 0;
+  outcomes[OUT_HATCH_CACHED] += counters.hatches > 0 && counters.cache_hits > 0;
+  outcomes[OUT_HATCH_CALLER_MEMORY] += r == GSHSCENE_OK && counters.hatches > 0 && (request.flags & GSHSCENE_RENDER_CALLER_MEMORY);
   /* UC4: the pieces of every cell the exact step made reproduce what the rasterizer summed, whatever the geometry. */
   CHECK(counters.exact_failures == 0);
   const uint64_t first_entries = entries_hash(report);

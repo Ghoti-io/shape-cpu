@@ -771,6 +771,29 @@
  *   caller's block (the size reported covers the use's own item and, above it, the most any unit of a tile takes); a pixel inside a damage is the
  *   pixel of the whole render.  Cancel is checked before every copy of every unit and between units.
  *
+ * ### Hatches (HX13; shape-scene's HX1 to HX16)
+ *
+ * A fill painted with a hatch is drawn as the stroke of its trimmed, dashed lines, by the stroke's own machinery (SC1 to SC8); nothing
+ * about the lines is decided here.  The sink claims `GSHSCENE_CAP_HATCH`.
+ *
+ * - **The expansion.**  The region (the fill's path, or a run's glyph outlines as one path) is hatched by shape-geometry's
+ *   `gshgeom_hatch_pieces` at the canonical map (SC3: the composed map's linear part with the translation's fraction, drawn moved by the
+ *   whole pixels), and the pieces are stroked by `gshgeom_hatch_expand_pieces` with the hatch's style: `hatch.h`'s HX4 to HX8, whose
+ *   outline equals the stroke expansion of the same pieces as one explicit path.  Its body is covered as a stroke's is (SC5, with no
+ *   aligned part), then the clips and the operator; the source is the hatch's ink with its alpha times the hatch paint's multiplier.  The
+ *   fill's own coverage is not multiplied in.  A translucent crosshatch is one union (SG13): its crossings are not darker.
+ * - **The cache.**  The expansion is cached under SC7's table, keyed by the region's id, the style's, the hatch's, the fill rule, the bit
+ *   patterns of the canonical linear part and the fraction, and the stroke's and the hatch's revisions; a hit equals a miss bit for bit,
+ *   `evict(id)` drops the entries naming the hatch, the region or the style, and nothing is read or written under `CALLER_MEMORY`.  FT-2's
+ *   sparse composite is taken (a hatch is mostly empty), and changes nothing.
+ * - **The limit.**  `GSHCPU_Limits.max_hatch_lines` bounds the lines of the use (HX5's count, over all the families, of the lines that meet the
+ *   closed bounds of the region the whole render draws of the fill, never only the damage or the clips): a count of more is the fill's
+ *   `RESOURCE_LIMIT`, on a hit as on a miss, whatever the tier.  The count is `GSHCPU_Render_Counters.hatch_lines`.  The pieces per fill
+ *   and the outline's points are bounded by `max_points` and `max_dash_steps` as a stroke's are.  The work bound counts a line's trim as one
+ *   step for each element of the region.
+ * - **Caller memory and bounds.**  The pieces and the outline are in the caller's block, sized as a stroke's is (measure_items); a hatch
+ *   fill's reach is its region's outset by the pen (shape-scene's HX15), which the expansion's boxes give exactly.
+ *
  * ### Memory (S9)
  *
  * A render takes one block: the layers (32 bytes a pixel of the region for the

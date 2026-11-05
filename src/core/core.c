@@ -78,6 +78,7 @@ void gshcpu_limits_default(GSHCPU_Limits * limits) {
   limits->max_image_work = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK */
   limits->max_dash_steps = 0; /* the default, shape-geometry's: 4 max_points + 4096 */
   limits->max_pattern_cells = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_PATTERN_CELLS */
+  limits->max_hatch_lines = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES */
   limits->max_union_tests = 0;   /* the default, GSHCPU_LIMITS_DEFAULT_MAX_UNION_TESTS */
 }
 

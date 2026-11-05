@@ -117,6 +117,8 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
 /** The default of ::GSHCPU_Limits.max_pattern_cells: 2^22 copies. */
 #define GSHCPU_LIMITS_DEFAULT_MAX_PATTERN_CELLS ((uint64_t)1 << 22)
 
+/** The default of ::GSHCPU_Limits.max_hatch_lines: 2^16 lines. */
+#define GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES ((uint64_t)1 << 16)
 /** The default of ::GSHCPU_Limits.max_union_tests: 2^26 comparisons. */
 #define GSHCPU_LIMITS_DEFAULT_MAX_UNION_TESTS ((uint64_t)1 << 26)
 
@@ -244,6 +246,14 @@ typedef struct GSHCPU_Limits {
    * the coverage functions ignore it.
    */
   uint64_t max_pattern_cells;
+  /**
+   * The most lines of a hatch fill (render.h, HX12): the lines of the use, over all the families of its hatch, that meet the closed
+   * bounds of what the whole render draws of the fill (never only the damage), counted by shape-geometry's enumeration and so the
+   * same whatever tier draws and whatever the cache holds; one more is ::GSHSCENE_REASON_RESOURCE_LIMIT for the fill.  0 is
+   * ::GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES (2^16), `UINT64_MAX` no cap.  A `uint64_t` whatever the target.  Read by the sink; the
+   * coverage functions ignore it.
+   */
+  uint64_t max_hatch_lines;
   /**
    * The most box comparisons (clip_union.h, CU17) the planning predicate may cost over every union clip push of one render, counted
    * for every union push in unit order whatever the damage excludes, so that the point of refusal never depends on the damage; the

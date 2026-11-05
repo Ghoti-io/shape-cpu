@@ -258,5 +258,21 @@ render pattern-hatch rgba8 9d22fd7560e29800
 render pattern-hatch rgba8-premultiplied b72ef4a92346d0c3
 render pattern-hatch rgbaf32 be486e1e9b6d2f6d
 render pattern-hatch rgbaf32-premultiplied c53414326060004a
-hash ac149b9536d41af4
-count 256
+render hatch-families rgba8 55d38fbc252c19f3
+render hatch-families rgba8-premultiplied ac57e7e32afa9834
+render hatch-families rgbaf32 3bf9a99df35fd776
+render hatch-families rgbaf32-premultiplied 93e07457932db645
+render hatch-nesting rgba8 ef7753587903364a
+render hatch-nesting rgba8-premultiplied 93c49a45230f1799
+render hatch-nesting rgbaf32 ffa602de376a627f
+render hatch-nesting rgbaf32-premultiplied 46be0fb1f62c1eec
+render hatch-curved rgba8 0fa74e4369b0653e
+render hatch-curved rgba8-premultiplied 6db0c948e5994081
+render hatch-curved rgbaf32 1632ebacd546fa1d
+render hatch-curved rgbaf32-premultiplied 02acddcbcda21646
+render hatch-maps rgba8 f095c585fcb17a39
+render hatch-maps rgba8-premultiplied 0f9203da520d301a
+render hatch-maps rgbaf32 334df0b17a14115e
+render hatch-maps rgbaf32-premultiplied dec384b4866eef09
+hash 25bc21b4b9c9872a
+count 272
