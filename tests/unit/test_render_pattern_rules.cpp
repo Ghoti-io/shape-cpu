@@ -36,6 +36,7 @@
 #include <ghoti.io/shape-scene/shape-scene.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -227,6 +228,27 @@ const GSHSCENE_Resource * interior_tile(RF_Ctx * c, int v) {
       rf_fill(c, t, rf_rect(c, 3.0, 5.0, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, f, 0, 0.0);
       break;
     }
+    case 10: { // a pattern in the tile whose steps (3) are not a divisor of the copies' (8): its lattice has to move with each copy by whole pixels
+      GSHSCENE_List * in = rf_open(c);
+      rf_fill(c, in, rf_rect(c, 0.25, 0.25, 1.25, 2.0), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.4, 0.8, 1.0), 0, 0.0);
+      const GSHSCENE_Resource * inner = rf_pattern(c, rf_picture_of(c, in), 0, 0, 3, 3, 3, 3, 1, 1, rf_move(0.5, 0.25), nullptr);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(inner, 1.0), 0, 0.0);
+      break;
+    }
+    case 11: { // two clip blocks in a row, each around a group: the second, inside the first's footprint but smaller, must not keep the first's coverage
+      GSHGEOM_Map at = rf_move(4.0, 4.0);
+      rf_check(c, gshscene_list_clip_push(t, rf_circle(c, 2.9), &at, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_general(c, t, 0, 0, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, nullptr);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.2, 0.2, 1.0), 0, 0.0);
+      rf_pop(c, t);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      rf_check(c, gshscene_list_clip_push(t, rf_rect(c, 5.0, 5.0, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_general(c, t, 0, 0, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, nullptr);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.2, 0.9, 1.0), 0, 0.0);
+      rf_pop(c, t);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      break;
+    }
     default:
       break;
   }
@@ -298,7 +320,7 @@ TEST(RenderPatternRules, ATileInsideItsCellIsThePictureDrawnOnceForEachCopy) {
   // (two in force at once, a block after a block, a clip inside a group), groups, strokes of every alignment and an image: every bookkeeping of a unit's
   // accumulator, its clips, its shifts and its weights is told from a wrong one by the pixels.
   const double lattices[4][4] = {{8, 8, 0.3, 0.45}, {10, 9, 0.7, 0.2}, {6, 6, 0.25, 0.5}, {8, 8, 0.0, 0.0}};
-  for (int variant = 0; variant < 10; variant++) {
+  for (int variant = 0; variant < 12; variant++) {
     for (const auto & l : lattices) {
       Twin tw(variant, l[0], l[1], l[2], l[3]);
       for (GSHCPU_Format format : {GSHCPU_FORMAT_RGBA8_STRAIGHT, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED}) {
@@ -748,6 +770,434 @@ TEST(RenderPatternRules, ARasterReadFromTheTableIsReleasedSoThatAnEvictionFreesI
     rf_release(&c);
   }
   EXPECT_EQ(live.live, 0) << "every byte the sink took is given back";
+}
+
+TEST(RenderPatternRules, AStrokeWhollyOutsideItsCellDrawsNothingAndIsNotCounted) {
+  // PC5: a stroke that the cell's cut leaves nothing of is dropped before it is covered; it is not a stroke drawn (the counter) and it costs no
+  // coverage.  The stroke inside the cell is the control that the counter counts.
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_List * outside = rf_open(&c);
+  const double far_line[4] = {20.0, 2.0, 30.0, 2.0};
+  rf_stroke(&c, outside, rf_polyline(&c, far_line, 2, 0), rf_pen(&c, 1.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), nullptr, rf_solid(0.1, 0.1, 0.5, 1.0));
+  GSHSCENE_List * inside = rf_open(&c);
+  const double near_line[4] = {2.0, 2.5, 6.0, 2.5};
+  rf_stroke(&c, inside, rf_polyline(&c, near_line, 2, 0), rf_pen(&c, 1.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), nullptr, rf_solid(0.1, 0.1, 0.5, 1.0));
+  GSHSCENE_List * lists[2];
+  const GSHSCENE_List * tiles[2] = {outside, inside};
+  for (int k = 0; k < 2; k++) {
+    const GSHSCENE_Resource * pat = rf_pattern(&c, rf_picture_of(&c, const_cast<GSHSCENE_List *>(tiles[k])), 0, 0, 8, 8, 12, 12, 1, 1, rf_move(0.25, 0.5), nullptr);
+    lists[k] = rf_open(&c);
+    rf_fill(&c, lists[k], rf_rect(&c, 0, 0, 48, 36), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+    rf_close(&c, lists[k]);
+  }
+  GSHSCENE_List * none = rf_open(&c);
+  rf_close(&c, none);
+  for (unsigned tiers : {kAll, kNoPeriod, kNoCache}) {
+    TSink a(tiers), b(tiers), z(tiers);
+    Out o = draw(a.sink, lists[0], 48, 36, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED);
+    Out e = draw(z.sink, none, 48, 36, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED);
+    EXPECT_EQ(o.result, GSHSCENE_OK);
+    EXPECT_EQ(o.bytes, e.bytes) << "tiers " << tiers;
+    EXPECT_EQ(a.counters.strokes, 0u) << "tiers " << tiers;
+    draw(b.sink, lists[1], 48, 36);
+    EXPECT_GE(b.counters.strokes, 1u) << "tiers " << tiers;
+  }
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, TheUnitsOfAPassPayForTheLayerTheyApply) {
+  // PC11: the apply of a unit's element to the lattice layer is work, over the pixels the copies reached.  A tile of one fill of the whole cell, drawn
+  // by the general tier over a use of 64 by 64 pixels, has a unit that costs more than the use's own pixels: the pixels, the cells its copies
+  // deposit and the points of its outlines.  (The use itself pays its pixels once, and work_max is the most any one unit paid.)
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_List * t = rf_open(&c);
+  rf_fill(&c, t, rf_rect(&c, 0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.4, 0.8, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * pat = rf_pattern(&c, rf_picture_of(&c, t), 0, 0, 8, 8, 8, 8, 1, 1, rf_move(0.0, 0.0), nullptr);
+  GSHSCENE_List * l = rf_open(&c);
+  rf_fill(&c, l, rf_rect(&c, 0, 0, 64, 64), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  rf_close(&c, l);
+  TSink s(kNoPeriod);
+  Out o = draw(s.sink, l, 64, 64);
+  ASSERT_EQ(o.result, GSHSCENE_OK);
+  EXPECT_GT(o.summary.work_max, 64u * 64u + 1000u);
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, AStepThatNoCopyUsesIsNotAnOverlap) {
+  // PC6: along an axis that does not repeat the step is never used, so a step smaller than the cell there does not make the copies overlap: the use is
+  // drawn as the pass over all the copies, not copy by copy.  The two differ at a row the cells of the other axis share (a translucent whole-cell fill
+  // at a fractional step: the mean of the two sources against one over the other), so the use with the unused step equals the one with the cell's.
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_List * t = rf_open(&c);
+  rf_fill(&c, t, rf_rect(&c, 0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.4, 0.8, 0.5), 0, 0.0);
+  const GSHSCENE_Resource * tile = rf_picture_of(&c, t);
+  GSHSCENE_List * lists[3];
+  const double xs[3] = {4.0, 8.0, 2.0};
+  for (int k = 0; k < 3; k++) {
+    const GSHSCENE_Resource * pat = rf_pattern(&c, tile, 0, 0, 8, 8, xs[k], 8, 0, 1, rf_move(0.3, 0.5), nullptr);
+    lists[k] = rf_open(&c);
+    rf_fill(&c, lists[k], rf_rect(&c, 0, 0, 24, 40), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+    rf_close(&c, lists[k]);
+  }
+  for (unsigned tiers : {kAll, kNoPeriod}) {
+    TSink a(tiers), b(tiers), d(tiers);
+    Out p4 = draw(a.sink, lists[0], 24, 40, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED);
+    Out p8 = draw(b.sink, lists[1], 24, 40, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED);
+    Out p2 = draw(d.sink, lists[2], 24, 40, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED);
+    ASSERT_EQ(p8.result, GSHSCENE_OK);
+    EXPECT_EQ(p4.bytes, p8.bytes) << tiers;
+    EXPECT_EQ(p2.bytes, p8.bytes) << tiers;
+  }
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, ACellsOriginIsItsOwnInEachAxis) {
+  // PC2: the cell's x and y place it independently: the cell [5, 13] x [1, 9] cuts a fill that begins at x = 3 and not at y = 2 (a cell origin that took
+  // its x from its y would cut the fill at x = 1, where it does not).  Each copy is the fill under a clip of the cell.
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_List * t = rf_open(&c);
+  rf_fill(&c, t, rf_rect(&c, 3, 2, 9, 8), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.3, 0.8, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * tile = rf_picture_of(&c, t);
+  const GSHSCENE_Resource * pat = rf_pattern(&c, tile, 5.0, 1.0, 8, 8, 12, 12, 1, 1, rf_move(1.0, 2.0), nullptr);
+  GSHSCENE_List * l1 = rf_open(&c);
+  rf_fill(&c, l1, rf_rect(&c, 0, 0, 60, 48), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  rf_close(&c, l1);
+  GSHSCENE_List * l2 = rf_open(&c);
+  for (int j = -1; j < 5; j++) {
+    for (int i = -1; i < 6; i++) {
+      GSHGEOM_Map at = rf_move(1.0 + 12.0 * i, 2.0 + 12.0 * j);
+      rf_check(&c, gshscene_list_clip_push(l2, rf_rect(&c, 5, 1, 13, 9), &at, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(&c, l2, rf_rect(&c, 3, 2, 9, 8), &at, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.3, 0.8, 1.0), 0, 0.0);
+      rf_check(&c, gshscene_list_clip_pop(l2) == GSHSCENE_OK);
+    }
+  }
+  rf_close(&c, l2);
+  for (unsigned tiers : {kAll, kNoPeriod}) {
+    TSink a(tiers), b(tiers);
+    Out p = draw(a.sink, l1, 60, 48);
+    Out e = draw(b.sink, l2, 60, 48);
+    ASSERT_EQ(p.result, GSHSCENE_OK);
+    EXPECT_LE(max_levels(p.bytes, e.bytes, GSHCPU_FORMAT_RGBA8_STRAIGHT), 1.0) << tiers;
+  }
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, TheWindowMayBeExactlyTheUsesWidthOrHeight) {
+  // PC9: the window of an integer lattice (8 by 8 here) is drawn when it fits the use's rectangle, which includes the rectangle that is exactly
+  // its width, or exactly its height.
+  RF_Ctx c;
+  rf_begin(&c);
+  const GSHSCENE_Resource * tile = interior_tile(&c, 0);
+  const GSHSCENE_Resource * pat = rf_pattern(&c, tile, 0, 0, 8, 8, 8, 8, 1, 1, rf_move(0.0, 0.0), nullptr);
+  const double rects[2][2] = {{8, 16}, {16, 8}};
+  for (const auto & r : rects) {
+    GSHSCENE_List * l = rf_open(&c);
+    rf_fill(&c, l, rf_rect(&c, 0, 0, r[0], r[1]), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+    rf_close(&c, l);
+    TSink s(kAll), off(kNoPeriod);
+    Out a = draw(s.sink, l, 16, 16);
+    Out b = draw(off.sink, l, 16, 16);
+    EXPECT_EQ(s.counters.pattern_period, 1u) << r[0] << " by " << r[1];
+    EXPECT_EQ(off.counters.pattern_period, 0u);
+    EXPECT_EQ(a.bytes, b.bytes);
+  }
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, ACellPastTheRangeGivesTheWindowUpWhoseCopiesAreInRange) {
+  // PC9: a copy whose whole cell lies past the range the scan converter takes cannot be vouched for by the window, which draws a small part of it, so the
+  // pass gives the window up and the general tier decides every copy.  A cell 20 million pixels tall, at a step of 3000, has some 6,700 copies that
+  // meet a use 16 pixels wide and 3000 tall, each of them drawn over a few pixels; the picture is the general tier's (here the copies far down the
+  // cell are in the cell's frame past the range, which is the sink's limit under either tier), and the give-up is counted.
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_List * fills = rf_open(&c);
+  rf_fill(&c, fills, rf_rect(&c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.3, 0.1, 0.8), 0, 0.0);
+  GSHSCENE_List * strokes = rf_open(&c);
+  const double line[4] = {2.0, 2.0, 6.0, 5.0};
+  rf_stroke(&c, strokes, rf_polyline(&c, line, 2, 0), rf_pen(&c, 1.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), nullptr, rf_solid(0.1, 0.1, 0.5, 1.0));
+  GSHSCENE_List * tiles[2] = {fills, strokes};
+  for (GSHSCENE_List * tile_list : tiles) {
+    const GSHSCENE_Resource * pat = rf_pattern(&c, rf_picture_of(&c, tile_list), 0, -20000000.0, 8, 20000008.0, 8, 3000, 1, 1, rf_move(0.0, 0.0), nullptr);
+    GSHSCENE_List * l = rf_open(&c);
+    rf_fill(&c, l, rf_rect(&c, 0, 0, 16, 3000), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+    rf_close(&c, l);
+    TSink on(kAll), off(kNoPeriod);
+    Out a = draw(on.sink, l, 16, 3000);
+    Out b = draw(off.sink, l, 16, 3000);
+    ASSERT_EQ(a.result, GSHSCENE_OK);
+    ASSERT_EQ(b.result, GSHSCENE_OK);
+    EXPECT_EQ(a.bytes, b.bytes);
+    EXPECT_EQ(a.summary.by_class[GSHSCENE_ENTRY_REFUSED], b.summary.by_class[GSHSCENE_ENTRY_REFUSED]) << "a limit under both tiers, or under neither";
+    EXPECT_EQ(on.counters.period_aborts, 1u);
+    EXPECT_EQ(on.counters.pattern_period, 0u);
+  }
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, ARegionPastTheRangeInACellsFrameIsALimitUnderBothTiers) {
+  // PC3, PC8: a use of the plane in a cell 25 million pixels wide, translated by 20 million, is drawn over the region of the copy in the cell's own
+  // frame, which lies 20 million pixels from its origin: past the range the scan converter takes.  That is the sink's resource limit, reported, and
+  // nothing is drawn, under either tier.
+  RF_Ctx c;
+  rf_begin(&c);
+  const GSHSCENE_Resource * plane = nullptr;
+  ASSERT_EQ(gshscene_store_intern_plane(c.store, &plane), GSHSCENE_OK);
+  c.held[c.held_count++] = plane;
+  GSHSCENE_List * t = rf_open(&c);
+  rf_fill(&c, t, plane, nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.4, 0.8, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * pat = rf_pattern(&c, rf_picture_of(&c, t), -25000000.0, 0, 25000000.0, 40, 25000000.0, 40, 1, 1, rf_move(20000000.0, 0.0), nullptr);
+  GSHSCENE_List * l = rf_open(&c);
+  rf_fill(&c, l, rf_rect(&c, 0, 0, 40, 30), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  rf_close(&c, l);
+  GSHSCENE_List * none = rf_open(&c);
+  rf_close(&c, none);
+  for (unsigned tiers : {kAll, kNoPeriod}) {
+    TSink a(tiers), z(tiers);
+    Out o = draw(a.sink, l, 40, 30);
+    Out e = draw(z.sink, none, 40, 30);
+    EXPECT_EQ(o.summary.by_class[GSHSCENE_ENTRY_REFUSED], 1u) << tiers;
+    EXPECT_EQ(o.bytes, e.bytes) << tiers;
+  }
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, ACutStrokeKnowsItsPartsPointsExtentBoxAndBound) {
+  // PC5: the stroke cut to a cell is a stroke of its own, whose parts are the cut ones: what each is made of (its points, the extent of its
+  // coordinates, the pixels it touches shifted into the device, the deposits it can make) is the cut path's, not the outline's; a part with nothing
+  // inside the cell is absent; and a stroke with no part left draws nothing.
+  RF_Ctx c;
+  rf_begin(&c);
+  const double zig[10] = {-2.0, 3.0, 3.0, 6.5, 6.0, 1.0, 10.0, 7.0, 12.0, 4.0};
+  GSHSCENE_List * l = rf_open(&c);
+  rf_stroke(&c, l, rf_polyline(&c, zig, 5, 1),
+      rf_style(&c, 1.5, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT, GSHSCENE_STROKE_DEGENERATE_DRAW, nullptr, 0, 0.0,
+          GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_INSIDE, GSHGEOM_FILL_NONZERO),
+      nullptr, rf_solid(0.1, 0.2, 0.6, 0.8));
+  rf_close(&c, l);
+  const GSHSCENE_Item * item = nullptr;
+  ASSERT_EQ(gshscene_list_item(l, 0, &item), GSHSCENE_OK);
+  GSHGEOM_Limits limits;
+  gshgeom_limits_default(&limits);
+  const GSHGEOM_Allocator * alloc = gshgeom_allocator_default();
+  auto floor_px = [](int64_t v) { return v % 64 != 0 && v < 0 ? v / 64 - 1 : v / 64; };
+  const GSHGEOM_Map at = rf_move(5.25, 7.5); // a whole-pixel shift of (5, 7) and the fraction in the outline
+  GSHCPU_Stroke whole;
+  ASSERT_EQ(gshcpu_render_stroke_open(nullptr, alloc, &limits, item, &at, &whole), GSHCPU_OK);
+  ASSERT_TRUE(whole.drawn);
+  EXPECT_EQ(whole.shift_x, 5);
+  EXPECT_EQ(whole.shift_y, 7);
+  GSHCPU_Stroke_Meta before = whole.meta;
+  GSHCPU_Rect box_before[GSHCPU_STROKE_PARTS];
+  for (int p = 0; p < GSHCPU_STROKE_PARTS; p++) {
+    box_before[p] = whole.box[p];
+  }
+  // The cell [2, 6] x [2, 6] in the canonical frame is, in the device, that cell moved by the shift.
+  GSHGEOM_Device_Point quad[4];
+  const int xs[4] = {2, 6, 6, 2}, ys[4] = {2, 2, 6, 6};
+  for (int k = 0; k < 4; k++) {
+    quad[k].x = (xs[k] + 5) * 64;
+    quad[k].y = (ys[k] + 7) * 64;
+  }
+  ASSERT_EQ(gshcpu_render_stroke_cut(&whole, quad, alloc, &limits), GSHCPU_OK);
+  EXPECT_TRUE(whole.drawn);
+  int parts_present = 0;
+  for (int p = GSHCPU_STROKE_BODY; p <= GSHCPU_STROKE_ALIGNED; p++) {
+    if (!whole.meta.present[p]) {
+      EXPECT_EQ(whole.meta.points[p], 0u) << p;
+      EXPECT_EQ(whole.meta.bound[p], 0u) << p;
+      EXPECT_TRUE(whole.box[p].x0 == whole.box[p].x1 || whole.box[p].y0 == whole.box[p].y1) << p;
+      continue;
+    }
+    parts_present++;
+    ASSERT_TRUE(whole.cut_set[p]) << p;
+    ASSERT_NE(whole.cut[p], nullptr) << p;
+    const size_t n = gshgeom_flat_path_point_count(whole.cut[p]);
+    const GSHGEOM_Device_Point * pts = gshgeom_flat_path_points(whole.cut[p]);
+    ASSERT_GT(n, 0u);
+    int64_t lo_x = pts[0].x, lo_y = pts[0].y, hi_x = pts[0].x, hi_y = pts[0].y;
+    for (size_t i = 1; i < n; i++) {
+      lo_x = std::min<int64_t>(lo_x, pts[i].x);
+      lo_y = std::min<int64_t>(lo_y, pts[i].y);
+      hi_x = std::max<int64_t>(hi_x, pts[i].x);
+      hi_y = std::max<int64_t>(hi_y, pts[i].y);
+    }
+    EXPECT_EQ(whole.meta.points[p], n) << p;
+    EXPECT_EQ(whole.meta.lo_x[p], lo_x) << p;
+    EXPECT_EQ(whole.meta.lo_y[p], lo_y) << p;
+    EXPECT_EQ(whole.meta.hi_x[p], hi_x) << p;
+    EXPECT_EQ(whole.meta.hi_y[p], hi_y) << p;
+    // the cut lies inside the cell (the cell's pixels are the canonical box's bound)
+    EXPECT_GE(lo_x, 2 * 64) << p;
+    EXPECT_LE(hi_x, 6 * 64) << p;
+    EXPECT_GE(lo_y, 2 * 64) << p;
+    EXPECT_LE(hi_y, 6 * 64) << p;
+    GSHCPU_Rect canon;
+    canon.x0 = floor_px(lo_x);
+    canon.y0 = floor_px(lo_y);
+    canon.x1 = -floor_px(-hi_x);
+    canon.y1 = -floor_px(-hi_y);
+    const GSHGEOM_Flat_Path * one = whole.cut[p];
+    EXPECT_EQ(whole.meta.bound[p], gshcpu_render_cells_bound(&one, 1, canon, UINT64_MAX)) << p;
+    EXPECT_EQ(whole.box[p].x0, canon.x0 + 5) << p;
+    EXPECT_EQ(whole.box[p].y0, canon.y0 + 7) << p;
+    EXPECT_EQ(whole.box[p].x1, canon.x1 + 5) << p;
+    EXPECT_EQ(whole.box[p].y1, canon.y1 + 7) << p;
+    // and it is not the outline's: the outline reaches past the cell in every direction
+    EXPECT_LT(whole.meta.hi_x[p] - whole.meta.lo_x[p], before.hi_x[p] - before.lo_x[p]) << p;
+    EXPECT_LT(whole.meta.points[p], 100000u);
+    (void)box_before;
+  }
+  EXPECT_GE(parts_present, 1);
+  gshcpu_render_stroke_close(nullptr, &whole);
+  // A cell with none of the stroke in it leaves no part, and no stroke.
+  GSHCPU_Stroke gone;
+  ASSERT_EQ(gshcpu_render_stroke_open(nullptr, alloc, &limits, item, &at, &gone), GSHCPU_OK);
+  for (int k = 0; k < 4; k++) {
+    quad[k].x = (xs[k] + 205) * 64;
+    quad[k].y = (ys[k] + 207) * 64;
+  }
+  ASSERT_EQ(gshcpu_render_stroke_cut(&gone, quad, alloc, &limits), GSHCPU_OK);
+  EXPECT_FALSE(gone.drawn);
+  EXPECT_FALSE(gone.meta.present[GSHCPU_STROKE_BODY]);
+  EXPECT_FALSE(gone.meta.present[GSHCPU_STROKE_ALIGNED]);
+  EXPECT_EQ(gone.meta.points[GSHCPU_STROKE_BODY], 0u);
+  gshcpu_render_stroke_close(nullptr, &gone);
+  // A translation past the range the scan converter takes is the sink's limit, at the opening.
+  const GSHGEOM_Map far = rf_move(40000000.0, 0.0);
+  GSHCPU_Stroke refused;
+  EXPECT_EQ(gshcpu_render_stroke_open(nullptr, alloc, &limits, item, &far, &refused), GSHCPU_ERR_LIMIT);
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, TheLinearPartAloneSeparatesTwoRastersOfOnePattern) {
+  // PC10: the same pattern, at a fraction of zero, drawn through one sink under maps that differ only in their linear part (a mirror in x, a mirror in
+  // y, a quarter turn, a transposition): the cell, the fraction and the spaces are the same, so only the key's linear part tells the rasters apart, and a
+  // picture that took another's raster would be a mirrored or turned tile.  Each is what a sink with no cache draws.
+  RF_Ctx c;
+  rf_begin(&c);
+  const GSHSCENE_Resource * tile = interior_tile(&c, 0);
+  const GSHSCENE_Resource * pat = rf_pattern(&c, tile, 0, 0, 8, 8, 8, 8, 1, 1, rf_move(0.0, 0.0), nullptr);
+  struct M {
+    double m[4];
+    double t[2];
+  };
+  const M maps[] = {{{1, 0, 0, 1}, {0, 0}}, {{-1, 0, 0, 1}, {72, 0}}, {{1, 0, 0, -1}, {0, 56}}, {{0, -1, 1, 0}, {56, 0}}, {{0, 1, 1, 0}, {0, 0}},
+      {{-1, 0, 0, -1}, {72, 56}}, {{1, 0, 0, 1}, {0, 0}}};
+  std::vector<GSHSCENE_List *> lists;
+  for (const M & m : maps) {
+    GSHGEOM_Map map;
+    gshgeom_map_from_matrix(2, m.m, m.t, &map);
+    GSHSCENE_List * l = rf_open(&c);
+    rf_fill(&c, l, rf_rect(&c, 0, 0, 72, 56), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.95, 0.9, 1.0), 0, 0.0);
+    rf_fill(&c, l, rf_rect(&c, 4, 3, 52, 51), &map, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+    rf_close(&c, l);
+    lists.push_back(l);
+  }
+  TSink cached(kAll), plain(kNoCache);
+  for (size_t k = 0; k < lists.size(); k++) {
+    Out a = draw(cached.sink, lists[k], 72, 56, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED);
+    Out b = draw(plain.sink, lists[k], 72, 56, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED);
+    ASSERT_EQ(a.result, GSHSCENE_OK);
+    EXPECT_EQ(a.bytes, b.bytes) << "map " << k;
+  }
+  EXPECT_GE(cached.counters.period_misses, 5u) << "five linear parts, five rasters";
+  EXPECT_GE(cached.counters.period_hits, 1u) << "and the last list is the first one again";
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, ANestedPatternAndAnExtentThatDoesNotStartAtTheOriginKeepEachOthersPixels) {
+  // PC3: a pattern inside a tile is drawn in the copy's own frame, whose pixels the pass keeps at the place they have in the device (the copy's whole-pixel
+  // shift is part of where they are kept).  Over an extent that begins well inside the canvas, a frame that forgot the shift would address the pixels
+  // before its layer, which belong to the layer of the pass around it.
+  for (int variant : {6, 10}) {
+    for (double step : {8.0, 11.0}) {
+      Twin tw(variant, step, step, 0.3, 0.45);
+      for (const auto & e : {std::array<int, 4>{16, 12, 72, 56}, std::array<int, 4>{30, 20, 70, 50}}) {
+        Out o[2];
+        const GSHSCENE_List * lists[2] = {tw.pattern, tw.explicit_copies};
+        for (int k = 0; k < 2; k++) {
+          TSink s(kNoPeriod);
+          RasterRef raster(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 72, 56));
+          std::memset(gimg_raster_pixels(raster.raster), 0, gimg_raster_stride_bytes(raster.raster) * 56);
+          ReportRef report;
+          GSHSCENE_Target t = target_of(raster.raster);
+          t.extent.x0 = e[0];
+          t.extent.y0 = e[1];
+          t.extent.x1 = e[2];
+          t.extent.y1 = e[3];
+          GSHSCENE_Render_Request req = request_of(lists[k], &t, report.report);
+          o[k].result = gshscene_sink_render(s.sink, &req);
+          o[k].bytes = raster.bytes();
+        }
+        ASSERT_EQ(o[0].result, GSHSCENE_OK);
+        ASSERT_EQ(o[1].result, GSHSCENE_OK);
+        EXPECT_LE(max_levels(o[0].bytes, o[1].bytes, GSHCPU_FORMAT_RGBA8_STRAIGHT), 1.0) << "variant " << variant << " step " << step << " extent " << e[0] << "," << e[1];
+      }
+    }
+  }
+}
+
+TEST(RenderPatternRules, AStrokeIsCutFromTheFormOfItsPartsThatHoldsNoCancellingEdges) {
+  // PC5: the cut of a part is the cut of what the part covers: its reduced form (the same winding without the edges that cancel) where it has one,
+  // else the part itself.  Strokes with sharp joins and a self-crossing path have a reduced form that is not the part; the cut equals the cut of it.
+  struct Shape {
+    std::vector<double> pts;
+    int closed;
+    uint32_t join, cap;
+    double width;
+  };
+  const Shape shapes[] = {
+      {{0.0, 8.0, 5.0, 1.0, 10.0, 8.0, 14.0, 2.0, 17.0, 7.0}, 0, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND, 3.0},
+      {{1.0, 1.0, 11.0, 9.0, 1.0, 9.0, 11.0, 1.0}, 1, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT, 2.5},
+      {{1.0, 5.0, 12.0, 5.0, 2.0, 5.5, 13.0, 5.5}, 0, GSHSCENE_STROKE_JOIN_BEVEL, GSHSCENE_STROKE_CAP_SQUARE, 2.0},
+  };
+  int differing = 0;
+  GSHGEOM_Limits limits;
+  gshgeom_limits_default(&limits);
+  const GSHGEOM_Allocator * alloc = gshgeom_allocator_default();
+  for (const Shape & sh : shapes) {
+    RF_Ctx c;
+    rf_begin(&c);
+    GSHSCENE_List * l = rf_open(&c);
+    rf_stroke(&c, l, rf_polyline(&c, sh.pts.data(), sh.pts.size() / 2, sh.closed), rf_pen(&c, sh.width, sh.join, sh.cap), nullptr, rf_solid(0.1, 0.2, 0.6, 0.8));
+    rf_close(&c, l);
+    const GSHSCENE_Item * item = nullptr;
+    ASSERT_EQ(gshscene_list_item(l, 0, &item), GSHSCENE_OK);
+    const GSHGEOM_Map at = rf_move(0.25, 0.5);
+    GSHCPU_Stroke st;
+    ASSERT_EQ(gshcpu_render_stroke_open(nullptr, alloc, &limits, item, &at, &st), GSHCPU_OK);
+    GSHGEOM_Device_Point quad[4];
+    const int xs[4] = {3, 9, 9, 3}, ys[4] = {2, 2, 8, 8};
+    for (int k = 0; k < 4; k++) {
+      quad[k].x = xs[k] * 64;
+      quad[k].y = ys[k] * 64;
+    }
+    ASSERT_EQ(gshcpu_render_stroke_cut(&st, quad, alloc, &limits), GSHCPU_OK);
+    const GSHGEOM_Flat_Path * reduced = gshgeom_stroke_outline_body_reduced(st.outline);
+    const GSHGEOM_Flat_Path * part = gshgeom_stroke_outline_body(st.outline);
+    if (st.meta.present[GSHCPU_STROKE_BODY]) {
+      const GSHGEOM_Flat_Path * source = reduced ? reduced : part;
+      GSHGEOM_Flat_Path * want = nullptr;
+      ASSERT_EQ(gshgeom_flat_path_clip_convex(source, quad, alloc, &limits, &want), GSHGEOM_OK);
+      ASSERT_NE(st.cut[GSHCPU_STROKE_BODY], nullptr);
+      ASSERT_EQ(gshgeom_flat_path_point_count(want), gshgeom_flat_path_point_count(st.cut[GSHCPU_STROKE_BODY]));
+      EXPECT_EQ(std::memcmp(gshgeom_flat_path_points(want), gshgeom_flat_path_points(st.cut[GSHCPU_STROKE_BODY]),
+                    gshgeom_flat_path_point_count(want) * sizeof(GSHGEOM_Device_Point)),
+          0);
+      gshgeom_flat_path_destroy(want);
+      if (reduced && reduced != part) {
+        differing++;
+      }
+    }
+    gshcpu_render_stroke_close(nullptr, &st);
+    rf_release(&c);
+  }
+  EXPECT_GE(differing, 1) << "a shape whose reduced form is not its part, or the case does not tell them apart";
 }
 
 int main(int argc, char ** argv) {

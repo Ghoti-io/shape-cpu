@@ -128,7 +128,7 @@ struct Family {
       case 2: {
         GSHSCENE_Color_Space none;
         std::memset(&none, 0, sizeof none);
-        const GSHSCENE_Resource * img = rf_image(&ctx, 4, 3, 1, 8, GIMG_ALPHA_STRAIGHT, 1, none);
+        const GSHSCENE_Resource * img = rf_image(&ctx, 4, 3, 1, 8, GIMG_ALPHA_NONE, 1, none);
         GSHSCENE_Paint ip = rf_image_paint(&ctx, img, rf_place(&ctx, 1.0, 1.0, 1.5, 1.5), GSHSCENE_IMAGE_EXTEND_PAD, GSHSCENE_IMAGE_EXTEND_PAD,
             GSHSCENE_IMAGE_FILTER_NEAREST, GSHSCENE_IMAGE_FILTER_NEAREST, none, &f, 1.0);
         rf_fill(&ctx, t, rf_rect(&ctx, 1.5, 1.5, 5.5, 4.5), nullptr, GSHGEOM_FILL_NONZERO, ip, 0, 0.0);
@@ -234,6 +234,8 @@ TEST(RenderPatternKeys, EveryFieldTheRasterDependsOnIsInTheKey) {
         {fam.list(0.8, none, 0, nullptr, nullptr), &gam},      {fam.list(0.8, none, 0, nullptr, nullptr), &gam2},
         {fam.list(0.8, none, 0, nullptr, &scale2), nullptr},   {fam.list(0.8, none, 0, nullptr, &skew), nullptr},    // the linear part
         {fam.list(0.8, none, 0, nullptr, &flip), nullptr},
+        // the target's space where the layer's is another (a group's), so that only the colors the tile leaves in the target's space are converted from it
+        {fam.list(0.8, none, 0, &lin, nullptr), &gam},         {fam.list(0.8, none, 0, &lin, nullptr), &gam2},       {fam.list(0.8, none, 0, &lin, nullptr), &p3},
     };
     TSink cached(kAll);
     TSink plain(kNoCache);
@@ -295,23 +297,37 @@ TEST(RenderPatternKeys, ATileThatHoldsAMaskOrAPatternIsNotDrawnFromAWindow) {
 
 namespace {
 
-/** One 24-pixel cell of @p unit content, filling a 72 by 56 target with the tier on and off at a limit set by @p set; the two must agree in everything. */
+/** The per-limit result of a sweep: whether the period tier was given up, whether it drew, and whether the use was refused, for each value from @p from. */
+struct Profile {
+  std::vector<int> value, aborted, taken, refused;
+};
+
+/** Where a sweep puts its pattern and how big the target it fills is. */
+struct Geo {
+  double cx = 0.0, cy = 0.0;     /* the cell's origin in the pattern's space */
+  double tx = 0.3, ty = 0.45;    /* the pattern's translation */
+  double step = 24.0;            /* the steps (the cell is 24 pixels) */
+  uint32_t w = 72, h = 56;       /* the target, which the use fills */
+};
+
+/** One 24-pixel cell of @p unit content, filling a target with the tier on and off at a limit set by @p set; the two must agree in everything. */
 template <typename Build, typename Set>
-void sweep(Build build, Set set, int from, int to, int step, uint64_t * gave_up, uint64_t * taken, uint64_t * refused) {
+void sweep(Build build, Set set, int from, int to, int step, uint64_t * gave_up, uint64_t * taken, uint64_t * refused, const Geo & geo = Geo(),
+    Profile * profile = nullptr) {
   RF_Ctx c;
   rf_begin(&c);
   const GSHSCENE_Resource * tile = build(&c);
-  const GSHSCENE_Resource * pat = rf_pattern(&c, tile, 0, 0, 24, 24, 24, 24, 1, 1, rf_move(0.3, 0.45), nullptr);
+  const GSHSCENE_Resource * pat = rf_pattern(&c, tile, geo.cx, geo.cy, 24, 24, geo.step, geo.step, 1, 1, rf_move(geo.tx, geo.ty), nullptr);
   GSHSCENE_List * l = rf_open(&c);
-  rf_fill(&c, l, rf_rect(&c, 0, 0, 72, 56), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  rf_fill(&c, l, rf_rect(&c, 0, 0, geo.w, geo.h), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
   rf_close(&c, l);
   for (int v = from; v <= to; v += step) {
     GSHCPU_Limits limits;
     gshcpu_limits_default(&limits);
     set(&limits, v);
     TSink on(kAll, &limits), off(kNoPeriod, &limits);
-    Out a = draw(on.sink, l, 72, 56);
-    Out b = draw(off.sink, l, 72, 56);
+    Out a = draw(on.sink, l, geo.w, geo.h);
+    Out b = draw(off.sink, l, geo.w, geo.h);
     ASSERT_EQ(a.result, b.result) << v;
     ASSERT_EQ(a.bytes, b.bytes) << "limit " << v;
     ASSERT_EQ(a.refused, b.refused) << v;
@@ -319,6 +335,12 @@ void sweep(Build build, Set set, int from, int to, int step, uint64_t * gave_up,
     *gave_up += on.counters.period_aborts > 0;
     *taken += on.counters.pattern_period > 0;
     *refused += a.refused > 0;
+    if (profile) {
+      profile->value.push_back(v);
+      profile->aborted.push_back(on.counters.period_aborts > 0);
+      profile->taken.push_back(on.counters.pattern_period > 0);
+      profile->refused.push_back(a.refused > 0);
+    }
   }
   rf_release(&c);
 }
@@ -368,6 +390,7 @@ TEST(RenderPatternKeys, ALimitIsTheSameUnderBothTiersAtEveryValueOfTheLimit) {
       return rf_picture_of(c, t);
     }, which == 0 ? [](GSHCPU_Limits * l, int v) { l->max_image_work = (uint64_t)v; } : [](GSHCPU_Limits * l, int v) { l->max_area_pixel_work = (uint64_t)v; },
         which == 0 ? 100 : 1, which == 0 ? 60000 : 90, which == 0 ? 97 : 1, &g3, &t3, &r3);
+    std::printf("image which %d: gave_up %llu taken %llu refused %llu\n", which, (unsigned long long)g3, (unsigned long long)t3, (unsigned long long)r3);
     EXPECT_GE(t3 + g3, 1u) << which;
   }
   // A gradient whose map puts the cell's far corner past the sampling domain while a pixel is inside it: the scale is swept in steps of 2%.
@@ -384,6 +407,7 @@ TEST(RenderPatternKeys, ALimitIsTheSameUnderBothTiersAtEveryValueOfTheLimit) {
       return rf_picture_of(c, t);
     }, [](GSHCPU_Limits *, int) {}, 0, 0, 1, &g4, &t4, &r4);
   }
+  std::printf("gradient: gave_up %llu taken %llu refused %llu\n", (unsigned long long)g4, (unsigned long long)t4, (unsigned long long)r4);
   EXPECT_GE(t4, 1u);
 }
 
@@ -596,6 +620,261 @@ TEST(RenderPatternKeys, AStrokeKeyAndAPeriodKeyOfZerosNeverMeetTheOtherKindsEntr
   const double * raster = nullptr;
   EXPECT_EQ(gshcpu_period_cache_acquire(c, &zero, &e, &raster), 0) << "a period key of zeros finds no stroke expansion";
   gshcpu_stroke_cache_destroy(c);
+}
+
+TEST(RenderPatternKeys, AKeyOfOneKindIsNotFoundAmongTheOtherKindsEntriesWhereTheirBucketsMeet) {
+  // PC10: a stroke key is compared with the entries of its bucket, and a period key likewise; the two kinds hash differently, so an entry of the
+  // other kind sits in the same bucket only by chance.  Where it does, the other kind's key (zero in the fields the entry's kind does not use) must
+  // still not match: with 256 buckets, a couple of thousand entries of one kind meet the lookup of the other kind's zero key in a few of them.
+  GSHGEOM_Allocator alloc = {nullptr, poison_malloc, poison_calloc, poison_realloc, poison_free};
+  GSHCPU_Render_Counters counters{};
+  // Period entries, and the stroke key of zeros.
+  {
+    GSHCPU_Stroke_Cache * c = nullptr;
+    ASSERT_EQ(gshcpu_stroke_cache_create(&alloc, 1u << 28, &counters, &c), GSHCPU_OK);
+    GSHCPU_Stroke_Key sk;
+    std::memset(&sk, 0, sizeof sk);
+    for (uint64_t n = 1; n <= 3000; n++) {
+      GSHCPU_Period_Key k;
+      std::memset(&k, 0, sizeof k);
+      k.pattern_id = n;
+      double * r = gshcpu_period_cache_make(c, 1);
+      ASSERT_NE(r, nullptr);
+      void * e = nullptr;
+      ASSERT_EQ(gshcpu_period_cache_store(c, &k, r, 1, &e), 1);
+      gshcpu_stroke_cache_release(c, e);
+      GSHGEOM_Stroke_Outline * outline = nullptr;
+      GSHCPU_Stroke_Meta meta;
+      void * found = nullptr;
+      ASSERT_EQ(gshcpu_stroke_cache_acquire(c, &sk, &found, &outline, &meta), 0) << "after period entry " << n;
+    }
+    gshcpu_stroke_cache_destroy(c);
+  }
+  // Stroke entries, and the period key of zeros.
+  {
+    GSHCPU_Stroke_Cache * c = nullptr;
+    ASSERT_EQ(gshcpu_stroke_cache_create(&alloc, 1u << 28, &counters, &c), GSHCPU_OK);
+    GSHCPU_Period_Key zero;
+    std::memset(&zero, 0, sizeof zero);
+    GSHGEOM_Path * path = nullptr;
+    ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &path), GSHGEOM_OK);
+    GSHGEOM_Point a = {0, 0, 0}, b = {5, 0, 0};
+    gshgeom_path_move_to(path, a);
+    gshgeom_path_line_to(path, b);
+    GSHGEOM_Stroke st;
+    gshgeom_stroke_init(&st);
+    st.width = 1.0;
+    GSHGEOM_Map id;
+    gshgeom_map_identity(2, &id);
+    for (uint64_t n = 1; n <= 3000; n++) {
+      GSHGEOM_Stroke_Outline * out = nullptr;
+      ASSERT_EQ(gshgeom_stroke_expand(path, &st, &id, nullptr, nullptr, &out), GSHGEOM_OK);
+      GSHCPU_Stroke_Meta meta;
+      std::memset(&meta, 0, sizeof meta);
+      meta.bytes = 100;
+      GSHCPU_Stroke_Key sk;
+      std::memset(&sk, 0, sizeof sk);
+      sk.path_id = n;
+      void * se = nullptr;
+      GSHGEOM_Stroke_Outline * held = nullptr;
+      ASSERT_EQ(gshcpu_stroke_cache_store(c, &sk, out, &meta, &se, &held), 1);
+      gshcpu_stroke_cache_release(c, se);
+      void * e = nullptr;
+      const double * raster = nullptr;
+      ASSERT_EQ(gshcpu_period_cache_acquire(c, &zero, &e, &raster), 0) << "after stroke entry " << n;
+    }
+    gshgeom_path_destroy(path);
+    gshcpu_stroke_cache_destroy(c);
+  }
+}
+
+namespace {
+
+/** The first value of a profile at which @p which holds, or -1. */
+int first_where(const Profile & pr, const std::vector<int> & which) {
+  for (size_t i = 0; i < pr.value.size(); i++) {
+    if (which[i]) {
+      return pr.value[i];
+    }
+  }
+  return -1;
+}
+
+std::vector<int> negated(const std::vector<int> & v) {
+  std::vector<int> n(v.size());
+  for (size_t i = 0; i < v.size(); i++) {
+    n[i] = !v[i];
+  }
+  return n;
+}
+
+} // namespace
+
+TEST(RenderPatternKeys, TheWindowIsGivenUpExactlyWhereAWholeCellCouldMeetTheLimitTheGeneralTierMeets) {
+  // PC9: for a tile that is one 24-pixel square at a fraction of (0.3, 0.45), the cell's cut outline is the square and its cells are bounded, from
+  // its edges alone, by the rows each edge crosses and the columns it spans (cover.c's edge_bound: R + min(span + R, R * W)).  Its two vertical edges
+  // cross 25 rows each (0.45 to 24.45) and span no column, 25 + min(0 + 25, 25 * 25) = 50 each, and its horizontal edges cross no row: the bound is
+  // 100.  The general tier counts what the copies deposit, which here is 56.  The window is given up for every limit below the bound, and the
+  // general tier decides, so for the limits from 56 to 99 the picture is drawn by it (the sweep checks the bytes); from 100 the window is drawn.
+  // The tile is also placed 100 pixels away in the pattern's space, with the translation that brings it back: the cell the bound is measured over is
+  // the cell's pixels in the frame of the copies, not the target's, and the profile is the same.
+  for (int far = 0; far < 2; far++) {
+    Profile pr;
+    uint64_t g = 0, t = 0, r = 0;
+    const double o = far ? 100.0 : 0.0;
+    sweep([o](RF_Ctx * c) {
+      GSHSCENE_List * tl = rf_open(c);
+      rf_fill(c, tl, rf_rect(c, o, o, o + 24, o + 24), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.85, 0.5, 1.0), 0, 0.0);
+      return rf_picture_of(c, tl);
+    }, [](GSHCPU_Limits * l, int v) { l->max_deposits = (uint64_t)v; }, 1, 200, 1, &g, &t, &r, Geo{o, o, far ? -99.7 : 0.3, far ? -99.55 : 0.45}, &pr);
+    EXPECT_EQ(first_where(pr, negated(pr.refused)), 56) << "the general tier needs 56 deposits, far " << far;
+    EXPECT_EQ(first_where(pr, pr.aborted), 56) << "given up from the first limit the general tier meets, far " << far;
+    EXPECT_EQ(first_where(pr, pr.taken), 100) << "and taken at the bound, not before and not after, far " << far;
+    EXPECT_EQ(g, 44u) << far;
+  }
+}
+
+TEST(RenderPatternKeys, TheStrokeGuardSumsTheDepositsOfEveryCutPartAndTakesTheWindowAtTheirSum) {
+  // PC9: a stroke in a tile is vouched for when the deposits its cut parts can make, summed over the parts (body and aligned part), are within the limit.
+  // For one stroke of an inside alignment in a 24-pixel cell (an aligned part, no body) the sum is that of the stroke cut to the cell at the fraction the
+  // copies have; the window is taken from exactly that limit.  A center-aligned stroke (a body, no aligned part) is the same with the other term.
+  RF_Ctx c;
+  rf_begin(&c);
+  const double sq[10] = {3.5, 2.5, 20.5, 6.5, 18.5, 21.5, 11.5, 16.5, 4.5, 20.5};
+  auto build = [&sq](RF_Ctx * k) {
+    GSHSCENE_List * tl = rf_open(k);
+    rf_stroke(k, tl, rf_polyline(k, sq, 5, 1),
+        rf_style(k, 2.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT, GSHSCENE_STROKE_DEGENERATE_DRAW, nullptr, 0, 0.0,
+            GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_INSIDE, GSHGEOM_FILL_NONZERO),
+        nullptr, rf_solid(0.6, 0.1, 0.1, 0.8));
+    return tl;
+  };
+  GSHSCENE_List * once = build(&c);
+  rf_close(&c, once);
+  const GSHSCENE_Item * item = nullptr;
+  ASSERT_EQ(gshscene_list_item(once, 0, &item), GSHSCENE_OK);
+  GSHGEOM_Limits limits;
+  gshgeom_limits_default(&limits);
+  const GSHGEOM_Allocator * alloc = gshgeom_allocator_default();
+  const GSHGEOM_Map canon = rf_move(0.3, 0.45);
+  GSHCPU_Stroke st;
+  ASSERT_EQ(gshcpu_render_stroke_open(nullptr, alloc, &limits, item, &canon, &st), GSHCPU_OK);
+  ASSERT_EQ(st.shift_x, 0);
+  GSHGEOM_Device_Point quad[4];
+  const double cx[4] = {0, 24, 24, 0}, cy[4] = {0, 0, 24, 24};
+  for (int k = 0; k < 4; k++) {
+    quad[k].x = (int32_t)std::llround((cx[k] + 0.3) * 64.0);
+    quad[k].y = (int32_t)std::llround((cy[k] + 0.45) * 64.0);
+  }
+  ASSERT_EQ(gshcpu_render_stroke_cut(&st, quad, alloc, &limits), GSHCPU_OK);
+  ASSERT_TRUE(st.meta.present[GSHCPU_STROKE_ALIGNED]) << "an aligned stroke is its aligned part (and the clip path), not a body";
+  const int expected = (int)(st.meta.bound[GSHCPU_STROKE_BODY] + st.meta.bound[GSHCPU_STROKE_ALIGNED]);
+  EXPECT_GT(st.meta.bound[GSHCPU_STROKE_ALIGNED], 0u);
+  gshcpu_render_stroke_close(nullptr, &st);
+  rf_release(&c);
+  Profile pr;
+  uint64_t g = 0, t = 0, r = 0;
+  sweep([&build](RF_Ctx * k) { return rf_picture_of(k, build(k)); }, [](GSHCPU_Limits * l, int v) { l->max_deposits = (uint64_t)v; }, 1, expected + 50, 1, &g, &t, &r, Geo(), &pr);
+  EXPECT_EQ(first_where(pr, pr.taken), expected);
+  EXPECT_EQ(g, (uint64_t)(expected - first_where(pr, pr.aborted))) << "given up at every limit below the sum from the first at which a copy is drawn at all";
+}
+
+TEST(RenderPatternKeys, ALatticeWhoseCopiesOverlapIsDrawnWholeAfterTheWindowIsGivenUp) {
+  // PC6, PC9: a lattice of steps smaller than the cell is drawn copy by copy over the use's rectangle; the general tier that follows a give-up draws
+  // that rectangle, not the window, whatever the tile holds (a plain fill, or a clip block around a group and a fill after it).
+  for (int nest = 0; nest < 2; nest++) {
+    Profile pr;
+    uint64_t g = 0, t = 0, r = 0;
+    sweep([nest](RF_Ctx * c) {
+      GSHSCENE_List * tl = rf_open(c);
+      if (nest) {
+        rf_check(c, gshscene_list_clip_push(tl, rf_rect(c, 1, 1, 23, 23), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+        rf_general(c, tl, 0, 0, 0.9, GSHSCENE_COMPOSITE_SRC_OVER, nullptr);
+      }
+      rf_fill(c, tl, rf_rect(c, 0, 0, 24, 24), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.85, 0.5, 1.0), 0, 0.0);
+      rf_fill(c, tl, rf_rect(c, 3.5, 3.5, 20.5, 20.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.2, 0.6, 0.8), 0, 0.0);
+      if (nest) {
+        rf_pop(c, tl);
+        rf_check(c, gshscene_list_clip_pop(tl) == GSHSCENE_OK);
+        rf_fill(c, tl, rf_rect(c, 9.5, 9.5, 14.5, 14.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.7, 0.1, 0.1, 1.0), 0, 0.0);
+      }
+      return rf_picture_of(c, tl);
+    }, [](GSHCPU_Limits * l, int v) { l->max_deposits = (uint64_t)v; }, 1, 400, 1, &g, &t, &r, Geo{0.0, 0.0, 0.3, 0.45, 20.0}, &pr);
+    EXPECT_GE(g, 1u) << nest;
+    EXPECT_GE(t, 1u) << nest;
+    EXPECT_GE(r, 1u) << nest;
+  }
+}
+
+TEST(RenderPatternKeys, AnImagesWorkOverAWholeCellGivesTheWindowUpWhereTheCopiesCutByTheTargetAreAffordable) {
+  // PC9: a 24-pixel cell at steps of 12 over a 20 by 20 target: every copy is cut by the target, so what the general tier counts (the work of the
+  // pixels drawn) is less than what a whole cell would cost; for the limits between the two the window is given up and the general tier draws, and
+  // for the limits above the whole cell's the window is drawn.  The area filter's work of one pixel is bounded in the same way.
+  const Geo geo{0.0, 0.0, 0.3, 0.45, 12.0, 20, 20};
+  uint64_t g_work = 0, t_work = 0, r_work = 0;
+  Profile work;
+  auto area_tile = [](RF_Ctx * c) {
+    GSHSCENE_List * t = rf_open(c);
+    GSHSCENE_Color_Space none;
+    std::memset(&none, 0, sizeof none);
+    const GSHSCENE_Resource * img = rf_image(c, 64, 48, 4, 8, GIMG_ALPHA_STRAIGHT, 0, none);
+    GSHSCENE_Paint ip = rf_image_paint(c, img, rf_place(c, 0.4, 0.4, 0.0, 0.0), GSHSCENE_IMAGE_EXTEND_PAD, GSHSCENE_IMAGE_EXTEND_PAD,
+        GSHSCENE_IMAGE_FILTER_AREA, GSHSCENE_IMAGE_FILTER_AREA, none, nullptr, 1.0);
+    rf_fill(c, t, rf_rect(c, 0, 0, 24, 19), nullptr, GSHGEOM_FILL_NONZERO, ip, 0, 0.0);
+    return rf_picture_of(c, t);
+  };
+  sweep(area_tile, [](GSHCPU_Limits * l, int v) { l->max_image_work = (uint64_t)v; }, 100, 60000, 97, &g_work, &t_work, &r_work, geo, &work);
+  EXPECT_GE(g_work, 1u);
+  EXPECT_GE(r_work, 1u);
+  int given_up_and_drawn = 0;
+  for (size_t i = 0; i < work.value.size(); i++) {
+    given_up_and_drawn += work.aborted[i] && !work.refused[i];
+  }
+  EXPECT_GE(given_up_and_drawn, 1) << "limits at which the window is given up and the general tier draws";
+  // The other filters have no work to bound: the window is taken at a limit the area filter would refuse.
+  uint64_t g_lin = 0, t_lin = 0, r_lin = 0;
+  sweep([](RF_Ctx * c) {
+    GSHSCENE_List * t = rf_open(c);
+    GSHSCENE_Color_Space none;
+    std::memset(&none, 0, sizeof none);
+    const GSHSCENE_Resource * img = rf_image(c, 64, 48, 4, 8, GIMG_ALPHA_STRAIGHT, 0, none);
+    GSHSCENE_Paint ip = rf_image_paint(c, img, rf_place(c, 0.4, 0.4, 0.0, 0.0), GSHSCENE_IMAGE_EXTEND_PAD, GSHSCENE_IMAGE_EXTEND_PAD,
+        GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_LINEAR, none, nullptr, 1.0);
+    rf_fill(c, t, rf_rect(c, 0, 0, 24, 19), nullptr, GSHGEOM_FILL_NONZERO, ip, 0, 0.0);
+    return rf_picture_of(c, t);
+  }, [](GSHCPU_Limits * l, int v) { l->max_image_work = (uint64_t)v; }, 100, 60000, 997, &g_lin, &t_lin, &r_lin, geo);
+  EXPECT_EQ(g_lin, 0u) << "a linear filter has no work to bound: the window is never given up for it";
+  EXPECT_GE(t_lin, 1u);
+}
+
+TEST(RenderPatternKeys, ACellWhoseCornersAreOutsideAnImagesDomainGivesTheWindowUpWhereTheImageIsDrawnInside) {
+  // PC9: an image is sampled within 2^32 image units of its origin (an image is one unit across).  An image placed in a box 1e-5 pixel wide, painted over
+  // a fill of 24 by 24 pixels (2.4e6 units) in the corner of a cell 200,000 pixels wide (the cell's far corners are 2e10 units out), is wholly in its
+  // domain where it is drawn and not where the cell reaches.  The window cannot vouch for a copy whose cell is not wholly in the domain, so it is given
+  // up and the general tier, which tests only what each copy draws, draws the use: the same bytes, one give-up.
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_List * t = rf_open(&c);
+  GSHSCENE_Color_Space none;
+  std::memset(&none, 0, sizeof none);
+  const GSHSCENE_Resource * img = rf_image(&c, 64, 48, 4, 8, GIMG_ALPHA_STRAIGHT, 0, none);
+  GSHSCENE_Paint ip = rf_image_paint(&c, img, rf_place(&c, 1e-5, 1e-5, 0.0, 0.0), GSHSCENE_IMAGE_EXTEND_PAD, GSHSCENE_IMAGE_EXTEND_PAD,
+      GSHSCENE_IMAGE_FILTER_NEAREST, GSHSCENE_IMAGE_FILTER_NEAREST, none, nullptr, 1.0);
+  rf_fill(&c, t, rf_rect(&c, 0, 0, 24, 24), nullptr, GSHGEOM_FILL_NONZERO, ip, 0, 0.0);
+  const GSHSCENE_Resource * pat = rf_pattern(&c, rf_picture_of(&c, t), 0, 0, 200000, 24, 12, 12, 1, 1, rf_move(0.3, 0.45), nullptr);
+  GSHSCENE_List * l = rf_open(&c);
+  rf_fill(&c, l, rf_rect(&c, 0, 0, 20, 20), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  rf_close(&c, l);
+  TSink on(kAll), off(kNoPeriod);
+  Out a = draw(on.sink, l, 20, 20);
+  Out b = draw(off.sink, l, 20, 20);
+  ASSERT_EQ(a.result, GSHSCENE_OK);
+  EXPECT_EQ(a.bytes, b.bytes);
+  EXPECT_EQ(a.refused, b.refused);
+  EXPECT_EQ(a.refused, 0u) << "what is drawn is inside the domain";
+  EXPECT_EQ(on.counters.period_aborts, 1u);
+  EXPECT_EQ(on.counters.pattern_period, 0u);
+  rf_release(&c);
 }
 
 int main(int argc, char ** argv) {

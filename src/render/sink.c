@@ -3210,9 +3210,9 @@ static GSHCPU_Rect rect_moved(GSHCPU_Rect r, int64_t dx, int64_t dy) {
   return r;
 }
 
-/** Whether every coordinate of the non-empty @p r is one the scan converter takes. */
+/** Whether every coordinate of the non-empty pixel rectangle @p r is one the scan converter takes (a 26.6 coordinate of at most ::GSHCPU_RENDER_COORD_LIMIT). */
 static int rect_in_range(GSHCPU_Rect r) {
-  const int64_t m = GSHCPU_RENDER_COORD_LIMIT;
+  const int64_t m = GSHCPU_RENDER_COORD_LIMIT / 64;
   return r.x0 > -m && r.y0 > -m && r.x1 < m && r.y1 < m;
 }
 
