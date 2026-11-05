@@ -1609,6 +1609,7 @@ typedef struct Painter {
 static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count, Frame * frame,
     GSHCPU_Rect rect, GSHCPU_Rect whole);
 static int pattern_pixel(const Painter * p, int64_t x, int64_t y, double s[4]);
+static int pattern_read(const Painter * p, int64_t x, int64_t y, double s[4]);
 
 /**
  * An image paint made ready (IC1 to IC9): its map composed with the chain by the one composer (AD-24), the filter chosen once
@@ -1917,7 +1918,19 @@ static void painter_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
   const int clipped = frame->clip_base < run->clip_count;
   if (p->pattern) {
     /* PC2: N7 with the source of the lattice layer's pixel (PC7), for each pixel of coverage after the clips. */
+    int64_t wxr = 0; /* PC9: the window column of the span's pixel i; along a row the class moves one column a pixel (LT3's reduction is the same k and shift) */
+    int64_t wyr = 0;
+    if (p->period && n > 0) {
+      int64_t r[2];
+      gshgeom_lattice_reduce(&p->per, x - p->wx, y - p->wy, r);
+      wxr = r[0];
+      wyr = p->wy + r[1];
+    }
     for (size_t i = 0; i < n; i++) {
+      const int64_t col = wxr; /* this pixel's reduced column, then the next one's */
+      if (p->period) {
+        wxr = wxr + 1 == p->per.p ? 0 : wxr + 1;
+      }
       if (m8[i] == 0) {
         continue;
       }
@@ -1927,7 +1940,7 @@ static void painter_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
         continue;
       }
       double s[4];
-      if (pattern_pixel(p, px, y, s)) {
+      if (p->period ? pattern_read(p, p->wx + col, wyr, s) : pattern_pixel(p, px, y, s)) {
         painter_pixel(run, frame, px, y, m, s);
       }
     }
@@ -3398,14 +3411,18 @@ static int painter_source(Painter * p, int64_t x, int64_t y, double s[4]) {
 
 /** PC7, PC2: the source of a pattern paint at a pixel of its lattice layer. */
 static int pattern_pixel(const Painter * p, int64_t x, int64_t y, double s[4]) {
-  const Frame * f = p->lf;
-  double v[4] = {0.0, 0.0, 0.0, 0.0};
   if (p->period) {
     int64_t r[2];
     gshgeom_lattice_reduce(&p->per, x - p->wx, y - p->wy, r); /* PC9, LT3: the window pixel congruent to (x, y) */
-    x = p->wx + r[0];
-    y = p->wy + r[1];
+    return pattern_read(p, p->wx + r[0], p->wy + r[1], s);
   }
+  return pattern_read(p, x, y, s);
+}
+
+/** PC7, PC2: the source of a pattern paint at the pixel (@p x, @p y) of the layer itself (the window's, once the period has reduced it). */
+static int pattern_read(const Painter * p, int64_t x, int64_t y, double s[4]) {
+  const Frame * f = p->lf;
+  double v[4] = {0.0, 0.0, 0.0, 0.0};
   if (inside(f->dirty, x, y)) {
     memcpy(v, &f->layer[4u * ((size_t)(y - p->loy) * p->run->layout.width + (size_t)(x - p->lox))], sizeof v);
   }
