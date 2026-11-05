@@ -24,10 +24,10 @@
  * describe, a pattern filling a rectangle over a transparent float target, and the layer before the write is compared with the
  * oracle's exact value at every pixel.
  *
- * The oracle takes the exact area average of each paint over the region a copy covers; the sink takes 8-bit coverages and the paint
- * at the pixel's center (render.h, D8, PC4), so the bound is the 8-bit rounding of a coverage (1/255 of the pixel's value) plus the
- * seam bound of CK4 (render.h, PC3).  A scene whose pixels are all covered whole by one copy at the pixel center agrees to
- * rounding; the others, to the figure each scene states below.
+ * The oracle takes a gradient or an image paint at the pixel's center in the frame of the copy, as the sink does, and weighs it by the
+ * area a copy covers; the sink takes 8-bit coverages (render.h, D8, PC4), so the bound is the 8-bit rounding of a coverage (1/255 of
+ * the pixel's value) plus the seam bound of CK4 (render.h, PC3).  A scene whose pixels are all covered whole by one copy agrees to
+ * rounding.
  */
 
 #include <gtest/gtest.h>
@@ -270,28 +270,15 @@ std::vector<double> draw(const pv::VScene & sc, int scale = 1) {
 } // namespace
 
 /**
- * The bound at which the sink agrees with the oracle on a scene, at every pixel and channel.  A scene with no paint that varies over a
- * pixel agrees to the 8-bit rounding of a coverage and the seam bound of CK4: `kSolid`.  A scene whose tile holds a gradient or an image
- * is the oracle's area average of the paint over the region of a copy against the sink's paint at the pixel's center (G12, the
- * definition the gradients and the images have everywhere), so it differs by what the paint changes across a pixel: the vectors' pixels
- * are a fraction of a cell and a gradient crosses a cell in two or three of them, so the figures are large, and each is pinned at its
- * measured value with a tenth to spare (a regression of the per-copy source shows as a far larger one: the scenes that hold none of
- * these agree to 1.3e-2).
+ * The bound at which the sink agrees with the oracle on a scene, at every pixel and channel: the 8-bit rounding of a coverage and the
+ * seam bound of CK4, which is 2e-2 over the 360-case sweep of the vectors.  It is the same for every scene, those whose tile holds a
+ * gradient or an image included: the oracle takes such a paint at the pixel's center in the copy's own frame, as the sink does (G12,
+ * the image paint's sampling), and weighs it by the area.
  */
-constexpr double kSolid = 2e-2;
+constexpr double kBound = 2e-2;
 
-double bound_of(const std::string & name) {
-  static const struct {
-    const char * name;
-    double bound;
-  } kCenterSampled[] = {{"gradient-abut", 0.23}, {"gradient-gapped", 0.10}, {"gradient-overlap", 0.05}, {"image-nearest", 0.63},
-      {"uncolored-gradient", 0.14}};
-  for (const auto & c : kCenterSampled) {
-    if (name == c.name) {
-      return c.bound;
-    }
-  }
-  return kSolid;
+double bound_of(const std::string &) {
+  return kBound;
 }
 
 TEST(RenderPatternVectors, EveryScene) {
