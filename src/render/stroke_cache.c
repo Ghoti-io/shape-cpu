@@ -21,7 +21,7 @@
 /**
  * @file
  *
- * The sink's cache of stroke expansions (render.h, SC7; strokes story S4, F2).
+ * The sink's cache of stroke expansions (render.h, SC7; strokes story S4, F2) and of a pattern's period rasters (PC10).
  *
  * An entry is an immutable outline with the key it was made for (the centerline's resource id, the style's, the bit
  * patterns of the canonical map's linear part and fraction, and the construction's revision) and what is known of
@@ -54,7 +54,10 @@ typedef struct Entry {
   struct Entry * chain;         /* the bucket's next */
   struct Entry * newer;         /* the recency list: toward the head */
   struct Entry * older;
+  int kind;                     /* 0: a stroke's outline (key, outline); 1: a pattern's period raster (pkey, raster) */
   GSHCPU_Stroke_Key key;
+  GSHCPU_Period_Key pkey;
+  double * raster;
   GSHGEOM_Stroke_Outline * outline;
   GSHCPU_Stroke_Meta meta;
   GSHCPU_Run_Note * notes;      /* a run's glyph notes (ST8), the entry's own copy, which meta.notes names */
@@ -85,9 +88,29 @@ static size_t bucket_of(const GSHCPU_Stroke_Key * k) {
   return (size_t)(h & (BUCKETS - 1u));
 }
 
+static size_t bucket_of_period(const GSHCPU_Period_Key * k) {
+  uint64_t h = (k->pattern_id + UINT64_C(0x51ED270B5C5A9B3D)) * UINT64_C(0x9E3779B97F4A7C15);
+  h ^= (k->tile_id + UINT64_C(0x2545F4914F6CDD1D)) * UINT64_C(0xC2B2AE3D27D4EB4F);
+  for (size_t i = 0; i < 4; i++) {
+    h = (h ^ k->linear[i]) * UINT64_C(0x100000001B3);
+  }
+  h = (h ^ k->fraction[0]) * UINT64_C(0x100000001B3);
+  h = (h ^ k->fraction[1]) * UINT64_C(0x100000001B3);
+  h ^= h >> 29;
+  return (size_t)(h & (BUCKETS - 1u));
+}
+
+static size_t bucket_of_entry(const Entry * e) {
+  return e->kind ? bucket_of_period(&e->pkey) : bucket_of(&e->key);
+}
+
 static int key_equal(const GSHCPU_Stroke_Key * a, const GSHCPU_Stroke_Key * b) {
   return a->path_id == b->path_id && a->style_id == b->style_id && memcmp(a->linear, b->linear, sizeof a->linear) == 0 &&
       memcmp(a->fraction, b->fraction, sizeof a->fraction) == 0 && a->revision == b->revision;
+}
+
+static int period_key_equal(const GSHCPU_Period_Key * a, const GSHCPU_Period_Key * b) {
+  return memcmp(a, b, sizeof *a) == 0; /* the key is built with every byte written (padding included): see period_key_zeroed */
 }
 
 GSHCPU_Result gshcpu_stroke_cache_create(const GSHGEOM_Allocator * alloc, uint64_t bound, GSHCPU_Render_Counters * counters,
@@ -109,7 +132,7 @@ GSHCPU_Result gshcpu_stroke_cache_create(const GSHGEOM_Allocator * alloc, uint64
 
 /** Take @p e out of the table and the list (the lock held). */
 static void unlink_entry(GSHCPU_Stroke_Cache * c, Entry * e) {
-  Entry ** at = &c->buckets[bucket_of(&e->key)];
+  Entry ** at = &c->buckets[bucket_of_entry(e)];
   while (*at != e) {
     at = &(*at)->chain;
   }
@@ -130,7 +153,11 @@ static void unlink_entry(GSHCPU_Stroke_Cache * c, Entry * e) {
 }
 
 static void free_entry(GSHCPU_Stroke_Cache * c, Entry * e) {
-  gshgeom_stroke_outline_destroy(e->outline);
+  if (e->kind) {
+    c->alloc.free_fn(c->alloc.ctx, e->raster);
+  } else {
+    gshgeom_stroke_outline_destroy(e->outline);
+  }
   if (e->notes) {
     c->alloc.free_fn(c->alloc.ctx, e->notes);
   }
@@ -170,7 +197,7 @@ void gshcpu_stroke_cache_evict(GSHCPU_Stroke_Cache * c, uint64_t id) {
     Entry * e = c->buckets[b];
     while (e) {
       Entry * next = e->chain;
-      if (e->key.path_id == id || e->key.style_id == id) {
+      if (e->kind ? (e->pkey.pattern_id == id || e->pkey.tile_id == id) : (e->key.path_id == id || e->key.style_id == id)) {
         unlink_entry(c, e);
         if (c->counters) {
           c->counters->cache_evictions++;
@@ -196,7 +223,7 @@ int gshcpu_stroke_cache_acquire(GSHCPU_Stroke_Cache * c, const GSHCPU_Stroke_Key
   int found = 0;
   GCU_MUTEX_LOCK(c->lock);
   for (Entry * e = c->buckets[bucket_of(key)]; e; e = e->chain) {
-    if (key_equal(&e->key, key)) {
+    if (!e->kind && key_equal(&e->key, key)) {
       e->refs++;
       /* To the head of the recency list. */
       if (c->head != e) {
@@ -254,7 +281,7 @@ int gshcpu_stroke_cache_store(GSHCPU_Stroke_Cache * c, const GSHCPU_Stroke_Key *
     c->counters->cache_misses++;
   }
   for (Entry * e = c->buckets[bucket_of(key)]; e; e = e->chain) {
-    if (key_equal(&e->key, key)) {
+    if (!e->kind && key_equal(&e->key, key)) {
       e->refs++;
       *entry = e;
       *held = e->outline;
@@ -315,6 +342,138 @@ int gshcpu_stroke_cache_store(GSHCPU_Stroke_Cache * c, const GSHCPU_Stroke_Key *
   }
   if (notes) {
     c->alloc.free_fn(c->alloc.ctx, notes);
+  }
+  while (doomed) {
+    Entry * next = doomed->chain;
+    free_entry(c, doomed);
+    doomed = next;
+  }
+  return result;
+}
+
+/** To the head of the recency list (the lock held). */
+static void touch(GSHCPU_Stroke_Cache * c, Entry * e) {
+  if (c->head == e) {
+    return;
+  }
+  if (e->newer) {
+    e->newer->older = e->older;
+  }
+  if (e->older) {
+    e->older->newer = e->newer;
+  }
+  if (c->tail == e) {
+    c->tail = e->newer;
+  }
+  e->newer = NULL;
+  e->older = c->head;
+  c->head->newer = e;
+  c->head = e;
+}
+
+int gshcpu_period_cache_acquire(GSHCPU_Stroke_Cache * c, const GSHCPU_Period_Key * key, void ** entry, const double ** raster) {
+  int found = 0;
+  GCU_MUTEX_LOCK(c->lock);
+  for (Entry * e = c->buckets[bucket_of_period(key)]; e; e = e->chain) {
+    if (e->kind && period_key_equal(&e->pkey, key)) {
+      e->refs++;
+      touch(c, e);
+      *entry = e;
+      *raster = e->raster;
+      if (c->counters) {
+        c->counters->period_hits++;
+      }
+      found = 1;
+      break;
+    }
+  }
+  GCU_MUTEX_UNLOCK(c->lock);
+  return found;
+}
+
+/** What the cache accounts for a raster of @p pixels pixels: its doubles and the entry. */
+static uint64_t period_need(size_t pixels) {
+  return (uint64_t)pixels * 4u * sizeof(double) + sizeof(Entry);
+}
+
+int gshcpu_period_cache_fits(GSHCPU_Stroke_Cache * c, size_t pixels) {
+  return period_need(pixels) <= c->bound;
+}
+
+double * gshcpu_period_cache_make(GSHCPU_Stroke_Cache * c, size_t pixels) {
+  return c->alloc.malloc_fn(c->alloc.ctx, pixels * 4u * sizeof(double));
+}
+
+void gshcpu_period_cache_free(GSHCPU_Stroke_Cache * c, double * raster) {
+  c->alloc.free_fn(c->alloc.ctx, raster);
+}
+
+int gshcpu_period_cache_store(GSHCPU_Stroke_Cache * c, const GSHCPU_Period_Key * key, double * raster, size_t pixels, void ** entry) {
+  const uint64_t need = period_need(pixels);
+  Entry * fresh = need <= c->bound ? c->alloc.malloc_fn(c->alloc.ctx, sizeof *fresh) : NULL;
+  if (need <= c->bound && !fresh) {
+    return -1;
+  }
+  Entry * doomed = NULL;
+  int result = 0;
+  GCU_MUTEX_LOCK(c->lock);
+  if (c->counters) {
+    c->counters->period_misses++;
+  }
+  for (Entry * e = c->buckets[bucket_of_period(key)]; e; e = e->chain) {
+    if (e->kind && period_key_equal(&e->pkey, key)) {
+      e->refs++;
+      *entry = e;
+      result = 2;
+      break;
+    }
+  }
+  if (result == 0 && fresh) {
+    /* Make room, least recently used first, never an entry in use. */
+    const uint64_t room = c->bound - need;
+    Entry * e = c->tail;
+    while (c->held > room && e) {
+      Entry * newer = e->newer;
+      if (e->refs == 0) {
+        unlink_entry(c, e);
+        if (c->counters) {
+          c->counters->cache_evictions++;
+        }
+        e->chain = doomed;
+        doomed = e;
+      }
+      e = newer;
+    }
+    if (c->held <= room) {
+      memset(fresh, 0, sizeof *fresh);
+      fresh->kind = 1;
+      fresh->pkey = *key;
+      fresh->raster = raster;
+      fresh->meta.bytes = (size_t)need;
+      fresh->refs = 1;
+      fresh->listed = 1;
+      const size_t b = bucket_of_period(key);
+      fresh->chain = c->buckets[b];
+      c->buckets[b] = fresh;
+      fresh->older = c->head;
+      if (c->head) {
+        c->head->newer = fresh;
+      } else {
+        c->tail = fresh;
+      }
+      c->head = fresh;
+      c->held += need;
+      if (c->counters) {
+        c->counters->period_kept++;
+      }
+      *entry = fresh;
+      fresh = NULL;
+      result = 1;
+    }
+  }
+  GCU_MUTEX_UNLOCK(c->lock);
+  if (fresh) {
+    c->alloc.free_fn(c->alloc.ctx, fresh);
   }
   while (doomed) {
     Entry * next = doomed->chain;

@@ -238,13 +238,25 @@ render pattern-content rgba8 9f1df71af2736f9f
 render pattern-content rgba8-premultiplied 092bbeaf4a6d6950
 render pattern-content rgbaf32 852bafc1fd20f09f
 render pattern-content rgbaf32-premultiplied ebf862f565713330
-render pattern-strokes rgba8 33037c761af5141d
-render pattern-strokes rgba8-premultiplied 00f057e412d0f646
-render pattern-strokes rgbaf32 00531c0f5e83f61f
-render pattern-strokes rgbaf32-premultiplied da26e478fbde6188
+render pattern-strokes rgba8 fe54280382427ae7
+render pattern-strokes rgba8-premultiplied 6f529e59ceee551c
+render pattern-strokes rgbaf32 cf1c0a9f5d239af0
+render pattern-strokes rgbaf32-premultiplied 6930e7d11fbc7a03
 render pattern-integer rgba8 e09bb1d93d8d6960
 render pattern-integer rgba8-premultiplied 3ef09d1a76230fbf
 render pattern-integer rgbaf32 f9fb27c4f47ca7f5
 render pattern-integer rgbaf32-premultiplied 02bbf681ad08d756
-hash ccff8d7d6c6f03a0
-count 244
+render pattern-period rgba8 769c5e08223012b6
+render pattern-period rgba8-premultiplied 8c3b1bc26a770795
+render pattern-period rgbaf32 68a6118185a2e28a
+render pattern-period rgbaf32-premultiplied 2c12600c53bf43d5
+render pattern-period-blend rgba8 744330a292706c4a
+render pattern-period-blend rgba8-premultiplied bcd859841b4ff1cd
+render pattern-period-blend rgbaf32 c4180b0b0962e766
+render pattern-period-blend rgbaf32-premultiplied 300274422928a9a9
+render pattern-hatch rgba8 9d22fd7560e29800
+render pattern-hatch rgba8-premultiplied b72ef4a92346d0c3
+render pattern-hatch rgbaf32 be486e1e9b6d2f6d
+render pattern-hatch rgbaf32-premultiplied c53414326060004a
+hash ac149b9536d41af4
+count 256

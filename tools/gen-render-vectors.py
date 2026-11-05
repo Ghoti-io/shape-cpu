@@ -680,6 +680,88 @@ def hash_cases():
     return out
 
 
+# --- patterns: a unit with copies at a seam (render.h, PC4) --------------------------------------------------------
+SEAM_PIXELS = 8
+
+
+def lerp_color(c0, c1, t):
+    return tuple(c0[i] + t * (c1[i] - c0[i]) for i in range(4))
+
+
+def seam_cases():
+    """(tx in 64ths, cell, step, c0, c1): a tile of one horizontal gradient from c0 to c1 across a cell of `cell` pixels (pad), repeated every
+    `step` pixels, drawn with the lattice at x = tx/64.  The cells' edges are multiples of 1/64, so a cell's coverage of a pixel is
+    `4 w` (255 when whole) for the overlap of w/64.  The expected premultiplied value of each of the first eight pixels of the first row is
+    PC4's: each copy that touches the pixel gives the 8-bit coverage m_x and the gradient's value at the pixel's center in the copy's own
+    frame S_x; the unit is one element with the shape min(255, sum m_x) / 255 and the mean source sum(m_x S_x) / sum(m_x), over a layer
+    that starts (0, 0, 0, 0), so the pixel is shape times source."""
+    red, blue = (F(1), F(0), F(0), F(1)), (F(0), F(0), F(1), F(1))
+    half_green, solid_yellow = (F(0), F(1), F(0), F(1, 2)), (F(1), F(1), F(0), F(1))
+    cases = [
+        (16, 4, 4, red, blue),         # abutting, the edge a quarter into a pixel: two copies, 64 and 192
+        (32, 4, 4, red, blue),         # the edge a half into a pixel: 128 and 128, sum 256
+        (48, 3, 3, red, half_green),   # abutting, a translucent end: the mean is of premultiplied sources
+        (8, 4, 4, solid_yellow, blue), # an eighth: 32 and 224
+        (24, 3, 5, red, blue),         # gapped (CSS space): a pixel that holds the end of a copy, a gap and the start of the next
+        (40, 2, 4, half_green, red),   # gapped by a cell's width
+        (0, 4, 4, red, blue),          # on the pixel grid: no seam pixel
+        (63, 5, 5, blue, red),         # one 64th into a pixel
+    ]
+    return cases
+
+
+def seam_expected(case):
+    tx64, cell, step, c0, c1 = case
+    tx = F(tx64, 64)
+    rows = []
+    for px in range(SEAM_PIXELS):
+        total = 0
+        acc = [F(0)] * 4
+        for i in range(-3, SEAM_PIXELS // step + 4):
+            left = tx + i * step
+            right = left + cell
+            lo, hi = max(F(px), left), min(F(px + 1), right)
+            if hi <= lo:
+                continue
+            wq = (hi - lo) * 64
+            assert wq.denominator == 1, "an edge off the 1/64 grid"
+            m = 255 if wq == 64 else 4 * int(wq)
+            u = F(px) + F(1, 2) - left
+            t = min(max(u / cell, F(0)), F(1))
+            col = lerp_color(c0, c1, t)
+            src = (col[0] * col[3], col[1] * col[3], col[2] * col[3], col[3])
+            total += m
+            for k in range(4):
+                acc[k] += m * src[k]
+        if total == 0:
+            rows.append(tuple(F(0) for _ in range(4)))
+            continue
+        shape = F(min(255, total), 255)
+        rows.append(tuple(shape * acc[k] / total for k in range(4)))
+    return rows
+
+
+def emit_seams(w):
+    w("// PC4: a unit with copies at a seam.  tx64: the lattice's x translation in 64ths of a pixel.  want: the first row's eight pixels,")
+    w("// premultiplied, the nearest doubles of the exact value (a straight-through sink is within 1e-6 of them on a float target).")
+    w("struct RSeam {")
+    w("  int tx64;")
+    w("  int cell;")
+    w("  int step;")
+    w("  double c0[4];")
+    w("  double c1[4];")
+    w("  double want[8][4];")
+    w("};")
+    w("static const RSeam kSeams[] = {")
+    for case in seam_cases():
+        tx64, cell, step, c0, c1 = case
+        want = seam_expected(case)
+        w("    {%d, %d, %d, {%s}, {%s}, {%s}}," % (tx64, cell, step, ", ".join(double_hex(v) for v in c0), ", ".join(double_hex(v) for v in c1),
+                                                  ", ".join("{" + ", ".join(double_hex(v) for v in px) + "}" for px in want)))
+    w("};")
+    w("static const int kSeamCount = %d;" % len(seam_cases()))
+
+
 # --- the header ---------------------------------------------------------------------------------------------------
 def space_c(s):
     return "{%d, %d, %s}" % (s[0], s[1], double_hex(F(s[2])))
@@ -795,6 +877,8 @@ def generate():
         w("    {%d, %du, %du, kHashPixels%d, {%d, %d, %d, %d}, 0x%016xull, \"%s\"}," % (
             fmt, width, height, n, extent[0], extent[1], extent[2], extent[3], render_hash(fmt, extent, sub), dump))
     w("};")
+    w("")
+    emit_seams(w)
     w("")
     w("}  // namespace render_vectors")
     w("")

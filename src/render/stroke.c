@@ -51,6 +51,7 @@
 
 #include "render_internal.h"
 
+#include <ghoti.io/shape-geometry/clip.h>
 #include <ghoti.io/shape-geometry/hash.h>
 #include <ghoti.io/shape-scene/glyph.h>
 #include <ghoti.io/shape-scene/resource.h>
@@ -94,6 +95,16 @@ static const GSHGEOM_Flat_Path * cover_of(const GSHGEOM_Stroke_Outline * o, int 
       break;
   }
   return reduced ? reduced : part_of(o, part);
+}
+
+/** The part @p p of @p s: the cut one (PC5) when the stroke was cut, else the outline's. */
+static const GSHGEOM_Flat_Path * stroke_part(const GSHCPU_Stroke * s, int p) {
+  return s->cut_set[p] ? s->cut[p] : part_of(s->outline, p);
+}
+
+/** The path covered for part @p p of @p s: the cut one, else the reduced form or the part (cover_of). */
+static const GSHGEOM_Flat_Path * stroke_cover(const GSHCPU_Stroke * s, int p) {
+  return s->cut_set[p] ? s->cut[p] : cover_of(s->outline, p);
 }
 
 /** What is known of @p o: each part's points and the extent of its 26.6 coordinates, and what a cache holds for it. */
@@ -179,6 +190,27 @@ static GSHCPU_Result collect_notes(const GSHGEOM_Allocator * alloc, const GSHSCE
     }
   }
   *out = records;
+  return GSHCPU_OK;
+}
+
+/** The box of part @p p in the device pixels, from its meta and the stroke's shift; ::GSHCPU_ERR_LIMIT when a shifted coordinate passes the range. */
+static GSHCPU_Result set_box(GSHCPU_Stroke * s, int p) {
+  s->box[p] = empty_rect();
+  if (!s->meta.present[p] || s->meta.points[p] == 0) {
+    return GSHCPU_OK;
+  }
+  const int64_t x0 = s->meta.lo_x[p] + 64 * s->shift_x;
+  const int64_t y0 = s->meta.lo_y[p] + 64 * s->shift_y;
+  const int64_t x1 = s->meta.hi_x[p] + 64 * s->shift_x;
+  const int64_t y1 = s->meta.hi_y[p] + 64 * s->shift_y;
+  if (x0 < -GSHCPU_RENDER_COORD_LIMIT || y0 < -GSHCPU_RENDER_COORD_LIMIT || x1 > GSHCPU_RENDER_COORD_LIMIT ||
+      y1 > GSHCPU_RENDER_COORD_LIMIT) {
+    return GSHCPU_ERR_LIMIT;
+  }
+  s->box[p].x0 = pixel_floor(x0);
+  s->box[p].y0 = pixel_floor(y0);
+  s->box[p].x1 = -pixel_floor(-x1);
+  s->box[p].y1 = -pixel_floor(-y1);
   return GSHCPU_OK;
 }
 
@@ -332,23 +364,7 @@ GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGE
   if (r == GSHCPU_OK && status == GSHGEOM_STROKE_DRAWN) {
     /* SC3: the shifted coordinates are the sink's resource limit past 2^24 pixels; the boxes are the pixels touched. */
     for (int p = 0; p < GSHCPU_STROKE_PARTS && r == GSHCPU_OK; p++) {
-      s.box[p] = empty_rect();
-      if (!s.meta.present[p] || s.meta.points[p] == 0) {
-        continue;
-      }
-      int64_t x0 = s.meta.lo_x[p] + 64 * sx;
-      int64_t y0 = s.meta.lo_y[p] + 64 * sy;
-      int64_t x1 = s.meta.hi_x[p] + 64 * sx;
-      int64_t y1 = s.meta.hi_y[p] + 64 * sy;
-      if (x0 < -GSHCPU_RENDER_COORD_LIMIT || y0 < -GSHCPU_RENDER_COORD_LIMIT || x1 > GSHCPU_RENDER_COORD_LIMIT ||
-          y1 > GSHCPU_RENDER_COORD_LIMIT) {
-        r = GSHCPU_ERR_LIMIT;
-        break;
-      }
-      s.box[p].x0 = pixel_floor(x0);
-      s.box[p].y0 = pixel_floor(y0);
-      s.box[p].x1 = -pixel_floor(-x1);
-      s.box[p].y1 = -pixel_floor(-y1);
+      r = set_box(&s, p);
     }
   }
   if (r != GSHCPU_OK) {
@@ -385,6 +401,13 @@ void gshcpu_render_stroke_close(GSHCPU_Stroke_Cache * cache, GSHCPU_Stroke * s) 
   if (s->owned) {
     gshgeom_stroke_outline_destroy(s->owned);
   }
+  for (int p = 0; p < GSHCPU_STROKE_PARTS; p++) {
+    if (s->cut[p]) {
+      gshgeom_flat_path_destroy(s->cut[p]);
+    }
+    s->cut[p] = NULL;
+    s->cut_set[p] = 0;
+  }
   if (s->notes) {
     s->alloc->free_fn(s->alloc->ctx, s->notes);
   }
@@ -393,6 +416,53 @@ void gshcpu_render_stroke_close(GSHCPU_Stroke_Cache * cache, GSHCPU_Stroke * s) 
   s->outline = NULL;
   s->notes = NULL;
   s->note_count = 0;
+}
+
+GSHCPU_Result gshcpu_render_stroke_cut(GSHCPU_Stroke * s, const GSHGEOM_Device_Point quad[4], const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits) {
+  for (int p = GSHCPU_STROKE_BODY; p <= GSHCPU_STROKE_ALIGNED; p++) {
+    if (!s->meta.present[p]) {
+      continue;
+    }
+    GSHGEOM_Flat_Path * cut = NULL;
+    const GSHGEOM_Result g = gshgeom_flat_path_clip_convex(cover_of(s->outline, p), quad, alloc, limits, &cut);
+    if (g != GSHGEOM_OK) {
+      return g == GSHGEOM_ERR_OOM ? GSHCPU_ERR_OOM : g == GSHGEOM_ERR_LIMIT ? GSHCPU_ERR_LIMIT : GSHCPU_ERR_INTERNAL;
+    }
+    s->cut_set[p] = 1;
+    if (gshgeom_flat_path_subpath_count(cut) == 0) {
+      gshgeom_flat_path_destroy(cut);
+      s->meta.present[p] = 0;
+      s->meta.points[p] = 0;
+      s->meta.bound[p] = 0;
+      s->box[p] = empty_rect();
+      continue;
+    }
+    s->cut[p] = cut;
+    /* What is known of the cut part, as meta_of knows it of an outline's. */
+    const size_t n = gshgeom_flat_path_point_count(cut);
+    const GSHGEOM_Device_Point * points = gshgeom_flat_path_points(cut);
+    s->meta.points[p] = n;
+    for (size_t i = 0; i < n; i++) {
+      const int64_t x = points[i].x;
+      const int64_t y = points[i].y;
+      s->meta.lo_x[p] = i == 0 || x < s->meta.lo_x[p] ? x : s->meta.lo_x[p];
+      s->meta.lo_y[p] = i == 0 || y < s->meta.lo_y[p] ? y : s->meta.lo_y[p];
+      s->meta.hi_x[p] = i == 0 || x > s->meta.hi_x[p] ? x : s->meta.hi_x[p];
+      s->meta.hi_y[p] = i == 0 || y > s->meta.hi_y[p] ? y : s->meta.hi_y[p];
+    }
+    const GSHCPU_Rect canon = canonical_box(&s->meta, p);
+    const GSHGEOM_Flat_Path * whole = cut;
+    s->meta.bound[p] = gshcpu_render_cells_bound(&whole, 1, canon, UINT64_MAX);
+    const GSHCPU_Result r = set_box(s, p);
+    if (r != GSHCPU_OK) {
+      return r;
+    }
+  }
+  if (!s->meta.present[GSHCPU_STROKE_BODY] && !s->meta.present[GSHCPU_STROKE_ALIGNED]) {
+    s->drawn = 0; /* nothing of it is inside the cell */
+  }
+  return GSHCPU_OK;
 }
 
 /* --- SC5: the composition ------------------------------------------------------------------------------- */
@@ -438,8 +508,8 @@ typedef struct Part {
 
 static Part part_rects(const GSHCPU_Stroke * s, int p, GSHCPU_Rect reach, GSHCPU_Rect whole) {
   Part part;
-  part.path = part_of(s->outline, p);
-  part.cover = cover_of(s->outline, p);
+  part.path = stroke_part(s, p);
+  part.cover = stroke_cover(s, p);
   part.rect = reach_of(s->box[p], reach);
   part.walk = gshcpu_render_rect_meet(s->box[p], whole);
   if (!part.path || gshcpu_render_rect_empty(s->box[p])) {
@@ -622,7 +692,7 @@ int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_deposit
   if (may_exceed(s, GSHCPU_STROKE_BODY, ex)) {
     return 0;
   }
-  const GSHGEOM_Flat_Path * path = part_of(s->outline, GSHCPU_STROKE_BODY);
+  const GSHGEOM_Flat_Path * path = stroke_part(s, GSHCPU_STROKE_BODY);
   GSHCPU_Rect box = s->box[GSHCPU_STROKE_BODY];
   if (!path || gshcpu_render_rect_empty(box)) {
     return 0;
@@ -640,7 +710,7 @@ int gshcpu_render_stroke_sparse_ok(const GSHCPU_Stroke * s, uint64_t max_deposit
 }
 
 const GSHGEOM_Flat_Path * gshcpu_render_stroke_cover_path(const GSHCPU_Stroke * s) {
-  return cover_of(s->outline, GSHCPU_STROKE_BODY);
+  return stroke_cover(s, GSHCPU_STROKE_BODY);
 }
 
 void gshcpu_render_stroke_rects(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole, GSHCPU_Rect * rect,

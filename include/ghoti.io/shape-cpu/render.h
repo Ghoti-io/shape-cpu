@@ -713,7 +713,7 @@
  *   initial backdrop showing through where an exact union would show none.  That is T3 (a knockout is defined on shape, and shape is
  *   coverage); this sink still refuses the conflation-free flag, and a test pins the values so a "fix" is seen.
  *
- * ### Patterns (PC1 to PC8, PC11; shape-scene's PT1 to PT14)
+ * ### Patterns (PC1 to PC11; shape-scene's PT1 to PT14)
  *
  * A pattern is drawn as defined: the **lattice picture** of a use (the tile's units, each over all the copies of the lattice that meet
  * the pixels the use draws) is rendered into an isolated layer, and the fill or stroke is N7 with that layer's pixel as its source.
@@ -727,7 +727,9 @@
  *   layer is a group layer over the pixels the use draws, starting `(0, 0, 0, 0)` in the layer's blend space.
  * - **PC3 The canonical translation of a copy.**  The copy `(i, j)`'s device translation is `gshgeom_lattice_translation`'s `tau + i a + j b`
  *   (`a`, `b` the device step vectors, each product rounded once, never accumulated), split by `gshgeom_stroke_canonical_map` into the
- *   whole pixels `s` and a fraction `f` in `[0, 1)`.  The copy is the tile under the chain's linear part with the translation `f`: its outlines
+ *   whole pixels `s` and a fraction `f` in `[0, 1)`; where `a` and `b` are integer vectors the split is exact (`s = floor(tau) + i a +
+ *   j b` in integers, `f` the fraction of `tau` for every copy: the sum in `double` would round the fraction), both by
+ *   `gshgeom_lattice_canonical` (LT5).  The copy is the tile under the chain's linear part with the translation `f`: its outlines
  *   are flattened there, cut to the cell's quadrilateral under the same map by `gshgeom_flat_path_clip_convex`, and scan converted over the
  *   region moved by `-s`; a paint in the tile is evaluated at `q - s`.  A copy is therefore a function of the linear part, the fraction and
  *   the shift: copies of equal fractions, and a pattern moved by whole pixels, are the same bits moved.  A shifted coordinate past
@@ -736,15 +738,16 @@
  *   a pixel, copy `x` has the 8-bit coverage `m_x`, its own coverage folded with the clips of the tile in force *in that copy* (each clip
  *   cut to that copy's cell, D8), and the source `S_x`.  The element has the shape `min(255, sum m_x) / 255` and the mean source
  *   `sum(m_x S_x) / sum(m_x)`, summed in lattice order with no fused multiply-add: the waist's `(1 - sum w_x A_x) L + sum w_x S_x` with
- *   `w_x = m_x / max(255, sum m)`, to within one rounding of the mean; a pixel only one copy touches is N7 exactly.  A clip block, to a
- *   group inside or around it, is the saturating union of its copies' coverages.
+ *   `w_x = m_x / max(255, sum m)`, to within one rounding of the mean; a pixel only one copy touches is N7 exactly.  A clip is made again for
+ *   each copy (its outline under that copy's canonical map, cut to that copy's cell); a clip block, to a group inside or around it, is the
+ *   saturating union of its copies' coverages.
  * - **PC5 Groups, strokes, images and nested patterns in the tile.**  A group is one group over all copies, popped once.  A stroke is one
- *   unit: each copy's stroke coverage (SC5) is restricted to the cell by the cell's 8-bit coverage, since a stroke's parts are not cut by the
- *   convex clip.  An image paint, a gradient or a pattern is evaluated per copy under the copy's canonical map; a pattern in a tile is a
+ *   unit: the expansion's body and aligned part are cut to the cell by the convex clip (CK1; in this copy's stroke only), and SC5 composes
+ *   the cut parts with the clip path, so a stroke that ends at a cell edge leaves no seam.  An image paint, a gradient or a pattern is evaluated per copy under the copy's canonical map; a pattern in a tile is a
  *   pass inside the copy's frame of coordinates, its layer drawn over the unit's pixels in that copy.  A nest is as deep as the tile's
  *   pictures allow (R1's PT2).
  * - **PC6 Overlapping cells.**  Where a step is smaller than the cell on an axis that repeats, the copies are drawn one at a time in lattice order,
- *   all of a copy's units onto the lattice layer before the next copy's.
+ *   all of a copy's units onto the lattice layer before the next copy's, each cut to its cell by the geometric clip and by nothing else.
  * - **PC7 Colored, uncolored, alpha.**  The tint is resolved and converted once; the lattice layer is drawn with the tile's own colors and only its
  *   alpha is read.
  * - **PC8 Limits.**  `GSHCPU_Limits.max_pattern_cells`: the copies of a use, counted by `gshgeom_lattice_each` (a cell that only touches the
@@ -752,11 +755,21 @@
  *   `RESOURCE_LIMIT` for the use, strict stopping with the finished prefix.  The count is of the list and the target and does not depend
  *   on the damage or the caller's memory.  A limit met inside a tile (a copy's points or cells, a coordinate past the range, a map the
  *   geometry refuses) refuses the use.  The nested count is taken over the outer copies that are drawn.
+ * - **PC9 The period tier.**  Where the step vectors `a` and `b` are integer vectors (every component an exact integer below `2^31`, both axes
+ *   repeating, `|D|` of their determinant nonzero and at most `2^31`) the lattice picture is the same at `q` and at every `q + i a + j b`, so the
+ *   pass draws one **window** `[0, p) x [0, s)` of the Hermite normal form `(p, r, s)` of the lattice (`p s = |D|`), moved to the corner of the
+ *   use's rectangle, and reads a pixel at `rep(q - w) + w` (LT3).  The window has to lie in the rectangle, and the tile has to hold no
+ *   pattern (PC8's nested count) and no soft mask.  It is bit-equal to the general tier by construction and by a gate (every fixture, the tests'
+ *   cases and every fuzz input rendered with `GSHCPU_RENDER_TIER_PERIOD` on and off: the same bytes and report), and a limit never depends on
+ *   it: a copy whose whole cell could meet a limit the window's copies would not (deposits, a gradient's or an image's domain or work, the range
+ *   of its pixels) makes the pass give the window up for the general tier.
+ * - **PC10 The cache.**  The window's pixels are kept in the table of the stroke expansions (SC7: one mutex, least recently used first, pinned
+ *   while read, `evict(id)` for the pattern's or the tile's id, `static_bytes`, bypassed under `CALLER_MEMORY`), under the key of the
+ *   pattern's and the tile's ids, the canonical map's linear part and fraction, the layer's and target's spaces, the list's foreground and
+ *   palette when the tile reads them, and the revisions of the pieces whose bits the raster holds; a hit is the miss bit for bit.
  * - **PC11 Caller memory, damage, cancel.**  Under `CALLER_MEMORY` the lattice layers, the accumulators and each copy's geometry are in the
  *   caller's block (the size reported covers the use's own item and, above it, the most any unit of a tile takes); a pixel inside a damage is the
  *   pixel of the whole render.  Cancel is checked before every copy of every unit and between units.
- *
- * PC9 (the period tier) and PC10 (its cache) are not part of this sink: every use takes the general tier above.
  *
  * ### Memory (S9)
  *

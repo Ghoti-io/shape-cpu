@@ -78,6 +78,14 @@
  * | mask-compose | a clip, a mask, an opacity and a blend mode on one group; a masked group in linear light with a mask rendered in Display P3; an unbounded operator on a small group |
  * | mask-not-a-clip | two abutting halves as an alpha mask (3/4 where they share a pixel) beside the exact union as a clip (whole) |
  * | blend-out-of-range | blend modes on sources out of range (negative, above 1, the recorded bound 2^16), dodge and burn past their poles, ClipColor with both steps, in a gamma-0.1 parent, nested blending groups, and a blend over the backdrop's transparent pixels |
+ * | pattern-lattices | (masks-images-patterns story R2) cells that abut at a fraction, gapped under a skew (CSS `space`), scaled, and rotated |
+ * | pattern-overlap | cells that overlap in x, in y and in both, one repeating on one axis only, and a tile whose content spills past its cell |
+ * | pattern-content | a tile of a gradient, an image and the foreground across a cell edge, groups and a clip block, an uncolored pattern under a tint |
+ * | pattern-strokes | strokes in a tile crossing the cell's edge, a stroke painted with a pattern, and a pattern inside a tile |
+ * | pattern-integer | an axis-aligned lattice of whole-pixel steps |
+ * | pattern-period | hatch tiles on lattices of whole-pixel steps, which the period tier draws from one window: abutting at a fraction, skewed (8, 3) and (0, 5), turned by an integer rotation, and gapped |
+ * | pattern-period-blend | whole-pixel lattices whose tile blends: overlapping cells under a multiply group and a non-isolated group, an uncolored hatch, the foreground and a gradient |
+ * | pattern-hatch | strokes that end at a cell's edge and run on into the next copy, horizontal, vertical and diagonal, with butt and square caps: the lines are unbroken |
  */
 
 #ifndef GHOTI_IO_GSHCPU_TEST_RENDER_FIXTURES_H
@@ -2837,6 +2845,114 @@ static inline GSHSCENE_List * rf_pattern_integer(RF_Ctx * c) {
   return l;
 }
 
+/**
+ * A hatch tile of the cell (0, 0, w, h): a pale background, a stroke from the left edge to the right edge at a third of the height
+ * (butt caps: it ends exactly at the cell's edges, so the copies' strokes join into a line), a diagonal stroke that crosses the cell's
+ * edges (round caps) and a translucent corner rectangle.  Proportional to the cell, so one tile serves cells of 1 (under a map that
+ * scales) and of 6.
+ */
+static inline const GSHSCENE_Resource * rf_tile_hatch(RF_Ctx * c, double w, double h) {
+  GSHSCENE_List * t = rf_open(c);
+  rf_fill(c, t, rf_rect(c, 0, 0, w, h), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.97, 0.93, 0.8, 1.0), 0, 0.0);
+  const double line[4] = {0.0, h / 3.0, w, h / 3.0};
+  rf_stroke(c, t, rf_polyline(c, line, 2, 0), rf_pen(c, h / 6.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), NULL,
+      rf_solid(0.1, 0.2, 0.5, 1.0));
+  const double diag[4] = {-0.1 * w, 1.1 * h, 1.1 * w, -0.1 * h};
+  rf_stroke(c, t, rf_polyline(c, diag, 2, 0), rf_pen(c, h / 8.0, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_ROUND), NULL,
+      rf_solid(0.7, 0.2, 0.1, 0.85));
+  rf_fill(c, t, rf_rect(c, 0.6 * w, 0.6 * h, w, h), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.5, 0.3, 0.6), 0, 0.0);
+  return rf_picture_of(c, t);
+}
+
+/** Four lattices of whole-pixel steps, which the period tier draws from one window: abutting at a fraction, skewed (8, 3) and (0, 5), turned by an integer rotation, and gapped. */
+static inline GSHSCENE_List * rf_pattern_period(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.92, 0.92, 0.96, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * six = rf_tile_hatch(c, 6, 6);
+  const GSHSCENE_Resource * abut = rf_pattern(c, six, 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.3, 0.45), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 1, 23, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(abut, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * unit = rf_tile_hatch(c, 1, 1);
+  const GSHSCENE_Resource * skew = rf_pattern(c, unit, 0, 0, 1, 1, 1, 1, 1, 1, rf_affine(c, 8.0, 0.0, 3.0, 5.0, 0.4, 0.2), NULL);
+  rf_fill(c, l, rf_rect(c, 25, 1, 47, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(skew, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * turn = rf_pattern(c, unit, 0, 0, 1, 1, 1, 1, 1, 1, rf_affine(c, 3.0, 4.0, -4.0, 3.0, 0.25, 0.5), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 21, 23, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(turn, 0.9), 0, 0.0);
+  const GSHSCENE_Resource * four = rf_tile_hatch(c, 4, 4);
+  const GSHSCENE_Resource * gap = rf_pattern(c, four, 0, 0, 4, 4, 7, 6, 1, 1, rf_move(1.5, 0.5), NULL);
+  rf_fill(c, l, rf_rect(c, 25, 21, 47, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(gap, 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+/** Whole-pixel lattices with a tile that blends: overlapping cells under a multiply group and a non-isolated group, an uncolored tile, and the foreground and a gradient. */
+static inline GSHSCENE_List * rf_pattern_period_blend(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  GSHSCENE_Color fg;
+  memset(&fg, 0, sizeof fg);
+  fg.rgba[0] = 0.55;
+  fg.rgba[1] = 0.15;
+  fg.rgba[2] = 0.35;
+  fg.rgba[3] = 1.0;
+  rf_check(c, gshscene_list_set_foreground(l, &fg) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.9, 0.85, 1.0), 0, 0.0);
+  GSHSCENE_List * m = rf_open(c);
+  rf_fill(c, m, rf_rect(c, 0, 0, 8, 8), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.9, 0.5, 0.8), 0, 0.0);
+  rf_general(c, m, 0, 0, 1.0, GSHSCENE_COMPOSITE_MULTIPLY, NULL);
+  rf_fill(c, m, rf_rect(c, 2, 2, 8, 8), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.3, 0.7, 0.9, 1.0), 0, 0.0);
+  rf_pop(c, m);
+  const GSHSCENE_Resource * multiply = rf_pattern(c, rf_picture_of(c, m), 0, 0, 8, 8, 6, 5, 1, 1, rf_move(0.2, 0.7), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 1, 23, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(multiply, 1.0), 0, 0.0);
+  GSHSCENE_List * n = rf_open(c);
+  rf_fill(c, n, rf_rect(c, 0, 0, 7, 7), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.3, 0.2, 0.7), 0, 0.0);
+  rf_general(c, n, 1, 0, 0.8, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  rf_fill(c, n, rf_rect(c, 1, 1, 6, 6), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.3, 0.9, 0.8), 0, 0.0);
+  rf_pop(c, n);
+  rf_general(c, n, 0, 1, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, NULL);
+  rf_fill(c, n, rf_rect(c, 3, 0, 5, 7), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.1, 0.1, 0.5), 0, 0.0);
+  rf_fill(c, n, rf_rect(c, 0, 3, 7, 5), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.9, 0.9, 0.5), 0, 0.0);
+  rf_pop(c, n);
+  const GSHSCENE_Resource * general = rf_pattern(c, rf_picture_of(c, n), 0, 0, 7, 7, 6, 6, 1, 1, rf_move(0.5, 0.1), NULL);
+  rf_fill(c, l, rf_rect(c, 25, 1, 47, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(general, 1.0), 0, 0.0);
+  GSHSCENE_Paint tint = rf_solid(0.1, 0.45, 0.6, 0.9);
+  const GSHSCENE_Resource * open = rf_pattern(c, rf_tile_hatch(c, 5, 5), 0, 0, 5, 5, 5, 5, 1, 1, rf_move(0.6, 0.35), &tint);
+  rf_fill(c, l, rf_rect(c, 1, 21, 23, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(open, 0.8), 0, 0.0);
+  GSHSCENE_Gradient_Stop stops[2] = {rf_stop(0.0, rf_solid(1, 0.9, 0, 1)), rf_stop(1.0, rf_solid(0, 0.3, 0.9, 1))};
+  const GSHSCENE_Resource * grad = rf_gradient(c, rf_linear(0, 0, 6, 6, 0, 0, GSHSCENE_EXTEND_PAD), stops, 2);
+  GSHSCENE_List * g = rf_open(c);
+  rf_fill(c, g, rf_rect(c, 0, 0, 6, 6), NULL, GSHGEOM_FILL_NONZERO, rf_gradient_paint(grad, 1.0), 0, 0.0);
+  GSHSCENE_Paint f = rf_solid(0, 0, 0, 0.6);
+  f.kind = GSHSCENE_PAINT_FOREGROUND;
+  f.rgba[3] = 0.6;
+  GSHGEOM_Map at = rf_move(3.0, 3.0);
+  rf_fill(c, g, rf_circle(c, 2.2), &at, GSHGEOM_FILL_NONZERO, f, 0, 0.0);
+  const GSHSCENE_Resource * graded = rf_pattern(c, rf_picture_of(c, g), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(1.35, 0.8), NULL);
+  rf_fill(c, l, rf_rect(c, 25, 21, 47, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(graded, 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+/** Hatch lines: strokes that end at the cell's edge and run on into the next copy, horizontal, vertical and diagonal, with butt and square caps, so that the lines are unbroken. */
+static inline GSHSCENE_List * rf_pattern_hatch(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1.0, 1.0, 0.98, 1.0), 0, 0.0);
+  const int kinds = 4;
+  for (int k = 0; k < kinds; k++) {
+    GSHSCENE_List * t = rf_open(c);
+    const double w = 4.0;
+    const double horizontal[4] = {0.0, 1.5, w, 1.5};
+    const double vertical[4] = {2.5, 0.0, 2.5, w};
+    const double slant[4] = {0.0, w, w, 0.0};
+    const double *line = k == 1 ? vertical : (k == 3 ? slant : horizontal);
+    rf_stroke(c, t, rf_polyline(c, line, 2, 0),
+        rf_pen(c, k == 2 ? 1.25 : 0.8, GSHSCENE_STROKE_JOIN_MITER, k == 3 ? GSHSCENE_STROKE_CAP_SQUARE : GSHSCENE_STROKE_CAP_BUTT), NULL,
+        rf_solid(0.05, 0.1, 0.4, k == 2 ? 0.7 : 1.0));
+    const GSHSCENE_Resource * pat = rf_pattern(c, rf_picture_of(c, t), 0, 0, w, w, w, w, 1, 1, rf_move(0.0 + 0.35 * (double)(k % 2), 0.2 * (double)k), NULL);
+    rf_fill(c, l, rf_rect(c, 1 + 24 * (k % 2), 1 + 20 * (k / 2), 23 + 24 * (k % 2), 19 + 20 * (k / 2)), NULL, GSHGEOM_FILL_NONZERO,
+        rf_pattern_paint(pat, 1.0), 0, 0.0);
+  }
+  rf_close(c, l);
+  return l;
+}
+
 typedef struct RF_Fixture {
   const char * name;
   RF_Build build;
@@ -2904,6 +3020,9 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"pattern-content", rf_pattern_content},
     {"pattern-strokes", rf_pattern_strokes},
     {"pattern-integer", rf_pattern_integer},
+    {"pattern-period", rf_pattern_period},
+    {"pattern-period-blend", rf_pattern_period_blend},
+    {"pattern-hatch", rf_pattern_hatch},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

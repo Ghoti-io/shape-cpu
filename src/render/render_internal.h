@@ -857,10 +857,15 @@ void gshcpu_render_image_texel(const GSHCPU_Image * im, uint32_t x, uint32_t y, 
  * its elements by KC4's element step (render.h), the gate of KC9 that the plain step is the same function in the reals.
  */
 #define GSHCPU_RENDER_FORCE_GENERAL 512u
+/**
+ * PC9, FT-P1: a pattern whose step vectors are whole device pixels is drawn by rendering one period of its lattice picture and reading the
+ * rest of the layer from it by integer arithmetic (the cache of PC10 keeps the period under TIER_CACHE).  Off, the general tier draws every copy.
+ */
+#define GSHCPU_RENDER_TIER_PERIOD 1024u
 #define GSHCPU_RENDER_TIERS_ALL \
   (GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE | GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT | \
       GSHCPU_RENDER_TIER_IMAGE_COPY | GSHCPU_RENDER_TIER_IMAGE_SEPARABLE | GSHCPU_RENDER_TIER_IMAGE_TABLE | \
-      GSHCPU_RENDER_TIER_MASK_OUTSIDE | GSHCPU_RENDER_TIER_MASK_IDENTITY)
+      GSHCPU_RENDER_TIER_MASK_OUTSIDE | GSHCPU_RENDER_TIER_MASK_IDENTITY | GSHCPU_RENDER_TIER_PERIOD)
 /** What the general tier is: the coverage (the exact step and UC8), none of the fast tiers. */
 #define GSHCPU_RENDER_TIERS_GENERAL (GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT)
 
@@ -902,7 +907,33 @@ typedef struct GSHCPU_Render_Counters {
   uint64_t group_shape_slots; /* ... and group shape channels: groups open at once with a knockout proper ancestor */
   uint64_t patterns;         /* passes of a pattern's tile drawn (PC2): a lattice layer made, however many copies */
   uint64_t pattern_copies;   /* the (unit, copy) pairs those passes drew */
+  uint64_t pattern_period;   /* ... of the passes, those drawn by the period tier (PC9): the layer read from a window of one period */
+  uint64_t period_aborts;    /* ... and those the tier began and gave up for the general tier (a copy it could not vouch for) */
+  uint64_t period_hits;      /* PC10: a period raster found in the cache */
+  uint64_t period_misses;    /* ... a window rendered because the cache had none (and the cache was in use) */
+  uint64_t period_kept;      /* ... and kept */
 } GSHCPU_Render_Counters;
+
+/**
+ * PC10: what identifies a period raster in the cache: the pattern and its tile (ids are never reused), the canonical map's linear part
+ * and the fraction `f` (the lattice's step vectors, and so its period, are functions of these and the pattern), the layer's and the
+ * target's color spaces, the list's foreground and palette when the tile holds a paint that reads them, and the revisions of the
+ * pieces whose bits the raster contains.  The tint, the alpha multiplier, the damage and the region are not in it.
+ */
+typedef struct GSHCPU_Period_Key {
+  uint64_t pattern_id;
+  uint64_t tile_id;
+  uint64_t linear[4];        /* the bit patterns of the canonical map's linear part, row major */
+  uint64_t fraction[2];      /* ... and of its translation, in [0, 1) */
+  uint64_t layer_space[2];   /* the lattice layer's color space: primaries and transfer, then the bits of gamma */
+  uint64_t target_space[2];  /* the target's */
+  uint64_t foreground[4];    /* the bits of the list's foreground (0 when the tile reads none) */
+  uint64_t foreground_space[2];
+  uint64_t palette_id;       /* the list's palette (0 when the tile reads none) */
+  int32_t reads_foreground;  /* the tile holds a FOREGROUND or PALETTE paint */
+  int32_t revisions[4];      /* GSHGEOM_STROKE_REVISION, GSHGEOM_FLATTEN_REVISION, GSHGEOM_CLIP_REVISION, GSHGEOM_LATTICE_REVISION */
+  int32_t reserved;          /* zero: the key has no padding, so that it is compared as bytes */
+} GSHCPU_Period_Key;
 
 /** What identifies an expansion in the cache (SC7). */
 typedef struct GSHCPU_Stroke_Key {
@@ -992,6 +1023,30 @@ int gshcpu_stroke_cache_acquire(GSHCPU_Stroke_Cache * cache, const GSHCPU_Stroke
 int gshcpu_stroke_cache_store(GSHCPU_Stroke_Cache * cache, const GSHCPU_Stroke_Key * key, GSHGEOM_Stroke_Outline * outline,
     const GSHCPU_Stroke_Meta * meta, void ** entry, GSHGEOM_Stroke_Outline ** held);
 
+/**
+ * PC10: look @p key up among the period rasters.  A hit pins the entry (::gshcpu_stroke_cache_release unpins it), sets @p raster to its
+ * `p * s` pixels of four doubles each in class order, and counts; a miss counts nothing here (::gshcpu_period_cache_store counts it).
+ * @return 1 on a hit, else 0.
+ */
+int gshcpu_period_cache_acquire(GSHCPU_Stroke_Cache * cache, const GSHCPU_Period_Key * key, void ** entry, const double ** raster);
+
+/** PC10: whether a raster of @p pixels pixels could be kept (the bound), so that a render that cannot keep it does not copy it out. */
+int gshcpu_period_cache_fits(GSHCPU_Stroke_Cache * cache, size_t pixels);
+
+/** PC10: room for a raster of @p pixels pixels from the cache's allocator, or NULL (out of memory); ::gshcpu_period_cache_store takes it. */
+double * gshcpu_period_cache_make(GSHCPU_Stroke_Cache * cache, size_t pixels);
+
+/** PC10: free a raster ::gshcpu_period_cache_make made and ::gshcpu_period_cache_store did not take (it returned 0 or 2 or -1). */
+void gshcpu_period_cache_free(GSHCPU_Stroke_Cache * cache, double * raster);
+
+/**
+ * PC10: offer the raster made for @p key (a miss, counted).  @return 1 when the cache took it (it owns @p raster now, and the entry
+ * is pinned: @p entry); 2 when an entry for the key was there already (pinned; the caller still owns @p raster); 0 when it was not kept
+ * (larger than the bound, or nothing could be dropped to make room): the caller still owns it; -1 when the entry could not be
+ * allocated (out of memory).
+ */
+int gshcpu_period_cache_store(GSHCPU_Stroke_Cache * cache, const GSHCPU_Period_Key * key, double * raster, size_t pixels, void ** entry);
+
 /** Unpin an entry; the last release of one that was dropped frees it. */
 void gshcpu_stroke_cache_release(GSHCPU_Stroke_Cache * cache, void * entry);
 
@@ -1019,6 +1074,10 @@ typedef struct GSHCPU_Stroke {
   GSHCPU_Run_Note * notes;         /* a run: the glyph notes of its centerline (ST8), the stroke's own copy; NULL for none */
   size_t note_count;
   uint64_t run_elements;           /* a run: the elements of its centerline */
+  /* PC5: the stroke cut to a cell's quadrilateral (::gshcpu_render_stroke_cut): the body and the aligned part replaced by the part of
+   * each inside the cell, which this stroke owns; the clip path is the outline's own (the aligned part is cut already). */
+  int cut_set[GSHCPU_STROKE_PARTS];
+  GSHGEOM_Flat_Path * cut[GSHCPU_STROKE_PARTS];
 } GSHCPU_Stroke;
 
 /**
@@ -1038,6 +1097,19 @@ GSHCPU_Result gshcpu_render_stroke_open(GSHCPU_Stroke_Cache * cache, const GSHGE
 
 /** Release what ::gshcpu_render_stroke_open holds. */
 void gshcpu_render_stroke_close(GSHCPU_Stroke_Cache * cache, GSHCPU_Stroke * s);
+
+/**
+ * PC5: cut the opened stroke @p s to the convex quadrilateral @p quad (a cell, in the canonical frame, 26.6 coordinates): the body and
+ * the aligned part are replaced, in this stroke only, by the winding-preserving cut of each by `gshgeom_flat_path_clip_convex` (CK1),
+ * so that the coverage composed from the cut parts by SC5 is the stroke's coverage inside the quadrilateral and the two sides of a cell
+ * edge add to the whole.  The cached outline is not touched.  A stroke with nothing left inside is `drawn == 0`.  The cut paths are
+ * made from @p alloc and freed by ::gshcpu_render_stroke_close.
+ *
+ * @return ::GSHCPU_OK; ::GSHCPU_ERR_LIMIT (a cut past `max_points` or the crossings' bound, a coordinate past the range);
+ *   ::GSHCPU_ERR_OOM.  On a failure the stroke is still closed by ::gshcpu_render_stroke_close.
+ */
+GSHCPU_Result gshcpu_render_stroke_cut(GSHCPU_Stroke * s, const GSHGEOM_Device_Point quad[4], const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits);
 
 /** The arrays a stroke's coverage is built in: the region's pixels each; the last three only for an aligned stroke. */
 typedef struct GSHCPU_Stroke_Buffers {

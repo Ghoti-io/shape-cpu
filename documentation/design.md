@@ -363,7 +363,10 @@ layer over the pixels the use draws, and reads that layer as the paint's source,
 **The pass.** A pattern paint, begun like any paint, makes one *pass* over the tile: the tile's units, walked by an expansion of their
 own into one more layer (the mask's picture is walked the same way), each *one element over all the copies*. A unit's coverage in a
 copy is the coverage of its outline under the copy's **canonical map** (the chain's linear part and the translation's fraction in
-`[0, 1)`; `shape-geometry`'s one function splits the translation `i a + j b` of PC3 into whole pixels and that fraction), the outline
+`[0, 1)`; `shape-geometry`'s one function, `gshgeom_lattice_canonical` (LT5), splits the copy's position into whole pixels and that
+fraction: LT2's `tau + i a + j b` split by the stroke function, or, where the step vectors are integer vectors, the exact split `floor(tau) +
+i a + j b` in integers and the fraction of `tau` itself, because the sum in `double` rounds the fraction once it grows and two copies of a
+lattice would then not be one set of bits moved), the outline
 cut to the cell's quadrilateral by `shape-geometry`'s convex clip and scan converted over the region moved by the whole pixels. So a
 copy is a function of the linear part, the fraction and the shift only; two copies with equal fractions are the same bits moved, and a
 paint inside the tile (a gradient, an image, another pattern) is evaluated at the position relative to its own cell. A copy at the
@@ -383,27 +386,58 @@ time in lattice order, each with all its units onto the lattice layer (source-ov
 holds a blend mode is drawn the same way, as one non-isolated, non-knockout group over the lattice layer). The cells' coverage is not
 multiplied in again: the outlines were cut to the cell by the clip, and multiplying would square the coverage at a cell's edge.
 
-**Strokes in a tile** are restricted to the cell by the cell's coverage (a stroke's parts are not cut by the clip), so a stroke that
-crosses a cell edge is seam free where the copy across the edge continues it, and exact only to the coverage of the cell where it does not.
+**Strokes in a tile (PC5)** are cut to the cell exactly. The expansion of the stroke (the cached one, which is a function of the
+centerline, the style, the linear part and the fraction) has up to three parts, the body, the aligned part and the clip path; the body and
+the aligned part are cut to the cell's quadrilateral by `shape-geometry`'s winding-preserving convex clip (in this copy's stroke only; the
+cache's outline is not touched), and SC5 composes the cut parts with the clip path as it composes a stroke's, `k_b + k_a c' - k_b k_a c'`.
+The aligned part is cut to the cell and the clip path restricts it, so the composition is the restriction of the stroke's coverage to the
+cell and the two sides of a cell edge add to the whole: a butt-capped line from one edge to the other is, copy after copy, the fill of the
+rectangle it covers bit for bit (a test), and a line that ends at a cell edge leaves no dent at the seam pixel. The first build weighed the
+stroke by the cell's 8-bit coverage instead, which multiplies two 8-bit values at the seam and is exact only where the stroke runs on across the edge. The
+cut is bounded as the clip is (the seam area at most `c (sqrt(2)/2) D` for `c` crossings and a cell of diameter `D`, shape-geometry's CK4).
 
 **Limits (PC8).** The copies of a use are counted by `gshgeom_lattice_each` over what the whole render draws of the use, at every level of
 nesting, summed, and one more than `GSHCPU_Limits.max_pattern_cells` is `RESOURCE_LIMIT` for the fill or stroke painted with the
 pattern: a function of the list and the target, so the same under a damage, with the caller's memory and under any tier. A limit met inside a
 tile (a copy's points, its cells, a shifted coordinate past the range) refuses the use, not the unit; the lattice layer is a group layer and meets the limits
 a group's does. A damage does not change the count of the outermost use, but the copies of a *nested* pattern are counted only for the outer copies
-that are drawn (see below).
+that are drawn.
 
 **Memory (PC11).** The lattice layer is a group layer in the frame stack, a pass takes an accumulator (37 bytes a pixel), a coverage
 buffer and a record, and nests as the patterns do; under `CALLER_MEMORY` all of it is in the caller's block, the geometry of a tile's units
 comes from the arena above the item that is painted with the pattern, and the size the sink reports is a bound that is never too small.
 
-**What is not built.** The period tier (PC9: whole-pixel step vectors read one period of the picture by integer arithmetic) and the cache of
-its raster (PC10) are not in the sink: every use takes the general tier. A nested pattern's copies are counted only for the outer
-copies that lie inside the damage, so a damaged render may admit a use the whole render refuses (PC8's damage clause holds for the
-outermost count, not the nested one). The planted-defect table for the pass, its fuzz harness, the benchmark scene and the gallery page are not written.
-
 picture the same way, so the installed `mask_vectors.h` and this sink agree on all 485 vectors, among them 24 whose `R` is another space
 than the target's (an earlier reading of the oracle took such a paint as already in `R`, and those 24 vectors moved when it was corrected).
+**The period tier (PC9).** A pattern whose step vectors `a` and `b` are integer vectors (every component an exact integer below `2^31`,
+both axes repeating, `D = a_x b_y - a_y b_x` nonzero and at most `2^31`) has a lattice picture that a translation by any `i a + j b` leaves
+unchanged: every copy has the fraction of `tau`, so every copy is the first copy's bits moved by whole pixels. Such a pass is drawn **over a
+window of one period**: `gshgeom_lattice_period` gives the Hermite normal form `(p, r, s)` of the lattice (`p s = |D|`) and its reduction
+`rep`, and the window `[0, p) x [0, s)` moved to the corner of the lattice layer's rectangle is the part of the layer that is drawn
+(by the general code, with the rectangle the window; the restriction property of the scan converter makes the window's pixels the layer's).
+Every pixel of the use is then read at `rep(q - w) + w`, `w` the window's corner. The window has to fit in the rectangle (`p` at most its
+width, `s` at most its height; so `|D|` is at most its pixels); a lattice whose period is wider than the use is drawn whole. The window is
+the layer's own memory, so the tier takes no workspace of its own. It does not apply where the tile holds a pattern (the nested count of
+PC8 is of the outer copies drawn) or a soft mask (a mask's picture is placed once in the pass's frame, not once for each copy), and it is
+taken for a tile with blend modes, groups and strokes: the value at a pixel is a function of the copies that touch it, in lattice order, which a
+translation by a lattice vector preserves. A limit never depends on the tier: a copy's other limits (deposits past the cap, the domain
+and the work of a gradient or an image paint, the range of the cell's pixels) are met by the copies of the window over what the whole render
+draws of each, and a copy elsewhere is the same bits moved, so the window can vouch for the whole lattice only when no copy could meet a
+limit over its whole cell. Each such copy is therefore checked against the *whole cell* (its pixels, the bound of its deposits over the
+cell, a gradient's and an image's domain over the cell): if any copy fails, the pass gives the window up (`period_aborts`) and draws the use's
+rectangle by the general tier, which decides every copy. The counters `pattern_period` (passes the tier drew) and `period_aborts` are in
+`GSHCPU_Render_Counters`, and `GSHCPU_RENDER_TIER_PERIOD` is the tier switch the gates turn off to compare: every fixture, the cases of
+`test_render_pattern_period.cpp` and every fuzz input render the same bytes and the same report with it on and off.
+
+**The cache of a period (PC10).** The window's pixels, four doubles each in the order of the classes `rep(q - t)` (`t` the whole pixels of
+copy `(0, 0)`, so that a lattice moved by whole pixels is the same entry), are kept in the stroke expansions' table (one `cutil` mutex, least
+recently used first, the same `max_cache_bytes` bound, pinned while a render reads one, bypassed under `CALLER_MEMORY`, dropped by
+`evict(id)` for the pattern's or the tile's id and by destruction, counted by `static_bytes`). The key is the pattern's and the tile's
+resource id, the bit patterns of the canonical map's linear part and fraction, the layer's and the target's color spaces, the list's foreground
+and palette when the tile holds a paint that reads them, and the revisions of the stroke expansion, the flattener, the clip and the lattice (each
+a constant of `shape-geometry`); the tint, the alpha multiplier, the damage and the region are applied after the lookup and are not in it. A hit
+copies the raster into the window and is the miss bit for bit; a raster larger than the bound is drawn and not kept. Ids are a store's: as for the
+stroke expansions, a sink that renders the lists of two stores whose ids collide has to be given a table each (`evict`, or a sink for each).
 
 ### A refused stroke draws nothing in every tier
 

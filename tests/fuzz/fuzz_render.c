@@ -115,7 +115,9 @@ enum {
   OUT_BUDGET_REFUSED, OUT_BUDGET_SAME, OUT_IMAGE_DRAWN, OUT_IMAGE_AREA, OUT_IMAGE_LIMIT, OUT_IMAGE_NOTICE, OUT_IMAGE_TINT,
   OUT_IMAGE_STROKE, OUT_MASK_DRAWN, OUT_MASK_LUMINANCE, OUT_MASK_NESTED, OUT_MASK_OUTSIDE, OUT_MASK_IDENTITY,
   OUT_MASK_REFUSED_INSIDE, OUT_MASK_TIERS_EQUAL, OUT_MASK_DAMAGE, OUT_MASK_CALLER_MEMORY, OUT_NON_ISOLATED, OUT_KNOCKOUT, OUT_GENERAL_MASKED, OUT_GENERAL_SHAPE,
-  OUT_GENERAL_NESTED, OUT_GENERAL_CALLER_MEMORY, OUT_GENERAL_DAMAGE, OUT_GENERAL_STROKE, OUT_COUNT
+  OUT_GENERAL_NESTED, OUT_GENERAL_CALLER_MEMORY, OUT_GENERAL_DAMAGE, OUT_GENERAL_STROKE,
+  OUT_PATTERN_DRAWN, OUT_PATTERN_OVERLAP, OUT_PATTERN_PERIOD, OUT_PATTERN_TIERS_EQUAL, OUT_PATTERN_CACHED, OUT_PATTERN_NESTED,
+  OUT_PATTERN_STROKE, OUT_PATTERN_LIMIT, OUT_PATTERN_CALLER_MEMORY, OUT_PATTERN_DAMAGE, OUT_PATTERN_GAVE_UP, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -143,7 +145,12 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a render with a non-isolated group (KC5)", "a render with a knockout group (KC4)", "a masked group that is non-isolated or knockout (KC10)",
     "a group shape carried under a knockout ancestor (KC3)", "general groups nested, a group alpha or group shape channel in two layers (KC8)",
     "a render with a general group in caller memory (KC8)", "a damage-limited render of a general group equal to the whole render (KC10)",
-    "a stroke drawn into a general layer (KC2)"};
+    "a stroke drawn into a general layer (KC2)",
+    "a render with a pattern fill or stroke drawn (PC2)", "a pattern whose cells overlap drawn (PC6)", "a pattern drawn by the period tier (PC9)",
+    "a pattern render equal to the render with the period tier off (PC9)", "a period raster served from the cache (PC10)",
+    "a pattern nested in a pattern's tile (PC5)", "a stroke in a pattern's tile (PC5)", "a pattern use refused for a sink limit (PC8)",
+    "a pattern render in caller memory (PC11)", "a damage-limited render of a pattern equal to the whole render (PC11)",
+    "the period tier given up for the general tier (PC9)"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -264,11 +271,18 @@ typedef struct World {
   double dashes[4];                  /* the style's dash lengths */
   const GSHGEOM_Allocator * alloc;   /* the harness's counting allocator: the pictures of masks are made through it */
   int masks_on;                      /* the request byte's bit 7: a group may take a mask */
+  int patterns_on;                   /* a fill whose rule byte is 0xF8 or more takes a pattern from the bytes that follow (R2) */
   size_t masks;                      /* groups recorded with a mask */
   size_t mask_luminance;             /* ... of luminance */
   size_t mask_nested;                /* ... masks inside a mask's picture */
   size_t general;                    /* groups made non-isolated or knockout */
   size_t knockouts;                  /* ... of them knockout groups */
+  size_t patterns;                   /* fills and strokes recorded with a pattern paint (R2) */
+  size_t pattern_overlaps;           /* ... whose cells overlap */
+  size_t pattern_integers;           /* ... whose step vectors are whole device pixels under the identity or a translation (PC9) */
+  size_t pattern_nested;             /* ... holding a pattern in the tile */
+  size_t pattern_strokes;            /* ... holding a stroke in the tile */
+  const GSHSCENE_Resource * tile_style; /* the style of a tile's stroke, made on first use */
 } World;
 
 static void intern_paths(Input * in, GSHSCENE_Store * store, const GSHGEOM_Allocator * alloc, World * w) {
@@ -862,6 +876,183 @@ static const GSHSCENE_Resource * mask_of(Input * in, World * w, int depth) {
   return mask;
 }
 
+/**
+ * A pattern from the bytes (masks-images-patterns story R2), or NULL where nothing can be made of it.  Bytes: the configuration (the
+ * tile's fills, a stroke, a clip, a group, a gradient or image paint, a nested pattern, a tint), the cell and the steps (from tables
+ * that give abutting, gapped, overlapping, whole-pixel and fractional lattices), the repeats and a map (identity, a translation by a
+ * fraction or by whole pixels or very far, a scale, an integer shear and turn, a quarter turn, a singular map); then the tile's fills as a
+ * list's.  A nest is as deep as @p depth allows.  The caller holds the reference.
+ */
+static const GSHSCENE_Resource * pattern_of(Input * in, World * w, int depth) {
+  static const double sizes[8] = {1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 2.5, 5.5};
+  static const double steps[10] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 12.0, 0.75, 2.5};
+  const uint8_t cfg = next(in);
+  const uint8_t geom = next(in);
+  const uint8_t maps = next(in);
+  const uint8_t tint = next(in);
+  GSHSCENE_List * tile_list = NULL;
+  if (!w->store || !w->path_count || gshscene_list_create(w->alloc, NULL, w->store, &tile_list) != GSHSCENE_OK) {
+    return NULL;
+  }
+  const size_t fills = 1u + cfg % 3u;
+  int holds_pattern = 0;
+  int holds_stroke = 0;
+  for (size_t i = 0; i < fills; i++) {
+    GSHGEOM_Map map;
+    GSHSCENE_Paint paint;
+    const GSHSCENE_Resource * held = NULL;
+    const GSHSCENE_Resource * path = w->paths[next(in) % w->path_count];
+    map_of(in, &map);
+    paint_of(in, w, &paint, &held);
+    int past = 0;
+    for (int k = 0; k < 3; k++) {
+      past |= !(paint.rgba[k] >= -0x1p16 && paint.rgba[k] <= 0x1p16);
+    }
+    const uint8_t rule = next(in);
+    const GSHSCENE_Resource * inner = NULL;
+    if (depth < 1 && (cfg & 0x40) && i == 0) {
+      inner = pattern_of(in, w, depth + 1);
+      if (inner) {
+        gshscene_resource_release(held);
+        memset(&paint, 0, sizeof paint);
+        paint.kind = GSHSCENE_PAINT_PATTERN;
+        paint.resource = inner;
+        paint.rgba[3] = 1.0;
+        held = NULL;
+        holds_pattern = 1;
+      }
+    }
+    int group_open = 0;
+    int clip_open = 0;
+    if ((cfg & 0x20) && i == 0) {
+      GSHSCENE_Group group;
+      memset(&group, 0, sizeof group);
+      group.opacity = (double)(1 + rule % 4) / 4.0;
+      group.composite = (rule >> 2) & 1 ? GSHSCENE_COMPOSITE_MULTIPLY : GSHSCENE_COMPOSITE_SRC_OVER;
+      group.isolation = (rule >> 3) & 1 ? GSHSCENE_ISOLATION_NON_ISOLATED : GSHSCENE_ISOLATION_ISOLATED;
+      group_open = gshscene_list_group_push(tile_list, &group, 0, 0.0) == GSHSCENE_OK;
+    }
+    if ((cfg & 0x80) && i + 1 == fills) {
+      clip_open = gshscene_list_clip_push(tile_list, path, &map, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK;
+    }
+    GSHSCENE_Result fr;
+    if (past) {
+      fr = GSHSCENE_ERR_LIMIT;
+    } else if ((cfg & 0x10) && i == 0 && !inner) {
+      if (!w->tile_style) {
+        GSHSCENE_Stroke_Style st;
+        gshscene_stroke_style_init(&st);
+        st.width = (cfg >> 2) & 1 ? 0.5 : 1.75;
+        st.cap = (cfg >> 3) & 1 ? GSHSCENE_STROKE_CAP_ROUND : GSHSCENE_STROKE_CAP_BUTT;
+        const GSHSCENE_Result sr = gshscene_store_intern_stroke_style(w->store, &st, &w->tile_style);
+        CHECK(sr == GSHSCENE_OK || sr == GSHSCENE_ERR_OOM || sr == GSHSCENE_ERR_LIMIT);
+      }
+      fr = w->tile_style ? gshscene_list_stroke(tile_list, path, w->tile_style, &map, &paint, 0, 0.0) : GSHSCENE_ERR_OOM;
+      holds_stroke += fr == GSHSCENE_OK;
+    } else {
+      fr = gshscene_list_fill(tile_list, path, &map, rule & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint, 0, 0.0);
+    }
+    w->gradients += held != NULL && paint.kind == GSHSCENE_PAINT_GRADIENT && fr == GSHSCENE_OK;
+    w->images += held != NULL && paint.kind == GSHSCENE_PAINT_IMAGE && fr == GSHSCENE_OK;
+    gshscene_resource_release(held);
+    gshscene_resource_release(inner);
+    if (clip_open) {
+      CHECK(gshscene_list_clip_pop(tile_list) == GSHSCENE_OK);
+    }
+    if (group_open) {
+      CHECK(gshscene_list_group_pop(tile_list) == GSHSCENE_OK);
+    }
+  }
+  const GSHSCENE_Result closed = gshscene_list_close(tile_list);
+  CHECK(closed == GSHSCENE_OK || closed == GSHSCENE_ERR_OOM);
+  if (closed != GSHSCENE_OK) {
+    gshscene_list_destroy(tile_list);
+    return NULL;
+  }
+  const GSHSCENE_Resource * picture = NULL;
+  GSHSCENE_Result pr = gshscene_store_intern_picture(w->store, tile_list, &picture);
+  gshscene_list_destroy(tile_list);
+  CHECK(pr == GSHSCENE_OK || pr == GSHSCENE_ERR_OOM || pr == GSHSCENE_ERR_LIMIT);
+  if (pr != GSHSCENE_OK) {
+    return NULL;
+  }
+  GSHSCENE_Pattern pt;
+  gshscene_pattern_init(&pt);
+  pt.tile = picture;
+  pt.x = (geom >> 6) & 1 ? -0.5 : 0.0;
+  pt.y = (geom >> 7) & 1 ? 0.25 : 0.0;
+  pt.w = sizes[geom & 7];
+  pt.h = sizes[(geom >> 3) & 7];
+  pt.repeat_x = (tint & 0x40) ? 0u : 1u;
+  pt.repeat_y = (tint & 0x80) ? 0u : 1u;
+  pt.x_step = steps[maps % 10];
+  pt.y_step = steps[(maps >> 4) % 10];
+  if (cfg % 5 == 0) {
+    pt.x_step = pt.w; /* abutting */
+  }
+  if (cfg % 7 == 0) {
+    pt.y_step = pt.h;
+  }
+  GSHGEOM_Map m;
+  switch (tint % 8) {
+    case 1:
+      gshgeom_map_translate(2, 0.3, 0.45, 0.0, &m);
+      break;
+    case 2:
+      gshgeom_map_translate(2, 5.0, 3.0, 0.0, &m);
+      break;
+    case 3:
+      gshgeom_map_scale(2, 2.0, 2.0, 1.0, &m);
+      break;
+    case 4: {
+      const double sh[4] = {1.0, 0.0, 1.0, 1.0};
+      const double tt[2] = {0.25, 0.75};
+      CHECK(gshgeom_map_from_matrix(2, sh, tt, &m) == GSHGEOM_OK);
+      break;
+    }
+    case 5: {
+      const double rot[4] = {3.0, -4.0, 4.0, 3.0};
+      const double tt[2] = {0.5, 0.5};
+      CHECK(gshgeom_map_from_matrix(2, rot, tt, &m) == GSHGEOM_OK);
+      break;
+    }
+    case 6:
+      gshgeom_map_translate(2, -4000.3, 3999.7, 0.0, &m);
+      break;
+    case 7:
+      gshgeom_map_scale(2, 0.0, 1.0, 1.0, &m); /* singular */
+      break;
+    default:
+      gshgeom_map_identity(2, &m);
+      break;
+  }
+  pt.map = m;
+  GSHSCENE_Paint tint_paint;
+  memset(&tint_paint, 0, sizeof tint_paint);
+  if ((tint & 0x30) == 0x30) {
+    tint_paint.kind = GSHSCENE_PAINT_SOLID;
+    tint_paint.rgba[0] = 0.2;
+    tint_paint.rgba[1] = 0.6;
+    tint_paint.rgba[2] = 0.9;
+    tint_paint.rgba[3] = 0.8;
+    pt.has_tint = 1;
+    pt.tint = tint_paint;
+  }
+  const GSHSCENE_Resource * pattern = NULL;
+  const GSHSCENE_Result r = gshscene_store_intern_pattern(w->store, &pt, &pattern);
+  gshscene_resource_release(picture);
+  CHECK(r == GSHSCENE_OK || r == GSHSCENE_ERR_OOM || r == GSHSCENE_ERR_LIMIT || r == GSHSCENE_ERR_INVALID || r == GSHSCENE_ERR_UNSUPPORTED);
+  if (r != GSHSCENE_OK) {
+    return NULL;
+  }
+  w->patterns++;
+  w->pattern_overlaps += (pt.repeat_x && pt.x_step < pt.w) || (pt.repeat_y && pt.y_step < pt.h);
+  w->pattern_integers += pt.repeat_x && pt.repeat_y && (tint % 8) <= 5 && pt.x_step == (double)(int)pt.x_step && pt.y_step == (double)(int)pt.y_step;
+  w->pattern_nested += holds_pattern;
+  w->pattern_strokes += holds_stroke > 0;
+  return pattern;
+}
+
 /** Record the list: fills, clips and groups, closed balanced.  @return the deepest group nesting reached. */
 static int record(Input * in, GSHSCENE_List * list, World * w) {
   int clips = 0, groups = 0, open[16], depth = 0, deepest = 0;
@@ -887,6 +1078,20 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
       }
       /* The rule byte's bits 1 and 2 both set: a stroke of the shape instead (strokes stories S1 and S5). */
       const uint8_t rule = next(in);
+      const GSHSCENE_Resource * pat = NULL;
+      if ((rule & 0xF8) == 0xF8 && w->patterns_on) {
+        /* R2: the paint is a pattern from the bytes that follow (a fill's rule 0xF8 to 0xFF; a stroke of it when bits 1 and 2 are set). */
+        pat = pattern_of(in, w, 0);
+        if (pat) {
+          gshscene_resource_release(held);
+          held = NULL;
+          memset(&paint, 0, sizeof paint);
+          paint.kind = GSHSCENE_PAINT_PATTERN;
+          paint.resource = pat;
+          paint.rgba[3] = (double)(1 + (rule >> 1) % 4) / 4.0;
+          past = 0;
+        }
+      }
       if ((rule & 6) == 6 && !w->style) {
         static const double widths[8] = {1.0, 0.0, 2.5, 6.0, 0.0625, 17.0, 1.5, 3.0};
         static const double patterns[4][2] = {{0.0, 0.0}, {3.0, 2.0}, {1.0, 1.0}, {0.0, 2.0}};
@@ -931,6 +1136,7 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
         w->at_bound++;
       }
       gshscene_resource_release(held); /* the list holds its own reference */
+      gshscene_resource_release(pat);
     } else if (op == 4 && r && depth < 16) {
       map_of(in, &map);
       if (gshscene_list_clip_push(list, r, &map, next(in) & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, 0, 0.0) ==
@@ -1223,6 +1429,9 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
       }
       break;
   }
+  if ((limit_byte & 7) == 0 && (limit_byte & 0x38) != 0 && limit_byte < 0x80) {
+    limits.max_pattern_cells = 1 + (uint64_t)((limit_byte >> 3) & 7) * 6u; /* PC8: a few copies to a few dozen */
+  }
   const int tightened = (limit_byte & 7) >= 5; /* a limit of the exact step (UC9, UC19) is lowered */
 
   GSHSCENE_Store * store = NULL;
@@ -1249,6 +1458,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   world.store = store;
   world.alloc = &alloc;
   world.masks_on = (request_byte & 0x80) != 0;
+  world.patterns_on = 1;
   intern_paths(&in, store, &alloc, &world);
   intern_runs(&in, store, &tp, &world);
   if (record(&in, list, &world) >= 2) {
@@ -1495,6 +1705,14 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   outcomes[OUT_STROKE_SPARSE] += counters.sparse_hairline + counters.sparse_plain > 0;
   outcomes[OUT_STROKE_EXACT] += counters.exact_cells > 0;
   outcomes[OUT_BUDGET_REFUSED] += (limit_byte & 7) >= 6 && limit_refused > 0;
+  outcomes[OUT_PATTERN_DRAWN] += r == GSHSCENE_OK && counters.patterns > 0;
+  outcomes[OUT_PATTERN_OVERLAP] += r == GSHSCENE_OK && counters.patterns > 0 && world.pattern_overlaps > 0;
+  outcomes[OUT_PATTERN_PERIOD] += r == GSHSCENE_OK && counters.pattern_period > 0;
+  outcomes[OUT_PATTERN_GAVE_UP] += counters.period_aborts > 0;
+  outcomes[OUT_PATTERN_NESTED] += r == GSHSCENE_OK && counters.patterns > 1 && world.pattern_nested > 0;
+  outcomes[OUT_PATTERN_STROKE] += r == GSHSCENE_OK && counters.patterns > 0 && world.pattern_strokes > 0;
+  outcomes[OUT_PATTERN_LIMIT] += world.patterns > 0 && (limit_byte & 7) == 0 && limit_byte < 0x80 && (limit_byte & 0x38) != 0 && limit_refused > 0;
+  outcomes[OUT_PATTERN_CALLER_MEMORY] += r == GSHSCENE_OK && counters.patterns > 0 && (request.flags & GSHSCENE_RENDER_CALLER_MEMORY);
   /* UC4: the pieces of every cell the exact step made reproduce what the rasterizer summed, whatever the geometry. */
   CHECK(counters.exact_failures == 0);
   const uint64_t first_entries = entries_hash(report);
@@ -1583,6 +1801,30 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
           gshscene_sink_destroy(dual);
           gimg_raster_destroy(twin_out);
         }
+        /* PC9, PC10: a render that drew a pattern is the render with the period tier off (and the cache: a second, third render of the
+         * same sink was a hit), bit for bit, with the same report. */
+        outcomes[OUT_PATTERN_CACHED] += counters.period_hits > 0;
+        if (counters.patterns > 0) {
+          GSHSCENE_Sink * general = NULL;
+          GIMG_Raster * other = copy_of(backdrop, format);
+          GSHCPU_Render_Counters general_counters;
+          if (other && gshcpu_render_sink_create_tiered(NULL, NULL, &limits,
+                  GSHCPU_RENDER_TIERS_ALL & ~(unsigned)(GSHCPU_RENDER_TIER_PERIOD | GSHCPU_RENDER_TIER_CACHE), &general_counters, NULL, NULL,
+                  &general) == GSHCPU_OK) {
+            target.surface = other;
+            GSHSCENE_Result rp = gshscene_sink_render(general, &request);
+            CHECK(rp == GSHSCENE_OK || rp == GSHSCENE_ERR_OOM);
+            if (rp == GSHSCENE_OK) {
+              CHECK(same_bytes(raster, other));
+              CHECK(entries_hash(report) == first_entries);
+              CHECK(general_counters.pattern_period == 0 && general_counters.period_hits == 0);
+              outcomes[OUT_PATTERN_TIERS_EQUAL]++;
+            }
+            target.surface = again;
+          }
+          gshscene_sink_destroy(general);
+          gimg_raster_destroy(other);
+        }
         /* MC8: a render that composited a masked group is the render with both mask tiers off, bit for bit. */
         if (counters.masks > 0) {
           GSHSCENE_Sink * general = NULL;
@@ -1640,6 +1882,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
               }
             }
             outcomes[OUT_DAMAGE]++;
+            outcomes[OUT_PATTERN_DAMAGE] += counters.patterns > 0;
             outcomes[OUT_MASK_DAMAGE] += counters.masks > 0;
             outcomes[OUT_GENERAL_DAMAGE] += counters.general_layers > 0;
           }
@@ -1660,6 +1903,7 @@ done:
   gshscene_resource_release(world.runs[0]);
   gshscene_resource_release(world.runs[1]);
   gshscene_resource_release(world.style);
+  gshscene_resource_release(world.tile_style);
   gshscene_report_destroy(report);
   if (sink) {
     gshscene_sink_destroy(sink);

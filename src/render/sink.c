@@ -39,7 +39,9 @@
 #include <ghoti.io/cutil/safemath.h>
 #include <ghoti.io/shape-geometry/clip.h>
 #include <ghoti.io/shape-geometry/device.h>
+#include <ghoti.io/shape-geometry/hash.h>
 #include <ghoti.io/shape-geometry/lattice.h>
+#include <ghoti.io/shape-geometry/stroke.h>
 #include <ghoti.io/shape-scene/pattern.h>
 #include <ghoti.io/shape-scene/resource.h>
 #include <ghoti.io/shape-scene/stroke.h>
@@ -326,7 +328,6 @@ struct Pat_Level {
   uint8_t * cov_aligned;
   uint8_t * cov_clip;
   uint8_t * cov_result;
-  uint8_t * quad;            /* the cell's coverage, for a stroke (PC5) */
   uint8_t * tmp;             /* one clip's coverage in a copy, folded into the unit's */
   Pat_Clip * pclips;         /* the clips pushed in the tile, by their place in the clip stack */
   GSHGEOM_Map * pmaps;       /* their maps, `levels + 2` for each */
@@ -336,6 +337,16 @@ struct Pat_Level {
   uint8_t * saved_result;
   uint64_t copies;           /* copies drawn by the pass (the counter) */
   size_t arena_mark;         /* CALLER_MEMORY: the arena's use when the pass began: the item painted with the pattern keeps what is below it */
+  /* PC9: the period tier.  The lattice layer holds one window of the lattice picture, [wx, wx + p) x [wy, wy + s) of the pass's frame, and
+   * a pixel q of the frame has the value of the window pixel congruent to it modulo the lattice of whole-pixel steps. */
+  int period;                /* the pass is the period tier's (until it is given up) */
+  GSHGEOM_Lattice_Period per;
+  int64_t wx, wy;            /* the window's corner */
+  int64_t tx, ty;            /* the whole pixels of copy (0, 0): the class of q, for the cache, is rep(q - t) */
+  GSHGEOM_Map canon0;        /* copy (0, 0)'s canonical map: the linear part and the fraction every copy of the lattice shares */
+  int guard;                 /* the window pass is running: a copy the window cannot vouch for sets abort_tier */
+  int abort_tier;
+  GSHCPU_Rect cur_qbox;      /* the pixels the current copy's cell touches, in its canonical frame */
 };
 
 /** The Run's size rounded to the carve alignment: where the mask area starts when the list has one. */
@@ -722,7 +733,7 @@ static GSHCPU_Rect whole_of(const GSHSCENE_Target * target) {
 
 /** Where the parts of one pass level's memory lie (PC11): the record, the unit's accumulator, and the coverage buffers. */
 typedef struct Pat_Offsets {
-  size_t at_sum8, at_cnt, at_acc, at_coverage, at_aligned, at_clip, at_result, at_quad, at_tmp, at_pclips, at_pmaps, bytes;
+  size_t at_sum8, at_cnt, at_acc, at_coverage, at_aligned, at_clip, at_result, at_tmp, at_pclips, at_pmaps, bytes;
 } Pat_Offsets;
 
 /** The sizes of one level's memory for @p pixels pixels; 0 on overflow. */
@@ -733,7 +744,7 @@ static int pat_offsets(size_t pixels, int aligned, size_t clips, size_t levels, 
       place(&at, pixels, &o->at_cnt) && place(&at, mul3(pixels, 4u, sizeof(double)), &o->at_acc) &&
       place(&at, pixels, &o->at_coverage) && place(&at, aligned ? pixels : 0, &o->at_aligned) &&
       place(&at, aligned ? pixels : 0, &o->at_clip) && place(&at, aligned ? pixels : 0, &o->at_result) &&
-      place(&at, pixels, &o->at_quad) && place(&at, pixels, &o->at_tmp) && place(&at, mul3(clips, sizeof(Pat_Clip), 1), &o->at_pclips) &&
+      place(&at, pixels, &o->at_tmp) && place(&at, mul3(clips, sizeof(Pat_Clip), 1), &o->at_pclips) &&
       place(&at, mul3(clips, sat_add(levels, 2u), sizeof(GSHGEOM_Map)), &o->at_pmaps);
   o->bytes = at;
   return ok;
@@ -1590,6 +1601,9 @@ typedef struct Painter {
   int pattern;               /* a pattern paint (PC2): lf is its lattice layer */
   const Frame * lf;
   int64_t lox, loy;          /* the pixel of the lattice layer's first element (the frame of coordinates of the rectangle it was begun with) */
+  int period;                /* PC9: the lattice layer holds one window of the picture: a pixel is read at rep(q - w) + w */
+  GSHGEOM_Lattice_Period per;
+  int64_t wx, wy;
   int has_tint;              /* PC7: uncolored; tint is the premultiplied tint, converted once */
   double tint[4];
   double alpha;              /* the paint's alpha multiplier */
@@ -1628,6 +1642,20 @@ static GSHSCENE_Result image_begin(Painter * p, Run * run, const GSHSCENE_Item *
       !gshcpu_render_image_place(&p->im, &composed) || !gshcpu_render_image_in_domain(&p->im, whole)) {
     p->refused = 1;
     return refuse(run, item, chain, count);
+  }
+  if (cur_pat(run) && cur_pat(run)->guard) {
+    /* PC9: the tier vouches for a copy only if the whole cell passes the checks below, which the window's copies meet over less. */
+    Pat_Level * pl = cur_pat(run);
+    uint64_t full_bound = 0;
+    uint64_t full_pixel = 0;
+    if (!gshcpu_render_image_in_domain(&p->im, pl->cur_qbox)) {
+      pl->abort_tier = 1;
+    } else if (filter == (uint32_t)GSHSCENE_IMAGE_FILTER_AREA &&
+        (!gshcpu_render_image_area_bound(&p->im, &full_pixel) || full_pixel > run->cs->max_area_pixel_work ||
+            !gcu_safe_mul_u64((uint64_t)(pl->cur_qbox.x1 - pl->cur_qbox.x0), (uint64_t)(pl->cur_qbox.y1 - pl->cur_qbox.y0), &full_bound) ||
+            !gcu_safe_mul_u64(full_bound, full_pixel, &full_bound) || full_bound > run->cs->max_image_work)) {
+      pl->abort_tier = 1;
+    }
   }
   if (filter == (uint32_t)GSHSCENE_IMAGE_FILTER_AREA) {
     /* IC9: the bound is a function of the map, the window and the rectangle only, so that no damage, cache or thread changes
@@ -1747,6 +1775,9 @@ static GSHSCENE_Result painter_begin(Painter * p, Run * run, const GSHSCENE_Item
       !gshcpu_render_gradient_in_domain(&p->gr, whole)) {
     p->refused = 1;
     return refuse(run, item, chain, count);
+  }
+  if (cur_pat(run) && cur_pat(run)->guard && !gshcpu_render_gradient_in_domain(&p->gr, cur_pat(run)->cur_qbox)) {
+    cur_pat(run)->abort_tier = 1; /* PC9: the whole cell, which the window cannot vouch for */
   }
   gshcpu_render_convert_prepare(&p->conv, &e->space, &frame->space);
   if (!quiet_of(run)) {
@@ -3202,20 +3233,17 @@ static int64_t floor_div64(int64_t v) {
 }
 
 /**
- * PC3: the copy @p (i, j) of the pass @p L: its translation by shape-geometry's one definition, split into whole pixels and a
- * fraction by S4's one function, its cell's corners under the canonical map; and `L->base` becomes the canonical map, what the
- * units of the tile are composed with.
+ * PC3: the copy @p (i, j) of the pass @p L: its canonical map and whole pixels by shape-geometry's one function (LT5: the position
+ * of LT2 split by S4's function, and for integer steps the exact split), its cell's corners under the canonical map; and
+ * `L->base` becomes the canonical map, what the units of the tile are composed with.
  */
 static GSHSCENE_Result pat_copy_open(Pat_Level * L, int64_t i, int64_t j, Pat_Copy * c) {
-  double w[2];
-  GSHGEOM_Map full = L->C;
   double q[8];
-  if (gshgeom_lattice_translation(&L->C, &L->lat, i, j, w) != GSHGEOM_OK || gshgeom_lattice_quad(&L->C, &L->lat, q) != GSHGEOM_OK) {
+  if (gshgeom_lattice_quad(&L->C, &L->lat, q) != GSHGEOM_OK) {
     return GSHSCENE_ERR_LIMIT;
   }
-  full.t[0] = w[0];
-  full.t[1] = w[1];
-  if (gshgeom_stroke_canonical_map(&full, &c->canon, &c->sx, &c->sy) != GSHGEOM_OK) {
+  /* LT5: the canonical map and the whole pixels of the copy, by shape-geometry's one function (the exact split for integer steps). */
+  if (gshgeom_lattice_canonical(&L->C, &L->lat, i, j, &c->canon, &c->sx, &c->sy) != GSHGEOM_OK) {
     return GSHSCENE_ERR_LIMIT; /* a shifted coordinate past the range the sink draws */
   }
   int64_t lo_x = INT64_MAX, lo_y = INT64_MAX, hi_x = INT64_MIN, hi_y = INT64_MIN;
@@ -3235,6 +3263,7 @@ static GSHSCENE_Result pat_copy_open(Pat_Level * L, int64_t i, int64_t j, Pat_Co
   c->qbox.y0 = floor_div64(lo_y);
   c->qbox.x1 = floor_div64(hi_x) + 1;
   c->qbox.y1 = floor_div64(hi_y) + 1;
+  L->cur_qbox = c->qbox;
   L->base = c->canon;
   L->sx = c->sx;
   L->sy = c->sy;
@@ -3376,6 +3405,12 @@ static int painter_source(Painter * p, int64_t x, int64_t y, double s[4]) {
 static int pattern_pixel(const Painter * p, int64_t x, int64_t y, double s[4]) {
   const Frame * f = p->lf;
   double v[4] = {0.0, 0.0, 0.0, 0.0};
+  if (p->period) {
+    int64_t r[2];
+    gshgeom_lattice_reduce(&p->per, x - p->wx, y - p->wy, r); /* PC9, LT3: the window pixel congruent to (x, y) */
+    x = p->wx + r[0];
+    y = p->wy + r[1];
+  }
   if (inside(f->dirty, x, y)) {
     memcpy(v, &f->layer[4u * ((size_t)(y - p->loy) * p->run->layout.width + (size_t)(x - p->lox))], sizeof v);
   }
@@ -3397,6 +3432,31 @@ static GSHSCENE_Result quad_path(Run * run, const Pat_Copy * c, GSHGEOM_Flat_Pat
   const GSHGEOM_Flat_Subpath sub = {0, 4, 1};
   const GSHGEOM_Result r = gshgeom_flat_path_from_points(c->quad, 4, &sub, 1, run->item_alloc, &run->cs->geometry, out);
   return r == GSHGEOM_OK ? GSHSCENE_OK : r == GSHGEOM_ERR_OOM ? GSHSCENE_ERR_OOM : GSHSCENE_ERR_LIMIT;
+}
+
+/**
+ * PC9: the period tier draws the copies that meet its window only, and every limit it meets is a limit of those copies over what the
+ * whole render draws of each.  A copy elsewhere is the same bits shifted, so it meets the same limit unless it lies more inside the
+ * whole render than the copies drawn do.  The tier therefore vouches for a copy only when no limit could be met by the copy whole:
+ * its cell's pixels are in range and the cell deposits of its cut outline over the whole cell cannot pass the cap.  A copy it cannot
+ * vouch for makes the pass give the window up (abort_tier) for the general tier, which decides every copy; so a limit never depends on the tier.
+ */
+static void period_guard_cells(Run * run, Pat_Level * L, const GSHGEOM_Flat_Path * const * paths, size_t n, const Pat_Copy * c) {
+  if (!rect_in_range(c->qbox) ||
+      gshcpu_render_cells_bound(paths, n, c->qbox, run->cs->max_deposits) > run->cs->max_deposits) {
+    L->abort_tier = 1;
+  }
+}
+
+/** PC9: the same for a stroke cut to the cell: the deposits of its parts over the cell's pixels, summed as the counting sums them. */
+static void period_guard_stroke(Run * run, Pat_Level * L, const GSHCPU_Stroke * s) {
+  uint64_t bound = 0;
+  for (int p = GSHCPU_STROKE_BODY; p <= GSHCPU_STROKE_ALIGNED; p++) {
+    bound += s->meta.bound[p] > run->cs->max_deposits ? run->cs->max_deposits + 1u : s->meta.bound[p];
+  }
+  if (!rect_in_range(L->cur_qbox) || bound > run->cs->max_deposits) {
+    L->abort_tier = 1;
+  }
 }
 
 /**
@@ -3456,6 +3516,9 @@ static GSHSCENE_Result pat_cover(Run * run, Pat_Level * L, const GSHSCENE_Item *
       clipped[n++] = cut;
     }
     paths = (const GSHGEOM_Flat_Path * const *)(void *)clipped;
+  }
+  if (result == GSHSCENE_OK && n > 0 && L->guard) {
+    period_guard_cells(run, L, paths, n, c);
   }
   if (result == GSHSCENE_OK && n > 0) {
     *rc = gshcpu_render_rect_meet(*rc, box);
@@ -3725,6 +3788,20 @@ static GSHSCENE_Result pat_stroke_copy(Run * run, Pat_Level * L, int64_t i, int6
     gshcpu_render_stroke_close(cache, &s);
     return GSHSCENE_OK;
   }
+  /* PC5: the stroke is cut to the cell by CK1 (the body and the aligned part; the clip path restricts the aligned part, which is cut
+   * already), so that the coverage of the two sides of a cell edge adds to the whole where a stroke ends at it. */
+  const GSHCPU_Result cut = gshcpu_render_stroke_cut(&s, c.quad, run->item_alloc, &cs->geometry);
+  if (cut != GSHCPU_OK) {
+    gshcpu_render_stroke_close(cache, &s);
+    return cut == GSHCPU_ERR_LIMIT ? GSHSCENE_ERR_LIMIT : scene_result(cut);
+  }
+  if (!s.drawn) {
+    gshcpu_render_stroke_close(cache, &s);
+    return GSHSCENE_OK;
+  }
+  if (L->guard) {
+    period_guard_stroke(run, L, &s);
+  }
   run->work += expansion_work(run, item, &s);
   GSHCPU_Rect rect, whole;
   uint64_t cells = 0;
@@ -3742,26 +3819,7 @@ static GSHSCENE_Result pat_stroke_copy(Run * run, Pat_Level * L, int64_t i, int6
   }
   gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, strokes));
   if (!gshcpu_render_rect_empty(rect)) {
-    /* PC5: the stroke is restricted to the cell by the cell's coverage (a stroke's parts are not cut by CK1). */
-    GSHGEOM_Flat_Path * qp = NULL;
-    result = quad_path(run, &c, &qp);
-    if (result == GSHSCENE_OK) {
-      const GSHGEOM_Flat_Path * const qpaths[1] = {qp};
-      uint64_t qcells = 0;
-      r = gshcpu_render_cover_counted(qpaths, 1, GSHGEOM_FILL_NONZERO, rect, rect, L->quad, run->acc, cs->max_deposits, &qcells);
-      run->acc_zero = 0;
-      result = scene_result(r);
-      const size_t n = (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0);
-      for (size_t k = 0; result == GSHSCENE_OK && k < n; k++) {
-        cov[k] = (uint8_t)gshcpu_render_weigh(cov[k], L->quad[k]);
-      }
-    }
-    if (qp) {
-      gshgeom_flat_path_destroy(qp);
-    }
-    if (result == GSHSCENE_OK) {
-      result = pat_paint_copy(run, L, u, &c, rect, whole, cov);
-    }
+    result = pat_paint_copy(run, L, u, &c, rect, whole, cov);
   }
   gshcpu_render_stroke_close(cache, &s);
   return result;
@@ -3823,6 +3881,162 @@ static GSHSCENE_Result pat_overlap_copy(Run * run, Pat_Level * L, int64_t i, int
   return r;
 }
 
+/* --- the period tier (PC9) and its cache (PC10) --------------------------------------------------------------- */
+
+/** What a tile holds that decides the period tier and the cache key (found by walking the tile once for each pass). */
+typedef struct Tile_Facts {
+  int pattern;               /* a pattern paints a unit: the nested count of PC8 is of the outer copies drawn, which the window does not draw all of */
+  int masked;                /* a group has a soft mask: its picture is placed once in the pass's frame, not once for each copy */
+  int reads_fg;              /* a paint reads the list's foreground or palette (PC10: the key holds them) */
+} Tile_Facts;
+
+static int paint_reads_fg(const GSHSCENE_Paint * paint) {
+  return paint->kind == GSHSCENE_PAINT_FOREGROUND || paint->kind == GSHSCENE_PAINT_PALETTE;
+}
+
+/** The deepest picture an instance chain is followed to; deeper is reported as holding a pattern (the tier is not taken). */
+#define TILE_FACTS_DEPTH 64u
+
+static void tile_facts(const GSHSCENE_List * list, unsigned depth, Tile_Facts * f) {
+  if (depth > TILE_FACTS_DEPTH) {
+    f->pattern = 1;
+    return;
+  }
+  const size_t count = gshscene_list_count(list);
+  for (size_t i = 0; i < count; i++) {
+    const GSHSCENE_Item * item = NULL;
+    if (gshscene_list_item(list, i, &item) != GSHSCENE_OK) {
+      break;
+    }
+    if (item->kind == GSHSCENE_ITEM_FILL || item->kind == GSHSCENE_ITEM_STROKE) {
+      GSHSCENE_Gradient g;
+      GSHSCENE_Image_Paint ip;
+      if (item->paint.kind == GSHSCENE_PAINT_PATTERN) {
+        f->pattern = 1;
+      } else if (paint_reads_fg(&item->paint)) {
+        f->reads_fg = 1;
+      } else if (item->paint.kind == GSHSCENE_PAINT_GRADIENT) {
+        if (gshscene_resource_gradient(item->paint.resource, &g) != GSHSCENE_OK) {
+          f->reads_fg = 1;
+        } else {
+          for (size_t k = 0; k < g.stop_count && g.stops; k++) {
+            f->reads_fg = f->reads_fg || paint_reads_fg(&g.stops[k].color);
+          }
+        }
+      } else if (item->paint.kind == GSHSCENE_PAINT_IMAGE) {
+        f->reads_fg = f->reads_fg ||
+            gshscene_resource_image_paint(item->paint.resource, &ip) != GSHSCENE_OK || (ip.tint && paint_reads_fg(ip.tint));
+      }
+    } else if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && item->group.soft_mask) {
+      f->masked = 1;
+    } else if (item->kind == GSHSCENE_ITEM_INSTANCE) {
+      tile_facts(gshscene_resource_picture(item->resource), depth + 1u, f);
+    }
+  }
+}
+
+/**
+ * PC9: whether the period tier applies to the pass @p L over @p rect, and if so its window.  The step vectors are integer vectors
+ * with a determinant of at most the layer's pixels (LT3), both axes repeat, the window of LT3 moved to the rectangle's corner lies in
+ * the rectangle (so that its `p s` pixels are at most the layer's), and the tile holds no pattern (PC8's nested count is of the outer
+ * copies drawn) and no mask (its picture is placed once in the pass's frame, not once for each copy).  @p facts is the tile's, found
+ * here once the cheaper conditions hold (the cache key needs it too).
+ */
+static int period_plan(const Run * run, Pat_Level * L, const GSHSCENE_List * tile, GSHCPU_Rect rect, Tile_Facts * facts) {
+  if (!(run->cs->tiers & GSHCPU_RENDER_TIER_PERIOD)) {
+    return 0;
+  }
+  int64_t a[2];
+  int64_t b[2];
+  int integer = 0;
+  GSHGEOM_Lattice_Period per;
+  int64_t tx, ty;
+  GSHGEOM_Map canon;
+  if (gshgeom_lattice_integer_steps(&L->C, &L->lat, a, b, &integer) != GSHGEOM_OK || !integer ||
+      gshgeom_lattice_period(a, b, &per) != GSHGEOM_OK ||
+      gshgeom_lattice_canonical(&L->C, &L->lat, 0, 0, &canon, &tx, &ty) != GSHGEOM_OK) {
+    return 0;
+  }
+  if (per.p > rect.x1 - rect.x0 || per.s > rect.y1 - rect.y0) {
+    return 0;
+  }
+  tile_facts(tile, 0, facts);
+  if (facts->pattern || facts->masked) {
+    return 0;
+  }
+  L->per = per;
+  L->wx = rect.x0;
+  L->wy = rect.y0;
+  L->tx = tx;
+  L->ty = ty;
+  L->canon0 = canon;
+  return 1;
+}
+
+static uint64_t space_word(const GSHSCENE_Color_Space * s) {
+  return (uint64_t)(uint32_t)s->primaries | ((uint64_t)(uint32_t)s->transfer << 32);
+}
+
+/** PC10: the key of the period raster of the pass @p L for the pattern @p resource. */
+static void period_key(const Run * run, const Pat_Level * L, const GSHSCENE_Resource * resource, const Frame * frame, const Tile_Facts * facts,
+    GSHCPU_Period_Key * k) {
+  memset(k, 0, sizeof *k);
+  k->pattern_id = gshscene_resource_id(resource);
+  k->tile_id = gshscene_resource_id(L->pat.tile);
+  for (int i = 0; i < 4; i++) {
+    k->linear[i] = gshgeom_f64_bits(L->canon0.m[i / 2][i % 2]);
+  }
+  k->fraction[0] = gshgeom_f64_bits(L->canon0.t[0]);
+  k->fraction[1] = gshgeom_f64_bits(L->canon0.t[1]);
+  k->layer_space[0] = space_word(&frame->space);
+  k->layer_space[1] = gshgeom_f64_bits(frame->space.gamma);
+  const GSHSCENE_Color_Space * target = gshscene_job_target_space(run->job);
+  k->target_space[0] = space_word(target);
+  k->target_space[1] = gshgeom_f64_bits(target->gamma);
+  if (facts->reads_fg) {
+    k->reads_foreground = 1;
+    for (int i = 0; i < 4; i++) {
+      k->foreground[i] = gshgeom_f64_bits(run->foreground.rgba[i]);
+    }
+    k->foreground_space[0] = space_word(&run->foreground.space);
+    k->foreground_space[1] = gshgeom_f64_bits(run->foreground.space.gamma);
+    k->palette_id = run->palette ? gshscene_resource_id(run->palette) : 0u;
+  }
+  k->revisions[0] = GSHGEOM_STROKE_REVISION;
+  k->revisions[1] = GSHGEOM_FLATTEN_REVISION;
+  k->revisions[2] = GSHGEOM_CLIP_REVISION;
+  k->revisions[3] = GSHGEOM_LATTICE_REVISION;
+}
+
+/**
+ * The window pixel (@p u, @p v) of the class order of the raster: the pixel w = (wx + ..) of the window whose class is rep(w - t).  The
+ * raster is indexed `v * p + u` by the class `(u, v) = rep(w - t)`; @p w_to_raster 1 copies the layer's window into @p raster, 0 the other way.
+ */
+static void period_copy(Run * run, const Pat_Level * L, const Frame * f, double * raster, int w_to_raster) {
+  for (int64_t v = 0; v < L->per.s; v++) {
+    for (int64_t u = 0; u < L->per.p; u++) {
+      int64_t r[2];
+      gshgeom_lattice_reduce(&L->per, L->wx + u - L->tx, L->wy + v - L->ty, r);
+      double * cell = &raster[4u * (size_t)(r[1] * L->per.p + r[0])];
+      double * px = &f->layer[4u * at(run, L->wx + u, L->wy + v)];
+      if (w_to_raster) {
+        memcpy(cell, px, 4u * sizeof(double));
+      } else {
+        memcpy(px, cell, 4u * sizeof(double));
+      }
+    }
+  }
+}
+
+/** The pass over @p rect: the tile's units over all the copies, or (PC6) the tile once for each copy in lattice order. */
+static GSHSCENE_Result pat_pass(Run * run, Pat_Level * L, const GSHSCENE_List * tile, int overlaps, GSHCPU_Rect rect) {
+  if (!overlaps) {
+    return pat_walk(run, L, tile);
+  }
+  /* PC6: the copies one at a time, in lattice order. */
+  return pat_each(run, L, rect, pat_overlap_copy, (void *)(uintptr_t)tile);
+}
+
 /**
  * PC2: a pattern paint begun: the lattice layer of the use (the tile's units over the copies, drawn into an isolated layer over
  * @p rect), which painter_span then reads for each pixel of the fill's coverage.  @p rect and @p whole are in the frame of
@@ -3832,6 +4046,7 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
     GSHCPU_Rect rect, GSHCPU_Rect whole) {
   Cpu_Sink * cs = run->cs;
   p->pattern = 1;
+  p->period = 0;
   p->gradient = 0;
   p->image = 0;
   p->refused = 0;
@@ -3857,7 +4072,6 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
   L->cov_aligned = run->layout.aligned ? lb + po.at_aligned : NULL;
   L->cov_clip = run->layout.aligned ? lb + po.at_clip : NULL;
   L->cov_result = run->layout.aligned ? lb + po.at_result : NULL;
-  L->quad = lb + po.at_quad;
   L->tmp = lb + po.at_tmp;
   L->pclips = (Pat_Clip *)(void *)(lb + po.at_pclips);
   L->pmaps = (GSHGEOM_Map *)(void *)(lb + po.at_pmaps);
@@ -3914,6 +4128,19 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
   L->urect.x0 = L->urect.x1 = rect.x0;
   L->urect.y0 = L->urect.y1 = rect.y0;
   const int overlaps = (pt.repeat_x && pt.x_step < pt.w) || (pt.repeat_y && pt.y_step < pt.h);
+  /* PC9: the period tier's window, when the pass is eligible: the pass then draws the window and not the use's rectangle. */
+  const GSHSCENE_List * tile = gshscene_resource_picture(pt.tile);
+  Tile_Facts facts;
+  memset(&facts, 0, sizeof facts);
+  L->guard = 0;
+  L->abort_tier = 0;
+  L->period = period_plan(run, L, tile, rect, &facts);
+  GSHCPU_Rect prect = rect;
+  if (L->period) {
+    prect.x1 = prect.x0 + L->per.p;
+    prect.y1 = prect.y0 + L->per.s;
+    L->rect = prect;
+  }
 
   /* The state the pass changes and restores. */
   Mask_State * ms = ms_of(run);
@@ -3940,7 +4167,7 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
   p->lox = pr(run)->org_x;
   p->loy = pr(run)->org_y;
   pr(run)->whole_cur = whole;
-  ms->window = rect;
+  ms->window = prect;
   ms->whole_window = whole;
   memset(&run->skip, 0, sizeof run->skip);
   run->coverage = L->coverage;
@@ -3973,16 +4200,78 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
   }
   memset(&ms->frames[run->top].whole_dirty, 0, sizeof ms->frames[run->top].whole_dirty);
   L->frame = run->top;
-  for (int64_t y = rect.y0; y < rect.y1; y++) {
-    memset(L->cnt + at(run, rect.x0, y), 0, (size_t)(rect.x1 - rect.x0));
+  for (int64_t y = prect.y0; y < prect.y1; y++) {
+    memset(L->cnt + at(run, prect.x0, y), 0, (size_t)(prect.x1 - prect.x0));
   }
-  GSHSCENE_Result result;
-  const GSHSCENE_List * tile = gshscene_resource_picture(pt.tile);
-  if (!overlaps) {
-    result = pat_walk(run, L, tile);
-  } else {
-    /* PC6: the copies one at a time, in lattice order. */
-    result = pat_each(run, L, rect, pat_overlap_copy, (void *)(uintptr_t)tile);
+  GSHSCENE_Result result = GSHSCENE_OK;
+  /* PC10: a period raster kept for this pattern, linear part and fraction is the window, bit for bit. */
+  GSHCPU_Stroke_Cache * pcache = L->period && !run->caller && (cs->tiers & GSHCPU_RENDER_TIER_CACHE) ? cs->cache : NULL;
+  GSHCPU_Period_Key pkey;
+  int served = 0;
+  if (pcache) {
+    void * entry = NULL;
+    const double * raster = NULL;
+    period_key(run, L, item->paint.resource, frame, &facts, &pkey);
+    if (gshcpu_period_cache_acquire(pcache, &pkey, &entry, &raster)) {
+      widen(run, f, prect);
+      period_copy(run, L, f, (double *)(void *)raster, 0);
+      gshcpu_stroke_cache_release(pcache, entry);
+      served = 1;
+    }
+  }
+  if (!served) {
+    L->guard = L->period;
+    result = pat_pass(run, L, tile, overlaps, prect);
+    L->guard = 0;
+    if (L->period && L->abort_tier && (result == GSHSCENE_OK || result == GSHSCENE_ERR_LIMIT)) {
+      /* PC9: a copy the window cannot vouch for: give the window up, and draw the use's rectangle by the general tier. */
+      gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, period_aborts));
+      if (run->item_alloc == &run->arena.self) {
+        gshcpu_render_arena_rewind(&run->arena, L->arena_mark);
+      }
+      L->period = 0;
+      L->abort_tier = 0;
+      L->copies = 0;
+      prect = rect;
+      L->rect = rect;
+      ms->window = rect;
+      run->top = L->frame;
+      run->clip_count = f->clip_base;
+      run->groups_open = saved_open;
+      memset(&run->skip, 0, sizeof run->skip);
+      memset(&f->dirty, 0, sizeof f->dirty);
+      memset(&ms->frames[run->top].whole_dirty, 0, sizeof ms->frames[run->top].whole_dirty);
+      L->urect.x0 = L->urect.x1 = rect.x0;
+      L->urect.y0 = L->urect.y1 = rect.y0;
+      for (int64_t y = rect.y0; y < rect.y1; y++) {
+        memset(L->cnt + at(run, rect.x0, y), 0, (size_t)(rect.x1 - rect.x0));
+      }
+      result = pat_pass(run, L, tile, overlaps, rect);
+    } else if (L->period && result == GSHSCENE_OK) {
+      widen(run, f, prect); /* the window made ready whole: the pixels no unit reached are transparent */
+      if (pcache && gshcpu_period_cache_fits(pcache, (size_t)(L->per.p * L->per.s))) {
+        void * entry = NULL;
+        double * raster = gshcpu_period_cache_make(pcache, (size_t)(L->per.p * L->per.s));
+        if (!raster) {
+          result = GSHSCENE_ERR_OOM;
+        } else {
+          period_copy(run, L, f, raster, 1);
+          const int kept = gshcpu_period_cache_store(pcache, &pkey, raster, (size_t)(L->per.p * L->per.s), &entry);
+          if (kept == 1 || kept == 2) {
+            gshcpu_stroke_cache_release(pcache, entry);
+          }
+          if (kept != 1) {
+            gshcpu_period_cache_free(pcache, raster);
+          }
+          if (kept < 0) {
+            result = GSHSCENE_ERR_OOM;
+          }
+        }
+      }
+    }
+  }
+  if (L->period && result == GSHSCENE_OK) {
+    gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, pattern_period));
   }
   /* Restore. */
   if (run->item_alloc == &run->arena.self) {
@@ -4018,6 +4307,12 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
     return result;
   }
   p->lf = &run->frames[saved_top + 1u];
+  p->period = L->period;
+  if (L->period) {
+    p->per = L->per;
+    p->wx = L->wx;
+    p->wy = L->wy;
+  }
   if (!quiet_of(run)) {
     widen_w(run, frame, rect, whole);
   }

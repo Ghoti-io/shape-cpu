@@ -30,6 +30,7 @@ import sys
 
 BIASED_FILES = 120
 BIASED_MASK_FILES = 60
+BIASED_PATTERN_FILES = 80
 PLAIN_FILES = 40
 
 # A coordinate byte below 12 picks the table in fuzz_render.c: 0 is 0.0, 2 is 0.5, 9 is 64.0.
@@ -458,6 +459,49 @@ def scripted():
     out["scripted-mask-refused-damage.bin"] = header(request=MASKS | DAMAGE) + body(refused)
     out["scripted-mask-refused-strict.bin"] = header(request=MASKS | STRICT) + body(refused)
     out["scripted-mask-cancel.bin"] = header(request=MASKS, cancel=3) + body([fill(0), alpha, fill(1), POP, fill(0)])
+    # Masks-images-patterns story R2: a fill whose rule byte is 0xF8 or more takes a pattern from the bytes that follow it (fuzz_render.c,
+    # pattern_of): the configuration (1 + cfg % 3 tile fills; bit 4 a stroke first, bit 5 a group, bit 6 a nested pattern, bit 7 a clip;
+    # cfg % 5 == 0 abuts in x and cfg % 7 == 0 in y), the cell (sizes index of geom and geom >> 3), the steps (steps table indexes of the maps
+    # byte's two nibbles), the map and tint (tint % 8: 1 translates by a fraction, 2 by whole pixels, 5 an integer turn, 6 far away, 7 is
+    # singular; bits 4 and 5 both set a tint, bits 6 and 7 stop repeating), then each tile fill's path pick, map, paint and rule.
+    def tile_fill(pick=0, rule=0):
+        return bytes([pick]) + b"\x00" + bytes([200, 100, 50, 255, 2, rule])
+
+    def pattern_fill(cfg, geom, maps, tint, tile, pick=0, rule=0xF8, alpha=0):
+        return fill(pick, rule=rule | alpha, style=bytes([cfg, geom, maps, tint]) + tile)
+
+    cell4 = 3 | 3 << 3  # a cell of 4 by 4
+    lattices = {
+        "period": pattern_fill(0, cell4, 0, 1, tile_fill(0)),                               # abutting, whole-pixel steps, a fraction
+        "period-pixels": pattern_fill(0, cell4, 0, 2, tile_fill(0)),                       # ... moved by whole pixels
+        "period-turn": pattern_fill(0, 1 | 1 << 3, 0, 5, tile_fill(0)),                   # an integer turn: steps (3, 4) and (-4, 3)
+        "period-shear": pattern_fill(0, cell4, 0, 4, tile_fill(0)),                        # an integer shear
+        "overlap": pattern_fill(1, cell4, 2 | 2 << 4, 1, tile_fill(0) + tile_fill(1)),     # cells of 4 in steps of 3
+        "gapped": pattern_fill(2, 1 | 1 << 3, 5 | 5 << 4, 2, tile_fill(0) + tile_fill(1) + tile_fill(0)),   # cells of 2 in steps of 6
+        "stroke": pattern_fill(0x10, cell4, 0, 1, tile_fill(2) + tile_fill(0)),             # a stroke in the tile
+        "group": pattern_fill(0x21, cell4, 0, 1, tile_fill(0, 4) + tile_fill(1)),          # a multiply group in the tile
+        "clip": pattern_fill(0x80, cell4, 0, 2, tile_fill(0) + tile_fill(1)),              # a clip around the last
+        "tint": pattern_fill(0, cell4, 0, 0x31, tile_fill(0)),                              # uncolored
+        "once": pattern_fill(0, cell4, 0, 0x41, tile_fill(0)),                              # repeat_x 0
+        "far": pattern_fill(0, cell4, 0, 6, tile_fill(0)),                                  # a lattice far from the target
+        "singular": pattern_fill(0, cell4, 0, 7, tile_fill(0)),                             # a singular map
+        # a tile whose first fill takes a pattern of its own (cfg bit 6): that fill's rule byte is followed by the inner pattern's bytes
+        "nested": pattern_fill(0x40, cell4, 0, 1, tile_fill(0) + bytes([0, 1 | 1 << 3, 0, 1]) + tile_fill(0) + tile_fill(1), alpha=2),
+    }
+    for name, item in lattices.items():
+        items = [fill(0), item, fill(1)]
+        out["scripted-pattern-%s.bin" % name] = header(request=0) + body_with_line(items)
+        out["scripted-pattern-%s-float.bin" % name] = header(target=T64 | 3) + body_with_line(items)
+        out["scripted-pattern-%s-memory-damage.bin" % name] = header(request=CALLER_MEMORY | DAMAGE) + body_with_line(items)
+    out["scripted-pattern-limit.bin"] = header(limit=3 << 3) + body_with_line([fill(0), lattices["overlap"], fill(1)])
+    out["scripted-pattern-limit-strict.bin"] = header(request=STRICT, limit=5 << 3) + body_with_line([fill(0), lattices["gapped"], fill(1)])
+    out["scripted-pattern-cell-cap.bin"] = header(limit=2 | 16) + body_with_line([fill(0), lattices["period"], fill(1)])
+    # A cell-deposit cap (limit mode 2, a cap of 16) that the outer fill meets and the window's copies may, over a target of 7 by 7 that
+    # holds the 4 by 4 window: whole cells could pass the cap, so the period tier gives the window up for the general tier (PC9).
+    small = (1 << 2) | (1 << 4)
+    out["scripted-pattern-gives-up.bin"] = header(target=small, limit=2 | (15 << 3)) + body_with_line([fill(0), lattices["period"], fill(1)])
+    out["scripted-pattern-gives-up-damage.bin"] = header(target=small, request=DAMAGE, limit=2 | (15 << 3)) + body_with_line([fill(0), lattices["period"], fill(1)])
+    out["scripted-pattern-cancel.bin"] = header(cancel=2) + body_with_line([fill(0), lattices["stroke"], fill(1)])
     out["regression-sparse-partial-under-budget.bin"] = base64.b64decode("PAAABgAiBQICAAAAAAAJAgAAAACqCQkAAAAAAQIJAAAAAAEAAAAAAAAFAwIJAAAAAPMAAAkACQkEAAAAAAAABQIMAAIAAAAAAA//AgAAAAC4AQICAgIJAwkCAAACAQICAgIJAwkCAAACAwAAAMhkMv8CBggAAAEDFMhkMv8CBgACAxTIZDL/AgY=")
     out["regression-strict-cells-outside-damage.bin"] = base64.b64decode(
         "cQsAMplAJm0ZT3ZmwR6Jf2Fd7lDCRLR/QSt6/zbm6uHj7bR6JLZqECw6JO+wOwclMCTHsAvBvaXFi6p+svmrTJ+KgxAuG0woagxRNjJeiGcC"
@@ -503,12 +547,27 @@ def biased_mask(seed):
     return bytes(data)
 
 
+def biased_pattern(seed):
+    """A biased file with fills whose rule byte is 0xF8 or more (a pattern from the bytes that follow: fuzz_render.c's pattern_of) put at
+    random places in the body, over a target of a size that holds a period (7 or more) and the sink's defaults or a lowered limit."""
+    data = bytearray(biased(2000 + seed))
+    data[0] = (data[0] & ~0x3C) | (1 + (seed % 3)) << 2 | (1 + (seed // 3 % 3)) << 4  # a width and a height of 7, 33 or 64
+    rng = Rng(7000 + seed)
+    for _ in range(10):
+        at = 5 + rng.below(len(data) - 40)
+        data[at:at + 14] = bytes([0, rng.byte(), 0, rng.byte(), rng.byte(), rng.byte(), 255, 2, 0xF8 | (rng.byte() & 7),
+                                  rng.byte(), rng.byte(), rng.byte(), rng.byte(), rng.byte()])
+    return bytes(data)
+
+
 def files():
     out = {}
     for i in range(BIASED_FILES):
         out["biased-%03d.bin" % i] = biased(i + 1)
     for i in range(BIASED_MASK_FILES):
         out["biased-mask-%03d.bin" % i] = biased_mask(i + 1)
+    for i in range(BIASED_PATTERN_FILES):
+        out["biased-pattern-%03d.bin" % i] = biased_pattern(i + 1)
     for i in range(PLAIN_FILES):
         out["plain-%03d.bin" % i] = plain(i + 1)
     out.update(scripted())

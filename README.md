@@ -54,11 +54,12 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   covers every seam once), each copy at a whole-pixel shift of the tile drawn at the translation's fraction, so that a pattern moved by whole
   pixels moves the same bits and a copy a million cells out has no drift. Gaps, overlaps, one-axis repeats, tints, gradients, images,
   groups, clips, strokes and patterns inside a tile are drawn; `GSHCPU_Limits.max_pattern_cells` bounds the copies of a use, counted from
-  the lattice before any is drawn. Every use takes the general path: the tier for lattices of whole pixels is not built.
+  the lattice before any is drawn. A lattice whose steps are whole pixels (a hatch, a checkerboard, a pixel-snapped texture) is drawn
+  from one period of its picture, read by integer arithmetic and kept in the cache, bit for bit the picture the general path draws.
   `gshcpu_render_hash` and `gshcpu_render_dump` spell a render; the
   fixture set's renders are committed goldens, the same on every target.
   `examples/render.c` renders a list; `examples/stroke.c` strokes a path and shows the cache serve a translation;
-  `examples/image.c` draws an image with two filters and checks what each does; `examples/mask.c` draws an alpha and a luminance mask; `examples/group.c` draws a non-isolated and a knockout group.
+  `examples/image.c` draws an image with two filters and checks what each does; `examples/mask.c` draws an alpha and a luminance mask; `examples/group.c` draws a non-isolated and a knockout group; `examples/pattern.c` fills a rectangle with a gapped pattern.
 
 ## Building
 

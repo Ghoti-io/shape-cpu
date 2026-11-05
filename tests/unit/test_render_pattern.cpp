@@ -29,11 +29,14 @@
 
 #include "../../src/render/render_internal.h"
 #include "../render_helpers.h"
+#include "../render_vectors.h"
 
 #include <ghoti.io/shape-cpu/shape-cpu.h>
 #include <ghoti.io/shape-geometry/shape-geometry.h>
 #include <ghoti.io/shape-scene/shape-scene.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -270,6 +273,138 @@ TEST(RenderPattern, ABackgroundThatFillsItsCellCoversEverySeamOnce) {
         EXPECT_EQ(a, 255) << "at " << x << "," << y << " fraction " << f[0] << "," << f[1];
       }
     }
+  }
+}
+
+/**
+ * A pattern of cells of @p w by @p h whose tile is one line across the cell: from (0, y0) to (w, y1) as a butt-capped stroke of the half
+ * width @p half, or the polygon that stroke covers as a fill (its four corners, found here), at (tx, ty).
+ */
+struct LineCase {
+  RF_Ctx ctx;
+  GSHSCENE_List * list = nullptr;
+  LineCase(int stroked, double w, double h, double sx, double sy, double tx, double ty, double half, double y0, double y1, double alpha = 0.8) {
+    rf_begin(&ctx);
+    GSHSCENE_List * t = rf_open(&ctx);
+    const double dx = w, dy = (y1 - y0) * h, len = std::sqrt(dx * dx + dy * dy);
+    const double nx = -dy / len * half, ny = dx / len * half;
+    if (stroked) {
+      const double line[4] = {0.0, y0 * h, w, y1 * h};
+      rf_stroke(&ctx, t, rf_polyline(&ctx, line, 2, 0), rf_pen(&ctx, 2.0 * half, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), nullptr,
+          rf_solid(0.1, 0.2, 0.6, alpha));
+    } else {
+      const double poly[8] = {0.0 + nx, y0 * h + ny, w + nx, y1 * h + ny, w - nx, y1 * h - ny, 0.0 - nx, y0 * h - ny};
+      rf_fill(&ctx, t, rf_polyline(&ctx, poly, 4, 1), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.2, 0.6, alpha), 0, 0.0);
+    }
+    const GSHSCENE_Resource * p = rf_pattern(&ctx, rf_picture_of(&ctx, t), 0, 0, w, h, sx, sy, 1, 1, rf_move(tx, ty), nullptr);
+    list = rf_open(&ctx);
+    rf_fill(&ctx, list, rf_rect(&ctx, 0, 0, 60, 40), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(p, 1.0), 0, 0.0);
+    rf_close(&ctx, list);
+  }
+  ~LineCase() {
+    rf_release(&ctx);
+  }
+  LineCase(const LineCase &) = delete;
+  LineCase & operator=(const LineCase &) = delete;
+};
+
+/**
+ * The largest difference of one premultiplied sample of two renders, in 1/255 (a float sample's difference times 255).  A straight 8-bit
+ * color under a small alpha is a quotient of tiny numbers and says little, so every sample is compared premultiplied.
+ */
+double max_levels(const RasterRef & a, const RasterRef & b, GSHCPU_Format format) {
+  const std::string sa = a.bytes(), sb = b.bytes();
+  double worst = 0.0;
+  const bool wide = format == GSHCPU_FORMAT_RGBAF32_STRAIGHT || format == GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED;
+  const bool straight = format == GSHCPU_FORMAT_RGBA8_STRAIGHT || format == GSHCPU_FORMAT_RGBAF32_STRAIGHT;
+  if (sa.size() != sb.size()) {
+    return 1e9;
+  }
+  const size_t sample = wide ? 4u : 1u;
+  for (size_t i = 0; i + 4 * sample <= sa.size(); i += 4 * sample) {
+    double va[4], vb[4];
+    for (int k = 0; k < 4; k++) {
+      if (wide) {
+        float x, y;
+        std::memcpy(&x, sa.data() + i + 4u * (size_t)k, 4);
+        std::memcpy(&y, sb.data() + i + 4u * (size_t)k, 4);
+        va[k] = (double)x * 255.0;
+        vb[k] = (double)y * 255.0;
+      } else {
+        va[k] = (double)(unsigned char)sa[i + (size_t)k];
+        vb[k] = (double)(unsigned char)sb[i + (size_t)k];
+      }
+    }
+    for (int k = 0; k < 3 && straight; k++) {
+      va[k] = va[k] * va[3] / 255.0;
+      vb[k] = vb[k] * vb[3] / 255.0;
+    }
+    for (int k = 0; k < 4; k++) {
+      worst = std::max(worst, std::fabs(va[k] - vb[k]));
+    }
+  }
+  return worst;
+}
+
+TEST(RenderPattern, AStrokeThatEndsAtTheCellEdgeIsCutByTheCellExactly) {
+  // PC5: the stroke's expansion is cut to the cell by the convex clip, not weighed by the cell's 8-bit coverage.  A butt-capped line across
+  // the cell, level or slanted (a slanted one ends in a cut that is not the cell's edge, so the cell's coverage and the stroke's are not
+  // independent in the seam pixel, where weighing one by the other is wrong by tens of levels), is the fill of the polygon it covers, to the
+  // rounding of the two coverage engines (the stroke's exact step and the fill's accumulation differ by a level or two in a pixel that holds
+  // several pieces), wherever the lattice sits.
+  const double fractions[6][2] = {{0.0, 0.0}, {0.5, 0.25}, {0.3, 0.45}, {0.01, 0.99}, {0.7, 0.2}, {0.126, 0.874}};
+  const double steps[3] = {6.0, 5.5, 4.25};
+  const double slants[3][2] = {{0.5, 0.5}, {0.2, 0.7}, {0.8, 0.15}};
+  double worst_all = 0.0;
+  for (GSHCPU_Format format : RF_FORMATS) {
+    for (double step : steps) {
+      for (const auto & f : fractions) {
+        for (const auto & sl : slants) {
+          LineCase stroked(1, step, step, step, step, f[0], f[1], 0.75, sl[0], sl[1]);
+          LineCase filled(0, step, step, step, step, f[0], f[1], 0.75, sl[0], sl[1]);
+          Drawn a(stroked.list, 60, 40, format);
+          Drawn b(filled.list, 60, 40, format);
+          ASSERT_EQ(a.result, GSHSCENE_OK);
+          ASSERT_EQ(b.result, GSHSCENE_OK);
+          const double worst = max_levels(a.raster, b.raster, format);
+          worst_all = std::max(worst_all, worst);
+          EXPECT_LE(worst, 5.0) << gshcpu_format_string(format) << " step " << step << " at " << f[0] << "," << f[1] << " slant " << sl[0] << "," << sl[1];
+        }
+      }
+    }
+  }
+  std::printf("worst difference of a stroke in a tile from the fill of its polygon: %.3f levels\n", worst_all);
+}
+
+TEST(RenderPattern, ASeamPixelIsPC4sCombinationOfItsCopiesInExactRationals) {
+  // PC4: a pixel that two copies of a unit touch is one element: the shape is min(255, the sum of the copies' 8-bit coverages) / 255 and the
+  // source the mean of the copies' sources weighed by those coverages (a gradient taken at the pixel's center in each copy's own frame).
+  // tools/gen-render-vectors.py states it in exact rationals for abutting and gapped lattices on the 1/64 grid; the sink's float target
+  // holds the layer's value to a float's rounding.
+  namespace rv = render_vectors;
+  for (int k = 0; k < rv::kSeamCount; k++) {
+    const rv::RSeam & c = rv::kSeams[k];
+    RF_Ctx ctx;
+    rf_begin(&ctx);
+    GSHSCENE_Gradient_Stop stops[2] = {rf_stop(0.0, rf_solid(c.c0[0], c.c0[1], c.c0[2], c.c0[3])), rf_stop(1.0, rf_solid(c.c1[0], c.c1[1], c.c1[2], c.c1[3]))};
+    const GSHSCENE_Resource * grad = rf_gradient(&ctx, rf_linear(0, 0, c.cell, 0, 0, 0, GSHSCENE_EXTEND_PAD), stops, 2);
+    GSHSCENE_List * t = rf_open(&ctx);
+    rf_fill(&ctx, t, rf_rect(&ctx, 0, 0, c.cell, 2), nullptr, GSHGEOM_FILL_NONZERO, rf_gradient_paint(grad, 1.0), 0, 0.0);
+    const GSHSCENE_Resource * pat = rf_pattern(&ctx, rf_picture_of(&ctx, t), 0, 0, c.cell, 2, c.step, 2, 1, 1, rf_move(c.tx64 / 64.0, 0.0), nullptr);
+    GSHSCENE_List * l = rf_open(&ctx);
+    rf_fill(&ctx, l, rf_rect(&ctx, 0, 0, 8, 2), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+    rf_close(&ctx, l);
+    Drawn d(l, 8, 2, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED);
+    ASSERT_EQ(d.result, GSHSCENE_OK);
+    const std::string bytes = d.raster.bytes();
+    for (int px = 0; px < 8; px++) {
+      for (int ch = 0; ch < 4; ch++) {
+        float got;
+        std::memcpy(&got, bytes.data() + (size_t)(px * 4 + ch) * sizeof got, sizeof got);
+        EXPECT_NEAR((double)got, c.want[px][ch], 1e-6) << "case " << k << " (tx " << c.tx64 << "/64, cell " << c.cell << ", step " << c.step << ") pixel " << px << " channel " << ch;
+      }
+    }
+    rf_release(&ctx);
   }
 }
 
