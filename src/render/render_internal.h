@@ -258,6 +258,7 @@ GSHCPU_Result gshcpu_render_cover_area(const GSHGEOM_Flat_Path * const * paths, 
 GSHCPU_Result gshcpu_render_cover_counted(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
     GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells);
 
+
 /**
  * ::gshcpu_render_cover_counted, and for each pixel of @p rect the area its byte leaves out in @p rem (`gshcpu_fold_split`, fold.h):
  * the pixel's rule-reduced area in 1/8192 pixel is `32 * out + rem`.  The copies of a pattern's tile add these areas (PC4), so that a
@@ -268,6 +269,8 @@ GSHCPU_Result gshcpu_render_cover_split(const GSHGEOM_Flat_Path * const * paths,
 
 /** The memory and settings of the exact step (below). */
 typedef struct GSHCPU_Exact GSHCPU_Exact;
+
+
 
 /**
  * ::gshcpu_render_cover_counted for a stroke part under the nonzero rule, with the exact step (UC1 to UC7): where a cell
@@ -300,6 +303,57 @@ typedef struct GSHCPU_Piece {
 } GSHCPU_Piece;
 
 /**
+ * What a group's pixel keeps of one member (CG7): the pixel's place in the group's rectangle, the member's number in the group, the
+ * cover to the left of the pixel and the dense area there (as the step's cell takes them), and the member's pieces in the pixel, which are
+ * `count` from `first` in the capture's array.
+ */
+typedef struct GSHCPU_Group_Record {
+  uint32_t cell;
+  uint32_t part;
+  uint32_t first;
+  uint32_t count;
+  int64_t a_left;
+  int64_t dense;
+} GSHCPU_Group_Record;
+
+/**
+ * The records a group's sweeps keep for the pixels that hold two or more pieces of the group in all (CG7), and the marks that choose
+ * them.  The arrays are the caller's, of the capacities named; a sweep that would pass them is ::GSHCPU_ERR_LIMIT.
+ * `mark` has a byte for each pixel of `rect`: the low seven bits count the pieces of the group in the pixel (held at 127), the high bit
+ * says a member without a piece in the pixel covers it whole.
+ */
+typedef struct GSHCPU_Group_Capture {
+  GSHCPU_Group_Record * records;   /* room for `piece_cap` records: a record keeps at least one piece */
+  size_t record_n;
+  GSHCPU_Piece * pieces;
+  size_t piece_cap, piece_n;
+  uint8_t * mark;
+  GSHCPU_Rect rect;
+  uint32_t part;   /* the member being swept */
+} GSHCPU_Group_Capture;
+
+#define GSHCPU_GROUP_FULL 0x80u /* set by the second pass; the first pass's counts never carry into it */
+#define GSHCPU_GROUP_COUNT 0x7fu
+
+/**
+ * The first pass of a union group's member (CG7): the pieces of @p paths in each pixel of @p rect counted into the marks of
+ * @p cap (the member's rectangle lies in `cap->rect`), nothing drawn.  @p ex is the group's exact memory.  A pixel with more pieces
+ * of this member than `ex->max_pieces`, or a count of cells past @p max_deposits, is ::GSHCPU_ERR_LIMIT.
+ */
+GSHCPU_Result gshcpu_render_cover_marks(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHCPU_Rect rect, GSHCPU_Group_Capture * cap,
+    GSHCPU_Exact * ex, uint64_t max_deposits, uint64_t * cells);
+
+/**
+ * The second pass of a union group's member (CG7): as ::gshcpu_render_cover_area, the rule-reduced area of each pixel of @p rect added
+ * into @p plane (held at 8192), and in addition the high mark of a pixel the member covers whole without a piece in it, and a record
+ * (see ::GSHCPU_Group_Record) of the member's pieces in every pixel the first pass's marks chose (two or more pieces of the group).
+ * ::GSHCPU_ERR_LIMIT also when the capture is full.
+ */
+GSHCPU_Result gshcpu_render_cover_group(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule, GSHCPU_Rect rect,
+    uint16_t * plane, GSHCPU_Rect prect, GSHCPU_Group_Capture * cap, GSHCPU_Exact * ex, int64_t * acc, uint64_t max_deposits,
+    uint64_t * cells);
+
+/**
  * The sign `eps` of the expansion's orientation (UC4): `w = eps W` where `W` counts an edge directed down +1 and `w` is 1
  * inside a positively wound piece.  Positive winding goes from +x toward +y around the inside (shape-geometry's orient.h),
  * so the edge on the left of a piece's inside is directed up and `W` is -1 there.
@@ -323,7 +377,14 @@ enum {
  * What the weight of a gap is: the overlap `(|w| - 1)^+` of one nonzero part (UC6), UC8's area of the three parts' region, or
  * (in an aligned stroke) the area of the clip's own region by its rule, where the clip alone has pieces in a cell.
  */
-enum { GSHCPU_EXACT_OVERLAP = 0, GSHCPU_EXACT_UNION3 = 1, GSHCPU_EXACT_REGION = 2 };
+enum { GSHCPU_EXACT_OVERLAP = 0, GSHCPU_EXACT_UNION3 = 1, GSHCPU_EXACT_REGION = 2, GSHCPU_EXACT_GROUP = 3 };
+
+/**
+ * ::GSHCPU_EXACT_GROUP (a union clip's general tier, story A3b, CG5): the area of the union of the regions of up to
+ * ::GSHCPU_EXACT_GROUP_PARTS parts, each region the points where the part's own rule holds at the part's own winding (nonzero, or
+ * odd).  The parts are the members that have pieces in the cell; a part's orientation is arbitrary.
+ */
+#define GSHCPU_EXACT_GROUP_PARTS 1024u
 
 /**
  * The most the winding of a part may be in magnitude at the top of a cell's left side (UC20): the sum of everything left of
@@ -341,7 +402,7 @@ typedef struct GSHCPU_Exact_Frag {
   int16_t px, py;
   int16_t dx, dy;
   int8_t s;       /* +1 when the contour goes down along it */
-  uint8_t part;
+  uint16_t part;
   uint32_t mu;    /* the equal copies of the segment it stands for */
 } GSHCPU_Exact_Frag;
 
@@ -350,6 +411,18 @@ typedef struct GSHCPU_Exact_Gap {
   int32_t w[3];
   int32_t om;
 } GSHCPU_Exact_Gap;
+
+/**
+ * The gap of a ::GSHCPU_EXACT_GROUP slab (CG5), the same size as ::GSHCPU_Exact_Gap so that the two share the scratch's array: the number
+ * of parts whose rule holds in the gap (`om` is 2 when it is not zero), and the winding, in the gap, of the part of the fragment on
+ * its left (`wl`) and of the fragment on its right (`wr`), which is all an exchange of two neighbours needs to know of the windings.
+ */
+typedef struct GSHCPU_Exact_UGap {
+  int32_t cnt;
+  int32_t wl;
+  int32_t wr;
+  int32_t om;
+} GSHCPU_Exact_UGap;
 
 /**
  * One cell's working memory, carved from a block of ::gshcpu_exact_scratch_bytes (per piece slot of the cell: the piece's key,
@@ -384,6 +457,31 @@ size_t gshcpu_exact_scratch_bytes(uint64_t max_pieces, int parts);
 /** Carve @p s from @p memory (@p gshcpu_exact_scratch_bytes bytes). */
 void gshcpu_exact_scratch_init(GSHCPU_Exact_Scratch * s, void * memory, uint64_t max_pieces, int parts);
 
+/**
+ * The scratch of ::GSHCPU_EXACT_GROUP cells (CG8): the scratch of one part's cell for as many pieces as the cell may hold in all
+ * (`base`, first so that a pointer to it is a pointer to the whole), and, for each of up to `parts_cap` parts, the record of its steps
+ * and windings that the three-part cells keep in the step's own frame; and the gaps of a group, in the base's memory.  It is a separate
+ * type so that the memory of a render with no union is what it was.
+ */
+typedef struct GSHCPU_Group_Scratch {
+  GSHCPU_Exact_Scratch base;
+  GSHCPU_Exact_UGap * ugap;   /* the memory of base.gap, for a group's cells */
+  size_t parts_cap;
+  uint64_t * jm;              /* per part: bit h set when the steps of its winding on the left side at height h are valid */
+  uint8_t * j64;
+  int64_t * wtop;
+  int64_t * wleft;
+  int64_t * wind0;
+  int32_t * cur;              /* per part: its winding in the gap being made */
+  int32_t * jn;               /* parts_cap * 65: the steps */
+} GSHCPU_Group_Scratch;
+
+/** Bytes of ::GSHCPU_Group_Scratch's arrays for cells of up to @p max_pieces pieces in all over up to @p max_parts parts. */
+size_t gshcpu_exact_group_scratch_bytes(uint64_t max_pieces, size_t max_parts);
+
+/** Carve @p gs from @p memory (::gshcpu_exact_group_scratch_bytes bytes, aligned to 16). */
+void gshcpu_exact_group_scratch_init(GSHCPU_Group_Scratch * gs, void * memory, uint64_t max_pieces, size_t max_parts);
+
 /** What the exact step is to compute for a cell. */
 typedef struct GSHCPU_Exact_Params {
   int parts;                  /* 1, or 3 (body, aligned, clip) */
@@ -392,6 +490,8 @@ typedef struct GSHCPU_Exact_Params {
   int even_odd;               /* UNION3: the clip part's rule */
   int complement;             /* UNION3: the region is the clip's complement */
   uint64_t max_crossings;     /* UC19: a cell with more meetings than this is the limit; 0 is none (the tests' own) */
+  const uint8_t * rule_of;    /* GROUP: for each of `parts` parts, 1 when its rule is even-odd (the region is the odd windings) and 0 for nonzero */
+  GSHCPU_Group_Scratch * gscratch; /* GROUP: the scratch the cell is made with, of which the scratch handed to the step is the base */
 } GSHCPU_Exact_Params;
 
 /** One cell as the exact step sees it, per part: its pieces, the cover to its left and the dense area summed there. */
@@ -400,6 +500,11 @@ typedef struct GSHCPU_Exact_Cell {
   size_t count[3];
   int64_t a_left[3];          /* the sum of the covers of the cells strictly left of this one, the fold column included */
   int64_t dense[3];           /* `eps (accumulated - area)`: the dense doubled area of the part's winding, signed */
+  /* GROUP: the same four, for each of `parts` parts (arrays of that many), in place of the three above */
+  const GSHCPU_Piece * const * gpieces;
+  const size_t * gcount;
+  const int64_t * ga_left;
+  const int64_t * gdense;
 } GSHCPU_Exact_Cell;
 
 /**
@@ -416,11 +521,25 @@ typedef int (*GSHCPU_Exact_Cell_Fn)(const GSHCPU_Exact_Params * params, GSHCPU_E
     const GSHCPU_Exact_Cell * cell, int64_t * out, uint64_t * work);
 
 /**
- * A test hook: when set, ::gshcpu_exact_cell calls it in place of the step.  Nothing in the library sets it; a test program
+ * A test hook: when set, ::gshcpu_exact_cell calls it in place of the step (but for a ::GSHCPU_EXACT_GROUP cell, which the second engine does not have).  Nothing in the library sets it; a test program
  * sets it to a second engine (the earlier step, kept in the tests) to render the same list with both and compare the pixels
  * (the dual render).  Read without a lock: set it before the renders it is to apply to, from the thread that makes them.
  */
 extern GSHCPU_Exact_Cell_Fn gshcpu_exact_hook;
+
+/**
+ * The most crossings a ::GSHCPU_EXACT_GROUP cell may have (CG6): the offset that makes the floor of an area come out right is `8 K + 2 E + 1` units of
+ * `2^-30` for `K` meetings and `E` evaluations at slabs' ends, and it must stay under half a unit; `K` is held at `2^25` here (`E` is below `2^27`
+ * for the largest cell), whatever UC19's budget the sink was given.  A test switch lowers it (the library never sets it).
+ */
+#define GSHCPU_EXACT_GROUP_CROSSINGS ((uint64_t)1 << 25)
+extern uint64_t gshcpu_exact_group_crossings;
+
+/**
+ * The most pixels a group's rectangle may have in a union push (CG9): a kept record names its pixel by a 32-bit index.  A test switch lowers it
+ * (the library never sets it).
+ */
+extern uint64_t gshcpu_union_pixels_max;
 
 /**
  * A test switch: when nonzero the step checks itself as it goes (UC16 iii): each slab's order, after its meetings, is sorted
@@ -500,6 +619,18 @@ size_t gshcpu_exact_bytes(size_t width, uint64_t max_pieces, int parts);
 
 /** Set @p ex up over @p memory (::gshcpu_exact_bytes bytes, aligned to 16). */
 void gshcpu_exact_init(GSHCPU_Exact * ex, void * memory, size_t width, uint64_t max_pieces, int parts);
+
+/**
+ * The bytes of the memory of a group's sweeps and cells (CG8): an ::GSHCPU_Exact for walks up to @p width wide and cells of up to
+ * @p max_pieces pieces in all, and a ::GSHCPU_Group_Scratch for up to @p max_parts parts.
+ */
+size_t gshcpu_exact_group_bytes(size_t width, uint64_t max_pieces, size_t max_parts);
+
+/**
+ * Set @p ex and @p gs up over @p memory (::gshcpu_exact_group_bytes bytes, aligned to 16) for a group's sweeps; `ex->scratch` is a copy of
+ * `gs->base`, so that the sweeps' log and the cells' step use the same arrays.
+ */
+void gshcpu_exact_group_init(GSHCPU_Exact * ex, GSHCPU_Group_Scratch * gs, void * memory, size_t width, uint64_t max_pieces, size_t max_parts);
 
 /** The place a cell has in the pool when none of its pieces are kept. */
 #define GSHCPU_EXACT_NO_SLOT UINT32_MAX
@@ -885,12 +1016,25 @@ void gshcpu_render_image_texel(const GSHCPU_Image * im, uint32_t x, uint32_t y, 
  * plane and quantizing once.  Off, the sink does not claim ::GSHSCENE_CAP_CLIP_UNION, so every union clip is refused, `CLIP_UNION`.
  */
 #define GSHCPU_RENDER_TIER_UNION 2048u
+/**
+ * CU25, CG10: the general tier of a union clip: any union, the members whose boxes overlap made exact by the exact step.  Off, the sink
+ * does not claim ::GSHSCENE_CAP_CLIP_UNION_GENERAL and an overlapping union is refused, `UNION_OVERLAP`.  With FT-U1 off and this on, every union
+ * (the disjoint ones too) is drawn by this tier: the switch that forces it, so that the two tiers can be compared on every input they share.
+ * Both off, the sink claims neither capability.
+ */
+#define GSHCPU_RENDER_TIER_UNION_GENERAL 4096u
+/**
+ * A test switch, not a tier (as ::GSHCPU_RENDER_FORCE_GENERAL): the general tier takes the members of a union as one group (CG2), so the
+ * exact step is made to compute the union of members whose boxes are disjoint, where it must give the fast tier's areas.  Only a member
+ * that does not overlap itself inside a pixel is the same either way (CG3), which is what the gate that uses it draws.
+ */
+#define GSHCPU_RENDER_FORCE_ONE_GROUP 8192u
 #define GSHCPU_RENDER_TIERS_ALL \
-  (GSHCPU_RENDER_TIER_UNION | GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE | GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT | \
+  (GSHCPU_RENDER_TIER_UNION | GSHCPU_RENDER_TIER_UNION_GENERAL | GSHCPU_RENDER_TIER_CACHE | GSHCPU_RENDER_TIER_SPARSE | GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT | \
       GSHCPU_RENDER_TIER_IMAGE_COPY | GSHCPU_RENDER_TIER_IMAGE_SEPARABLE | GSHCPU_RENDER_TIER_IMAGE_TABLE | \
       GSHCPU_RENDER_TIER_MASK_OUTSIDE | GSHCPU_RENDER_TIER_MASK_IDENTITY | GSHCPU_RENDER_TIER_PERIOD)
-/** What the general tier is: the coverage (the exact step and UC8), none of the fast tiers. */
-#define GSHCPU_RENDER_TIERS_GENERAL (GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT)
+/** What the general tier is: the coverage (the exact step and UC8, and the general tier of a union clip), none of the fast tiers. */
+#define GSHCPU_RENDER_TIERS_GENERAL (GSHCPU_RENDER_TIER_EXACT | GSHCPU_RENDER_TIER_JOINT | GSHCPU_RENDER_TIER_UNION_GENERAL)
 
 /**
  * What a sink counted (render.h, SC7, SC8): how often each tier was taken.  A test reads it after the renders it
@@ -940,6 +1084,10 @@ typedef struct GSHCPU_Render_Counters {
   uint64_t union_fast;       /* FT-U1 (CU22): union clip pushes drawn by the fast tier */
   uint64_t union_sweeps;     /* ... the members swept into a plane */
   uint64_t union_tests;      /* ... the box comparisons of the predicate, summed over the pushes */
+  uint64_t union_general;    /* CG10: union clip pushes drawn by the general tier */
+  uint64_t union_groups;     /* ... the groups of two or more members it made exact (CG2) */
+  uint64_t union_exact;      /* ... the pixels made exact by the exact step (CG7) */
+  uint64_t union_pieces;     /* ... the pieces kept for them */
 } GSHCPU_Render_Counters;
 
 /**

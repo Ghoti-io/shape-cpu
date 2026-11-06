@@ -488,6 +488,74 @@
  *   render, which allows a difference of one level at an exact tie and none anywhere else.
  *
 
+ * ### The general tier of a union clip (shape-exact-primitives story A3b, CG1 to CG12)
+ *
+ * The sink claims ::GSHSCENE_CAP_CLIP_UNION_GENERAL as well as ::GSHSCENE_CAP_CLIP_UNION, so it draws every union clip (shape-scene's
+ * `clip_union.h`).  A union whose members the planning predicate shows disjoint is the fast tier's (FT-U1: each member's area added into one
+ * plane, quantized once); any other is the general tier's, which this section defines.  The rules are in the units of CU2: an area is a whole number
+ * of 1/8192 pixel, a pixel's byte is `min(255, area >> 5)`.
+ *
+ * - **CG1 What the tier is.**  The exact area of the union of the members' regions on the 26.6 lattice, by the exact step (UC4 to UC7, UC13
+ *   to UC16) taken over the pieces of several members at once.  No boolean is formed and no geometry is new: a region is the points where
+ *   a member's rule holds at the member's winding of the pieces the scan converter cuts (UC2), and the area is computed in integers from
+ *   the pieces of each pixel.
+ * - **CG2 Groups.**  The members are partitioned into groups, the connected components of the relation "the interiors of the two members' device boxes meet"
+ *   (CU16's overlap, formed by the same `gshscene_clip_union_member_box`); a group is named by its least member.  An empty box, or one without
+ *   width or height, meets nothing.  The comparisons of every pair are billed (CG11).  With `GSHCPU_RENDER_FORCE_ONE_GROUP` the members are one group (a test
+ *   switch: it makes the exact step compute the union of members the predicate shows disjoint, which it must give as their sum).
+ * - **CG3 The area of a pixel.**  The sum over the groups, held at 8192, of the group's area.  A group of one member has its own area `a_i` (CU2's
+ *   number: the member's accumulated winding area reduced by its rule, the saturating sum of AD-12 where its contours overlap themselves inside
+ *   the pixel).  A group of several has the **floor** of the exact area of the union of its members' regions in the pixel, each region the points
+ *   where the member's own rule (nonzero, or odd) holds at the member's own winding, whatever the orientation of its contours.  The floor is
+ *   CU2's own and is taken before the sum, which is the same as taking it after (the other terms are whole numbers).
+ * - **CG4 Equality with the fast tier.**  When the predicate shows the members disjoint every member is a group of its own, and the sum is the
+ *   fast tier's, bit for bit, whatever each member does inside a pixel; the gates draw hundreds of generated unions both ways, and the same
+ *   unions with the members as one group, whose exact union must be that sum wherever no member overlaps itself.
+ * - **CG5 The step for a group.**  `GSHCPU_EXACT_GROUP`: up to 1024 parts, the members that have pieces in the pixel, each with its pieces, the cover to the
+ *   left of the pixel and its dense area (UC4), and a rule of its own.  The slabs, the order, the meetings, the heap and the integral are UC5, UC14
+ *   and UC15 unchanged; what differs is the weight of a gap: twice the indicator of "some part's rule holds at that part's winding in the gap".  A gap
+ *   keeps the number of parts inside it and, for the part of the fragment on either side of it, that part's winding there; an exchange of two
+ *   neighbours changes the one gap between them, in constant time, from those two windings.  The windings of the parts are carried once from the left of the
+ *   pixel (UC4 for each part).  No winding is bounded but by UC20's `2^28`.
+ * - **CG6 The arithmetic and its bound.**  The sum of the `2^30` times the area is UC15's, low by less than `8 K + 2 E` units of `2^-30` for `K`
+ *   meetings and `E` evaluations at slabs' ends.  The step adds that bound and one to it and drops the fraction, so an area that is exactly a whole number
+ *   of units comes out whole, and an area within the bound below the next whole number may come out one unit high (the byte is then one level high only
+ *   when that unit is a multiple of 32).  The bound is `(8 K + 2 E + 1) 2^-30` of a unit: under `2^-12` up to `2^17` meetings (the vectors' pixels have
+ *   under a hundred), and the meetings of a group's pixel are held at `2^25` whatever UC19's budget (`GSHCPU_EXACT_GROUP_CROSSINGS`), which keeps the bound
+ *   under half a unit for the largest pixel, so that the floor is never a unit off by more than the rule says.  The oracle commits a vector only where
+ *   the exact area is a whole unit or at least `2^-12` below the next.  The step has no `long double`, no 128-bit type and no floating point.
+ * - **CG7 The passes.**  A group of several members is swept three times.  The first counts each member's pieces in every pixel (the marks, seven bits
+ *   held at 127).  The second adds each member's dense area into the group's plane, sets the high mark of a pixel a member without a piece in it covers
+ *   whole, and keeps, for every pixel the marks say holds two or more pieces of the group in all, the member's pieces there with the cover and the dense
+ *   area.  The third sorts the kept records by pixel and member and, for each pixel, makes the area exact from the pieces of its members (or
+ *   whole, when the high mark is set); the plane's value there is replaced by it.  Every other pixel keeps the dense sum held at 8192, which is exact:
+ *   with no piece the members are whole or empty, and with one piece the winding takes two adjacent values (UC3).
+ * - **CG8 Memory.**  A function of the list, the target and the limits: the plan (a box, a rectangle and three indices for each member); an accumulator wide
+ *   as the union over the whole render; the plane (two bytes a pixel) over that; and, when a group has several members, the group's plane and marks over the
+ *   most pixels of one, the exact memory (`gshcpu_exact_group_bytes`: the scratch of a pixel for `max_exact_fragments` pieces in all and a record of
+ *   steps and windings for each part), and `max_union_pieces` records of 32 bytes and pieces of 4.  It is taken from the item arena in one order by the push and by the
+ *   measure, so a list with no union has the memory, work and hashes it had, and one with a union asks for exactly what the push takes (under
+ *   `CALLER_MEMORY` nothing is allocated).
+ * - **CG9 Limits and what is refused.**  Each is the sink's resource limit for the clip push (`RESOURCE_LIMIT`), the block skipped and strict failing there; the union is never
+ *   drawn with a member left out, and the work is over the whole render's rectangle of the union whatever the damage, so a damaged render refuses what the whole
+ *   one does (S4).  (a) A member whose box cannot be formed, or whose cells pass `max_deposits`; (b) a member with more than `max_exact_fragments`
+ *   pieces in a pixel, and a pixel in which the members together hold more than that (the scratch of CG8); (c) a pixel with more crossings than
+ *   `max_exact_crossings` (UC19) or than `2^25` (CG6); (d) more pieces kept than `GSHCPU_Limits.max_union_pieces` (default 2^17, ceiling 2^22) in a
+ *   group; (e) comparisons past `max_union_tests` (CG11); (f) a group whose rectangle has more than `2^32 - 1` pixels (a kept record names its pixel by
+ *   a 32-bit index).  Not refused: a rule for each member (nonzero and even-odd mix freely), any orientation, a member that overlaps itself, a depth of
+ *   overlap, a group of up to the store's `max_clip_members` (1024).  Still refused, and documented: a union in a pattern's tile (CU21, PC8's rule
+ *   for the use painted with the pattern), and a glyph run from a font as a member (`ERR_UNSUPPORTED` when the union is interned, CU-D8).
+ * - **CG10 Tiers, caps, counters.**  `GSHCPU_RENDER_TIER_UNION` (FT-U1) and `GSHCPU_RENDER_TIER_UNION_GENERAL` are separate switches: the sink claims `CLIP_UNION`
+ *   while either is on and `CLIP_UNION_GENERAL` while the second is; with the first off and the second on every union is the general tier's, the switch that
+ *   forces it.  The counters are `union_general` (pushes), `union_groups` (groups of several members made exact), `union_exact` (pixels made exact) and
+ *   `union_pieces` (pieces kept); `union_fast`, `union_sweeps` and `union_tests` are CU22's.
+ * - **CG11 The bill and the declared work.**  A union the general tier draws costs the predicate's comparisons and `n (n - 1) / 2` more for its groups, billed together against
+ *   `max_union_tests` for every union push of the render in unit order, whatever the damage.  The declared bound of the work between two checks gains
+ *   the most one union push does: each of the store's `max_clip_members` swept twice, two passes over the pixels, and the exact step over their pieces.
+ * - **CG12 The check.**  The oracle of shape-scene (`tools/clip-union-oracle.py`) in exact rationals over the pieces; its vectors are drawn byte for byte
+ *   by the default tiers, by the general tier forced, and, for the vectors whose members do not overlap themselves, by the exact step on one group; the
+ *   exact step of a stroke part (UC1 to UC7) is a second engine for positive polygons, equal but where the area is within half a unit below a level.
+ *
  * ### Images (masks-images-patterns story I3, IC1 to IC14; shape-scene's IP1 to IP18)
  *
  * An image paint is drawn on a fill, on a stroke (the paint sampled in the item's local space, with the stroke's coverage) and

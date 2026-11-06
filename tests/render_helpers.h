@@ -236,8 +236,8 @@ struct Store {
   GSHSCENE_Store * store = nullptr;
   std::vector<const GSHSCENE_Resource *> held;
   std::vector<GSHSCENE_List *> lists;
-  Store() {
-    gshscene_store_create(nullptr, nullptr, &store);
+  explicit Store(const GSHSCENE_Limits * limits = nullptr) {
+    gshscene_store_create(nullptr, limits, &store);
   }
   ~Store() {
     for (GSHSCENE_List * l : lists) {

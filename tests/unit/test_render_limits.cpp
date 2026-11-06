@@ -500,7 +500,11 @@ TEST(RenderLimits, AHostileMaximalItemDoesItsWorkWithinTheDeclaredBound) {
       (uint64_t)GSHSCENE_LIMITS_DEFAULT_MAX_RESOURCE_ELEMENTS * (GSHGEOM_STROKE_MAX_DEPTH + 1) +
       gshcpu_exact_work_bound(cells, 3 * points, GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION, 3 * GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS,
       GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS) + GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK +
-      GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES * (uint64_t)GSHSCENE_LIMITS_DEFAULT_MAX_RESOURCE_ELEMENTS); // HX13: a hatch's lines
+      GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES * (uint64_t)GSHSCENE_LIMITS_DEFAULT_MAX_RESOURCE_ELEMENTS + // HX13: a hatch's lines
+      // CG11: one union push of the default 256 members at most, each swept twice, with two passes over the pixels and the exact step
+      GSHSCENE_LIMITS_DEFAULT_MAX_CLIP_MEMBERS * (2 * points + 2 * cells + 2 * RF_WIDTH * RF_HEIGHT) + 2 * RF_WIDTH * RF_HEIGHT +
+      gshcpu_exact_work_bound(GSHSCENE_LIMITS_DEFAULT_MAX_CLIP_MEMBERS * cells, GSHSCENE_LIMITS_DEFAULT_MAX_CLIP_MEMBERS * points,
+          GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION, GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS, GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS));
   Outcome run = render(sink.sink, l, r.raster);
   ASSERT_EQ(run.result, GSHSCENE_OK);
   EXPECT_TRUE(run.entries.empty());

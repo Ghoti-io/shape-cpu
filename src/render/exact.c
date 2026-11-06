@@ -90,6 +90,17 @@ typedef GSHCPU_Exact_Gap Gap;
 /* Test hooks: the library never sets either (render_internal.h). */
 GSHCPU_Exact_Cell_Fn gshcpu_exact_hook = NULL;
 int gshcpu_exact_check = 0;
+uint64_t gshcpu_exact_group_crossings = GSHCPU_EXACT_GROUP_CROSSINGS;
+uint64_t gshcpu_union_pixels_max = UINT32_MAX;
+
+/** The budget of meetings a cell may have: UC19's, and for a group's cell no more than the arithmetic of CG6 allows. */
+static uint64_t cell_budget(const GSHCPU_Exact_Params * params) {
+  if (params->mode != GSHCPU_EXACT_GROUP) {
+    return params->max_crossings;
+  }
+  return params->max_crossings == 0 || params->max_crossings > gshcpu_exact_group_crossings ? gshcpu_exact_group_crossings
+                                                                                              : params->max_crossings;
+}
 
 /* --- scratch ------------------------------------------------------------------------------------------------- */
 
@@ -107,6 +118,22 @@ size_t gshcpu_exact_scratch_bytes(uint64_t max_pieces, int parts) {
   bytes += (m + 1u) * sizeof(Gap) + 16u;
   bytes += 4u * (m * sizeof(uint32_t) + 16u); /* heap, hpos, evn, evd */
   return bytes;
+}
+
+/** Bytes of the per-part records of a group cell's scratch for @p parts parts. */
+static size_t group_part_bytes(size_t parts) {
+  size_t bytes = 0;
+  bytes += parts * sizeof(uint64_t) + 16u;      /* jm */
+  bytes += parts * sizeof(uint8_t) + 16u;       /* j64 */
+  bytes += 3u * (parts * sizeof(int64_t) + 16u); /* wtop, wleft, wind0 */
+  bytes += parts * sizeof(int32_t) + 16u;       /* cur */
+  bytes += parts * 65u * sizeof(int32_t) + 16u; /* jn */
+  return bytes;
+}
+
+size_t gshcpu_exact_group_scratch_bytes(uint64_t max_pieces, size_t max_parts) {
+  /* The pieces are those of one part's cell: the group cell holds as many in all.  A gap is the same size either way. */
+  return gshcpu_exact_scratch_bytes(max_pieces, 1) + group_part_bytes(max_parts);
 }
 
 static unsigned char * carve(unsigned char ** at, size_t bytes) {
@@ -136,20 +163,41 @@ void gshcpu_exact_scratch_init(GSHCPU_Exact_Scratch * s, void * memory, uint64_t
   s->evd = (void *)carve(&at, m * sizeof(uint32_t));
 }
 
+void gshcpu_exact_group_scratch_init(GSHCPU_Group_Scratch * gs, void * memory, uint64_t max_pieces, size_t max_parts) {
+  unsigned char * at = memory;
+  memset(gs, 0, sizeof *gs);
+  gshcpu_exact_scratch_init(&gs->base, memory, max_pieces, 1);
+  /* The gaps of a group are the same bytes as the base's gaps: a cell uses one kind or the other, never both. */
+  unsigned char * at_gap = (unsigned char *)(void *)gs->base.gap;
+  gs->ugap = (void *)carve(&at_gap, (gs->base.capacity + 1u) * sizeof(GSHCPU_Exact_UGap));
+  at += gshcpu_exact_scratch_bytes(max_pieces, 1);
+  gs->parts_cap = max_parts;
+  gs->jm = (void *)carve(&at, max_parts * sizeof(uint64_t));
+  gs->j64 = (void *)carve(&at, max_parts * sizeof(uint8_t));
+  gs->wtop = (void *)carve(&at, max_parts * sizeof(int64_t));
+  gs->wleft = (void *)carve(&at, max_parts * sizeof(int64_t));
+  gs->wind0 = (void *)carve(&at, max_parts * sizeof(int64_t));
+  gs->cur = (void *)carve(&at, max_parts * sizeof(int32_t));
+  gs->jn = (void *)carve(&at, max_parts * 65u * sizeof(int32_t));
+}
+
 /* --- the cell's working state ------------------------------------------------------------------------------------ */
 
 typedef struct Ctx {
   const GSHCPU_Exact_Params * pr;
   GSHCPU_Exact_Scratch * s;
+  GSHCPU_Group_Scratch * gs; /* a group's cells: the scratch with the parts' records, of which s is the base */
   size_t nfrag;
   size_t weighted;        /* pieces left after the seams cancel, equal copies counted: the sum of the multiplicities */
   size_t raw;             /* pieces handed in, all parts */
   uint64_t mk;            /* bit h (0..63) set: a slab boundary at height h; 0 and 64 always are */
   uint64_t endmk;         /* bit h set: a fragment ends at height h */
-  uint64_t jm[3];         /* bit h set: the steps of the winding on the left side at height h (jnet[part][h] is valid) */
-  uint8_t j64[3];         /* ... at height 64 */
-  int64_t wtop[3];
-  int64_t wind0[3];       /* the winding on the left side at the current slab's top, eps applied */
+  uint64_t * jm;          /* per part: bit h set: the steps of the winding on the left side at height h (jn[part * 65 + h] is valid) */
+  uint8_t * j64;          /* ... at height 64 */
+  int64_t * wtop;
+  int64_t * wind0;        /* the winding on the left side at the current slab's top, eps applied */
+  int32_t * jn;           /* the steps, 65 for each part */
+  int group;              /* the cell is a ::GSHCPU_EXACT_GROUP's */
   /* the order of the previous slab's end, carried */
   uint32_t * ord;
   uint32_t * ord2;
@@ -171,7 +219,12 @@ typedef struct Ctx {
   uint64_t work;
   uint32_t logn;          /* ceil(log2(fragments)) for the work units */
   int status;
-  int32_t jnet[3][65];    /* last: not cleared with the rest, valid where jm and j64 say */
+  /* the three-part cells' own records (a group's are in the scratch) */
+  uint64_t jm_own[3];
+  uint8_t j64_own[3];
+  int64_t wtop_own[3];
+  int64_t wind0_own[3];
+  int32_t jn_own[3 * 65]; /* last: not cleared with the rest, valid where jm and j64 say */
 } Ctx;
 
 /* --- the pieces of the cell -------------------------------------------------------------------------------------- */
@@ -259,24 +312,49 @@ static uint32_t ceil_log2(uint64_t n) {
 
 /** The steps of the winding on the left side of part @p p at height @p h: a slot that reads as zero until it is written. */
 static int32_t * jstep(Ctx * c, int p, int h) {
+  int32_t * row = c->jn + (size_t)p * 65u;
   if (h == 64) {
     if (!c->j64[p]) {
       c->j64[p] = 1;
-      c->jnet[p][64] = 0;
+      row[64] = 0;
     }
   } else if (!((c->jm[p] >> h) & 1u)) {
     c->jm[p] |= (uint64_t)1 << h;
-    c->jnet[p][h] = 0;
+    row[h] = 0;
   }
-  return &c->jnet[p][h];
+  return &row[h];
 }
 
 /** The steps there, zero where none was written. */
 static int32_t jget(const Ctx * c, int p, int h) {
+  const int32_t * row = c->jn + (size_t)p * 65u;
   if (h == 64) {
-    return c->j64[p] ? c->jnet[p][64] : 0;
+    return c->j64[p] ? row[64] : 0;
   }
-  return ((c->jm[p] >> h) & 1u) ? c->jnet[p][h] : 0;
+  return ((c->jm[p] >> h) & 1u) ? row[h] : 0;
+}
+
+/* --- what a cell holds, of the three parts or of a group's (render_internal.h) -------------------------------------- */
+
+static inline size_t cell_count(const GSHCPU_Exact_Params * pr, const GSHCPU_Exact_Cell * cell, int p) {
+  return pr->mode == GSHCPU_EXACT_GROUP ? cell->gcount[p] : cell->count[p];
+}
+
+static inline const GSHCPU_Piece * cell_pieces(const GSHCPU_Exact_Params * pr, const GSHCPU_Exact_Cell * cell, int p) {
+  return pr->mode == GSHCPU_EXACT_GROUP ? cell->gpieces[p] : cell->pieces[p];
+}
+
+static inline int64_t cell_a_left(const GSHCPU_Exact_Params * pr, const GSHCPU_Exact_Cell * cell, int p) {
+  return pr->mode == GSHCPU_EXACT_GROUP ? cell->ga_left[p] : cell->a_left[p];
+}
+
+static inline int64_t cell_dense(const GSHCPU_Exact_Params * pr, const GSHCPU_Exact_Cell * cell, int p) {
+  return pr->mode == GSHCPU_EXACT_GROUP ? cell->gdense[p] : cell->dense[p];
+}
+
+/** The orientation sign of part @p p: a group's parts all have the expansion's (their windings are tested for zero or oddness, never signed). */
+static inline int part_eps(const GSHCPU_Exact_Params * pr, int p) {
+  return pr->mode == GSHCPU_EXACT_GROUP ? GSHCPU_RENDER_EXACT_EPS : pr->eps[p];
 }
 
 /**
@@ -295,7 +373,7 @@ static int collect(Ctx * c, const GSHCPU_Exact_Cell * cell, int verify) {
   const GSHCPU_Exact_Params * params = c->pr;
   size_t pieces = 0;
   for (int p = 0; p < params->parts; p++) {
-    pieces += cell->count[p];
+    pieces += cell_count(params, cell, p);
   }
   c->raw = pieces;
   if (pieces > s->capacity) {
@@ -304,8 +382,8 @@ static int collect(Ctx * c, const GSHCPU_Exact_Cell * cell, int verify) {
   c->mk = 1u; /* height 0; height 64 is always a boundary and has no bit */
   uint64_t * keys = s->key;
   for (int p = 0; p < params->parts; p++) {
-    const size_t n = cell->count[p];
-    const GSHCPU_Piece * v = cell->pieces[p];
+    const size_t n = cell_count(params, cell, p);
+    const GSHCPU_Piece * v = cell_pieces(params, cell, p);
     /* The pieces, as the rasterizer deposited them: the cover is the sum of the heights, the area the sum of height times
      * the two x ends, and what was summed to the left of the cell is the cover of the cells before it. */
     int64_t cover = 0;
@@ -320,7 +398,7 @@ static int collect(Ctx * c, const GSHCPU_Exact_Cell * cell, int verify) {
       area += dy * ((int64_t)pc.x0 + (int64_t)pc.x1);
       keys[i] = piece_key(pc);
     }
-    if (verify && cell->dense[p] != params->eps[p] * (128 * (cell->a_left[p] + cover) - area)) {
+    if (verify && cell_dense(params, cell, p) != part_eps(params, p) * (128 * (cell_a_left(params, cell, p) + cover) - area)) {
       return GSHCPU_EXACT_IDENTITY; /* the pieces are not the ones the rasterizer summed: a piece missed or invented */
     }
     c->work += n;
@@ -359,7 +437,7 @@ static int collect(Ctx * c, const GSHCPU_Exact_Cell * cell, int verify) {
         f->dx = (int16_t)(down ? x1 - x0 : x0 - x1);
         f->dy = (int16_t)(down ? y1 - y0 : y0 - y1);
         f->s = down ? 1 : -1;
-        f->part = (uint8_t)p;
+        f->part = (uint16_t)p;
         f->mu = mu;
         c->mk |= (uint64_t)1 << f->py;
         if (f->py + f->dy < 64) {
@@ -373,7 +451,7 @@ static int collect(Ctx * c, const GSHCPU_Exact_Cell * cell, int verify) {
   for (int p = 0; p < params->parts; p++) {
     for (uint64_t bits = c->jm[p]; bits != 0; bits &= bits - 1u) {
       int h = __builtin_ctzll(bits);
-      if (c->jnet[p][h] != 0) {
+      if (c->jn[(size_t)p * 65u + (size_t)h] != 0) {
         c->mk |= (uint64_t)1 << h;
       }
     }
@@ -798,8 +876,156 @@ static void slab_gaps(Ctx * c) {
   }
 }
 
+
+/* --- the sweep of a group's slab (CG5) --------------------------------------------------------------------------------- */
+
+/** Whether the winding @p w of part @p part is inside its region: odd under even-odd, not zero under nonzero. */
+static inline int in_rule(const GSHCPU_Exact_Params * pr, int part, int32_t w) {
+  return pr->rule_of[part] ? (w & 1) != 0 : w != 0;
+}
+
+static inline void note_wmax(Ctx * c, int32_t w) {
+  const int64_t m = w < 0 ? -(int64_t)w : (int64_t)w;
+  c->wmax = m > c->wmax ? m : c->wmax;
+}
+
+/**
+ * The gaps of the slab in the order of `ord`, for a group: how many parts are inside in each, and the winding there of the part of the
+ * fragment on either side of it.  The windings of all the parts are carried once, from the left of the cell, and a fragment changes
+ * the winding of its own part alone.
+ */
+static void slab_gaps_group(Ctx * c) {
+  GSHCPU_Exact_Scratch * s = c->s;
+  const GSHCPU_Exact_Params * pr = c->pr;
+  GSHCPU_Exact_UGap * g = c->gs->ugap;
+  int32_t * cur = c->gs->cur;
+  int32_t inside = 0;
+  for (int p = 0; p < pr->parts; p++) {
+    cur[p] = (int32_t)c->wind0[p];
+    note_wmax(c, cur[p]);
+    inside += in_rule(pr, p, cur[p]);
+  }
+  for (size_t i = 0; i <= c->n; i++) {
+    g[i].wl = 0;
+    if (i > 0) {
+      const Frag * f = &s->frag[c->ord[i - 1]];
+      const int part = f->part;
+      inside -= in_rule(pr, part, cur[part]);
+      cur[part] += GSHCPU_RENDER_EXACT_EPS * f->s * (int32_t)f->mu;
+      inside += in_rule(pr, part, cur[part]);
+      note_wmax(c, cur[part]);
+      g[i].wl = cur[part];
+    }
+    g[i].cnt = inside;
+    g[i].om = inside > 0 ? 2 : 0;
+    g[i].wr = i < c->n ? cur[s->frag[c->ord[i]].part] : 0;
+  }
+}
+
+/** Sweep a group's slab: as sweep_slab, with the gaps of ::slab_gaps_group (an exchange of two neighbours changes the one gap between them). */
+static void sweep_slab_group(Ctx * c) {
+  GSHCPU_Exact_Scratch * s = c->s;
+  const GSHCPU_Exact_Params * pr = c->pr;
+  const int64_t height = c->height;
+  const size_t n = c->n;
+  c->work += 6u * n + 8u + (uint64_t)pr->parts;
+  if (n == 0) {
+    int32_t inside = 0;
+    for (int p = 0; p < pr->parts; p++) {
+      note_wmax(c, (int32_t)c->wind0[p]);
+      inside += in_rule(pr, p, (int32_t)c->wind0[p]);
+    }
+    c->acc += (uint64_t)((int64_t)64 * height * (inside > 0 ? 2 : 0)) << 30;
+    return;
+  }
+  slab_gaps_group(c);
+  GSHCPU_Exact_UGap * g = c->gs->ugap;
+  c->acc += (uint64_t)((int64_t)64 * height * (int64_t)g[n].om) << 30;
+  c->hn = 0;
+  if (n >= 2) {
+    for (size_t pos = 0; pos + 1 < n; pos++) {
+      uint32_t en = 0;
+      uint32_t ed = 0;
+      if (event_of(c, (uint32_t)pos, &en, &ed)) {
+        s->evn[pos] = en;
+        s->evd[pos] = ed;
+        s->hpos[pos] = (uint32_t)c->hn;
+        s->heap[c->hn++] = (uint32_t)pos;
+      } else {
+        s->hpos[pos] = NONE;
+      }
+    }
+    for (size_t i = c->hn / 2; i-- > 0;) {
+      heap_down(c, i);
+    }
+  }
+  while (c->hn > 0) {
+    uint32_t pos = s->heap[0];
+    uint64_t en = s->evn[pos];
+    uint64_t ed = s->evd[pos];
+    heap_remove(c, pos);
+    uint32_t ip = c->ord[pos];
+    uint32_t iq = c->ord[pos + 1];
+    const Frag * p = &s->frag[ip];
+    const Frag * q = &s->frag[iq];
+    const int mp = p->part;
+    const int mq = q->part;
+    const int32_t dp = GSHCPU_RENDER_EXACT_EPS * p->s * (int32_t)p->mu;
+    const int32_t dq = GSHCPU_RENDER_EXACT_EPS * q->s * (int32_t)q->mu;
+    /* L = g[pos], M = g[pos + 1] = L + p, R = g[pos + 2] = L + p + q; after the exchange M' = L + q.  The winding of q's part in L
+     * is what R says of it (its left fragment is q) less the two steps. */
+    const int32_t x = g[pos + 2].wl - dq - (mp == mq ? dp : 0);
+    const int32_t lmp = g[pos].wr; /* the winding of p's part in L: L's right fragment is p */
+    GSHCPU_Exact_UGap mid;
+    mid.cnt = g[pos].cnt - in_rule(pr, mq, x) + in_rule(pr, mq, x + dq);
+    mid.om = mid.cnt > 0 ? 2 : 0;
+    mid.wl = x + dq;
+    mid.wr = lmp + (mp == mq ? dq : 0);
+    note_wmax(c, mid.wl);
+    note_wmax(c, mid.wr);
+    int32_t dd = g[pos].om + g[pos + 2].om - g[pos + 1].om - mid.om;
+    if (dd != 0) {
+      uint64_t fp = f30_at(s, ip, en, ed);
+      uint64_t fq = f30_at(s, iq, en, ed);
+      c->acc += (uint64_t)(int64_t)dd * (fp - fq);
+    }
+    c->events++;
+    c->work += (uint64_t)c->logn + 12u;
+    g[pos].wr = x;               /* L's right fragment is now q */
+    g[pos + 1] = mid;
+    g[pos + 2].wl = mid.wr + dp; /* R's left fragment is now p */
+    c->ord[pos] = iq;
+    c->ord[pos + 1] = ip;
+    if (pos > 0) {
+      event_set(c, pos - 1);
+    }
+    if (pos + 2 < n) {
+      event_set(c, pos + 1);
+    }
+  }
+  for (size_t i = 0; i < n; i++) {
+    int32_t cf = g[i].om - g[i + 1].om;
+    if (cf != 0) {
+      c->acc += (uint64_t)(int64_t)cf * f30_end(s, c->ord[i], height);
+      c->end_evals++;
+    }
+  }
+  if (gshcpu_exact_check) {
+    for (size_t i = 1; i < n; i++) {
+      if (right_of_at(s, c->ord[i - 1], c->ord[i], height)) {
+        c->status = GSHCPU_EXACT_IDENTITY; /* UC16 iii: a missed meeting leaves an inversion */
+        return;
+      }
+    }
+  }
+}
+
 /** Sweep the slab: the sentinel, the meetings in order, the ends (UC14, UC15). */
 static void sweep_slab(Ctx * c) {
+  if (c->group) {
+    sweep_slab_group(c);
+    return;
+  }
   GSHCPU_Exact_Scratch * s = c->s;
   const GSHCPU_Exact_Params * pr = c->pr;
   const int64_t height = c->height;
@@ -898,7 +1124,8 @@ static void sweep_slab(Ctx * c) {
 static int walk_slabs(Ctx * c, int count, uint64_t limit, uint64_t * crossings) {
   GSHCPU_Exact_Scratch * s = c->s;
   const GSHCPU_Exact_Params * pr = c->pr;
-  int64_t left[3] = {0, 0, 0};
+  int64_t left_own[3] = {0, 0, 0};
+  int64_t * left = c->group ? c->gs->wleft : left_own;
   for (int p = 0; p < pr->parts; p++) {
     left[p] = c->wtop[p];
   }
@@ -917,8 +1144,8 @@ static int walk_slabs(Ctx * c, int count, uint64_t limit, uint64_t * crossings) 
     c->ya = h;
     c->yb = yb;
     c->height = yb - h;
-    for (int p = 0; p < 3; p++) {
-      c->wind0[p] = p < pr->parts ? pr->eps[p] * left[p] : 0;
+    for (int p = 0; p < (c->group ? pr->parts : 3); p++) {
+      c->wind0[p] = p < pr->parts ? part_eps(pr, p) * left[p] : 0;
     }
     slab_order(c);
     if (count) {
@@ -949,9 +1176,9 @@ static int tops(Ctx * c, const GSHCPU_Exact_Cell * cell) {
     int64_t sum = 0;
     for (uint64_t bits = c->jm[p]; bits != 0; bits &= bits - 1u) {
       int h = __builtin_ctzll(bits); /* a step at height 64 is weighted by 64 - 64 */
-      sum += (int64_t)c->jnet[p][h] * (64 - h);
+      sum += (int64_t)c->jn[(size_t)p * 65u + (size_t)h] * (64 - h);
     }
-    int64_t rem = cell->a_left[p] - sum;
+    int64_t rem = cell_a_left(c->pr, cell, p) - sum;
     if (rem % 64 != 0) {
       return GSHCPU_EXACT_IDENTITY;
     }
@@ -1013,9 +1240,27 @@ static void note(Ctx * c, uint64_t crossings) {
 }
 
 static void ctx_init(Ctx * c, const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s) {
-  memset(c, 0, offsetof(Ctx, jnet)); /* the steps of the winding are valid only where jm and j64 say */
+  memset(c, 0, offsetof(Ctx, jn_own)); /* the steps of the winding are valid only where jm and j64 say */
   c->pr = params;
   c->s = s;
+  c->group = params->mode == GSHCPU_EXACT_GROUP;
+  if (c->group) {
+    /* A group's parts are many: their records are the scratch's, and the marks of the steps are cleared for the parts of this cell. */
+    c->gs = params->gscratch;
+    c->jm = c->gs->jm;
+    c->j64 = c->gs->j64;
+    c->wtop = c->gs->wtop;
+    c->wind0 = c->gs->wind0;
+    c->jn = c->gs->jn;
+    memset(c->jm, 0, (size_t)params->parts * sizeof *c->jm);
+    memset(c->j64, 0, (size_t)params->parts * sizeof *c->j64);
+  } else {
+    c->jm = c->jm_own;
+    c->j64 = c->j64_own;
+    c->wtop = c->wtop_own;
+    c->wind0 = c->wind0_own;
+    c->jn = c->jn_own;
+  }
   s->last_wmax = 0;
   s->last_pieces = 0;
   s->last_distinct = 0;
@@ -1088,8 +1333,11 @@ static int certify_simple(const Ctx * c) {
 
 int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s, const GSHCPU_Exact_Cell * cell,
     int64_t * out, uint64_t * work) {
-  if (gshcpu_exact_hook) {
-    return gshcpu_exact_hook(params, s, cell, out, work);
+  if (gshcpu_exact_hook && params->mode != GSHCPU_EXACT_GROUP) {
+    return gshcpu_exact_hook(params, s, cell, out, work);  /* the second engine has the three-part cells; a group's has none */
+  }
+  if (params->mode == GSHCPU_EXACT_GROUP && (!params->gscratch || &params->gscratch->base != s || (size_t)params->parts > params->gscratch->parts_cap || !params->rule_of)) {
+    return GSHCPU_EXACT_LIMIT; /* more parts than the scratch holds: the caller counts first, so reaching this is a defect, and refuses */
   }
   Ctx c;
   ctx_init(&c, params, s);
@@ -1123,9 +1371,10 @@ int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch *
   }
   uint64_t crossings = 0;
   int counted = 0;
-  if (may_pass(c.nfrag, params->max_crossings) || (gshcpu_exact_check && c.nfrag >= 2)) {
+  const uint64_t budget = cell_budget(params);
+  if (may_pass(c.nfrag, budget) || (gshcpu_exact_check && c.nfrag >= 2)) {
     /* UC19: the meetings are counted before they are made, so that a cell past the budget costs its count and not the budget. */
-    status = walk_slabs(&c, 1, params->max_crossings ? params->max_crossings : UINT64_MAX, &crossings);
+    status = walk_slabs(&c, 1, budget ? budget : UINT64_MAX, &crossings);
     counted = 1;
     if (status != GSHCPU_EXACT_OK) {
       *work += c.work;
@@ -1157,6 +1406,10 @@ int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch *
     if (simple && *out != 0) {
       return GSHCPU_EXACT_IDENTITY; /* the test switch: the certificate and the sweep disagree */
     }
+  } else if (params->mode == GSHCPU_EXACT_GROUP) {
+    /* The floor of the area (CG6): the offset `beta` makes an area that is exactly a whole number of units come out whole, and the
+     * area within `beta` of the next whole number below it may come out one unit high.  It is at most the pixel. */
+    *out = (v + (int64_t)beta) >> 30; /* 0 <= area <= 8192: v is the area less at most beta, and beta is below half a unit (the budget is held, above) */
   } else {
     int64_t q = v + ((int64_t)1 << 29) + (int64_t)beta;
     *out = q >= 0 ? (q >> 30) : -(((-q) + (((int64_t)1 << 30) - 1)) >> 30);
@@ -1167,6 +1420,9 @@ int gshcpu_exact_cell(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch *
 
 int gshcpu_exact_crossings(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s, const GSHCPU_Exact_Cell * cell,
     uint64_t * crossings, uint64_t * work) {
+  if (params->mode == GSHCPU_EXACT_GROUP && (!params->gscratch || &params->gscratch->base != s || (size_t)params->parts > params->gscratch->parts_cap || !params->rule_of)) {
+    return GSHCPU_EXACT_LIMIT;
+  }
   Ctx c;
   ctx_init(&c, params, s);
   *crossings = 0;
@@ -1176,12 +1432,15 @@ int gshcpu_exact_crossings(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scra
     return status;
   }
   c.logn = ceil_log2(c.nfrag ? c.nfrag : 1u);
-  if (c.nfrag >= 2 && may_pass(c.nfrag, params->max_crossings)) {
-    status = walk_slabs(&c, 1, params->max_crossings, crossings);
+  const uint64_t budget = cell_budget(params);
+  if (c.nfrag >= 2 && may_pass(c.nfrag, budget)) {
+    status = walk_slabs(&c, 1, budget, crossings);
   }
   *work += c.work;
   return status;
 }
+
+_Static_assert(sizeof(GSHCPU_Exact_UGap) <= sizeof(GSHCPU_Exact_Gap), "a group's gaps share the three-part gaps' array");
 
 /* --- the memory of a cover's exact step ---------------------------------------------------------------------------- */
 
@@ -1231,6 +1490,29 @@ void gshcpu_exact_init(GSHCPU_Exact * ex, void * memory, size_t width, uint64_t 
     ex->clip_k = (uint16_t *)(void *)carve(&at, cells * sizeof(uint16_t));
     ex->prefix = (int64_t *)(void *)carve(&at, (width + 1u) * 3u * sizeof(int64_t));
   }
+}
+
+size_t gshcpu_exact_group_bytes(size_t width, uint64_t max_pieces, size_t max_parts) {
+  size_t total = gshcpu_exact_bytes(width, max_pieces, 0);
+  size_t scratch = gshcpu_exact_group_scratch_bytes(max_pieces, max_parts);
+  if (total == SIZE_MAX || max_pieces > (uint64_t)GSHCPU_EXACT_FRAGMENTS_CEILING || max_parts > GSHCPU_EXACT_GROUP_PARTS ||
+      !gcu_safe_add_size(total, scratch, &total) || !gcu_safe_add_size(total, 32u, &total)) {
+    return SIZE_MAX;
+  }
+  return total;
+}
+
+void gshcpu_exact_group_init(GSHCPU_Exact * ex, GSHCPU_Group_Scratch * gs, void * memory, size_t width, uint64_t max_pieces, size_t max_parts) {
+  unsigned char * at = memory;
+  size_t cells = (width + 1u) * GSHCPU_RENDER_BAND_ROWS;
+  memset(ex, 0, sizeof *ex);
+  ex->max_pieces = max_pieces;
+  ex->count = (uint32_t *)(void *)carve(&at, cells * sizeof(uint32_t));
+  ex->slot = (uint32_t *)(void *)carve(&at, cells * sizeof(uint32_t));
+  ex->pool_cap = pool_pieces(max_pieces);
+  ex->pool = (GSHCPU_Piece *)(void *)carve(&at, ex->pool_cap * sizeof(GSHCPU_Piece));
+  gshcpu_exact_group_scratch_init(gs, carve(&at, gshcpu_exact_group_scratch_bytes(max_pieces, max_parts)), max_pieces, max_parts);
+  ex->scratch = gs->base;
 }
 
 /* --- the declared bound of the step's work (SC11) ------------------------------------------------------------------- */

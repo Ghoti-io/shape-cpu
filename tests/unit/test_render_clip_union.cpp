@@ -28,130 +28,51 @@
 
 #include <gtest/gtest.h>
 
-#include "../mask_helpers.h"
-
-#include <ghoti.io/shape-cpu/shape-cpu.h>
-#include <ghoti.io/shape-geometry/shape-geometry.h>
-#include <ghoti.io/shape-scene/shape-scene.h>
-#include <ghoti.io/shape-scene/testing/clipunion_vectors.h>
+#include "../clipunion_helpers.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
 
-using namespace mh;
-namespace cv = clipunion_vectors;
+using namespace cuh;
 
 namespace {
 
-GSHSCENE_Paint white() {
-  return rh::solid(1.0, 1.0, 1.0, 1.0);
-}
-
-/** A path resource of the polygon with lattice vertices @p v (26.6, so v / 64 pixels is exact). */
-const GSHSCENE_Resource * lattice_polygon(Scene & s, const std::vector<std::pair<int, int>> & v) {
-  std::vector<double> xy;
-  for (auto & p : v) {
-    xy.push_back(p.first / 64.0);
-    xy.push_back(p.second / 64.0);
-  }
-  return s.polygon(xy);
-}
-
-/** One member of a vector case: its contours as one path of several subpaths. */
-const GSHSCENE_Resource * member_path(Scene & s, const cv::Member & m) {
-  GSHGEOM_Path * p = nullptr;
-  gshgeom_path_create(nullptr, nullptr, 2, &p);
-  for (size_t c = 0; c < m.contour_count; c++) {
-    const cv::Contour & ct = cv::kContours[m.contour_first + c];
-    for (size_t k = 0; k < ct.count; k++) {
-      GSHGEOM_Point q{cv::kVerts[ct.first + k][0] / 64.0, cv::kVerts[ct.first + k][1] / 64.0, 0};
-      if (k == 0) {
-        gshgeom_path_move_to(p, q);
-      } else {
-        gshgeom_path_line_to(p, q);
-      }
-    }
-    gshgeom_path_close(p);
-  }
-  return s.path(p);
-}
-
-const GSHSCENE_Resource * make_union(Scene & s, const std::vector<GSHSCENE_Clip_Member> & members) {
-  const GSHSCENE_Resource * u = nullptr;
-  EXPECT_EQ(gshscene_store_intern_clip_union(s.store, members.data(), members.size(), &u), GSHSCENE_OK);
-  s.held.push_back(u);
-  return u;
-}
-
-GSHSCENE_Clip_Member member(const GSHSCENE_Resource * r, GSHGEOM_Fill_Rule rule = GSHGEOM_FILL_NONZERO) {
-  GSHSCENE_Clip_Member m;
-  std::memset(&m, 0, sizeof m);
-  m.resource = r;
-  m.rule = rule;
-  return m;
-}
-
-/** A list: the union as a clip around one white fill of the whole w by h grid. */
-GSHSCENE_List * clipped_fill(Scene & s, const GSHSCENE_Resource * u, uint32_t w, uint32_t h, const GSHGEOM_Map * map = nullptr) {
-  GSHSCENE_List * l = s.open();
-  EXPECT_EQ(gshscene_list_clip_push(l, u, map, GSHGEOM_FILL_NONZERO, 0, 0.0), GSHSCENE_OK);
-  GSHSCENE_Paint wh = white();
-  EXPECT_EQ(gshscene_list_fill(l, s.rect(0, 0, (double)w, (double)h), nullptr, GSHGEOM_FILL_NONZERO, &wh, 0, 0.0), GSHSCENE_OK);
-  EXPECT_EQ(gshscene_list_clip_pop(l), GSHSCENE_OK);
-  EXPECT_EQ(gshscene_list_close(l), GSHSCENE_OK);
-  return l;
-}
-
-/** The alpha byte of every pixel of @p d. */
-std::vector<uint8_t> alphas(const Draw & d) {
-  std::vector<uint8_t> out;
-  for (uint32_t y = 0; y < d.height; y++) {
-    for (uint32_t x = 0; x < d.width; x++) {
-      out.push_back(d.at8(x, y, 3));
-    }
-  }
-  return out;
+/** The caps of a sink with the tiers @p tiers on. */
+uint32_t union_caps(unsigned tiers) {
+  GSHSCENE_Sink * sink = nullptr;
+  EXPECT_EQ(gshcpu_render_sink_create_tiered(nullptr, nullptr, nullptr, tiers, nullptr, nullptr, nullptr, &sink), GSHCPU_OK);
+  RasterRef r(blank(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, 4, 4));
+  GSHSCENE_Target t = target_of(r.raster);
+  GSHSCENE_Sink_Caps caps{};
+  EXPECT_EQ(gshscene_sink_caps(sink, &t, &caps), GSHSCENE_OK);
+  EXPECT_EQ(gshscene_sink_destroy(sink), GSHSCENE_OK);
+  return caps.flags & (GSHSCENE_CAP_CLIP_UNION | GSHSCENE_CAP_CLIP_UNION_GENERAL);
 }
 
 } // namespace
 
-/* --- the claim and the vectors ------------------------------------------------------------------------------------ */
-
-TEST(RenderClipUnion, TheSinkClaimsTheDisjointTierAndNeverTheGeneralOne) {
-  SinkRef sink;
-  RasterRef r(blank(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, 4, 4));
-  GSHSCENE_Target t = target_of(r.raster);
-  GSHSCENE_Sink_Caps caps{};
-  ASSERT_EQ(gshscene_sink_caps(sink.sink, &t, &caps), GSHSCENE_OK);
-  EXPECT_NE(caps.flags & GSHSCENE_CAP_CLIP_UNION, 0u);
-  EXPECT_EQ(caps.flags & GSHSCENE_CAP_CLIP_UNION_GENERAL, 0u);
+TEST(RenderClipUnion, TheSinkClaimsTheDisjointTierAndTheGeneralOneAsTheirSwitchesSay) {
+  // CG10: the general tier is a union with the capability of the disjoint ones (CU12), so it claims both; with FT-U1 off and it on, both
+  // are claimed still (every union is drawn by it); with it off the sink claims the disjoint tier alone; with both off, neither.
+  const unsigned all = GSHCPU_RENDER_TIERS_ALL;
+  EXPECT_EQ(union_caps(all), GSHSCENE_CAP_CLIP_UNION | GSHSCENE_CAP_CLIP_UNION_GENERAL);
+  EXPECT_EQ(union_caps(all & ~GSHCPU_RENDER_TIER_UNION), GSHSCENE_CAP_CLIP_UNION | GSHSCENE_CAP_CLIP_UNION_GENERAL);
+  EXPECT_EQ(union_caps(all & ~GSHCPU_RENDER_TIER_UNION_GENERAL), GSHSCENE_CAP_CLIP_UNION);
+  EXPECT_EQ(union_caps(all & ~GSHCPU_RENDER_TIER_UNION & ~GSHCPU_RENDER_TIER_UNION_GENERAL), 0u);
 }
 
-TEST(RenderClipUnion, EveryPolygonVectorIsTheOraclesByteForByteOrRefusedWhenItsBoxesOverlap) {
-  size_t drawn = 0, refused = 0;
+TEST(RenderClipUnion, EveryPolygonVectorIsTheOraclesByteForByteWhichTierDrawsIt) {
+  size_t drawn = 0, general = 0;
   for (const cv::Case & c : cv::kCases) {
     Scene s;
-    std::vector<GSHSCENE_Clip_Member> members;
-    for (size_t i = 0; i < c.member_count; i++) {
-      const cv::Member & m = cv::kMembers[c.member_first + i];
-      members.push_back(member(member_path(s, m), m.even_odd ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO));
-    }
-    const GSHSCENE_Resource * u = make_union(s, members);
+    const GSHSCENE_Resource * u = make_union(s, case_members(s, c));
     GSHSCENE_List * l = clipped_fill(s, u, (uint32_t)c.width, (uint32_t)c.height);
     Draw d = draw(l, (uint32_t)c.width, (uint32_t)c.height);
     ASSERT_EQ(d.result, GSHSCENE_OK) << c.name;
-    if (!c.disjoint) {
-      refused++;
-      // A union whose members could not be shown disjoint is refused, `UNION_OVERLAP`, and nothing inside is drawn.
-      ASSERT_EQ(d.count(GSHSCENE_ENTRY_REFUSED, GSHSCENE_REASON_UNION_OVERLAP), 1u) << c.name;
-      for (uint8_t a : alphas(d)) {
-        EXPECT_EQ(a, 0u) << c.name;
-      }
-      continue;
-    }
-    drawn++;
+    // CG10: a union the predicate shows disjoint is the fast tier's, any other the general tier's; neither is refused.
+    (c.disjoint ? drawn : general)++;
     EXPECT_EQ(d.count(GSHSCENE_ENTRY_REFUSED), 0u) << c.name;
     for (int y = 0; y < c.height; y++) {
       for (int x = 0; x < c.width; x++) {
@@ -159,11 +80,14 @@ TEST(RenderClipUnion, EveryPolygonVectorIsTheOraclesByteForByteOrRefusedWhenItsB
             << c.name << " at (" << x << ", " << y << ")";
       }
     }
-    EXPECT_EQ(d.counters.union_fast, 1u) << c.name;
-    EXPECT_EQ(d.counters.union_sweeps, c.member_count) << c.name;
+    EXPECT_EQ(d.counters.union_fast, c.disjoint ? 1u : 0u) << c.name;
+    EXPECT_EQ(d.counters.union_general, c.disjoint ? 0u : 1u) << c.name;
+    if (c.disjoint) {
+      EXPECT_EQ(d.counters.union_sweeps, c.member_count) << c.name;
+    }
   }
   EXPECT_GE(drawn, 10u);
-  EXPECT_GE(refused, 1u);
+  EXPECT_GE(general, 20u);
 }
 
 TEST(RenderClipUnion, TwoAbuttingHalvesAreWholeWhereTheMaskOfTheSameShapesIsThreeQuarters) {
@@ -226,11 +150,13 @@ TEST(RenderClipUnion, FastFillCoverageDrawsAUnionByTheDenseCoverLikeTheDefault) 
 
 /* --- refusal, damage, limits, tiers ------------------------------------------------------------------------------- */
 
-TEST(RenderClipUnion, AnOverlappingUnionIsRefusedWithThePairNamedAndStrictFailsAtTheUnit) {
+TEST(RenderClipUnion, WithoutTheGeneralTierAnOverlappingUnionIsRefusedWithThePairNamedAndStrictFailsAtTheUnit) {
   Scene s;
   const GSHSCENE_Resource * u = make_union(s, {member(s.rect(0, 0, 4, 4)), member(s.rect(3, 3, 8, 8))});
   GSHSCENE_List * l = clipped_fill(s, u, 8, 8);
-  Draw d = draw(l, 8, 8);
+  Options no_general;
+  no_general.tiers = GSHCPU_RENDER_TIERS_ALL & ~GSHCPU_RENDER_TIER_UNION_GENERAL;
+  Draw d = draw(l, 8, 8, no_general);
   ASSERT_EQ(d.result, GSHSCENE_OK);
   ASSERT_EQ(d.count(GSHSCENE_ENTRY_REFUSED, GSHSCENE_REASON_UNION_OVERLAP), 1u);
   for (const GSHSCENE_Report_Entry & e : d.entries) {
@@ -241,9 +167,17 @@ TEST(RenderClipUnion, AnOverlappingUnionIsRefusedWithThePairNamedAndStrictFailsA
   for (uint8_t a : alphas(d)) {
     EXPECT_EQ(a, 0u);
   }
-  Options strict;
+  Options strict = no_general;
   strict.flags = GSHSCENE_RENDER_STRICT;
   EXPECT_EQ(draw(l, 8, 8, strict).result, GSHSCENE_ERR_REFUSED);
+  // With the general tier the same union is drawn (CG10), and strict succeeds.
+  Options general;
+  general.flags = GSHSCENE_RENDER_STRICT;
+  Draw g = draw(l, 8, 8, general);
+  EXPECT_EQ(g.result, GSHSCENE_OK);
+  EXPECT_EQ(g.count(GSHSCENE_ENTRY_REFUSED), 0u);
+  EXPECT_EQ(g.at8(3, 3, 3), 255u);
+  EXPECT_EQ(g.at8(7, 0, 3), 0u);
 }
 
 TEST(RenderClipUnion, ADamagedRenderEqualsTheWholeOnItsPartAndPaysTheSameTests) {
@@ -302,12 +236,22 @@ TEST(RenderClipUnion, TheTierIsShownTakenAndForcedOff) {
   Draw on = draw(l, 8, 4);
   EXPECT_EQ(on.counters.union_fast, 1u);
   EXPECT_EQ(on.counters.union_sweeps, 2u);
+  // FT-U1 off alone: every union is drawn by the general tier (CG10), to the same bytes.
+  Options general;
+  general.tiers = GSHCPU_RENDER_TIERS_ALL & ~GSHCPU_RENDER_TIER_UNION;
+  Draw forced = draw(l, 8, 4, general);
+  ASSERT_EQ(forced.result, GSHSCENE_OK);
+  EXPECT_EQ(forced.counters.union_fast, 0u);
+  EXPECT_EQ(forced.counters.union_general, 1u);
+  EXPECT_EQ(forced.bytes, on.bytes);
+  // Both off: the sink claims neither, so the union is refused `CLIP_UNION` and nothing is drawn.
   Options off;
-  off.tiers = GSHCPU_RENDER_TIERS_ALL & ~GSHCPU_RENDER_TIER_UNION;
+  off.tiers = GSHCPU_RENDER_TIERS_ALL & ~GSHCPU_RENDER_TIER_UNION & ~GSHCPU_RENDER_TIER_UNION_GENERAL;
   Draw d = draw(l, 8, 4, off);
   ASSERT_EQ(d.result, GSHSCENE_OK);
   EXPECT_EQ(d.count(GSHSCENE_ENTRY_REFUSED, GSHSCENE_REASON_CLIP_UNION), 1u);
   EXPECT_EQ(d.counters.union_fast, 0u);
+  EXPECT_EQ(d.counters.union_general, 0u);
   for (uint8_t a : alphas(d)) {
     EXPECT_EQ(a, 0u) << "forced off: refused, nothing drawn";
   }

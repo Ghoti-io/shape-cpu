@@ -68,7 +68,8 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
     EXPECT_EQ(caps.flags, GSHSCENE_CAP_CAN_BLOCK | GSHSCENE_CAP_CALLER_MEMORY | GSHSCENE_CAP_CLIP_AA |
         GSHSCENE_CAP_BLEND_SPACES | GSHSCENE_CAP_READBACK | GSHSCENE_CAP_GLYPHS_FROM_FONT | GSHSCENE_CAP_GRADIENT_SPACES |
         GSHSCENE_CAP_STROKE_EXPAND | GSHSCENE_CAP_STROKE_RUNS | GSHSCENE_CAP_IMAGE_FILTER_SPACES | GSHSCENE_CAP_GROUP_SOFT_MASK |
-        GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT | GSHSCENE_CAP_PATTERN | GSHSCENE_CAP_CLIP_UNION | GSHSCENE_CAP_HATCH);
+        GSHSCENE_CAP_GROUP_NON_ISOLATED | GSHSCENE_CAP_GROUP_KNOCKOUT | GSHSCENE_CAP_PATTERN | GSHSCENE_CAP_CLIP_UNION |
+        GSHSCENE_CAP_CLIP_UNION_GENERAL | GSHSCENE_CAP_HATCH);
     EXPECT_NE(caps.flags & GSHSCENE_CAP_STROKE_RUNS, 0u) << "a stroked run is the stroke of its centerline (strokes story S5, ST8)";
     EXPECT_EQ(caps.gradient_kinds, (1u << GSHSCENE_GRADIENT_LINEAR) | (1u << GSHSCENE_GRADIENT_RADIAL) |
         (1u << GSHSCENE_GRADIENT_SWEEP)) << "every gradient kind (color-paint story P2)";
@@ -80,7 +81,14 @@ TEST(RenderCaps, EachFormatItWritesHasTheSameCaps) {
         gshcpu_exact_work_bound(GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS, 3 * (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS,
             GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION, 3 * GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS,
             GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS) +
-        GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK + GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES * (uint64_t)GSHSCENE_LIMITS_DEFAULT_MAX_RESOURCE_ELEMENTS)
+        GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK + GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES * (uint64_t)GSHSCENE_LIMITS_DEFAULT_MAX_RESOURCE_ELEMENTS +
+        // CG11: and one union clip push, each of its members swept twice at most (points and cells) with the planes' passes, and the
+        // pixels they share made exact
+        GSHSCENE_LIMITS_DEFAULT_MAX_CLIP_MEMBERS * (2 * (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS + 2 * GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS +
+            2 * (uint64_t)GSHCPU_LIMITS_DEFAULT_MAX_BYTES) + 2 * (uint64_t)GSHCPU_LIMITS_DEFAULT_MAX_BYTES +
+        gshcpu_exact_work_bound(GSHSCENE_LIMITS_DEFAULT_MAX_CLIP_MEMBERS * GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS,
+            GSHSCENE_LIMITS_DEFAULT_MAX_CLIP_MEMBERS * (uint64_t)GSHGEOM_LIMITS_DEFAULT_MAX_POINTS, GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION,
+            GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS, GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS))
         << "HX13: a hatch's lines, each at most the elements of the resource limit (one piece, one dash), and SC11: an aligned stroke's three parts, its cells, two passes over the pixels, the expansion's steps and the exact step's (UC9)";
   }
 }
@@ -197,9 +205,14 @@ TEST(RenderCaps, TheWorkBoundIsTheWorstUnitsSumOfTheLimits) {
   ASSERT_EQ(gshcpu_sink_create(nullptr, &scene_limits, &limits, &small), GSHCPU_OK);
   // An aligned stroke: 3 parts of 100 points, 200 cells, two passes over 300 pixels, 10 elements to the depth cap, and
   // the exact step over the pieces its parts can hold (200 deposits and a horizontal piece for each point and column).
+  // and CG11's one union clip push of the default 256 members at most: each swept twice (100 points, 200 cells, 600 pixels), two more
+  // passes over the pixels, and the exact step over their pieces
   EXPECT_EQ(caps_for(small, r.raster).cancel_work_bound, 300u + 200u + 600u + 10u * (GSHGEOM_STROKE_MAX_DEPTH + 1) +
       gshcpu_exact_work_bound(200u, 300u, GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION, 3 * GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS,
-            GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS) + 70u + GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES * 10u);
+            GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS) + 70u + GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES * 10u +
+      GSHSCENE_LIMITS_DEFAULT_MAX_CLIP_MEMBERS * (2u * 100u + 2u * 200u + 600u) + 600u +
+      gshcpu_exact_work_bound(GSHSCENE_LIMITS_DEFAULT_MAX_CLIP_MEMBERS * 200u, GSHSCENE_LIMITS_DEFAULT_MAX_CLIP_MEMBERS * 100u,
+            GSHCPU_LIMITS_DEFAULT_MAX_DIMENSION, GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS, GSHCPU_LIMITS_DEFAULT_MAX_EXACT_CROSSINGS));
   EXPECT_EQ(gshscene_sink_destroy(small), GSHSCENE_OK);
   limits.max_deposits = SIZE_MAX;
   limits.max_points = SIZE_MAX;

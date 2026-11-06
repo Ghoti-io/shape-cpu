@@ -56,6 +56,10 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   groups, clips, strokes and patterns inside a tile are drawn; `GSHCPU_Limits.max_pattern_cells` bounds the copies of a use, counted from
   the lattice before any is drawn. A lattice whose steps are whole pixels (a hatch, a checkerboard, a pixel-snapped texture) is drawn
   from one period of its picture, read by integer arithmetic and kept in the cache, bit for bit the picture the general path draws.
+  Union clips: a clip of several shapes (an SVG `clipPath`, a text clip) is the exact union of their regions, quantized once, never a mask and never
+  a sum of 8-bit coverages. Members whose boxes are disjoint are summed in a 16-bit plane; members that overlap are made exact in the pixels they share
+  by the same integer step that unites a stroke's pieces, each member under its own fill rule (`GSHCPU_Limits.max_union_tests` and `max_union_pieces`
+  bound the work, and the exact step's limits bound a pixel). Neither a seam nor a double count appears at an edge two members share.
   `gshcpu_render_hash` and `gshcpu_render_dump` spell a render; the
   fixture set's renders are committed goldens, the same on every target.
   `examples/render.c` renders a list; `examples/stroke.c` strokes a path and shows the cache serve a translation;

@@ -774,6 +774,7 @@ general tier (which can be forced, and is the oracle):
 | Tier | Detection | Counter |
 | --- | --- | --- |
 | FT-U1 union clip, disjoint members | the planning predicate shows the members' device boxes interior-disjoint (shape-scene `clip_union.h`, CU16) | `union_fast` (pushes), `union_sweeps` (members), `union_tests` (comparisons) |
+| FT-U2 union clip, any members (the general tier, which is the oracle's partner for FT-U1) | not a tier but the other route: a union the predicate did not show disjoint, or any union with FT-U1 off | `union_general` (pushes), `union_groups`, `union_exact` (pixels), `union_pieces` |
 | FT-1 cached expansion | the key is in the cache | `cache_hits` |
 | FT-2 sparse composite, solid hairline | a solid paint, one part, a bound of the deposits from the edges alone within a sixteenth of the rectangle's pixels and within `max_cells`; device width 1 | `sparse_hairline` |
 | FT-2 sparse composite, plain solid stroke | the same, any other width | `sparse_plain` |
@@ -909,9 +910,9 @@ restates it.
 
 ### Union clips (shapes story A3: CU18 to CU22)
 
-A clip push may name a clip union (shape-scene `clip_union.h`). The sink claims `CLIP_UNION` while `GSHCPU_RENDER_TIER_UNION` is on and never
-`CLIP_UNION_GENERAL`, so the planning pass refuses a union whose members it cannot show disjoint (`UNION_OVERLAP`) and `clip_push` only
-ever sees a union it can draw exactly. **The arithmetic (CU18).** Each member, taken through `gshscene_clip_union_member_item`, is
+A clip push may name a clip union (shape-scene `clip_union.h`). The sink claims `CLIP_UNION` while `GSHCPU_RENDER_TIER_UNION` or
+`GSHCPU_RENDER_TIER_UNION_GENERAL` is on and `CLIP_UNION_GENERAL` while the second is, so the planning pass refuses nothing it can draw: a union whose members
+it shows disjoint is the fast tier's (below), any other the general tier's (the next section). **The arithmetic (CU18).** Each member, taken through `gshscene_clip_union_member_item`, is
 swept by the dense cover with the **magnitude fold and no final shift** (`gshcpu_fold_area`, the rule-reduced area in 1/8192 pixel, the number
 the byte is the shift of) and added into one `uint16` plane over the union's rectangle, each pixel held at 8192; when the last member
 is in, each plane value `s` becomes the clip's byte `min(255, s >> 5)`: the sum is quantized once. The byte path of the cover calls the same
@@ -934,8 +935,40 @@ A union in a mask's picture or around or inside a non-isolated or knockout group
 byte coverage by the time a group sees it.
 
 **Tier bookkeeping (CU22).** FT-U1: detection is the planning predicate's verdict; the counters are `union_fast`, `union_sweeps` and
-`union_tests`; `GSHCPU_RENDER_TIER_UNION` forces the tier off (the sink then does not claim `CLIP_UNION` and every union is refused
-`CLIP_UNION`); the AD-13 pairing, until a general tier exists, is the independent oracle (`tools/clip-union-oracle.py` in shape-scene).
+`union_tests`; `GSHCPU_RENDER_TIER_UNION` forces the tier off (every union is then the general tier's, or refused `CLIP_UNION` when
+`GSHCPU_RENDER_TIER_UNION_GENERAL` is off too); the AD-13 pairing is the general tier on every input the two share (the next section).
+
+### The general tier of a union clip (story A3b: CG1 to CG12)
+
+`render.h` states the rules; this says how they are built and why. **The definition.** The area of a pixel is the sum over *groups* of
+members (the connected components of "the interiors of the device boxes meet", which the sink forms from the same boxes the predicate
+uses) of the group's area: a group of one member has the number the fast tier adds, a group of several the floor of the exact area of the
+union of its members' regions. A group of one keeps its own number, the saturating sum of AD-12 where its contours overlap themselves
+inside a pixel, because that is what the fast tier adds and the two tiers must agree on every union the fast tier takes; inside a group the exact area of the
+regions is the only number there is. A region is the polygon the scan converter deposits: the edges are cut at the pixel boundaries and every cut
+point is the lattice rounding of the cut (UC2), so the exact step integrates the pieces and not the straight edges. The first oracle that left the cut out
+disagreed with the sink by a level at every slanted crossing.
+
+**The exact step for several parts.** `exact.c` computes the area of a cell as `sum of c_f F_f` over the fragments, with a coefficient from the weights of the gaps beside
+a fragment (UC15). The weight was written for three parts; for a group it is the indicator of "some part's rule holds in the gap". Each gap keeps how many parts
+are inside it (`cnt`) and the winding there of the part of the fragment on its left (`wl`) and on its right (`wr`). When two neighbours `p` (left) and `q` exchange
+places at a meeting, only the gap between them changes, from `L + p` to `L + q` where `L` is the gap on the left; the winding in `L` of `q`'s part is what the gap on
+the right says of it (`wl`, its left fragment being `q`) less the two steps, so the new count is the old count of `L` less whether `q`'s part was inside and plus whether it
+is now, and the three records are updated in constant time. The windings of all the parts are carried once along the slab from the left of the pixel. Everything else, the order, the meetings, the heap, the
+`2^30` integrals and the check of UC4's division, is the stroke's, and the three-part cells use the same functions with the same bits.
+The result is `floor` of the area with an offset (CG6): the same offset that makes UC21's ties round up makes a whole number come out whole.
+
+**Three passes, and why.** The exact step needs the pieces of every member of a pixel at once, and the dense sweeps are one member at a time (a sweep needs `2 * rows * width`
+words of accumulator, and a thousand members cannot each keep one). So the first pass counts pieces (the marks), the second adds the dense areas and keeps the pieces of the pixels that need the
+step (two or more pieces of the group), and the third makes those pixels exact. A pixel with fewer pieces needs nothing: with none every member is whole or empty (the high mark
+for a member that covers the pixel whole without a piece in it), with one the dense area is exact (UC3). The kept pixels are those of the whole render, so the limits are not
+the damage's; the work is over the whole union whatever the damage (it is the price of a refusal that does not depend on it).
+
+**Memory** is the plan, an accumulator, the plane and, for a group, a plane and marks over its rectangle, the step's scratch, and the kept records and pieces. The push and the
+measure call the same two functions (`union_plan`, `union_alloc`) so they cannot disagree; the geometry of one member is live at a time, as for the fast tier.
+
+**Cost.** One group of `n` members of `p` pieces in a pixel costs the step `O(64 p + K log p)` for that pixel, as a stroke's pixel does; the three sweeps cost three times a member's cells;
+a pixel's records are sorted once (`O(R log R)`). `suite/tools/shape-bench/clip-unions.c` measures a member of each tier.
 
 ## Tests and gates
 

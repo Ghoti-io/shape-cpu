@@ -80,6 +80,7 @@ void gshcpu_limits_default(GSHCPU_Limits * limits) {
   limits->max_pattern_cells = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_PATTERN_CELLS */
   limits->max_hatch_lines = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES */
   limits->max_union_tests = 0;   /* the default, GSHCPU_LIMITS_DEFAULT_MAX_UNION_TESTS */
+  limits->max_union_pieces = 0;  /* the default, GSHCPU_LIMITS_DEFAULT_MAX_UNION_PIECES */
 }
 
 GSHCPU_Result gshcpu_limits_for_memory(GSHCPU_Limits * limits, uint64_t bytes) {

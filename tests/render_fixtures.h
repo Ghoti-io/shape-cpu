@@ -90,6 +90,10 @@
  * | hatch-nesting | three nested squares hatched by the rule (nonzero and even-odd), by the outermost ring and by everything inside the outer loop |
  * | hatch-curved | a circle with an island, a hairline pen and thick pens with each cap, solid and dashed families |
  * | hatch-maps | a hatch under a rotation and a non-uniform scale (its own map and the item's), in a translucent group, and in a pattern's tile |
+ * | union-overlap | (shape-exact-primitives story A3b) union clips whose members overlap: a star (its centre wound twice), a blob and a rectangle under the nonzero and even-odd rules, and a second union of tilted rectangles; the exact area of the union at every edge |
+ * | union-groups | groups of overlapping members beside members that stand alone: a ring with a triangle across its hole, two crossing rectangles, a tripled contour that overlaps itself and a star apart |
+ * | union-nested | a union under a rotation inside a clip block inside a translucent group, its members each under a map of their own, and a union of members that touch at a quarter pixel with two that overlap |
+ * | union-abutting | rectangles that share edges at quarter pixels and a corner, a union of triangles that share a diagonal, and the same members as a union beside an overlapping one |
  */
 
 #ifndef GHOTI_IO_GSHCPU_TEST_RENDER_FIXTURES_H
@@ -3135,6 +3139,168 @@ static inline GSHSCENE_List * rf_hatch_maps(RF_Ctx * c) {
   return l;
 }
 
+/** The closed polygon through the @p n points of @p xy (x, y pairs). */
+static inline const GSHSCENE_Resource * rf_polygon(RF_Ctx * c, const double * xy, size_t n) {
+  GSHGEOM_Path * p = rf_path(c);
+  for (size_t i = 0; i < n; i++) {
+    if (i == 0) {
+      gshgeom_path_move_to(p, rf_pt(xy[0], xy[1]));
+    } else {
+      gshgeom_path_line_to(p, rf_pt(xy[2 * i], xy[2 * i + 1]));
+    }
+  }
+  gshgeom_path_close(p);
+  return rf_intern(c, p);
+}
+
+/** A clip-union member: @p r under @p rule, and under @p map when it is not NULL (the identity otherwise). */
+static inline GSHSCENE_Clip_Member rf_member(const GSHSCENE_Resource * r, GSHGEOM_Fill_Rule rule, const GSHGEOM_Map * map) {
+  GSHSCENE_Clip_Member m;
+  memset(&m, 0, sizeof m);
+  m.resource = r;
+  m.rule = rule;
+  if (map) {
+    m.map = *map;
+  }
+  return m;
+}
+
+/** The union of the @p n members, held by @p c. */
+static inline const GSHSCENE_Resource * rf_union(RF_Ctx * c, const GSHSCENE_Clip_Member * members, size_t n) {
+  const GSHSCENE_Resource * u = NULL;
+  rf_check(c, gshscene_store_intern_clip_union(c->store, members, n, &u) == GSHSCENE_OK);
+  return rf_hold(c, u);
+}
+
+/** The list @p l clips a fill of the rectangle (x0, y0) to (x1, y1) in @p paint to the union @p u under @p map. */
+static inline void rf_clipped_fill(RF_Ctx * c, GSHSCENE_List * l, const GSHSCENE_Resource * u, const GSHGEOM_Map * map, double x0, double y0,
+    double x1, double y1, GSHSCENE_Paint paint) {
+  rf_check(c, gshscene_list_clip_push(l, u, map, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, l, rf_rect(c, x0, y0, x1, y1), NULL, GSHGEOM_FILL_NONZERO, paint, 0, 0.0);
+  rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+}
+
+static inline GSHSCENE_List * rf_union_overlap(RF_Ctx * c) {
+  static const double lit1[] = {27.25, 4.25, 45.5, 4.25, 45.5, 22.5, 27.25, 22.5, 31.5, 8.5, 41.25, 8.5, 41.25, 18.25, 31.5, 18.25};
+  static const double lit2[] = {29.75, 16.5, 43.0, 6.25, 38.5, 21.25};
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.97, 0.96, 0.9, 1.0), 0, 0.0);
+  /* A star whose centre is wound twice, a blob with curves, and a rectangle that cuts both: one group of three. */
+  GSHSCENE_Clip_Member a[3] = {rf_member(rf_star(c, 13.0, 13.0, 10.5), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_blob(c, 14.25, 4.5, 5.5), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_rect(c, 6.5, 14.25, 22.75, 20.5), GSHGEOM_FILL_EVEN_ODD, NULL)};
+  rf_clipped_fill(c, l, rf_union(c, a, 3), NULL, 0, 0, 24, 24, rf_solid(0.75, 0.1, 0.1, 0.9));
+  /* An even-odd polygon that doubles back on itself, and two triangles that cross it. */
+  static const double tri[6] = {30.5, 31.25, 44.75, 28.5, 36.25, 38.5};
+  const GSHSCENE_Resource * ring = rf_polygon(c, lit1, 8);
+  GSHSCENE_Clip_Member b[3] = {rf_member(ring, GSHGEOM_FILL_EVEN_ODD, NULL),
+      rf_member(rf_polygon(c, lit2, 3), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_polygon(c, tri, 3), GSHGEOM_FILL_NONZERO, NULL)};
+  rf_clipped_fill(c, l, rf_union(c, b, 3), NULL, 24, 0, 48, 26, rf_solid(0.1, 0.3, 0.8, 0.8));
+  /* Tilted rectangles whose edges cross at points that are not on the lattice. */
+  GSHGEOM_Map t1, t2, m1, m2;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 21.0, &t1);
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, -34.0, &t2);
+  GSHGEOM_Map mv1 = rf_move(8.0, 25.0), mv2 = rf_move(19.0, 28.0);
+  gshgeom_map_compose(&mv1, &t1, &m1);
+  gshgeom_map_compose(&mv2, &t2, &m2);
+  const GSHSCENE_Resource * bar = rf_rect(c, 0.0, 0.0, 14.0, 3.75);
+  GSHSCENE_Clip_Member d[2] = {rf_member(bar, GSHGEOM_FILL_NONZERO, &m1), rf_member(bar, GSHGEOM_FILL_NONZERO, &m2)};
+  rf_clipped_fill(c, l, rf_union(c, d, 2), NULL, 0, 24, 40, 40, rf_solid(0.1, 0.55, 0.2, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_union_groups(RF_Ctx * c) {
+  static const double lit3[] = {10.0, 12.25, 22.5, 9.0, 16.25, 22.0};
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.92, 0.95, 1.0, 1.0), 0, 0.0);
+  /* A tripled contour: it overlaps itself in every pixel its edges cross, and stands apart from the others (its own number, AD-12's). */
+  GSHGEOM_Path * p = rf_path(c);
+  for (int k = 0; k < 3; k++) {
+    gshgeom_path_move_to(p, rf_pt(35.25, 3.25));
+    gshgeom_path_line_to(p, rf_pt(44.75, 3.25));
+    gshgeom_path_line_to(p, rf_pt(44.75, 12.5));
+    gshgeom_path_line_to(p, rf_pt(35.25, 12.5));
+    gshgeom_path_close(p);
+  }
+  const GSHSCENE_Resource * thrice = rf_intern(c, p);
+  const double ringxy[16] = {3.5, 3.5, 18.5, 3.5, 18.5, 18.5, 3.5, 18.5, 7.25, 7.25, 14.75, 7.25, 14.75, 14.5, 7.25, 14.5};
+  GSHSCENE_Clip_Member m[6] = {rf_member(rf_polygon(c, ringxy, 8), GSHGEOM_FILL_EVEN_ODD, NULL),
+      rf_member(rf_polygon(c, lit3, 3), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_rect(c, 24.25, 5.25, 31.75, 9.5), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_rect(c, 27.5, 3.0, 29.75, 12.5), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(thrice, GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_star(c, 40.0, 26.0, 8.25), GSHGEOM_FILL_NONZERO, NULL)};
+  rf_clipped_fill(c, l, rf_union(c, m, 6), NULL, 0, 0, 48, 40, rf_solid(0.15, 0.2, 0.7, 0.9));
+  /* The same union under a map that scales and moves it, drawn again over the first with another color. */
+  GSHGEOM_Map sc, mv, both;
+  gshgeom_map_scale(2, 0.8, 0.6, 1.0, &sc);
+  mv = rf_move(1.5, 20.5);
+  gshgeom_map_compose(&mv, &sc, &both);
+  rf_clipped_fill(c, l, rf_union(c, m, 6), &both, 0, 20, 48, 40, rf_solid(0.9, 0.5, 0.0, 0.75));
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_union_nested(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1.0, 1.0, 1.0, 1.0), 0, 0.0);
+  GSHSCENE_Group g = rf_group(0.7, GSHSCENE_COMPOSITE_SRC_OVER);
+  rf_check(c, gshscene_list_group_push(l, &g, 0, 0.0) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_clip_push(l, rf_rect(c, 2.25, 2.5, 45.5, 37.75), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  /* Members that each turn about the point they stand at, the item's map turning all of them. */
+  const GSHSCENE_Resource * bar = rf_rect(c, -9.0, -2.0, 9.0, 2.0);
+  GSHGEOM_Map r0, r1, r2, p0, p1, p2, m0, m1, m2;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 0.0, &r0);
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 60.0, &r1);
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 120.0, &r2);
+  p0 = rf_move(14.0, 14.0);
+  p1 = rf_move(14.0, 14.0);
+  p2 = rf_move(14.0, 14.0);
+  gshgeom_map_compose(&p0, &r0, &m0);
+  gshgeom_map_compose(&p1, &r1, &m1);
+  gshgeom_map_compose(&p2, &r2, &m2);
+  GSHSCENE_Clip_Member spokes[3] = {rf_member(bar, GSHGEOM_FILL_NONZERO, &m0), rf_member(bar, GSHGEOM_FILL_NONZERO, &m1),
+      rf_member(bar, GSHGEOM_FILL_NONZERO, &m2)};
+  GSHGEOM_Map turn, move, placed;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 9.0, &turn);
+  move = rf_move(4.0, 3.0);
+  gshgeom_map_compose(&move, &turn, &placed);
+  rf_clipped_fill(c, l, rf_union(c, spokes, 3), &placed, 0, 0, 48, 40, rf_solid(0.8, 0.1, 0.4, 1.0));
+  /* Two members that touch at a quarter pixel and one that overlaps both. */
+  GSHSCENE_Clip_Member quarter[3] = {rf_member(rf_rect(c, 26.25, 5.0, 32.25, 15.0), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_rect(c, 32.25, 7.5, 40.5, 17.5), GSHGEOM_FILL_EVEN_ODD, NULL),
+      rf_member(rf_rect(c, 30.5, 12.5, 36.75, 24.25), GSHGEOM_FILL_NONZERO, NULL)};
+  rf_clipped_fill(c, l, rf_union(c, quarter, 3), NULL, 0, 0, 48, 40, rf_solid(0.1, 0.5, 0.6, 1.0));
+  rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  rf_close(c, l);
+  return l;
+}
+
+static inline GSHSCENE_List * rf_union_abutting(RF_Ctx * c) {
+  static const double lit4[] = {28.0, 3.0, 44.0, 3.0, 28.0, 19.0};
+  static const double lit5[] = {44.0, 3.0, 44.0, 19.0, 28.0, 19.0};
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.95, 0.95, 1.0), 0, 0.0);
+  /* Three rectangles that share edges at quarter pixels, and a fourth that shares a corner: disjoint, the fast tier's. */
+  GSHSCENE_Clip_Member row[4] = {rf_member(rf_rect(c, 2.0, 2.0, 7.25, 8.5), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_rect(c, 7.25, 2.0, 13.75, 8.5), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_rect(c, 13.75, 2.0, 20.5, 8.5), GSHGEOM_FILL_EVEN_ODD, NULL),
+      rf_member(rf_rect(c, 20.5, 8.5, 26.0, 14.0), GSHGEOM_FILL_NONZERO, NULL)};
+  rf_clipped_fill(c, l, rf_union(c, row, 4), NULL, 0, 0, 48, 20, rf_solid(0.2, 0.2, 0.2, 1.0));
+  /* The two triangles of a square share its diagonal: their boxes overlap, so the general tier draws them, and the diagonal is no seam. */
+  GSHSCENE_Clip_Member diag[2] = {rf_member(rf_polygon(c, lit4, 3), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_polygon(c, lit5, 3), GSHGEOM_FILL_NONZERO, NULL)};
+  rf_clipped_fill(c, l, rf_union(c, diag, 2), NULL, 0, 0, 48, 20, rf_solid(0.7, 0.2, 0.2, 1.0));
+  /* The rectangles of the first union again, with a bar across all of them: one group now. */
+  GSHSCENE_Clip_Member across[5] = {row[0], row[1], row[2], row[3], rf_member(rf_rect(c, 1.0, 5.0, 24.0, 6.75), GSHGEOM_FILL_NONZERO, NULL)};
+  rf_clipped_fill(c, l, rf_union(c, across, 5), NULL, 0, 20, 48, 40, rf_solid(0.2, 0.2, 0.2, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
 typedef struct RF_Fixture {
   const char * name;
   RF_Build build;
@@ -3209,6 +3375,10 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"hatch-nesting", rf_hatch_nesting},
     {"hatch-curved", rf_hatch_curved},
     {"hatch-maps", rf_hatch_maps},
+    {"union-overlap", rf_union_overlap},
+    {"union-groups", rf_union_groups},
+    {"union-nested", rf_union_nested},
+    {"union-abutting", rf_union_abutting},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

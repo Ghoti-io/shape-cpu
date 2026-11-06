@@ -122,6 +122,12 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
 /** The default of ::GSHCPU_Limits.max_union_tests: 2^26 comparisons. */
 #define GSHCPU_LIMITS_DEFAULT_MAX_UNION_TESTS ((uint64_t)1 << 26)
 
+/** The default of ::GSHCPU_Limits.max_union_pieces: 2^17 pieces. */
+#define GSHCPU_LIMITS_DEFAULT_MAX_UNION_PIECES ((uint64_t)1 << 17)
+
+/** The largest ::GSHCPU_Limits.max_union_pieces the sink accepts: 2^22.  A larger value is refused at sink creation. */
+#define GSHCPU_LIMITS_MAX_UNION_PIECES ((uint64_t)1 << 22)
+
 /** The largest ::GSHCPU_Limits.max_exact_crossings the sink accepts: 2^32.  A larger value is refused at sink creation. */
 #define GSHCPU_LIMITS_MAX_EXACT_CROSSINGS ((uint64_t)1 << 32)
 
@@ -261,6 +267,17 @@ typedef struct GSHCPU_Limits {
    * ::GSHCPU_LIMITS_DEFAULT_MAX_UNION_TESTS (2^26), `UINT64_MAX` no cap.  A `uint64_t` whatever the target.
    */
   uint64_t max_union_tests;
+  /**
+   * The most pieces of the outlines of one group of overlapping members (clip_union.h, CG1; the members whose boxes overlap, connected) the
+   * general tier of a union clip keeps for the pixels it makes exact (render.h, CG7), over one push: the pieces, as the scan converter cuts the
+   * edges, in every pixel that holds two or more pieces of the group in all.  A push that would keep more is
+   * ::GSHSCENE_REASON_RESOURCE_LIMIT for the clip, its block skipped, and the union is never drawn with a member left out.  The pixels are
+   * those of the whole render (never only the damage), so the point of refusal does not depend on the damage.  The limit also fixes the
+   * memory of the tier (a record of 32 bytes and a piece of 4 for each, render.h CG8).  0 is ::GSHCPU_LIMITS_DEFAULT_MAX_UNION_PIECES (2^17),
+   * any other value is used as given up to ::GSHCPU_LIMITS_MAX_UNION_PIECES (2^22; a larger one is ::GSHCPU_ERR_INVALID at sink creation).
+   * A `uint64_t` whatever the target.  Read by the sink; the coverage functions ignore it.
+   */
+  uint64_t max_union_pieces;
 } GSHCPU_Limits;
 
 /** ::GSHCPU_Limits.fill_coverage: the exact area of a fill (the default). */

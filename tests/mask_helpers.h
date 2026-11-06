@@ -140,6 +140,8 @@ inline Draw draw(const GSHSCENE_List * list, uint32_t w, uint32_t h, const Optio
 
 /** A scene: a store, and the pictures, masks and lists a test builds in it. */
 struct Scene : Store {
+  explicit Scene(const GSHSCENE_Limits * limits = nullptr) : Store(limits) {}
+
   GSHSCENE_Group group(double opacity = 1.0, uint32_t composite = GSHSCENE_COMPOSITE_SRC_OVER, const GSHSCENE_Resource * mask = nullptr) {
     GSHSCENE_Group g{};
     g.opacity = opacity;

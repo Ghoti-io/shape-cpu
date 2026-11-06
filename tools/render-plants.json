@@ -6978,7 +6978,7 @@
 "rx-99-eq",
 "srcl",
 "src/render/exact.c",
-"99:==",
+"110:==",
 "!=",
 [
 "testRender_vectors",
@@ -7007,7 +7007,7 @@
 "rx-99-neg",
 "srcl",
 "src/render/exact.c",
-"99:(parts == 0)",
+"110:(parts == 0)",
 "(!(parts == 0))",
 [
 "testRender_vectors",
@@ -7036,7 +7036,7 @@
 "rx-103-del",
 "srcl",
 "src/render/exact.c",
-"103:bytes += m * sizeof(Frag) + 16u;",
+"114:bytes += m * sizeof(Frag) + 16u;",
 ";",
 [
 "testRender_vectors",
@@ -7065,7 +7065,7 @@
 "rx-107-del",
 "srcl",
 "src/render/exact.c",
-"107:bytes += (m + 1u) * sizeof(Gap) + 16u;",
+"118:bytes += (m + 1u) * sizeof(Gap) + 16u;",
 ";",
 [
 "testRender_vectors",
@@ -7094,7 +7094,7 @@
 "rx-123-del",
 "srcl",
 "src/render/exact.c",
-"123:s->capacity = m;",
+"150:s->capacity = m;",
 ";",
 [
 "testRender_vectors",
@@ -7123,7 +7123,7 @@
 "rx-124-del",
 "srcl",
 "src/render/exact.c",
-"124:s->frag = (void *)carve(&at, m * sizeof(Frag));",
+"151:s->frag = (void *)carve(&at, m * sizeof(Frag));",
 ";",
 [
 "testRender_vectors",
@@ -7152,7 +7152,7 @@
 "rx-125-del",
 "srcl",
 "src/render/exact.c",
-"125:s->a = (void *)carve(&at, m * sizeof(int32_t));",
+"152:s->a = (void *)carve(&at, m * sizeof(int32_t));",
 ";",
 [
 "testRender_vectors",
@@ -7181,7 +7181,7 @@
 "rx-126-del",
 "srcl",
 "src/render/exact.c",
-"126:s->key = (void *)carve(&at, m * sizeof(uint64_t));",
+"153:s->key = (void *)carve(&at, m * sizeof(uint64_t));",
 ";",
 [
 "testRender_vectors",
@@ -7210,7 +7210,7 @@
 "rx-127-del",
 "srcl",
 "src/render/exact.c",
-"127:s->byy = (void *)carve(&at, m * sizeof(uint32_t));",
+"154:s->byy = (void *)carve(&at, m * sizeof(uint32_t));",
 ";",
 [
 "testRender_vectors",
@@ -7239,7 +7239,7 @@
 "rx-128-del",
 "srcl",
 "src/render/exact.c",
-"128:s->ord = (void *)carve(&at, m * sizeof(uint32_t));",
+"155:s->ord = (void *)carve(&at, m * sizeof(uint32_t));",
 ";",
 [
 "testRender_vectors",
@@ -7268,7 +7268,7 @@
 "rx-129-del",
 "srcl",
 "src/render/exact.c",
-"129:s->ord2 = (void *)carve(&at, m * sizeof(uint32_t));",
+"156:s->ord2 = (void *)carve(&at, m * sizeof(uint32_t));",
 ";",
 [
 "testRender_vectors",
@@ -7297,7 +7297,7 @@
 "rx-130-del",
 "srcl",
 "src/render/exact.c",
-"130:s->st = (void *)carve(&at, m * sizeof(uint32_t));",
+"157:s->st = (void *)carve(&at, m * sizeof(uint32_t));",
 ";",
 [
 "testRender_vectors",
@@ -7326,7 +7326,7 @@
 "rx-131-del",
 "srcl",
 "src/render/exact.c",
-"131:s->sc = (void *)carve(&at, m * sizeof(uint32_t));",
+"158:s->sc = (void *)carve(&at, m * sizeof(uint32_t));",
 ";",
 [
 "testRender_vectors",
@@ -7355,7 +7355,7 @@
 "rx-132-del",
 "srcl",
 "src/render/exact.c",
-"132:s->gap = (void *)carve(&at, (m + 1u) * sizeof(Gap));",
+"159:s->gap = (void *)carve(&at, (m + 1u) * sizeof(Gap));",
 ";",
 [
 "testRender_vectors",
@@ -7384,7 +7384,7 @@
 "rx-133-del",
 "srcl",
 "src/render/exact.c",
-"133:s->heap = (void *)carve(&at, m * sizeof(uint32_t));",
+"160:s->heap = (void *)carve(&at, m * sizeof(uint32_t));",
 ";",
 [
 "testRender_vectors",
@@ -7413,7 +7413,7 @@
 "rx-134-del",
 "srcl",
 "src/render/exact.c",
-"134:s->hpos = (void *)carve(&at, m * sizeof(uint32_t));",
+"161:s->hpos = (void *)carve(&at, m * sizeof(uint32_t));",
 ";",
 [
 "testRender_vectors",
@@ -7442,7 +7442,7 @@
 "rx-135-del",
 "srcl",
 "src/render/exact.c",
-"135:s->evn = (void *)carve(&at, m * sizeof(uint32_t));",
+"162:s->evn = (void *)carve(&at, m * sizeof(uint32_t));",
 ";",
 [
 "testRender_vectors",
@@ -7471,7 +7471,7 @@
 "rx-136-del",
 "srcl",
 "src/render/exact.c",
-"136:s->evd = (void *)carve(&at, m * sizeof(uint32_t));",
+"163:s->evd = (void *)carve(&at, m * sizeof(uint32_t));",
 ";",
 [
 "testRender_vectors",
@@ -7500,7 +7500,7 @@
 "rx-196-neg",
 "srcl",
 "src/render/exact.c",
-"196:(n <= 24)",
+"249:(n <= 24)",
 "(!(n <= 24))",
 [
 "testRender_vectors",
@@ -7529,7 +7529,7 @@
 "rx-197-lt",
 "srcl",
 "src/render/exact.c",
-"197:<",
+"250:<",
 "<=",
 [
 "testRender_vectors",
@@ -7558,7 +7558,7 @@
 "rx-200-and",
 "srcl",
 "src/render/exact.c",
-"200:&&",
+"253:&&",
 "||",
 [
 "testRender_vectors",
@@ -7587,7 +7587,7 @@
 "rx-200-neg",
 "srcl",
 "src/render/exact.c",
-"200:(j > 0 && v[j - 1] > k)",
+"253:(j > 0 && v[j - 1] > k)",
 "(!(j > 0 && v[j - 1] > k))",
 [
 "testRender_vectors",
@@ -7616,7 +7616,7 @@
 "rx-201-del",
 "srcl",
 "src/render/exact.c",
-"201:v[j] = v[j - 1];",
+"254:v[j] = v[j - 1];",
 ";",
 [
 "testRender_vectors",
@@ -7645,7 +7645,7 @@
 "rx-202-del",
 "srcl",
 "src/render/exact.c",
-"202:j--;",
+"255:j--;",
 ";",
 [
 "testRender_vectors",
@@ -7674,7 +7674,7 @@
 "rx-204-del",
 "srcl",
 "src/render/exact.c",
-"204:v[j] = k;",
+"257:v[j] = k;",
 ";",
 [
 "testRender_vectors",
@@ -7703,7 +7703,7 @@
 "rx-212-ge",
 "srcl",
 "src/render/exact.c",
-"212:>=",
+"265:>=",
 ">",
 [
 "testRender_vectors",
@@ -7732,7 +7732,7 @@
 "rx-212-neg",
 "srcl",
 "src/render/exact.c",
-"212:(child >= n)",
+"265:(child >= n)",
 "(!(child >= n))",
 [
 "testRender_vectors",
@@ -7761,7 +7761,7 @@
 "rx-215-lt",
 "srcl",
 "src/render/exact.c",
-"215: 1 < n ",
+"268: 1 < n ",
 " 1 <= n ",
 [
 "testRender_vectors",
@@ -7790,7 +7790,7 @@
 "rx-215-and",
 "srcl",
 "src/render/exact.c",
-"215:&&",
+"268:&&",
 "||",
 [
 "testRender_vectors",
@@ -7819,7 +7819,7 @@
 "rx-215-neg",
 "srcl",
 "src/render/exact.c",
-"215:(child + 1 < n && v[child] < v[child + 1])",
+"268:(child + 1 < n && v[child] < v[child + 1])",
 "(!(child + 1 < n && v[child] < v[child + 1]))",
 [
 "testRender_vectors",
@@ -7848,7 +7848,7 @@
 "rx-216-del",
 "srcl",
 "src/render/exact.c",
-"216:child++;",
+"269:child++;",
 ";",
 [
 "testRender_vectors",
@@ -7877,7 +7877,7 @@
 "rx-218-neg",
 "srcl",
 "src/render/exact.c",
-"218:(v[root] >= v[child])",
+"271:(v[root] >= v[child])",
 "(!(v[root] >= v[child]))",
 [
 "testRender_vectors",
@@ -7906,7 +7906,7 @@
 "rx-222-del",
 "srcl",
 "src/render/exact.c",
-"222:v[root] = v[child];",
+"275:v[root] = v[child];",
 ";",
 [
 "testRender_vectors",
@@ -7935,7 +7935,7 @@
 "rx-224-del",
 "srcl",
 "src/render/exact.c",
-"224:root = child;",
+"277:root = child;",
 ";",
 [
 "testRender_vectors",
@@ -7964,7 +7964,7 @@
 "rx-229-del",
 "srcl",
 "src/render/exact.c",
-"229:v[0] = v[end];",
+"282:v[0] = v[end];",
 ";",
 [
 "testRender_vectors",
@@ -7993,7 +7993,7 @@
 "rx-234-ge",
 "srcl",
 "src/render/exact.c",
-"234:>=",
+"287:>=",
 ">",
 [
 "testRender_vectors",
@@ -8022,7 +8022,7 @@
 "rx-234-neg",
 "srcl",
 "src/render/exact.c",
-"234:(child >= end)",
+"287:(child >= end)",
 "(!(child >= end))",
 [
 "testRender_vectors",
@@ -8051,7 +8051,7 @@
 "rx-237-lt",
 "srcl",
 "src/render/exact.c",
-"237: 1 < en",
+"290: 1 < en",
 " 1 <= en",
 [
 "testRender_vectors",
@@ -8080,7 +8080,7 @@
 "rx-237-and",
 "srcl",
 "src/render/exact.c",
-"237:&&",
+"290:&&",
 "||",
 [
 "testRender_vectors",
@@ -8109,7 +8109,7 @@
 "rx-237-neg",
 "srcl",
 "src/render/exact.c",
-"237:(child + 1 < end && v[child] < v[child + 1])",
+"290:(child + 1 < end && v[child] < v[child + 1])",
 "(!(child + 1 < end && v[child] < v[child + 1]))",
 [
 "testRender_vectors",
@@ -8138,7 +8138,7 @@
 "rx-238-del",
 "srcl",
 "src/render/exact.c",
-"238:child++;",
+"291:child++;",
 ";",
 [
 "testRender_vectors",
@@ -8167,7 +8167,7 @@
 "rx-240-neg",
 "srcl",
 "src/render/exact.c",
-"240:(v[root] >= v[child])",
+"293:(v[root] >= v[child])",
 "(!(v[root] >= v[child]))",
 [
 "testRender_vectors",
@@ -8196,7 +8196,7 @@
 "rx-244-del",
 "srcl",
 "src/render/exact.c",
-"244:v[root] = v[child];",
+"297:v[root] = v[child];",
 ";",
 [
 "testRender_vectors",
@@ -8225,7 +8225,7 @@
 "rx-246-del",
 "srcl",
 "src/render/exact.c",
-"246:root = child;",
+"299:root = child;",
 ";",
 [
 "testRender_vectors",
@@ -8254,7 +8254,7 @@
 "rx-254-and",
 "srcl",
 "src/render/exact.c",
-"254:&&",
+"307:&&",
 "||",
 [
 "testRender_vectors",
@@ -8283,7 +8283,7 @@
 "rx-254-neg",
 "srcl",
 "src/render/exact.c",
-"254:(b < 63 && ((uint64_t)1 << b) < n)",
+"307:(b < 63 && ((uint64_t)1 << b) < n)",
 "(!(b < 63 && ((uint64_t)1 << b) < n))",
 [
 "testRender_vectors",
@@ -8312,7 +8312,7 @@
 "rx-255-del",
 "srcl",
 "src/render/exact.c",
-"255:b++;",
+"308:b++;",
 ";",
 [
 "testRender_vectors",
@@ -8341,7 +8341,7 @@
 "rx-262-eq",
 "srcl",
 "src/render/exact.c",
-"262:==",
+"316:==",
 "!=",
 [
 "testRender_vectors",
@@ -8370,7 +8370,7 @@
 "rx-262-neg",
 "srcl",
 "src/render/exact.c",
-"262:(h == 64)",
+"316:(h == 64)",
 "(!(h == 64))",
 [
 "testRender_vectors",
@@ -8399,7 +8399,7 @@
 "rx-267-neg",
 "srcl",
 "src/render/exact.c",
-"267:(!((c->jm[p] >> h) & 1u))",
+"321:(!((c->jm[p] >> h) & 1u))",
 "(!(!((c->jm[p] >> h) & 1u)))",
 [
 "testRender_vectors",
@@ -8428,7 +8428,7 @@
 "rx-269-del",
 "srcl",
 "src/render/exact.c",
-"269:c->jnet[p][h] = 0;",
+"323:row[h] = 0;",
 ";",
 [
 "testRender_vectors",
@@ -8457,7 +8457,7 @@
 "rx-276-eq",
 "srcl",
 "src/render/exact.c",
-"276:==",
+"331:==",
 "!=",
 [
 "testRender_vectors",
@@ -8486,7 +8486,7 @@
 "rx-276-neg",
 "srcl",
 "src/render/exact.c",
-"276:(h == 64)",
+"331:(h == 64)",
 "(!(h == 64))",
 [
 "testRender_vectors",
@@ -8515,7 +8515,7 @@
 "rx-297-lt",
 "srcl",
 "src/render/exact.c",
-"297:<",
+"375:<",
 "<=",
 [
 "testRender_vectors",
@@ -8544,7 +8544,7 @@
 "rx-298-del",
 "srcl",
 "src/render/exact.c",
-"298:pieces += cell->count[p];",
+"376:pieces += cell_count(params, cell, p);",
 ";",
 [
 "testRender_vectors",
@@ -8573,7 +8573,7 @@
 "rx-301-gt",
 "srcl",
 "src/render/exact.c",
-"301:es > s-",
+"379:es > s-",
 "es >= s-",
 [
 "testRender_vectors",
@@ -8602,7 +8602,7 @@
 "rx-301-neg",
 "srcl",
 "src/render/exact.c",
-"301:(pieces > s->capacity)",
+"379:(pieces > s->capacity)",
 "(!(pieces > s->capacity))",
 [
 "testRender_vectors",
@@ -8631,7 +8631,7 @@
 "rx-306-lt",
 "srcl",
 "src/render/exact.c",
-"306:<",
+"384:<",
 "<=",
 [
 "testRender_vectors",
@@ -8660,7 +8660,7 @@
 "rx-313-lt",
 "srcl",
 "src/render/exact.c",
-"313:<",
+"391:<",
 "<=",
 [
 "testRender_vectors",
@@ -8689,7 +8689,7 @@
 "rx-315-gt",
 "srcl",
 "src/render/exact.c",
-"315:x0 > 64",
+"393:x0 > 64",
 "x0 >= 64",
 [
 "testRender_vectors",
@@ -8718,7 +8718,7 @@
 "rx-315-gt2",
 "srcl",
 "src/render/exact.c",
-"315:x1 > 64",
+"393:x1 > 64",
 "x1 >= 64",
 [
 "testRender_vectors",
@@ -8747,7 +8747,7 @@
 "rx-315-gt3",
 "srcl",
 "src/render/exact.c",
-"315:y0 > 64",
+"393:y0 > 64",
 "y0 >= 64",
 [
 "testRender_vectors",
@@ -8776,7 +8776,7 @@
 "rx-315-gt4",
 "srcl",
 "src/render/exact.c",
-"315:y1 > 64",
+"393:y1 > 64",
 "y1 >= 64",
 [
 "testRender_vectors",
@@ -8805,7 +8805,7 @@
 "rx-315-eq",
 "srcl",
 "src/render/exact.c",
-"315:x0 == pc",
+"393:x0 == pc",
 "x0 != pc",
 [
 "testRender_vectors",
@@ -8834,7 +8834,7 @@
 "rx-315-and",
 "srcl",
 "src/render/exact.c",
-"315:&&",
+"393:&&",
 "||",
 [
 "testRender_vectors",
@@ -8863,7 +8863,7 @@
 "rx-315-eq2",
 "srcl",
 "src/render/exact.c",
-"315:y0 == pc",
+"393:y0 == pc",
 "y0 != pc",
 [
 "testRender_vectors",
@@ -8892,7 +8892,7 @@
 "rx-315-neg",
 "srcl",
 "src/render/exact.c",
-"315:(pc.x0 > 64 || pc.x1 > 64 || pc.y0 > 64 || pc.y1 > 64 || (pc.x0 == pc.x1 && pc.y0 == pc.y1))",
+"393:(pc.x0 > 64 || pc.x1 > 64 || pc.y0 > 64 || pc.y1 > 64 || (pc.x0 == pc.x1 && pc.y0 == pc.y1))",
 "(!(pc.x0 > 64 || pc.x1 > 64 || pc.y0 > 64 || pc.y1 > 64 || (pc.x0 == pc.x1 && pc.y0 == pc.y1)))",
 [
 "testRender_vectors",
@@ -8921,7 +8921,7 @@
 "rx-319-del",
 "srcl",
 "src/render/exact.c",
-"319:cover += dy;",
+"397:cover += dy;",
 ";",
 [
 "testRender_vectors",
@@ -8950,7 +8950,7 @@
 "rx-320-del",
 "srcl",
 "src/render/exact.c",
-"320:area += dy * ((int64_t)pc.x0 + (int64_t)pc.x1);",
+"398:area += dy * ((int64_t)pc.x0 + (int64_t)pc.x1);",
 ";",
 [
 "testRender_vectors",
@@ -8979,7 +8979,7 @@
 "rx-321-del",
 "srcl",
 "src/render/exact.c",
-"321:keys[i] = piece_key(pc);",
+"399:keys[i] = piece_key(pc);",
 ";",
 [
 "testRender_vectors",
@@ -9008,7 +9008,7 @@
 "rx-323-and",
 "srcl",
 "src/render/exact.c",
-"323:&&",
+"401:&&",
 "||",
 [
 "testRender_vectors",
@@ -9037,7 +9037,7 @@
 "rx-323-ne",
 "srcl",
 "src/render/exact.c",
-"323:!=",
+"401:!=",
 "==",
 [
 "testRender_vectors",
@@ -9066,8 +9066,8 @@
 "rx-323-neg",
 "srcl",
 "src/render/exact.c",
-"323:(verify && cell->dense[p] != params->eps[p] * (128 * (cell->a_left[p] + cover) - area))",
-"(!(verify && cell->dense[p] != params->eps[p] * (128 * (cell->a_left[p] + cover) - area)))",
+"401:(verify && cell_dense(params, cell, p) != part_eps(params, p) * (128 * (cell_a_left(params, cell, p) + cover) - area))",
+"(!(verify && cell_dense(params, cell, p) != part_eps(params, p) * (128 * (cell_a_left(params, cell, p) + cover) - area)))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9095,7 +9095,7 @@
 "rx-328-lt",
 "srcl",
 "src/render/exact.c",
-"328:<",
+"406:<",
 "<=",
 [
 "testRender_vectors",
@@ -9124,7 +9124,7 @@
 "rx-332-lt",
 "srcl",
 "src/render/exact.c",
-"332:<",
+"410:<",
 "<=",
 [
 "testRender_vectors",
@@ -9153,7 +9153,7 @@
 "rx-332-and",
 "srcl",
 "src/render/exact.c",
-"332:&&",
+"410:&&",
 "||",
 [
 "testRender_vectors",
@@ -9182,7 +9182,7 @@
 "rx-332-eq",
 "srcl",
 "src/render/exact.c",
-"332:==",
+"410:==",
 "!=",
 [
 "testRender_vectors",
@@ -9211,7 +9211,7 @@
 "rx-332-neg",
 "srcl",
 "src/render/exact.c",
-"332:(j < n && (keys[j] >> 1) == group)",
+"410:(j < n && (keys[j] >> 1) == group)",
 "(!(j < n && (keys[j] >> 1) == group))",
 [
 "testRender_vectors",
@@ -9240,7 +9240,7 @@
 "rx-333-del",
 "srcl",
 "src/render/exact.c",
-"333:net += (keys[j] & 1u) ? 1 : -1;",
+"411:net += (keys[j] & 1u) ? 1 : -1;",
 ";",
 [
 "testRender_vectors",
@@ -9269,7 +9269,7 @@
 "rx-334-del",
 "srcl",
 "src/render/exact.c",
-"334:j++;",
+"412:j++;",
 ";",
 [
 "testRender_vectors",
@@ -9298,7 +9298,7 @@
 "rx-338-del",
 "srcl",
 "src/render/exact.c",
-"338:i = j;",
+"416:i = j;",
 ";",
 [
 "testRender_vectors",
@@ -9327,7 +9327,7 @@
 "rx-339-eq",
 "srcl",
 "src/render/exact.c",
-"339:==",
+"417:==",
 "!=",
 [
 "testRender_vectors",
@@ -9356,7 +9356,7 @@
 "rx-339-neg",
 "srcl",
 "src/render/exact.c",
-"339:(net == 0)",
+"417:(net == 0)",
 "(!(net == 0))",
 [
 "testRender_vectors",
@@ -9385,7 +9385,7 @@
 "rx-347-del",
 "srcl",
 "src/render/exact.c",
-"347:c->weighted += mu;",
+"425:c->weighted += mu;",
 ";",
 [
 "testRender_vectors",
@@ -9414,7 +9414,7 @@
 "rx-348-eq",
 "srcl",
 "src/render/exact.c",
-"348:==",
+"426:==",
 "!=",
 [
 "testRender_vectors",
@@ -9443,7 +9443,7 @@
 "rx-348-neg",
 "srcl",
 "src/render/exact.c",
-"348:(x0 == 0)",
+"426:(x0 == 0)",
 "(!(x0 == 0))",
 [
 "testRender_vectors",
@@ -9472,7 +9472,7 @@
 "rx-351-eq",
 "srcl",
 "src/render/exact.c",
-"351:==",
+"429:==",
 "!=",
 [
 "testRender_vectors",
@@ -9501,7 +9501,7 @@
 "rx-351-neg",
 "srcl",
 "src/render/exact.c",
-"351:(x1 == 0)",
+"429:(x1 == 0)",
 "(!(x1 == 0))",
 [
 "testRender_vectors",
@@ -9530,7 +9530,7 @@
 "rx-354-ne",
 "srcl",
 "src/render/exact.c",
-"354:!=",
+"432:!=",
 "==",
 [
 "testRender_vectors",
@@ -9559,7 +9559,7 @@
 "rx-354-neg",
 "srcl",
 "src/render/exact.c",
-"354:(y0 != y1)",
+"432:(y0 != y1)",
 "(!(y0 != y1))",
 [
 "testRender_vectors",
@@ -9588,7 +9588,7 @@
 "rx-357-del",
 "srcl",
 "src/render/exact.c",
-"357:f->px = (int16_t)(down ? x0 : x1);",
+"435:f->px = (int16_t)(down ? x0 : x1);",
 ";",
 [
 "testRender_vectors",
@@ -9617,7 +9617,7 @@
 "rx-358-del",
 "srcl",
 "src/render/exact.c",
-"358:f->py = (int16_t)(down ? y0 : y1);",
+"436:f->py = (int16_t)(down ? y0 : y1);",
 ";",
 [
 "testRender_vectors",
@@ -9646,7 +9646,7 @@
 "rx-359-del",
 "srcl",
 "src/render/exact.c",
-"359:f->dx = (int16_t)(down ? x1 - x0 : x0 - x1);",
+"437:f->dx = (int16_t)(down ? x1 - x0 : x0 - x1);",
 ";",
 [
 "testRender_vectors",
@@ -9675,7 +9675,7 @@
 "rx-360-del",
 "srcl",
 "src/render/exact.c",
-"360:f->dy = (int16_t)(down ? y1 - y0 : y0 - y1);",
+"438:f->dy = (int16_t)(down ? y1 - y0 : y0 - y1);",
 ";",
 [
 "testRender_vectors",
@@ -9704,7 +9704,7 @@
 "rx-361-del",
 "srcl",
 "src/render/exact.c",
-"361:f->s = down ? 1 : -1;",
+"439:f->s = down ? 1 : -1;",
 ";",
 [
 "testRender_vectors",
@@ -9733,7 +9733,7 @@
 "rx-362-del",
 "srcl",
 "src/render/exact.c",
-"362:f->part = (uint8_t)p;",
+"440:f->part = (uint16_t)p;",
 ";",
 [
 "testRender_vectors",
@@ -9762,7 +9762,7 @@
 "rx-363-del",
 "srcl",
 "src/render/exact.c",
-"363:f->mu = mu;",
+"441:f->mu = mu;",
 ";",
 [
 "testRender_vectors",
@@ -9791,7 +9791,7 @@
 "rx-365-neg",
 "srcl",
 "src/render/exact.c",
-"365:(f->py + f->dy < 64)",
+"443:(f->py + f->dy < 64)",
 "(!(f->py + f->dy < 64))",
 [
 "testRender_vectors",
@@ -9820,7 +9820,7 @@
 "rx-369-del",
 "srcl",
 "src/render/exact.c",
-"369:c->nfrag++;",
+"447:c->nfrag++;",
 ";",
 [
 "testRender_vectors",
@@ -9849,7 +9849,7 @@
 "rx-374-ne",
 "srcl",
 "src/render/exact.c",
-"374:!=",
+"452:!=",
 "==",
 [
 "testRender_vectors",
@@ -9878,7 +9878,7 @@
 "rx-376-ne",
 "srcl",
 "src/render/exact.c",
-"376:!=",
+"454:!=",
 "==",
 [
 "testRender_vectors",
@@ -9907,8 +9907,8 @@
 "rx-376-neg",
 "srcl",
 "src/render/exact.c",
-"376:(c->jnet[p][h] != 0)",
-"(!(c->jnet[p][h] != 0))",
+"454:(c->jn[(size_t)p * 65u + (size_t)h] != 0)",
+"(!(c->jn[(size_t)p * 65u + (size_t)h] != 0))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -9936,7 +9936,7 @@
 "rx-385-lt",
 "srcl",
 "src/render/exact.c",
-"385:<",
+"463:<",
 "<=",
 [
 "testRender_vectors",
@@ -9965,7 +9965,7 @@
 "rx-388-and",
 "srcl",
 "src/render/exact.c",
-"388:&&",
+"466:&&",
 "||",
 [
 "testRender_vectors",
@@ -9994,7 +9994,7 @@
 "rx-388-neg",
 "srcl",
 "src/render/exact.c",
-"388:(j > 0 && s->frag[byy[j - 1]].py > s->frag[id].py)",
+"466:(j > 0 && s->frag[byy[j - 1]].py > s->frag[id].py)",
 "(!(j > 0 && s->frag[byy[j - 1]].py > s->frag[id].py))",
 [
 "testRender_vectors",
@@ -10023,7 +10023,7 @@
 "rx-389-del",
 "srcl",
 "src/render/exact.c",
-"389:byy[j] = byy[j - 1];",
+"467:byy[j] = byy[j - 1];",
 ";",
 [
 "testRender_vectors",
@@ -10052,7 +10052,7 @@
 "rx-390-del",
 "srcl",
 "src/render/exact.c",
-"390:j--;",
+"468:j--;",
 ";",
 [
 "testRender_vectors",
@@ -10081,7 +10081,7 @@
 "rx-392-del",
 "srcl",
 "src/render/exact.c",
-"392:byy[j] = id;",
+"470:byy[j] = id;",
 ";",
 [
 "testRender_vectors",
@@ -10110,7 +10110,7 @@
 "rx-396-del",
 "srcl",
 "src/render/exact.c",
-"396:memset(count, 0, sizeof count);",
+"474:memset(count, 0, sizeof count);",
 ";",
 [
 "testRender_vectors",
@@ -10139,7 +10139,7 @@
 "rx-397-lt",
 "srcl",
 "src/render/exact.c",
-"397:<",
+"475:<",
 "<=",
 [
 "testRender_vectors",
@@ -10168,7 +10168,7 @@
 "rx-398-del",
 "srcl",
 "src/render/exact.c",
-"398:count[s->frag[i].py + 1]++;",
+"476:count[s->frag[i].py + 1]++;",
 ";",
 [
 "testRender_vectors",
@@ -10197,7 +10197,7 @@
 "rx-403-lt",
 "srcl",
 "src/render/exact.c",
-"403:<",
+"481:<",
 "<=",
 [
 "testRender_vectors",
@@ -10226,7 +10226,7 @@
 "rx-404-del",
 "srcl",
 "src/render/exact.c",
-"404:byy[count[s->frag[i].py]++] = (uint32_t)i;",
+"482:byy[count[s->frag[i].py]++] = (uint32_t)i;",
 ";",
 [
 "testRender_vectors",
@@ -10255,7 +10255,7 @@
 "rx-421-eq",
 "srcl",
 "src/render/exact.c",
-"421:==",
+"499:==",
 "!=",
 [
 "testRender_vectors",
@@ -10284,7 +10284,7 @@
 "rx-421-neg",
 "srcl",
 "src/render/exact.c",
-"421:(p->mode == GSHCPU_EXACT_OVERLAP)",
+"499:(p->mode == GSHCPU_EXACT_OVERLAP)",
 "(!(p->mode == GSHCPU_EXACT_OVERLAP))",
 [
 "testRender_vectors",
@@ -10313,7 +10313,7 @@
 "rx-422-ne",
 "srcl",
 "src/render/exact.c",
-"422:!=",
+"500:!=",
 "==",
 [
 "testRender_vectors",
@@ -10342,7 +10342,7 @@
 "rx-424-eq",
 "srcl",
 "src/render/exact.c",
-"424:==",
+"502:==",
 "!=",
 [
 "testRender_vectors",
@@ -10371,7 +10371,7 @@
 "rx-424-neg",
 "srcl",
 "src/render/exact.c",
-"424:(p->mode == GSHCPU_EXACT_REGION)",
+"502:(p->mode == GSHCPU_EXACT_REGION)",
 "(!(p->mode == GSHCPU_EXACT_REGION))",
 [
 "testRender_vectors",
@@ -10400,7 +10400,7 @@
 "rx-425-ne",
 "srcl",
 "src/render/exact.c",
-"425:1) != 0 ",
+"503:1) != 0 ",
 "1) == 0 ",
 [
 "testRender_vectors",
@@ -10429,7 +10429,7 @@
 "rx-425-ne2",
 "srcl",
 "src/render/exact.c",
-"425:0] != 0)",
+"503:0] != 0)",
 "0] == 0)",
 [
 "testRender_vectors",
@@ -10458,7 +10458,7 @@
 "rx-427-ne",
 "srcl",
 "src/render/exact.c",
-"427:!=",
+"505:!=",
 "==",
 [
 "testRender_vectors",
@@ -10487,7 +10487,7 @@
 "rx-427-neg",
 "srcl",
 "src/render/exact.c",
-"427:(w[0] != 0)",
+"505:(w[0] != 0)",
 "(!(w[0] != 0))",
 [
 "testRender_vectors",
@@ -10516,7 +10516,7 @@
 "rx-430-eq",
 "srcl",
 "src/render/exact.c",
-"430:==",
+"508:==",
 "!=",
 [
 "testRender_vectors",
@@ -10545,7 +10545,7 @@
 "rx-430-neg",
 "srcl",
 "src/render/exact.c",
-"430:(w[1] == 0)",
+"508:(w[1] == 0)",
 "(!(w[1] == 0))",
 [
 "testRender_vectors",
@@ -10574,7 +10574,7 @@
 "rx-433-ne",
 "srcl",
 "src/render/exact.c",
-"433:1) != 0)",
+"511:1) != 0)",
 "1) == 0)",
 [
 "testRender_vectors",
@@ -10603,7 +10603,7 @@
 "rx-433-ne2",
 "srcl",
 "src/render/exact.c",
-"433:2] != 0)",
+"511:2] != 0)",
 "2] == 0)",
 [
 "testRender_vectors",
@@ -10632,7 +10632,7 @@
 "rx-434-neg",
 "srcl",
 "src/render/exact.c",
-"434:(p->complement)",
+"512:(p->complement)",
 "(!(p->complement))",
 [
 "testRender_vectors",
@@ -10661,7 +10661,7 @@
 "rx-435-del",
 "srcl",
 "src/render/exact.c",
-"435:in = !in;",
+"513:in = !in;",
 ";",
 [
 "testRender_vectors",
@@ -10690,7 +10690,7 @@
 "rx-448-ne",
 "srcl",
 "src/render/exact.c",
-"448:!=",
+"526:!=",
 "==",
 [
 "testRender_vectors",
@@ -10719,7 +10719,7 @@
 "rx-448-neg",
 "srcl",
 "src/render/exact.c",
-"448:(xp != xq)",
+"526:(xp != xq)",
 "(!(xp != xq))",
 [
 "testRender_vectors",
@@ -10748,7 +10748,7 @@
 "rx-453-ne",
 "srcl",
 "src/render/exact.c",
-"453:!=",
+"531:!=",
 "==",
 [
 "testRender_vectors",
@@ -10777,7 +10777,7 @@
 "rx-453-neg",
 "srcl",
 "src/render/exact.c",
-"453:(sp != sq)",
+"531:(sp != sq)",
 "(!(sp != sq))",
 [
 "testRender_vectors",
@@ -10806,7 +10806,7 @@
 "rx-465-gt",
 "srcl",
 "src/render/exact.c",
-"465:>",
+"543:>",
 ">=",
 [
 "testRender_vectors",
@@ -10835,7 +10835,7 @@
 "rx-479-lt",
 "srcl",
 "src/render/exact.c",
-"479:(i < mi",
+"557:(i < mi",
 "(i <= mi",
 [
 "testRender_vectors",
@@ -10864,7 +10864,7 @@
 "rx-479-and",
 "srcl",
 "src/render/exact.c",
-"479:&&",
+"557:&&",
 "||",
 [
 "testRender_vectors",
@@ -10893,7 +10893,7 @@
 "rx-479-lt2",
 "srcl",
 "src/render/exact.c",
-"479: j < hi",
+"557: j < hi",
 " j <= hi",
 [
 "testRender_vectors",
@@ -10922,7 +10922,7 @@
 "rx-479-neg",
 "srcl",
 "src/render/exact.c",
-"479:(i < mid && j < hi)",
+"557:(i < mid && j < hi)",
 "(!(i < mid && j < hi))",
 [
 "testRender_vectors",
@@ -10951,7 +10951,7 @@
 "rx-482-lt",
 "srcl",
 "src/render/exact.c",
-"482:<",
+"560:<",
 "<=",
 [
 "testRender_vectors",
@@ -10980,7 +10980,7 @@
 "rx-482-neg",
 "srcl",
 "src/render/exact.c",
-"482:(i < mid)",
+"560:(i < mid)",
 "(!(i < mid))",
 [
 "testRender_vectors",
@@ -11009,7 +11009,7 @@
 "rx-483-del",
 "srcl",
 "src/render/exact.c",
-"483:dst[k++] = src[i++];",
+"561:dst[k++] = src[i++];",
 ";",
 [
 "testRender_vectors",
@@ -11038,7 +11038,7 @@
 "rx-485-neg",
 "srcl",
 "src/render/exact.c",
-"485:(j < hi)",
+"563:(j < hi)",
 "(!(j < hi))",
 [
 "testRender_vectors",
@@ -11067,7 +11067,7 @@
 "rx-486-del",
 "srcl",
 "src/render/exact.c",
-"486:dst[k++] = src[j++];",
+"564:dst[k++] = src[j++];",
 ";",
 [
 "testRender_vectors",
@@ -11096,7 +11096,7 @@
 "rx-490-del",
 "srcl",
 "src/render/exact.c",
-"490:src = dst;",
+"568:src = dst;",
 ";",
 [
 "testRender_vectors",
@@ -11125,7 +11125,7 @@
 "rx-493-ne",
 "srcl",
 "src/render/exact.c",
-"493:!=",
+"571:!=",
 "==",
 [
 "testRender_vectors",
@@ -11154,7 +11154,7 @@
 "rx-493-neg",
 "srcl",
 "src/render/exact.c",
-"493:(src != v)",
+"571:(src != v)",
 "(!(src != v))",
 [
 "testRender_vectors",
@@ -11183,7 +11183,7 @@
 "rx-494-del",
 "srcl",
 "src/render/exact.c",
-"494:memcpy(v, src, n * sizeof *v);",
+"572:memcpy(v, src, n * sizeof *v);",
 ";",
 [
 "testRender_vectors",
@@ -11212,7 +11212,7 @@
 "rx-514-lt",
 "srcl",
 "src/render/exact.c",
-"514:(i < mi",
+"592:(i < mi",
 "(i <= mi",
 [
 "testRender_vectors",
@@ -11241,7 +11241,7 @@
 "rx-514-and",
 "srcl",
 "src/render/exact.c",
-"514:&&",
+"592:&&",
 "||",
 [
 "testRender_vectors",
@@ -11270,7 +11270,7 @@
 "rx-514-lt2",
 "srcl",
 "src/render/exact.c",
-"514: j < hi",
+"592: j < hi",
 " j <= hi",
 [
 "testRender_vectors",
@@ -11299,7 +11299,7 @@
 "rx-514-neg",
 "srcl",
 "src/render/exact.c",
-"514:(i < mid && j < hi)",
+"592:(i < mid && j < hi)",
 "(!(i < mid && j < hi))",
 [
 "testRender_vectors",
@@ -11328,7 +11328,7 @@
 "rx-515-neg",
 "srcl",
 "src/render/exact.c",
-"515:(right_of_at(s, src[i], src[j], h))",
+"593:(right_of_at(s, src[i], src[j], h))",
 "(!(right_of_at(s, src[i], src[j], h)))",
 [
 "testRender_vectors",
@@ -11357,7 +11357,7 @@
 "rx-516-del",
 "srcl",
 "src/render/exact.c",
-"516:inversions += (uint64_t)(mid - i);",
+"594:inversions += (uint64_t)(mid - i);",
 ";",
 [
 "testRender_vectors",
@@ -11386,7 +11386,7 @@
 "rx-517-del",
 "srcl",
 "src/render/exact.c",
-"517:dst[k++] = src[j++];",
+"595:dst[k++] = src[j++];",
 ";",
 [
 "testRender_vectors",
@@ -11415,7 +11415,7 @@
 "rx-519-del",
 "srcl",
 "src/render/exact.c",
-"519:dst[k++] = src[i++];",
+"597:dst[k++] = src[i++];",
 ";",
 [
 "testRender_vectors",
@@ -11444,7 +11444,7 @@
 "rx-522-lt",
 "srcl",
 "src/render/exact.c",
-"522:<",
+"600:<",
 "<=",
 [
 "testRender_vectors",
@@ -11473,7 +11473,7 @@
 "rx-522-neg",
 "srcl",
 "src/render/exact.c",
-"522:(i < mid)",
+"600:(i < mid)",
 "(!(i < mid))",
 [
 "testRender_vectors",
@@ -11502,7 +11502,7 @@
 "rx-523-del",
 "srcl",
 "src/render/exact.c",
-"523:dst[k++] = src[i++];",
+"601:dst[k++] = src[i++];",
 ";",
 [
 "testRender_vectors",
@@ -11531,7 +11531,7 @@
 "rx-525-neg",
 "srcl",
 "src/render/exact.c",
-"525:(j < hi)",
+"603:(j < hi)",
 "(!(j < hi))",
 [
 "testRender_vectors",
@@ -11560,7 +11560,7 @@
 "rx-526-del",
 "srcl",
 "src/render/exact.c",
-"526:dst[k++] = src[j++];",
+"604:dst[k++] = src[j++];",
 ";",
 [
 "testRender_vectors",
@@ -11589,7 +11589,7 @@
 "rx-530-del",
 "srcl",
 "src/render/exact.c",
-"530:src = dst;",
+"608:src = dst;",
 ";",
 [
 "testRender_vectors",
@@ -11618,7 +11618,7 @@
 "rx-545-lt",
 "srcl",
 "src/render/exact.c",
-"545:<",
+"623:<",
 "<=",
 [
 "testRender_vectors",
@@ -11647,7 +11647,7 @@
 "rx-548-and",
 "srcl",
 "src/render/exact.c",
-"548:&&",
+"626:&&",
 "||",
 [
 "testRender_vectors",
@@ -11676,7 +11676,7 @@
 "rx-548-neg",
 "srcl",
 "src/render/exact.c",
-"548:(j > 0 && cmp_top(s, v[j - 1], id) > 0)",
+"626:(j > 0 && cmp_top(s, v[j - 1], id) > 0)",
 "(!(j > 0 && cmp_top(s, v[j - 1], id) > 0))",
 [
 "testRender_vectors",
@@ -11705,7 +11705,7 @@
 "rx-549-del",
 "srcl",
 "src/render/exact.c",
-"549:v[j] = v[j - 1];",
+"627:v[j] = v[j - 1];",
 ";",
 [
 "testRender_vectors",
@@ -11734,7 +11734,7 @@
 "rx-550-del",
 "srcl",
 "src/render/exact.c",
-"550:j--;",
+"628:j--;",
 ";",
 [
 "testRender_vectors",
@@ -11763,7 +11763,7 @@
 "rx-552-del",
 "srcl",
 "src/render/exact.c",
-"552:v[j] = id;",
+"630:v[j] = id;",
 ";",
 [
 "testRender_vectors",
@@ -11792,7 +11792,7 @@
 "rx-568-neg",
 "srcl",
 "src/render/exact.c",
-"568:((c->endmk >> ya) & 1u)",
+"646:((c->endmk >> ya) & 1u)",
 "(!((c->endmk >> ya) & 1u))",
 [
 "testRender_vectors",
@@ -11821,7 +11821,7 @@
 "rx-570-lt",
 "srcl",
 "src/render/exact.c",
-"570:<",
+"648:<",
 "<=",
 [
 "testRender_vectors",
@@ -11850,7 +11850,7 @@
 "rx-572-gt",
 "srcl",
 "src/render/exact.c",
-"572:dy > ya",
+"650:dy > ya",
 "dy >= ya",
 [
 "testRender_vectors",
@@ -11879,7 +11879,7 @@
 "rx-572-neg",
 "srcl",
 "src/render/exact.c",
-"572:(s->frag[id].py + s->frag[id].dy > ya)",
+"650:(s->frag[id].py + s->frag[id].dy > ya)",
 "(!(s->frag[id].py + s->frag[id].dy > ya))",
 [
 "testRender_vectors",
@@ -11908,7 +11908,7 @@
 "rx-573-del",
 "srcl",
 "src/render/exact.c",
-"573:c->ord[out++] = id;",
+"651:c->ord[out++] = id;",
 ";",
 [
 "testRender_vectors",
@@ -11937,7 +11937,7 @@
 "rx-576-del",
 "srcl",
 "src/render/exact.c",
-"576:k = out;",
+"654:k = out;",
 ";",
 [
 "testRender_vectors",
@@ -11966,7 +11966,7 @@
 "rx-579-ne",
 "srcl",
 "src/render/exact.c",
-"579:!=",
+"657:!=",
 "==",
 [
 "testRender_vectors",
@@ -11995,7 +11995,7 @@
 "rx-579-neg",
 "srcl",
 "src/render/exact.c",
-"579:(moved != 0)",
+"657:(moved != 0)",
 "(!(moved != 0))",
 [
 "testRender_vectors",
@@ -12024,7 +12024,7 @@
 "rx-580-lt",
 "srcl",
 "src/render/exact.c",
-"580:<",
+"658:<",
 "<=",
 [
 "testRender_vectors",
@@ -12053,7 +12053,7 @@
 "rx-586-lt",
 "srcl",
 "src/render/exact.c",
-"586:<",
+"664:<",
 "<=",
 [
 "testRender_vectors",
@@ -12082,7 +12082,7 @@
 "rx-586-and",
 "srcl",
 "src/render/exact.c",
-"586:&&",
+"664:&&",
 "||",
 [
 "testRender_vectors",
@@ -12111,7 +12111,7 @@
 "rx-586-eq",
 "srcl",
 "src/render/exact.c",
-"586:==",
+"664:==",
 "!=",
 [
 "testRender_vectors",
@@ -12140,7 +12140,7 @@
 "rx-586-neg",
 "srcl",
 "src/render/exact.c",
-"586:(c->cursor < c->nfrag && s->frag[s->byy[c->cursor]].py == ya)",
+"664:(c->cursor < c->nfrag && s->frag[s->byy[c->cursor]].py == ya)",
 "(!(c->cursor < c->nfrag && s->frag[s->byy[c->cursor]].py == ya))",
 [
 "testRender_vectors",
@@ -12169,7 +12169,7 @@
 "rx-588-del",
 "srcl",
 "src/render/exact.c",
-"588:s->a[id] = (int32_t)s->frag[id].px * s->frag[id].dy;",
+"666:s->a[id] = (int32_t)s->frag[id].px * s->frag[id].dy;",
 ";",
 [
 "testRender_vectors",
@@ -12198,7 +12198,7 @@
 "rx-589-del",
 "srcl",
 "src/render/exact.c",
-"589:s->st[ns++] = id;",
+"667:s->st[ns++] = id;",
 ";",
 [
 "testRender_vectors",
@@ -12227,7 +12227,7 @@
 "rx-591-del",
 "srcl",
 "src/render/exact.c",
-"591:c->ya_prev = ya;",
+"669:c->ya_prev = ya;",
 ";",
 [
 "testRender_vectors",
@@ -12256,7 +12256,7 @@
 "rx-592-eq",
 "srcl",
 "src/render/exact.c",
-"592:==",
+"670:==",
 "!=",
 [
 "testRender_vectors",
@@ -12285,7 +12285,7 @@
 "rx-592-neg",
 "srcl",
 "src/render/exact.c",
-"592:(ns == 0)",
+"670:(ns == 0)",
 "(!(ns == 0))",
 [
 "testRender_vectors",
@@ -12314,7 +12314,7 @@
 "rx-593-del",
 "srcl",
 "src/render/exact.c",
-"593:c->n = k;",
+"671:c->n = k;",
 ";",
 [
 "testRender_vectors",
@@ -12343,7 +12343,7 @@
 "rx-594-eq",
 "srcl",
 "src/render/exact.c",
-"594:==",
+"672:==",
 "!=",
 [
 "testRender_vectors",
@@ -12372,7 +12372,7 @@
 "rx-594-neg",
 "srcl",
 "src/render/exact.c",
-"594:(k == 0)",
+"672:(k == 0)",
 "(!(k == 0))",
 [
 "testRender_vectors",
@@ -12401,7 +12401,7 @@
 "rx-595-del",
 "srcl",
 "src/render/exact.c",
-"595:sort_top_short(s, s->st, s->sc, ns);",
+"673:sort_top_short(s, s->st, s->sc, ns);",
 ";",
 [
 "testRender_vectors",
@@ -12430,7 +12430,7 @@
 "rx-596-del",
 "srcl",
 "src/render/exact.c",
-"596:memcpy(c->ord, s->st, ns * sizeof *c->ord);",
+"674:memcpy(c->ord, s->st, ns * sizeof *c->ord);",
 ";",
 [
 "testRender_vectors",
@@ -12459,7 +12459,7 @@
 "rx-597-del",
 "srcl",
 "src/render/exact.c",
-"597:c->n = ns;",
+"675:c->n = ns;",
 ";",
 [
 "testRender_vectors",
@@ -12488,7 +12488,7 @@
 "rx-604-lt",
 "srcl",
 "src/render/exact.c",
-"604:(i < k ",
+"682:(i < k ",
 "(i <= k ",
 [
 "testRender_vectors",
@@ -12517,7 +12517,7 @@
 "rx-604-and",
 "srcl",
 "src/render/exact.c",
-"604:&&",
+"682:&&",
 "||",
 [
 "testRender_vectors",
@@ -12546,7 +12546,7 @@
 "rx-604-lt2",
 "srcl",
 "src/render/exact.c",
-"604: j < ns",
+"682: j < ns",
 " j <= ns",
 [
 "testRender_vectors",
@@ -12575,7 +12575,7 @@
 "rx-605-del",
 "srcl",
 "src/render/exact.c",
-"605:c->ord2[out++] = cmp_top(s, c->ord[i], s->st[j]) <= 0 ? c->ord[i++] : s->st[j++];",
+"683:c->ord2[out++] = cmp_top(s, c->ord[i], s->st[j]) <= 0 ? c->ord[i++] : s->st[j++];",
 ";",
 [
 "testRender_vectors",
@@ -12604,7 +12604,7 @@
 "rx-607-lt",
 "srcl",
 "src/render/exact.c",
-"607:<",
+"685:<",
 "<=",
 [
 "testRender_vectors",
@@ -12633,7 +12633,7 @@
 "rx-607-neg",
 "srcl",
 "src/render/exact.c",
-"607:(i < k)",
+"685:(i < k)",
 "(!(i < k))",
 [
 "testRender_vectors",
@@ -12662,7 +12662,7 @@
 "rx-608-del",
 "srcl",
 "src/render/exact.c",
-"608:c->ord2[out++] = c->ord[i++];",
+"686:c->ord2[out++] = c->ord[i++];",
 ";",
 [
 "testRender_vectors",
@@ -12691,7 +12691,7 @@
 "rx-610-lt",
 "srcl",
 "src/render/exact.c",
-"610:<",
+"688:<",
 "<=",
 [
 "testRender_vectors",
@@ -12720,7 +12720,7 @@
 "rx-610-neg",
 "srcl",
 "src/render/exact.c",
-"610:(j < ns)",
+"688:(j < ns)",
 "(!(j < ns))",
 [
 "testRender_vectors",
@@ -12749,7 +12749,7 @@
 "rx-611-del",
 "srcl",
 "src/render/exact.c",
-"611:c->ord2[out++] = s->st[j++];",
+"689:c->ord2[out++] = s->st[j++];",
 ";",
 [
 "testRender_vectors",
@@ -12778,7 +12778,7 @@
 "rx-614-del",
 "srcl",
 "src/render/exact.c",
-"614:c->ord = c->ord2;",
+"692:c->ord = c->ord2;",
 ";",
 [
 "testRender_vectors",
@@ -12807,7 +12807,7 @@
 "rx-616-del",
 "srcl",
 "src/render/exact.c",
-"616:c->n = out;",
+"694:c->n = out;",
 ";",
 [
 "testRender_vectors",
@@ -12836,7 +12836,7 @@
 "rx-618-lt",
 "srcl",
 "src/render/exact.c",
-"618:<",
+"696:<",
 "<=",
 [
 "testRender_vectors",
@@ -12865,7 +12865,7 @@
 "rx-619-neg",
 "srcl",
 "src/render/exact.c",
-"619:(cmp_top(s, c->ord[q - 1], c->ord[q]) >= 0)",
+"697:(cmp_top(s, c->ord[q - 1], c->ord[q]) >= 0)",
 "(!(cmp_top(s, c->ord[q - 1], c->ord[q]) >= 0))",
 [
 "testRender_vectors",
@@ -12894,7 +12894,7 @@
 "rx-632-or",
 "srcl",
 "src/render/exact.c",
-"632:||",
+"710:||",
 "&&",
 [
 "testRender_vectors",
@@ -12923,7 +12923,7 @@
 "rx-632-eq",
 "srcl",
 "src/render/exact.c",
-"632:==",
+"710:==",
 "!=",
 [
 "testRender_vectors",
@@ -12952,7 +12952,7 @@
 "rx-632-and",
 "srcl",
 "src/render/exact.c",
-"632:&&",
+"710:&&",
 "||",
 [
 "testRender_vectors",
@@ -12981,7 +12981,7 @@
 "rx-638-neg",
 "srcl",
 "src/render/exact.c",
-"638:(i > 0)",
+"716:(i > 0)",
 "(!(i > 0))",
 [
 "testRender_vectors",
@@ -13010,7 +13010,7 @@
 "rx-640-neg",
 "srcl",
 "src/render/exact.c",
-"640:(!ev_less(s, v, s->heap[parent]))",
+"718:(!ev_less(s, v, s->heap[parent]))",
 "(!(!ev_less(s, v, s->heap[parent])))",
 [
 "testRender_vectors",
@@ -13039,7 +13039,7 @@
 "rx-643-del",
 "srcl",
 "src/render/exact.c",
-"643:s->heap[i] = s->heap[parent];",
+"721:s->heap[i] = s->heap[parent];",
 ";",
 [
 "testRender_vectors",
@@ -13068,7 +13068,7 @@
 "rx-645-del",
 "srcl",
 "src/render/exact.c",
-"645:i = parent;",
+"723:i = parent;",
 ";",
 [
 "testRender_vectors",
@@ -13097,7 +13097,7 @@
 "rx-647-del",
 "srcl",
 "src/render/exact.c",
-"647:s->heap[i] = v;",
+"725:s->heap[i] = v;",
 ";",
 [
 "testRender_vectors",
@@ -13126,7 +13126,7 @@
 "rx-648-del",
 "srcl",
 "src/render/exact.c",
-"648:s->hpos[v] = (uint32_t)i;",
+"726:s->hpos[v] = (uint32_t)i;",
 ";",
 [
 "testRender_vectors",
@@ -13155,7 +13155,7 @@
 "rx-657-ge",
 "srcl",
 "src/render/exact.c",
-"657:>=",
+"735:>=",
 ">",
 [
 "testRender_vectors",
@@ -13184,7 +13184,7 @@
 "rx-657-neg",
 "srcl",
 "src/render/exact.c",
-"657:(child >= n)",
+"735:(child >= n)",
 "(!(child >= n))",
 [
 "testRender_vectors",
@@ -13213,7 +13213,7 @@
 "rx-660-lt",
 "srcl",
 "src/render/exact.c",
-"660:<",
+"738:<",
 "<=",
 [
 "testRender_vectors",
@@ -13242,7 +13242,7 @@
 "rx-660-and",
 "srcl",
 "src/render/exact.c",
-"660:&&",
+"738:&&",
 "||",
 [
 "testRender_vectors",
@@ -13271,7 +13271,7 @@
 "rx-660-neg",
 "srcl",
 "src/render/exact.c",
-"660:(child + 1 < n && ev_less(s, s->heap[child + 1], s->heap[child]))",
+"738:(child + 1 < n && ev_less(s, s->heap[child + 1], s->heap[child]))",
 "(!(child + 1 < n && ev_less(s, s->heap[child + 1], s->heap[child])))",
 [
 "testRender_vectors",
@@ -13300,7 +13300,7 @@
 "rx-661-del",
 "srcl",
 "src/render/exact.c",
-"661:child++;",
+"739:child++;",
 ";",
 [
 "testRender_vectors",
@@ -13329,7 +13329,7 @@
 "rx-663-neg",
 "srcl",
 "src/render/exact.c",
-"663:(!ev_less(s, s->heap[child], v))",
+"741:(!ev_less(s, s->heap[child], v))",
 "(!(!ev_less(s, s->heap[child], v)))",
 [
 "testRender_vectors",
@@ -13358,7 +13358,7 @@
 "rx-666-del",
 "srcl",
 "src/render/exact.c",
-"666:s->heap[i] = s->heap[child];",
+"744:s->heap[i] = s->heap[child];",
 ";",
 [
 "testRender_vectors",
@@ -13387,7 +13387,7 @@
 "rx-667-del",
 "srcl",
 "src/render/exact.c",
-"667:s->hpos[s->heap[i]] = (uint32_t)i;",
+"745:s->hpos[s->heap[i]] = (uint32_t)i;",
 ";",
 [
 "testRender_vectors",
@@ -13416,7 +13416,7 @@
 "rx-668-del",
 "srcl",
 "src/render/exact.c",
-"668:i = child;",
+"746:i = child;",
 ";",
 [
 "testRender_vectors",
@@ -13445,7 +13445,7 @@
 "rx-670-del",
 "srcl",
 "src/render/exact.c",
-"670:s->heap[i] = v;",
+"748:s->heap[i] = v;",
 ";",
 [
 "testRender_vectors",
@@ -13474,7 +13474,7 @@
 "rx-671-del",
 "srcl",
 "src/render/exact.c",
-"671:s->hpos[v] = (uint32_t)i;",
+"749:s->hpos[v] = (uint32_t)i;",
 ";",
 [
 "testRender_vectors",
@@ -13503,7 +13503,7 @@
 "rx-678-eq",
 "srcl",
 "src/render/exact.c",
-"678:==",
+"756:==",
 "!=",
 [
 "testRender_vectors",
@@ -13532,7 +13532,7 @@
 "rx-678-neg",
 "srcl",
 "src/render/exact.c",
-"678:(i == NONE)",
+"756:(i == NONE)",
 "(!(i == NONE))",
 [
 "testRender_vectors",
@@ -13561,7 +13561,7 @@
 "rx-681-del",
 "srcl",
 "src/render/exact.c",
-"681:s->hpos[pos] = NONE;",
+"759:s->hpos[pos] = NONE;",
 ";",
 [
 "testRender_vectors",
@@ -13590,7 +13590,7 @@
 "rx-682-del",
 "srcl",
 "src/render/exact.c",
-"682:c->hn--;",
+"760:c->hn--;",
 ";",
 [
 "testRender_vectors",
@@ -13619,7 +13619,7 @@
 "rx-683-eq",
 "srcl",
 "src/render/exact.c",
-"683:==",
+"761:==",
 "!=",
 [
 "testRender_vectors",
@@ -13648,7 +13648,7 @@
 "rx-683-neg",
 "srcl",
 "src/render/exact.c",
-"683:(i == c->hn)",
+"761:(i == c->hn)",
 "(!(i == c->hn))",
 [
 "testRender_vectors",
@@ -13677,7 +13677,7 @@
 "rx-686-del",
 "srcl",
 "src/render/exact.c",
-"686:s->heap[i] = s->heap[c->hn];",
+"764:s->heap[i] = s->heap[c->hn];",
 ";",
 [
 "testRender_vectors",
@@ -13706,7 +13706,7 @@
 "rx-688-del",
 "srcl",
 "src/render/exact.c",
-"688:heap_down(c, i);",
+"766:heap_down(c, i);",
 ";",
 [
 "testRender_vectors",
@@ -13735,7 +13735,7 @@
 "rx-703-neg",
 "srcl",
 "src/render/exact.c",
-"703:(dd <= 0)",
+"781:(dd <= 0)",
 "(!(dd <= 0))",
 [
 "testRender_vectors",
@@ -13764,7 +13764,7 @@
 "rx-707-or",
 "srcl",
 "src/render/exact.c",
-"707:||",
+"785:||",
 "&&",
 [
 "testRender_vectors",
@@ -13793,7 +13793,7 @@
 "rx-707-ge",
 "srcl",
 "src/render/exact.c",
-"707:>=",
+"785:>=",
 ">",
 [
 "testRender_vectors",
@@ -13822,7 +13822,7 @@
 "rx-707-neg",
 "srcl",
 "src/render/exact.c",
-"707:(nn <= 0 || nn >= c->height * dd)",
+"785:(nn <= 0 || nn >= c->height * dd)",
 "(!(nn <= 0 || nn >= c->height * dd))",
 [
 "testRender_vectors",
@@ -13851,7 +13851,7 @@
 "rx-720-neg",
 "srcl",
 "src/render/exact.c",
-"720:(!event_of(c, pos, &n, &d))",
+"798:(!event_of(c, pos, &n, &d))",
 "(!(!event_of(c, pos, &n, &d)))",
 [
 "testRender_vectors",
@@ -13880,7 +13880,7 @@
 "rx-724-del",
 "srcl",
 "src/render/exact.c",
-"724:s->evn[pos] = n;",
+"802:s->evn[pos] = n;",
 ";",
 [
 "testRender_vectors",
@@ -13909,7 +13909,7 @@
 "rx-725-del",
 "srcl",
 "src/render/exact.c",
-"725:s->evd[pos] = d;",
+"803:s->evd[pos] = d;",
 ";",
 [
 "testRender_vectors",
@@ -13938,7 +13938,7 @@
 "rx-727-eq",
 "srcl",
 "src/render/exact.c",
-"727:==",
+"805:==",
 "!=",
 [
 "testRender_vectors",
@@ -13967,7 +13967,7 @@
 "rx-727-neg",
 "srcl",
 "src/render/exact.c",
-"727:(i == NONE)",
+"805:(i == NONE)",
 "(!(i == NONE))",
 [
 "testRender_vectors",
@@ -13996,7 +13996,7 @@
 "rx-728-del",
 "srcl",
 "src/render/exact.c",
-"728:i = c->hn++;",
+"806:i = c->hn++;",
 ";",
 [
 "testRender_vectors",
@@ -14025,7 +14025,7 @@
 "rx-729-del",
 "srcl",
 "src/render/exact.c",
-"729:s->heap[i] = pos;",
+"807:s->heap[i] = pos;",
 ";",
 [
 "testRender_vectors",
@@ -14054,7 +14054,7 @@
 "rx-732-del",
 "srcl",
 "src/render/exact.c",
-"732:heap_up(c, i);",
+"810:heap_up(c, i);",
 ";",
 [
 "testRender_vectors",
@@ -14083,7 +14083,7 @@
 "rx-763-eq",
 "srcl",
 "src/render/exact.c",
-"763:==",
+"841:==",
 "!=",
 [
 "testRender_vectors",
@@ -14112,7 +14112,7 @@
 "rx-763-neg",
 "srcl",
 "src/render/exact.c",
-"763:(pr->parts == 1)",
+"841:(pr->parts == 1)",
 "(!(pr->parts == 1))",
 [
 "testRender_vectors",
@@ -14141,7 +14141,7 @@
 "rx-769-del",
 "srcl",
 "src/render/exact.c",
-"769:g[i].w[0] = w;",
+"847:g[i].w[0] = w;",
 ";",
 [
 "testRender_vectors",
@@ -14170,7 +14170,7 @@
 "rx-772-eq",
 "srcl",
 "src/render/exact.c",
-"772:==",
+"850:==",
 "!=",
 [
 "testRender_vectors",
@@ -14199,7 +14199,7 @@
 "rx-772-ne",
 "srcl",
 "src/render/exact.c",
-"772:(w != 0 ",
+"850:(w != 0 ",
 "(w == 0 ",
 [
 "testRender_vectors",
@@ -14228,7 +14228,7 @@
 "rx-772-ne2",
 "srcl",
 "src/render/exact.c",
-"772:1) != 0 ",
+"850:1) != 0 ",
 "1) == 0 ",
 [
 "testRender_vectors",
@@ -14257,7 +14257,7 @@
 "rx-772-ne3",
 "srcl",
 "src/render/exact.c",
-"772: w != 0)",
+"850: w != 0)",
 " w == 0)",
 [
 "testRender_vectors",
@@ -14286,7 +14286,7 @@
 "rx-772-del",
 "srcl",
 "src/render/exact.c",
-"772:g[i].om = pr->mode == GSHCPU_EXACT_OVERLAP ? (w != 0 ? 2 : 0) : ((pr->even_odd ? (w & 1) != 0 : w != 0) ? 2 : 0);",
+"850:g[i].om = pr->mode == GSHCPU_EXACT_OVERLAP ? (w != 0 ? 2 : 0) : ((pr->even_odd ? (w & 1) != 0 : w != 0) ? 2 : 0);",
 ";",
 [
 "testRender_vectors",
@@ -14315,7 +14315,7 @@
 "rx-773-eq",
 "srcl",
 "src/render/exact.c",
-"773:==",
+"851:==",
 "!=",
 [
 "testRender_vectors",
@@ -14344,7 +14344,7 @@
 "rx-773-neg",
 "srcl",
 "src/render/exact.c",
-"773:(i == c->n)",
+"851:(i == c->n)",
 "(!(i == c->n))",
 [
 "testRender_vectors",
@@ -14373,7 +14373,7 @@
 "rx-781-del",
 "srcl",
 "src/render/exact.c",
-"781:c->wmax = most > c->wmax ? most : c->wmax;",
+"859:c->wmax = most > c->wmax ? most : c->wmax;",
 ";",
 [
 "testRender_vectors",
@@ -14402,7 +14402,7 @@
 "rx-785-del",
 "srcl",
 "src/render/exact.c",
-"785:g[0].w[p] = (int32_t)c->wind0[p];",
+"863:g[0].w[p] = (int32_t)c->wind0[p];",
 ";",
 [
 "testRender_vectors",
@@ -14431,7 +14431,7 @@
 "rx-787-le",
 "srcl",
 "src/render/exact.c",
-"787:<=",
+"865:<=",
 "<",
 [
 "testRender_vectors",
@@ -14460,7 +14460,7 @@
 "rx-788-neg",
 "srcl",
 "src/render/exact.c",
-"788:(i > 0)",
+"866:(i > 0)",
 "(!(i > 0))",
 [
 "testRender_vectors",
@@ -14489,7 +14489,7 @@
 "rx-790-del",
 "srcl",
 "src/render/exact.c",
-"790:g[i] = g[i - 1];",
+"868:g[i] = g[i - 1];",
 ";",
 [
 "testRender_vectors",
@@ -14518,7 +14518,7 @@
 "rx-797-del",
 "srcl",
 "src/render/exact.c",
-"797:g[i].om = omega_of(pr, g[i].w);",
+"875:g[i].om = omega_of(pr, g[i].w);",
 ";",
 [
 "testRender_vectors",
@@ -14547,7 +14547,7 @@
 "rx-808-eq",
 "srcl",
 "src/render/exact.c",
-"808:==",
+"1034:==",
 "!=",
 [
 "testRender_vectors",
@@ -14576,7 +14576,7 @@
 "rx-808-neg",
 "srcl",
 "src/render/exact.c",
-"808:(n == 0)",
+"1034:(n == 0)",
 "(!(n == 0))",
 [
 "testRender_vectors",
@@ -14605,7 +14605,7 @@
 "rx-815-del",
 "srcl",
 "src/render/exact.c",
-"815:c->acc += (uint64_t)((int64_t)64 * height * (int64_t)omega_of(pr, w)) << 30;",
+"1041:c->acc += (uint64_t)((int64_t)64 * height * (int64_t)omega_of(pr, w)) << 30;",
 ";",
 [
 "testRender_vectors",
@@ -14634,7 +14634,7 @@
 "rx-818-del",
 "srcl",
 "src/render/exact.c",
-"818:slab_gaps(c);",
+"1044:slab_gaps(c);",
 ";",
 [
 "testRender_vectors",
@@ -14663,7 +14663,7 @@
 "rx-820-del",
 "srcl",
 "src/render/exact.c",
-"820:c->acc += (uint64_t)((int64_t)64 * height * (int64_t)g[n].om) << 30;",
+"1046:c->acc += (uint64_t)((int64_t)64 * height * (int64_t)g[n].om) << 30;",
 ";",
 [
 "testRender_vectors",
@@ -14692,7 +14692,7 @@
 "rx-823-ge",
 "srcl",
 "src/render/exact.c",
-"823:>=",
+"1049:>=",
 ">",
 [
 "testRender_vectors",
@@ -14721,7 +14721,7 @@
 "rx-823-neg",
 "srcl",
 "src/render/exact.c",
-"823:(n >= 2)",
+"1049:(n >= 2)",
 "(!(n >= 2))",
 [
 "testRender_vectors",
@@ -14750,7 +14750,7 @@
 "rx-824-lt",
 "srcl",
 "src/render/exact.c",
-"824:<",
+"1050:<",
 "<=",
 [
 "testRender_vectors",
@@ -14779,7 +14779,7 @@
 "rx-827-neg",
 "srcl",
 "src/render/exact.c",
-"827:(event_of(c, (uint32_t)pos, &en, &ed))",
+"1053:(event_of(c, (uint32_t)pos, &en, &ed))",
 "(!(event_of(c, (uint32_t)pos, &en, &ed)))",
 [
 "testRender_vectors",
@@ -14808,7 +14808,7 @@
 "rx-828-del",
 "srcl",
 "src/render/exact.c",
-"828:s->evn[pos] = en;",
+"1054:s->evn[pos] = en;",
 ";",
 [
 "testRender_vectors",
@@ -14837,7 +14837,7 @@
 "rx-829-del",
 "srcl",
 "src/render/exact.c",
-"829:s->evd[pos] = ed;",
+"1055:s->evd[pos] = ed;",
 ";",
 [
 "testRender_vectors",
@@ -14866,7 +14866,7 @@
 "rx-830-del",
 "srcl",
 "src/render/exact.c",
-"830:s->hpos[pos] = (uint32_t)c->hn;",
+"1056:s->hpos[pos] = (uint32_t)c->hn;",
 ";",
 [
 "testRender_vectors",
@@ -14895,7 +14895,7 @@
 "rx-831-del",
 "srcl",
 "src/render/exact.c",
-"831:s->heap[c->hn++] = (uint32_t)pos;",
+"1057:s->heap[c->hn++] = (uint32_t)pos;",
 ";",
 [
 "testRender_vectors",
@@ -14924,7 +14924,7 @@
 "rx-833-del",
 "srcl",
 "src/render/exact.c",
-"833:s->hpos[pos] = NONE;",
+"1059:s->hpos[pos] = NONE;",
 ";",
 [
 "testRender_vectors",
@@ -14953,7 +14953,7 @@
 "rx-837-del",
 "srcl",
 "src/render/exact.c",
-"837:heap_down(c, i);",
+"1063:heap_down(c, i);",
 ";",
 [
 "testRender_vectors",
@@ -14982,7 +14982,7 @@
 "rx-840-neg",
 "srcl",
 "src/render/exact.c",
-"840:(c->hn > 0)",
+"1066:(c->hn > 0)",
 "(!(c->hn > 0))",
 [
 "testRender_vectors",
@@ -15011,7 +15011,7 @@
 "rx-844-del",
 "srcl",
 "src/render/exact.c",
-"844:heap_remove(c, pos);",
+"1070:heap_remove(c, pos);",
 ";",
 [
 "testRender_vectors",
@@ -15040,7 +15040,7 @@
 "rx-854-del",
 "srcl",
 "src/render/exact.c",
-"854:mid.om = omega_of(pr, mid.w);",
+"1080:mid.om = omega_of(pr, mid.w);",
 ";",
 [
 "testRender_vectors",
@@ -15069,7 +15069,7 @@
 "rx-856-ne",
 "srcl",
 "src/render/exact.c",
-"856:!=",
+"1082:!=",
 "==",
 [
 "testRender_vectors",
@@ -15098,7 +15098,7 @@
 "rx-856-neg",
 "srcl",
 "src/render/exact.c",
-"856:(dd != 0)",
+"1082:(dd != 0)",
 "(!(dd != 0))",
 [
 "testRender_vectors",
@@ -15127,7 +15127,7 @@
 "rx-861-del",
 "srcl",
 "src/render/exact.c",
-"861:c->events++;",
+"1087:c->events++;",
 ";",
 [
 "testRender_vectors",
@@ -15156,7 +15156,7 @@
 "rx-864-del",
 "srcl",
 "src/render/exact.c",
-"864:c->ord[pos] = iq;",
+"1090:c->ord[pos] = iq;",
 ";",
 [
 "testRender_vectors",
@@ -15185,7 +15185,7 @@
 "rx-867-neg",
 "srcl",
 "src/render/exact.c",
-"867:(pos > 0)",
+"1093:(pos > 0)",
 "(!(pos > 0))",
 [
 "testRender_vectors",
@@ -15214,7 +15214,7 @@
 "rx-868-del",
 "srcl",
 "src/render/exact.c",
-"868:event_set(c, pos - 1);",
+"1094:event_set(c, pos - 1);",
 ";",
 [
 "testRender_vectors",
@@ -15243,7 +15243,7 @@
 "rx-870-lt",
 "srcl",
 "src/render/exact.c",
-"870:<",
+"1096:<",
 "<=",
 [
 "testRender_vectors",
@@ -15272,7 +15272,7 @@
 "rx-870-neg",
 "srcl",
 "src/render/exact.c",
-"870:(pos + 2 < n)",
+"1096:(pos + 2 < n)",
 "(!(pos + 2 < n))",
 [
 "testRender_vectors",
@@ -15301,7 +15301,7 @@
 "rx-871-del",
 "srcl",
 "src/render/exact.c",
-"871:event_set(c, pos + 1);",
+"1097:event_set(c, pos + 1);",
 ";",
 [
 "testRender_vectors",
@@ -15330,7 +15330,7 @@
 "rx-874-lt",
 "srcl",
 "src/render/exact.c",
-"874:<",
+"1100:<",
 "<=",
 [
 "testRender_vectors",
@@ -15359,7 +15359,7 @@
 "rx-876-ne",
 "srcl",
 "src/render/exact.c",
-"876:!=",
+"1102:!=",
 "==",
 [
 "testRender_vectors",
@@ -15388,7 +15388,7 @@
 "rx-876-neg",
 "srcl",
 "src/render/exact.c",
-"876:(cf != 0)",
+"1102:(cf != 0)",
 "(!(cf != 0))",
 [
 "testRender_vectors",
@@ -15417,7 +15417,7 @@
 "rx-877-del",
 "srcl",
 "src/render/exact.c",
-"877:c->acc += (uint64_t)(int64_t)cf * f30_end(s, c->ord[i], height);",
+"1103:c->acc += (uint64_t)(int64_t)cf * f30_end(s, c->ord[i], height);",
 ";",
 [
 "testRender_vectors",
@@ -15446,7 +15446,7 @@
 "rx-878-del",
 "srcl",
 "src/render/exact.c",
-"878:c->end_evals++;",
+"1104:c->end_evals++;",
 ";",
 [
 "testRender_vectors",
@@ -15475,7 +15475,7 @@
 "rx-882-lt",
 "srcl",
 "src/render/exact.c",
-"882:<",
+"1108:<",
 "<=",
 [
 "testRender_vectors",
@@ -15504,7 +15504,7 @@
 "rx-883-neg",
 "srcl",
 "src/render/exact.c",
-"883:(right_of_at(s, c->ord[i - 1], c->ord[i], height))",
+"1109:(right_of_at(s, c->ord[i - 1], c->ord[i], height))",
 "(!(right_of_at(s, c->ord[i - 1], c->ord[i], height)))",
 [
 "testRender_vectors",
@@ -15533,7 +15533,7 @@
 "rx-903-del",
 "srcl",
 "src/render/exact.c",
-"903:left[p] = c->wtop[p];",
+"1130:left[p] = c->wtop[p];",
 ";",
 [
 "testRender_vectors",
@@ -15562,7 +15562,7 @@
 "rx-905-del",
 "srcl",
 "src/render/exact.c",
-"905:c->n_prev = 0;",
+"1132:c->n_prev = 0;",
 ";",
 [
 "testRender_vectors",
@@ -15591,7 +15591,7 @@
 "rx-906-del",
 "srcl",
 "src/render/exact.c",
-"906:c->ord = s->ord;",
+"1133:c->ord = s->ord;",
 ";",
 [
 "testRender_vectors",
@@ -15620,7 +15620,7 @@
 "rx-907-del",
 "srcl",
 "src/render/exact.c",
-"907:c->ord2 = s->ord2;",
+"1134:c->ord2 = s->ord2;",
 ";",
 [
 "testRender_vectors",
@@ -15649,7 +15649,7 @@
 "rx-908-del",
 "srcl",
 "src/render/exact.c",
-"908:c->cursor = 0;",
+"1135:c->cursor = 0;",
 ";",
 [
 "testRender_vectors",
@@ -15678,7 +15678,7 @@
 "rx-911-lt",
 "srcl",
 "src/render/exact.c",
-"911:<",
+"1138:<",
 "<=",
 [
 "testRender_vectors",
@@ -15707,7 +15707,7 @@
 "rx-917-del",
 "srcl",
 "src/render/exact.c",
-"917:c->ya = h;",
+"1144:c->ya = h;",
 ";",
 [
 "testRender_vectors",
@@ -15736,7 +15736,7 @@
 "rx-919-del",
 "srcl",
 "src/render/exact.c",
-"919:c->height = yb - h;",
+"1146:c->height = yb - h;",
 ";",
 [
 "testRender_vectors",
@@ -15765,7 +15765,7 @@
 "rx-921-del",
 "srcl",
 "src/render/exact.c",
-"921:c->wind0[p] = p < pr->parts ? pr->eps[p] * left[p] : 0;",
+"1148:c->wind0[p] = p < pr->parts ? part_eps(pr, p) * left[p] : 0;",
 ";",
 [
 "testRender_vectors",
@@ -15794,7 +15794,7 @@
 "rx-923-del",
 "srcl",
 "src/render/exact.c",
-"923:slab_order(c);",
+"1150:slab_order(c);",
 ";",
 [
 "testRender_vectors",
@@ -15823,7 +15823,7 @@
 "rx-924-neg",
 "srcl",
 "src/render/exact.c",
-"924:(count)",
+"1151:(count)",
 "(!(count))",
 [
 "testRender_vectors",
@@ -15852,7 +15852,7 @@
 "rx-926-ge",
 "srcl",
 "src/render/exact.c",
-"926:>=",
+"1153:>=",
 ">",
 [
 "testRender_vectors",
@@ -15881,7 +15881,7 @@
 "rx-928-gt",
 "srcl",
 "src/render/exact.c",
-"928:>",
+"1155:>",
 ">=",
 [
 "testRender_vectors",
@@ -15910,7 +15910,7 @@
 "rx-928-neg",
 "srcl",
 "src/render/exact.c",
-"928:(total > limit)",
+"1155:(total > limit)",
 "(!(total > limit))",
 [
 "testRender_vectors",
@@ -15939,7 +15939,7 @@
 "rx-934-del",
 "srcl",
 "src/render/exact.c",
-"934:sweep_slab(c);",
+"1161:sweep_slab(c);",
 ";",
 [
 "testRender_vectors",
@@ -15968,7 +15968,7 @@
 "rx-935-ne",
 "srcl",
 "src/render/exact.c",
-"935:!=",
+"1162:!=",
 "==",
 [
 "testRender_vectors",
@@ -15997,7 +15997,7 @@
 "rx-935-neg",
 "srcl",
 "src/render/exact.c",
-"935:(c->status != GSHCPU_EXACT_OK)",
+"1162:(c->status != GSHCPU_EXACT_OK)",
 "(!(c->status != GSHCPU_EXACT_OK))",
 [
 "testRender_vectors",
@@ -16026,7 +16026,7 @@
 "rx-939-del",
 "srcl",
 "src/render/exact.c",
-"939:c->n_prev = c->n;",
+"1166:c->n_prev = c->n;",
 ";",
 [
 "testRender_vectors",
@@ -16055,7 +16055,7 @@
 "rx-940-del",
 "srcl",
 "src/render/exact.c",
-"940:h = yb;",
+"1167:h = yb;",
 ";",
 [
 "testRender_vectors",
@@ -16084,7 +16084,7 @@
 "rx-948-lt",
 "srcl",
 "src/render/exact.c",
-"948:<",
+"1175:<",
 "<=",
 [
 "testRender_vectors",
@@ -16113,7 +16113,7 @@
 "rx-950-ne",
 "srcl",
 "src/render/exact.c",
-"950:!=",
+"1177:!=",
 "==",
 [
 "testRender_vectors",
@@ -16142,7 +16142,7 @@
 "rx-955-ne",
 "srcl",
 "src/render/exact.c",
-"955:!=",
+"1182:!=",
 "==",
 [
 "testRender_vectors",
@@ -16171,7 +16171,7 @@
 "rx-955-neg",
 "srcl",
 "src/render/exact.c",
-"955:(rem % 64 != 0)",
+"1182:(rem % 64 != 0)",
 "(!(rem % 64 != 0))",
 [
 "testRender_vectors",
@@ -16200,7 +16200,7 @@
 "rx-958-del",
 "srcl",
 "src/render/exact.c",
-"958:c->wtop[p] = rem / 64;",
+"1185:c->wtop[p] = rem / 64;",
 ";",
 [
 "testRender_vectors",
@@ -16229,7 +16229,7 @@
 "rx-959-neg",
 "srcl",
 "src/render/exact.c",
-"959:(c->wtop[p] > GSHCPU_EXACT_WINDING_LIMIT || c->wtop[p] < -GSHCPU_EXACT_WINDING_LIMIT)",
+"1186:(c->wtop[p] > GSHCPU_EXACT_WINDING_LIMIT || c->wtop[p] < -GSHCPU_EXACT_WINDING_LIMIT)",
 "(!(c->wtop[p] > GSHCPU_EXACT_WINDING_LIMIT || c->wtop[p] < -GSHCPU_EXACT_WINDING_LIMIT))",
 [
 "testRender_vectors",
@@ -16258,7 +16258,7 @@
 "rx-967-eq",
 "srcl",
 "src/render/exact.c",
-"967:==",
+"1194:==",
 "!=",
 [
 "testRender_vectors",
@@ -16287,7 +16287,7 @@
 "rx-967-neg",
 "srcl",
 "src/render/exact.c",
-"967:(budget == 0)",
+"1194:(budget == 0)",
 "(!(budget == 0))",
 [
 "testRender_vectors",
@@ -16316,7 +16316,7 @@
 "rx-972-lt",
 "srcl",
 "src/render/exact.c",
-"972:<",
+"1199:<",
 "<=",
 [
 "testRender_vectors",
@@ -16345,7 +16345,7 @@
 "rx-972-neg",
 "srcl",
 "src/render/exact.c",
-"972:(lo < hi)",
+"1199:(lo < hi)",
 "(!(lo < hi))",
 [
 "testRender_vectors",
@@ -16374,7 +16374,7 @@
 "rx-974-gt",
 "srcl",
 "src/render/exact.c",
-"974:>",
+"1201:>",
 ">=",
 [
 "testRender_vectors",
@@ -16403,7 +16403,7 @@
 "rx-974-neg",
 "srcl",
 "src/render/exact.c",
-"974:((mid * (mid - 1u)) / 2u > budget)",
+"1201:((mid * (mid - 1u)) / 2u > budget)",
 "(!((mid * (mid - 1u)) / 2u > budget))",
 [
 "testRender_vectors",
@@ -16432,7 +16432,7 @@
 "rx-975-del",
 "srcl",
 "src/render/exact.c",
-"975:hi = mid;",
+"1202:hi = mid;",
 ";",
 [
 "testRender_vectors",
@@ -16461,7 +16461,7 @@
 "rx-977-del",
 "srcl",
 "src/render/exact.c",
-"977:lo = mid + 1u;",
+"1204:lo = mid + 1u;",
 ";",
 [
 "testRender_vectors",
@@ -16490,7 +16490,7 @@
 "rx-985-ne",
 "srcl",
 "src/render/exact.c",
-"985:!=",
+"1212:!=",
 "==",
 [
 "testRender_vectors",
@@ -16519,7 +16519,7 @@
 "rx-991-del",
 "srcl",
 "src/render/exact.c",
-"991:s->last_wmax = c->wmax;",
+"1218:s->last_wmax = c->wmax;",
 ";",
 [
 "testRender_vectors",
@@ -16548,7 +16548,7 @@
 "rx-993-del",
 "srcl",
 "src/render/exact.c",
-"993:s->last_distinct = c->nfrag;",
+"1220:s->last_distinct = c->nfrag;",
 ";",
 [
 "testRender_vectors",
@@ -16577,7 +16577,7 @@
 "rx-996-del",
 "srcl",
 "src/render/exact.c",
-"996:s->last_events = c->events;",
+"1223:s->last_events = c->events;",
 ";",
 [
 "testRender_vectors",
@@ -16606,7 +16606,7 @@
 "rx-1007-neg",
 "srcl",
 "src/render/exact.c",
-"1007:(crossings > s->crossings_max)",
+"1234:(crossings > s->crossings_max)",
 "(!(crossings > s->crossings_max))",
 [
 "testRender_vectors",
@@ -16635,7 +16635,7 @@
 "rx-1008-del",
 "srcl",
 "src/render/exact.c",
-"1008:s->crossings_max = crossings;",
+"1235:s->crossings_max = crossings;",
 ";",
 [
 "testRender_vectors",
@@ -16664,7 +16664,7 @@
 "rx-1018-del",
 "srcl",
 "src/render/exact.c",
-"1018:c->s = s;",
+"1245:c->s = s;",
 ";",
 [
 "testRender_vectors",
@@ -16693,7 +16693,7 @@
 "rx-1024-del",
 "srcl",
 "src/render/exact.c",
-"1024:s->last_events = 0;",
+"1269:s->last_events = 0;",
 ";",
 [
 "testRender_vectors",
@@ -16780,7 +16780,7 @@
 "rv-360-eq",
 "srcl",
 "src/render/cover.c",
-"360:==",
+"361:==",
 "!=",
 [
 "testRender_vectors",
@@ -23392,7 +23392,7 @@
 "rv-188-ne",
 "srcl",
 "src/render/cover.c",
-"188:!=",
+"189:!=",
 "==",
 [
 "testRender_vectors",
@@ -23421,7 +23421,7 @@
 "rv-188-neg",
 "srcl",
 "src/render/cover.c",
-"188:(a.y != b.y)",
+"189:(a.y != b.y)",
 "(!(a.y != b.y))",
 [
 "testRender_vectors",
@@ -23450,7 +23450,7 @@
 "rv-191-eq",
 "srcl",
 "src/render/cover.c",
-"191:==",
+"192:==",
 "!=",
 [
 "testRender_vectors",
@@ -23479,7 +23479,7 @@
 "rv-191-neg",
 "srcl",
 "src/render/cover.c",
-"191:(a.x == b.x)",
+"192:(a.x == b.x)",
 "(!(a.x == b.x))",
 [
 "testRender_vectors",
@@ -23508,7 +23508,7 @@
 "rv-195-eq",
 "srcl",
 "src/render/cover.c",
-"195:n a.x == left ",
+"196:n a.x == left ",
 "n a.x != left ",
 [
 "testRender_vectors",
@@ -23537,7 +23537,7 @@
 "rv-195-or",
 "srcl",
 "src/render/cover.c",
-"195:||",
+"196:||",
 "&&",
 [
 "testRender_vectors",
@@ -23566,7 +23566,7 @@
 "rv-195-eq2",
 "srcl",
 "src/render/cover.c",
-"195:| b.x == left ",
+"196:| b.x == left ",
 "| b.x != left ",
 [
 "testRender_vectors",
@@ -23595,7 +23595,7 @@
 "rv-201-del",
 "srcl",
 "src/render/cover.c",
-"201:p.x0 = (uint8_t)(a.x - ex * ONE_PIXEL);",
+"202:p.x0 = (uint8_t)(a.x - ex * ONE_PIXEL);",
 ";",
 [
 "testRender_vectors",
@@ -23624,7 +23624,7 @@
 "rv-202-del",
 "srcl",
 "src/render/cover.c",
-"202:p.y0 = (uint8_t)(a.y - ey * ONE_PIXEL);",
+"203:p.y0 = (uint8_t)(a.y - ey * ONE_PIXEL);",
 ";",
 [
 "testRender_vectors",
@@ -23653,7 +23653,7 @@
 "rv-203-del",
 "srcl",
 "src/render/cover.c",
-"203:p.x1 = (uint8_t)(b.x - ex * ONE_PIXEL);",
+"204:p.x1 = (uint8_t)(b.x - ex * ONE_PIXEL);",
 ";",
 [
 "testRender_vectors",
@@ -23682,7 +23682,7 @@
 "rv-204-del",
 "srcl",
 "src/render/cover.c",
-"204:p.y1 = (uint8_t)(b.y - ey * ONE_PIXEL);",
+"205:p.y1 = (uint8_t)(b.y - ey * ONE_PIXEL);",
 ";",
 [
 "testRender_vectors",
@@ -23711,7 +23711,7 @@
 "rv-218-del",
 "srcl",
 "src/render/cover.c",
-"218:c->log_n = 0;",
+"219:c->log_n = 0;",
 ";",
 [
 "testRender_vectors",
@@ -23740,7 +23740,7 @@
 "rv-221-eq",
 "srcl",
 "src/render/cover.c",
-"221:==",
+"222:==",
 "!=",
 [
 "testRender_vectors",
@@ -23769,7 +23769,7 @@
 "rv-222-lt",
 "srcl",
 "src/render/cover.c",
-"222:x0 < c-",
+"223:x0 < c-",
 "x0 <= c-",
 [
 "testRender_vectors",
@@ -23798,7 +23798,7 @@
 "rv-222-gt",
 "srcl",
 "src/render/cover.c",
-"222:x1 > c-",
+"223:x1 > c-",
 "x1 >= c-",
 [
 "testRender_vectors",
@@ -23827,7 +23827,7 @@
 "rv-226-neg",
 "srcl",
 "src/render/cover.c",
-"226:(width > UINT32_MAX / (uint64_t)c->rows)",
+"227:(width > UINT32_MAX / (uint64_t)c->rows)",
 "(!(width > UINT32_MAX / (uint64_t)c->rows))",
 [
 "testRender_vectors",
@@ -23856,7 +23856,7 @@
 "rv-229-del",
 "srcl",
 "src/render/cover.c",
-"229:c->log_key = ex->scratch.key;",
+"230:c->log_key = ex->scratch.key;",
 ";",
 [
 "testRender_vectors",
@@ -23885,7 +23885,7 @@
 "rv-230-del",
 "srcl",
 "src/render/cover.c",
-"230:c->log_at = ex->scratch.byy;",
+"231:c->log_at = ex->scratch.byy;",
 ";",
 [
 "testRender_vectors",
@@ -23914,7 +23914,7 @@
 "rv-231-del",
 "srcl",
 "src/render/cover.c",
-"231:c->log_cap = ex->scratch.capacity;",
+"232:c->log_cap = ex->scratch.capacity;",
 ";",
 [
 "testRender_vectors",
@@ -23943,7 +23943,7 @@
 "rv-232-del",
 "srcl",
 "src/render/cover.c",
-"232:c->log_on = 1;",
+"233:c->log_on = 1;",
 ";",
 [
 "testRender_vectors",
@@ -23972,7 +23972,7 @@
 "rv-233-del",
 "srcl",
 "src/render/cover.c",
-"233:c->log_valid = 1;",
+"234:c->log_valid = 1;",
 ";",
 [
 "testRender_vectors",
@@ -24001,7 +24001,7 @@
 "rv-238-lt",
 "srcl",
 "src/render/cover.c",
-"238:<",
+"239:<",
 "<=",
 [
 "testRender_vectors",
@@ -24030,7 +24030,7 @@
 "rv-238-or",
 "srcl",
 "src/render/cover.c",
-"238:||",
+"239:||",
 "&&",
 [
 "testRender_vectors",
@@ -24059,7 +24059,7 @@
 "rv-238-neg",
 "srcl",
 "src/render/cover.c",
-"238:(ex < c->rect.x0 || ex >= c->rect.x1)",
+"239:(ex < c->rect.x0 || ex >= c->rect.x1)",
 "(!(ex < c->rect.x0 || ex >= c->rect.x1))",
 [
 "testRender_vectors",
@@ -24088,7 +24088,7 @@
 "rv-241-eq",
 "srcl",
 "src/render/cover.c",
-"241:==",
+"242:==",
 "!=",
 [
 "testRender_vectors",
@@ -24117,7 +24117,7 @@
 "rv-241-neg",
 "srcl",
 "src/render/cover.c",
-"241:(c->log_n == c->log_cap)",
+"242:(c->log_n == c->log_cap)",
 "(!(c->log_n == c->log_cap))",
 [
 "testRender_vectors",
@@ -24146,7 +24146,7 @@
 "rv-243-del",
 "srcl",
 "src/render/cover.c",
-"243:c->log_valid = 0;",
+"244:c->log_valid = 0;",
 ";",
 [
 "testRender_vectors",
@@ -24175,7 +24175,7 @@
 "rv-249-del",
 "srcl",
 "src/render/cover.c",
-"249:c->log_at[c->log_n] = (uint32_t)((ey - c->band) * (c->rect.x1 - c->rect.x0) + (ex - c->rect.x0));",
+"250:c->log_at[c->log_n] = (uint32_t)((ey - c->band) * (c->rect.x1 - c->rect.x0) + (ex - c->rect.x0));",
 ";",
 [
 "testRender_vectors",
@@ -24204,7 +24204,7 @@
 "rv-250-del",
 "srcl",
 "src/render/cover.c",
-"250:c->log_n++;",
+"251:c->log_n++;",
 ";",
 [
 "testRender_vectors",
@@ -24233,7 +24233,7 @@
 "rv-256-del",
 "srcl",
 "src/render/cover.c",
-"256:ex->replays++;",
+"257:ex->replays++;",
 ";",
 [
 "testRender_vectors",
@@ -24262,7 +24262,7 @@
 "rv-257-lt",
 "srcl",
 "src/render/cover.c",
-"257:<",
+"258:<",
 "<=",
 [
 "testRender_vectors",
@@ -24291,7 +24291,7 @@
 "rv-259-lt",
 "srcl",
 "src/render/cover.c",
-"259:<",
+"260:<",
 "<=",
 [
 "testRender_vectors",
@@ -24320,7 +24320,7 @@
 "rv-259-neg",
 "srcl",
 "src/render/cover.c",
-"259:(at < c->win0 || at >= c->win1)",
+"260:(at < c->win0 || at >= c->win1)",
 "(!(at < c->win0 || at >= c->win1))",
 [
 "testRender_vectors",
@@ -24349,7 +24349,7 @@
 "rv-264-eq",
 "srcl",
 "src/render/cover.c",
-"264:==",
+"265:==",
 "!=",
 [
 "testRender_vectors",
@@ -24378,7 +24378,7 @@
 "rv-264-neg",
 "srcl",
 "src/render/cover.c",
-"264:(ex->slot[k] == GSHCPU_EXACT_NO_SLOT)",
+"265:(ex->slot[k] == GSHCPU_EXACT_NO_SLOT)",
 "(!(ex->slot[k] == GSHCPU_EXACT_NO_SLOT))",
 [
 "testRender_vectors",
@@ -24407,7 +24407,7 @@
 "rv-268-del",
 "srcl",
 "src/render/cover.c",
-"268:p.x0 = (uint8_t)key;",
+"269:p.x0 = (uint8_t)key;",
 ";",
 [
 "testRender_vectors",
@@ -24436,7 +24436,7 @@
 "rv-269-del",
 "srcl",
 "src/render/cover.c",
-"269:p.y0 = (uint8_t)(key >> 8);",
+"270:p.y0 = (uint8_t)(key >> 8);",
 ";",
 [
 "testRender_vectors",
@@ -24465,7 +24465,7 @@
 "rv-270-del",
 "srcl",
 "src/render/cover.c",
-"270:p.x1 = (uint8_t)(key >> 16);",
+"271:p.x1 = (uint8_t)(key >> 16);",
 ";",
 [
 "testRender_vectors",
@@ -24494,7 +24494,7 @@
 "rv-271-del",
 "srcl",
 "src/render/cover.c",
-"271:p.y1 = (uint8_t)(key >> 24);",
+"272:p.y1 = (uint8_t)(key >> 24);",
 ";",
 [
 "testRender_vectors",
@@ -24523,7 +24523,7 @@
 "rv-273-del",
 "srcl",
 "src/render/cover.c",
-"273:ex->work++;",
+"274:ex->work++;",
 ";",
 [
 "testRender_vectors",
@@ -24552,7 +24552,7 @@
 "rv-279-lt",
 "srcl",
 "src/render/cover.c",
-"279:<",
+"280:<",
 "<=",
 [
 "testRender_vectors",
@@ -24581,7 +24581,7 @@
 "rv-279-or",
 "srcl",
 "src/render/cover.c",
-"279:||",
+"280:||",
 "&&",
 [
 "testRender_vectors",
@@ -24610,7 +24610,7 @@
 "rv-279-neg",
 "srcl",
 "src/render/cover.c",
-"279:(ex < c->walk.x0 || ex >= c->walk.x1)",
+"280:(ex < c->walk.x0 || ex >= c->walk.x1)",
 "(!(ex < c->walk.x0 || ex >= c->walk.x1))",
 [
 "testRender_vectors",
@@ -24639,7 +24639,7 @@
 "rv-283-ge",
 "srcl",
 "src/render/cover.c",
-"283:>=",
+"284:>=",
 ">",
 [
 "testRender_vectors",
@@ -24668,7 +24668,7 @@
 "rv-283-neg",
 "srcl",
 "src/render/cover.c",
-"283:((uint64_t)*n >= c->ex->max_pieces)",
+"284:((uint64_t)*n >= c->ex->max_pieces)",
 "(!((uint64_t)*n >= c->ex->max_pieces))",
 [
 "testRender_vectors",
@@ -24697,7 +24697,7 @@
 "rv-284-del",
 "srcl",
 "src/render/cover.c",
-"284:c->over = 1;",
+"285:c->over = 1;",
 ";",
 [
 "testRender_vectors",
@@ -24726,7 +24726,7 @@
 "rv-287-del",
 "srcl",
 "src/render/cover.c",
-"287:(*n)++;",
+"288:(*n)++;",
 ";",
 [
 "testRender_vectors",
@@ -24755,7 +24755,7 @@
 "rv-292-neg",
 "srcl",
 "src/render/cover.c",
-"292:(column < c->lo[row])",
+"293:(column < c->lo[row])",
 "(!(column < c->lo[row]))",
 [
 "testRender_vectors",
@@ -24784,7 +24784,7 @@
 "rv-295-neg",
 "srcl",
 "src/render/cover.c",
-"295:(column > c->hi[row])",
+"296:(column > c->hi[row])",
 "(!(column > c->hi[row]))",
 [
 "testRender_vectors",
@@ -24813,7 +24813,7 @@
 "rv-296-del",
 "srcl",
 "src/render/cover.c",
-"296:c->hi[row] = column;",
+"297:c->hi[row] = column;",
 ";",
 [
 "testRender_vectors",
@@ -24842,7 +24842,7 @@
 "rv-303-neg",
 "srcl",
 "src/render/cover.c",
-"303:(c->store_walk)",
+"304:(c->store_walk)",
 "(!(c->store_walk))",
 [
 "testRender_vectors",
@@ -24871,7 +24871,7 @@
 "rv-304-lt",
 "srcl",
 "src/render/cover.c",
-"304:<",
+"305:<",
 "<=",
 [
 "testRender_vectors",
@@ -24900,7 +24900,7 @@
 "rv-304-eq",
 "srcl",
 "src/render/cover.c",
-"304:==",
+"305:==",
 "!=",
 [
 "testRender_vectors",
@@ -24929,7 +24929,7 @@
 "rv-304-neg",
 "srcl",
 "src/render/cover.c",
-"304:(ex < c->walk.x0 || ex >= c->walk.x1 || piece_kind(ex, a, b) == 0)",
+"305:(ex < c->walk.x0 || ex >= c->walk.x1 || piece_kind(ex, a, b) == 0)",
 "(!(ex < c->walk.x0 || ex >= c->walk.x1 || piece_kind(ex, a, b) == 0))",
 [
 "testRender_vectors",
@@ -24958,7 +24958,7 @@
 "rv-308-lt",
 "srcl",
 "src/render/cover.c",
-"308:<",
+"309:<",
 "<=",
 [
 "testRender_vectors",
@@ -24987,7 +24987,7 @@
 "rv-308-eq",
 "srcl",
 "src/render/cover.c",
-"308:==",
+"309:==",
 "!=",
 [
 "testRender_vectors",
@@ -25016,7 +25016,7 @@
 "rv-308-neg",
 "srcl",
 "src/render/cover.c",
-"308:(ex < c->rect.x0 || ex >= c->rect.x1 || piece_kind(ex, a, b) == 0)",
+"309:(ex < c->rect.x0 || ex >= c->rect.x1 || piece_kind(ex, a, b) == 0)",
 "(!(ex < c->rect.x0 || ex >= c->rect.x1 || piece_kind(ex, a, b) == 0))",
 [
 "testRender_vectors",
@@ -25045,7 +25045,7 @@
 "rv-312-lt",
 "srcl",
 "src/render/cover.c",
-"312:<",
+"313:<",
 "<=",
 [
 "testRender_vectors",
@@ -25074,7 +25074,7 @@
 "rv-312-or",
 "srcl",
 "src/render/cover.c",
-"312:||",
+"313:||",
 "&&",
 [
 "testRender_vectors",
@@ -25103,7 +25103,7 @@
 "rv-312-neg",
 "srcl",
 "src/render/cover.c",
-"312:(at < c->win0 || at >= c->win1)",
+"313:(at < c->win0 || at >= c->win1)",
 "(!(at < c->win0 || at >= c->win1))",
 [
 "testRender_vectors",
@@ -25132,7 +25132,7 @@
 "rv-317-eq",
 "srcl",
 "src/render/cover.c",
-"317:==",
+"318:==",
 "!=",
 [
 "testRender_vectors",
@@ -25161,7 +25161,7 @@
 "rv-317-neg",
 "srcl",
 "src/render/cover.c",
-"317:(c->ex->slot[k] == GSHCPU_EXACT_NO_SLOT)",
+"318:(c->ex->slot[k] == GSHCPU_EXACT_NO_SLOT)",
 "(!(c->ex->slot[k] == GSHCPU_EXACT_NO_SLOT))",
 [
 "testRender_vectors",
@@ -25190,7 +25190,7 @@
 "rv-320-del",
 "srcl",
 "src/render/cover.c",
-"320:c->ex->pool[c->ex->slot[k]++] = local_piece(ex, ey, a, b);",
+"321:c->ex->pool[c->ex->slot[k]++] = local_piece(ex, ey, a, b);",
 ";",
 [
 "testRender_vectors",
@@ -25219,7 +25219,7 @@
 "rv-321-del",
 "srcl",
 "src/render/cover.c",
-"321:c->ex->work++;",
+"322:c->ex->work++;",
 ";",
 [
 "testRender_vectors",
@@ -25248,7 +25248,7 @@
 "rv-326-eq",
 "srcl",
 "src/render/cover.c",
-"326:==",
+"327:==",
 "!=",
 [
 "testRender_vectors",
@@ -25277,7 +25277,7 @@
 "rv-326-neg",
 "srcl",
 "src/render/cover.c",
-"326:(dy == 0 || c->over || c->store)",
+"327:(dy == 0 || c->over || c->store)",
 "(!(dy == 0 || c->over || c->store))",
 [
 "testRender_vectors",
@@ -25306,7 +25306,7 @@
 "rv-329-ge",
 "srcl",
 "src/render/cover.c",
-"329:>=",
+"330:>=",
 ">",
 [
 "testRender_vectors",
@@ -25335,7 +25335,7 @@
 "rv-329-neg",
 "srcl",
 "src/render/cover.c",
-"329:(c->cells >= c->max_deposits)",
+"330:(c->cells >= c->max_deposits)",
 "(!(c->cells >= c->max_deposits))",
 [
 "testRender_vectors",
@@ -25364,7 +25364,7 @@
 "rv-330-del",
 "srcl",
 "src/render/cover.c",
-"330:c->over = 1;",
+"331:c->over = 1;",
 ";",
 [
 "testRender_vectors",
@@ -25393,7 +25393,7 @@
 "rv-333-del",
 "srcl",
 "src/render/cover.c",
-"333:c->cells++;",
+"334:c->cells++;",
 ";",
 [
 "testRender_vectors",
@@ -25422,7 +25422,7 @@
 "rv-334-neg",
 "srcl",
 "src/render/cover.c",
-"334:(!c->cover)",
+"335:(!c->cover)",
 "(!(!c->cover))",
 [
 "testRender_vectors",
@@ -25451,7 +25451,7 @@
 "rv-339-neg",
 "srcl",
 "src/render/cover.c",
-"339:(c->track)",
+"340:(c->track)",
 "(!(c->track))",
 [
 "testRender_vectors",
@@ -25480,7 +25480,7 @@
 "rv-341-neg",
 "srcl",
 "src/render/cover.c",
-"341:(0 < c->lo[row])",
+"342:(0 < c->lo[row])",
 "(!(0 < c->lo[row]))",
 [
 "testRender_vectors",
@@ -25509,7 +25509,7 @@
 "rv-342-del",
 "srcl",
 "src/render/cover.c",
-"342:c->lo[row] = 0;",
+"343:c->lo[row] = 0;",
 ";",
 [
 "testRender_vectors",
@@ -25538,7 +25538,7 @@
 "rv-344-neg",
 "srcl",
 "src/render/cover.c",
-"344:(0 > c->hi[row])",
+"345:(0 > c->hi[row])",
 "(!(0 > c->hi[row]))",
 [
 "testRender_vectors",
@@ -25567,7 +25567,7 @@
 "rv-352-neg",
 "srcl",
 "src/render/cover.c",
-"352:(c->over)",
+"353:(c->over)",
 "(!(c->over))",
 [
 "testRender_vectors",
@@ -25596,7 +25596,7 @@
 "rv-355-neg",
 "srcl",
 "src/render/cover.c",
-"355:(c->store)",
+"356:(c->store)",
 "(!(c->store))",
 [
 "testRender_vectors",
@@ -25625,7 +25625,7 @@
 "rv-356-del",
 "srcl",
 "src/render/cover.c",
-"356:store_piece(c, ex, ey, a, b);",
+"357:store_piece(c, ex, ey, a, b);",
 ";",
 [
 "testRender_vectors",
@@ -25654,7 +25654,7 @@
 "rv-360-neg",
 "srcl",
 "src/render/cover.c",
-"360:(dy == 0)",
+"361:(dy == 0)",
 "(!(dy == 0))",
 [
 "testRender_vectors",
@@ -25683,7 +25683,7 @@
 "rv-361-and",
 "srcl",
 "src/render/cover.c",
-"361:&&",
+"362:&&",
 "||",
 [
 "testRender_vectors",
@@ -25712,7 +25712,7 @@
 "rv-361-eq",
 "srcl",
 "src/render/cover.c",
-"361:==",
+"362:==",
 "!=",
 [
 "testRender_vectors",
@@ -25741,7 +25741,7 @@
 "rv-361-neg",
 "srcl",
 "src/render/cover.c",
-"361:(c->ex && piece_kind(ex, a, b) == 2)",
+"362:(c->ex && piece_kind(ex, a, b) == 2)",
 "(!(c->ex && piece_kind(ex, a, b) == 2))",
 [
 "testRender_vectors",
@@ -25770,7 +25770,7 @@
 "rv-362-del",
 "srcl",
 "src/render/cover.c",
-"362:count_piece(c, ex, ey);",
+"363:count_piece(c, ex, ey);",
 ";",
 [
 "testRender_vectors",
@@ -25799,7 +25799,7 @@
 "rv-363-neg",
 "srcl",
 "src/render/cover.c",
-"363:(c->log_on)",
+"364:(c->log_on)",
 "(!(c->log_on))",
 [
 "testRender_vectors",
@@ -25828,7 +25828,7 @@
 "rv-364-del",
 "srcl",
 "src/render/cover.c",
-"364:log_piece(c, ex, ey, a, b);",
+"365:log_piece(c, ex, ey, a, b);",
 ";",
 [
 "testRender_vectors",
@@ -25857,7 +25857,7 @@
 "rv-369-ge",
 "srcl",
 "src/render/cover.c",
-"369:>=",
+"370:>=",
 ">",
 [
 "testRender_vectors",
@@ -25886,7 +25886,7 @@
 "rv-369-neg",
 "srcl",
 "src/render/cover.c",
-"369:(c->cells >= c->max_deposits)",
+"370:(c->cells >= c->max_deposits)",
 "(!(c->cells >= c->max_deposits))",
 [
 "testRender_vectors",
@@ -25915,7 +25915,7 @@
 "rv-370-del",
 "srcl",
 "src/render/cover.c",
-"370:c->over = 1;",
+"371:c->over = 1;",
 ";",
 [
 "testRender_vectors",
@@ -25944,7 +25944,7 @@
 "rv-373-del",
 "srcl",
 "src/render/cover.c",
-"373:c->cells++;",
+"374:c->cells++;",
 ";",
 [
 "testRender_vectors",
@@ -25973,7 +25973,7 @@
 "rv-374-neg",
 "srcl",
 "src/render/cover.c",
-"374:(c->ex)",
+"375:(c->ex)",
 "(!(c->ex))",
 [
 "testRender_vectors",
@@ -26002,7 +26002,7 @@
 "rv-375-del",
 "srcl",
 "src/render/cover.c",
-"375:count_piece(c, ex, ey);",
+"376:count_piece(c, ex, ey);",
 ";",
 [
 "testRender_vectors",
@@ -26031,7 +26031,7 @@
 "rv-376-neg",
 "srcl",
 "src/render/cover.c",
-"376:(c->over)",
+"377:(c->over)",
 "(!(c->over))",
 [
 "testRender_vectors",
@@ -26060,7 +26060,7 @@
 "rv-379-neg",
 "srcl",
 "src/render/cover.c",
-"379:(c->log_on)",
+"380:(c->log_on)",
 "(!(c->log_on))",
 [
 "testRender_vectors",
@@ -26089,7 +26089,7 @@
 "rv-380-del",
 "srcl",
 "src/render/cover.c",
-"380:log_piece(c, ex, ey, a, b);",
+"381:log_piece(c, ex, ey, a, b);",
 ";",
 [
 "testRender_vectors",
@@ -26118,7 +26118,7 @@
 "rv-383-or",
 "srcl",
 "src/render/cover.c",
-"383:||",
+"384:||",
 "&&",
 [
 "testRender_vectors",
@@ -26147,7 +26147,7 @@
 "rv-383-ge",
 "srcl",
 "src/render/cover.c",
-"383:>=",
+"384:>=",
 ">",
 [
 "testRender_vectors",
@@ -26176,7 +26176,7 @@
 "rv-383-neg",
 "srcl",
 "src/render/cover.c",
-"383:(!c->cover || ex >= c->rect.x1)",
+"384:(!c->cover || ex >= c->rect.x1)",
 "(!(!c->cover || ex >= c->rect.x1))",
 [
 "testRender_vectors",
@@ -26205,7 +26205,7 @@
 "rv-388-lt",
 "srcl",
 "src/render/cover.c",
-"388:<",
+"389:<",
 "<=",
 [
 "testRender_vectors",
@@ -26234,7 +26234,7 @@
 "rv-390-del",
 "srcl",
 "src/render/cover.c",
-"390:c->cover[at] += dy;",
+"391:c->cover[at] += dy;",
 ";",
 [
 "testRender_vectors",
@@ -26263,7 +26263,7 @@
 "rv-392-and",
 "srcl",
 "src/render/cover.c",
-"392:&&",
+"393:&&",
 "||",
 [
 "testRender_vectors",
@@ -26292,7 +26292,7 @@
 "rv-392-neg",
 "srcl",
 "src/render/cover.c",
-"392:(c->pf && ex >= c->rect.x0)",
+"393:(c->pf && ex >= c->rect.x0)",
 "(!(c->pf && ex >= c->rect.x0))",
 [
 "testRender_vectors",
@@ -26321,7 +26321,7 @@
 "rv-395-neg",
 "srcl",
 "src/render/cover.c",
-"395:(c->track)",
+"396:(c->track)",
 "(!(c->track))",
 [
 "testRender_vectors",
@@ -26350,7 +26350,7 @@
 "rv-397-neg",
 "srcl",
 "src/render/cover.c",
-"397:(column < c->lo[row])",
+"398:(column < c->lo[row])",
 "(!(column < c->lo[row]))",
 [
 "testRender_vectors",
@@ -26379,7 +26379,7 @@
 "rv-398-del",
 "srcl",
 "src/render/cover.c",
-"398:c->lo[row] = column;",
+"399:c->lo[row] = column;",
 ";",
 [
 "testRender_vectors",
@@ -26408,7 +26408,7 @@
 "rv-400-neg",
 "srcl",
 "src/render/cover.c",
-"400:(column > c->hi[row])",
+"401:(column > c->hi[row])",
 "(!(column > c->hi[row]))",
 [
 "testRender_vectors",
@@ -26437,7 +26437,7 @@
 "rv-401-del",
 "srcl",
 "src/render/cover.c",
-"401:c->hi[row] = column;",
+"402:c->hi[row] = column;",
 ";",
 [
 "testRender_vectors",
@@ -26466,7 +26466,7 @@
 "rv-409-del",
 "srcl",
 "src/render/cover.c",
-"409:p.x = b;",
+"410:p.x = b;",
 ";",
 [
 "testRender_vectors",
@@ -26495,7 +26495,7 @@
 "rv-416-neg",
 "srcl",
 "src/render/cover.c",
-"416:(c->rev)",
+"417:(c->rev)",
 "(!(c->rev))",
 [
 "testRender_vectors",
@@ -26524,7 +26524,7 @@
 "rv-417-del",
 "srcl",
 "src/render/cover.c",
-"417:piece(c, ex, ey, b, a);",
+"418:piece(c, ex, ey, b, a);",
 ";",
 [
 "testRender_vectors",
@@ -26553,7 +26553,7 @@
 "rv-419-del",
 "srcl",
 "src/render/cover.c",
-"419:piece(c, ex, ey, a, b);",
+"420:piece(c, ex, ey, a, b);",
 ";",
 [
 "testRender_vectors",
@@ -26582,7 +26582,7 @@
 "rv-425-eq",
 "srcl",
 "src/render/cover.c",
-"425:==",
+"426:==",
 "!=",
 [
 "testRender_vectors",
@@ -26611,7 +26611,7 @@
 "rv-425-neg",
 "srcl",
 "src/render/cover.c",
-"425:(from.y == to.y)",
+"426:(from.y == to.y)",
 "(!(from.y == to.y))",
 [
 "testRender_vectors",
@@ -26640,7 +26640,7 @@
 "rv-430-eq",
 "srcl",
 "src/render/cover.c",
-"430:==",
+"431:==",
 "!=",
 [
 "testRender_vectors",
@@ -26669,7 +26669,7 @@
 "rv-430-neg",
 "srcl",
 "src/render/cover.c",
-"430:(ex1 == ex2)",
+"431:(ex1 == ex2)",
 "(!(ex1 == ex2))",
 [
 "testRender_vectors",
@@ -26698,7 +26698,7 @@
 "rv-431-lt",
 "srcl",
 "src/render/cover.c",
-"431:<",
+"432:<",
 "<=",
 [
 "testRender_vectors",
@@ -26727,7 +26727,7 @@
 "rv-431-neg",
 "srcl",
 "src/render/cover.c",
-"431:(ex1 < c->walk.x1)",
+"432:(ex1 < c->walk.x1)",
 "(!(ex1 < c->walk.x1))",
 [
 "testRender_vectors",
@@ -26756,7 +26756,7 @@
 "rv-432-del",
 "srcl",
 "src/render/cover.c",
-"432:emit(c, ex1, ey, from, to);",
+"433:emit(c, ex1, ey, from, to);",
 ";",
 [
 "testRender_vectors",
@@ -26785,7 +26785,7 @@
 "rv-440-lt",
 "srcl",
 "src/render/cover.c",
-"440:<",
+"441:<",
 "<=",
 [
 "testRender_vectors",
@@ -26814,7 +26814,7 @@
 "rv-440-neg",
 "srcl",
 "src/render/cover.c",
-"440:(lo < c->walk.x0)",
+"441:(lo < c->walk.x0)",
 "(!(lo < c->walk.x0))",
 [
 "testRender_vectors",
@@ -26843,7 +26843,7 @@
 "rv-443-ge",
 "srcl",
 "src/render/cover.c",
-"443:>=",
+"444:>=",
 ">",
 [
 "testRender_vectors",
@@ -26872,7 +26872,7 @@
 "rv-443-neg",
 "srcl",
 "src/render/cover.c",
-"443:(hi >= c->walk.x0)",
+"444:(hi >= c->walk.x0)",
 "(!(hi >= c->walk.x0))",
 [
 "testRender_vectors",
@@ -26901,7 +26901,7 @@
 "rv-445-neg",
 "srcl",
 "src/render/cover.c",
-"445:(right)",
+"446:(right)",
 "(!(right))",
 [
 "testRender_vectors",
@@ -26930,7 +26930,7 @@
 "rv-446-del",
 "srcl",
 "src/render/cover.c",
-"446:b = cut;",
+"447:b = cut;",
 ";",
 [
 "testRender_vectors",
@@ -26959,7 +26959,7 @@
 "rv-448-del",
 "srcl",
 "src/render/cover.c",
-"448:a = cut;",
+"449:a = cut;",
 ";",
 [
 "testRender_vectors",
@@ -26988,7 +26988,7 @@
 "rv-455-le",
 "srcl",
 "src/render/cover.c",
-"455:<=",
+"456:<=",
 "<",
 [
 "testRender_vectors",
@@ -27017,7 +27017,7 @@
 "rv-457-eq",
 "srcl",
 "src/render/cover.c",
-"457:==",
+"458:==",
 "!=",
 [
 "testRender_vectors",
@@ -27046,7 +27046,7 @@
 "rv-458-eq",
 "srcl",
 "src/render/cover.c",
-"458:==",
+"459:==",
 "!=",
 [
 "testRender_vectors",
@@ -27075,7 +27075,7 @@
 "rv-467-del",
 "srcl",
 "src/render/cover.c",
-"467:p.y = b;",
+"468:p.y = b;",
 ";",
 [
 "testRender_vectors",
@@ -27104,7 +27104,7 @@
 "rv-477-lt",
 "srcl",
 "src/render/cover.c",
-"477:<",
+"478:<",
 "<=",
 [
 "testRender_vectors",
@@ -27133,7 +27133,7 @@
 "rv-477-ge",
 "srcl",
 "src/render/cover.c",
-"477:>=",
+"478:>=",
 ">",
 [
 "testRender_vectors",
@@ -27162,7 +27162,7 @@
 "rv-477-eq",
 "srcl",
 "src/render/cover.c",
-"477:==",
+"478:==",
 "!=",
 [
 "testRender_vectors",
@@ -27191,7 +27191,7 @@
 "rv-477-neg",
 "srcl",
 "src/render/cover.c",
-"477:(ey < c->band || ey >= c->band + c->rows || from.x == to.x)",
+"478:(ey < c->band || ey >= c->band + c->rows || from.x == to.x)",
 "(!(ey < c->band || ey >= c->band + c->rows || from.x == to.x))",
 [
 "testRender_vectors",
@@ -27220,7 +27220,7 @@
 "rv-487-le",
 "srcl",
 "src/render/cover.c",
-"487:<=",
+"488:<=",
 "<",
 [
 "testRender_vectors",
@@ -27249,7 +27249,7 @@
 "rv-487-and",
 "srcl",
 "src/render/cover.c",
-"487:&&",
+"488:&&",
 "||",
 [
 "testRender_vectors",
@@ -27278,7 +27278,7 @@
 "rv-492-neg",
 "srcl",
 "src/render/cover.c",
-"492:(!c->store)",
+"493:(!c->store)",
 "(!(!c->store))",
 [
 "testRender_vectors",
@@ -27307,7 +27307,7 @@
 "rv-507-eq",
 "srcl",
 "src/render/cover.c",
-"507:==",
+"508:==",
 "!=",
 [
 "testRender_vectors",
@@ -27336,7 +27336,7 @@
 "rv-507-neg",
 "srcl",
 "src/render/cover.c",
-"507:(from.y == to.y)",
+"508:(from.y == to.y)",
 "(!(from.y == to.y))",
 [
 "testRender_vectors",
@@ -27365,7 +27365,7 @@
 "rv-508-neg",
 "srcl",
 "src/render/cover.c",
-"508:(c->ex)",
+"509:(c->ex)",
 "(!(c->ex))",
 [
 "testRender_vectors",
@@ -27394,7 +27394,7 @@
 "rv-509-del",
 "srcl",
 "src/render/cover.c",
-"509:flat_edge(c, from, to);",
+"510:flat_edge(c, from, to);",
 ";",
 [
 "testRender_vectors",
@@ -27423,7 +27423,7 @@
 "rv-517-neg",
 "srcl",
 "src/render/cover.c",
-"517:(ymax <= top || ymin >= bottom)",
+"518:(ymax <= top || ymin >= bottom)",
 "(!(ymax <= top || ymin >= bottom))",
 [
 "testRender_vectors",
@@ -27452,7 +27452,7 @@
 "rv-522-del",
 "srcl",
 "src/render/cover.c",
-"522:from = to;",
+"523:from = to;",
 ";",
 [
 "testRender_vectors",
@@ -27481,7 +27481,7 @@
 "rv-524-del",
 "srcl",
 "src/render/cover.c",
-"524:c->rev = 1;",
+"525:c->rev = 1;",
 ";",
 [
 "testRender_vectors",
@@ -27510,7 +27510,7 @@
 "rv-530-neg",
 "srcl",
 "src/render/cover.c",
-"530:(lo < c->band)",
+"531:(lo < c->band)",
 "(!(lo < c->band))",
 [
 "testRender_vectors",
@@ -27539,7 +27539,7 @@
 "rv-531-del",
 "srcl",
 "src/render/cover.c",
-"531:lo = c->band;",
+"532:lo = c->band;",
 ";",
 [
 "testRender_vectors",
@@ -27568,7 +27568,7 @@
 "rv-533-neg",
 "srcl",
 "src/render/cover.c",
-"533:(hi > c->band + c->rows - 1)",
+"534:(hi > c->band + c->rows - 1)",
 "(!(hi > c->band + c->rows - 1))",
 [
 "testRender_vectors",
@@ -27597,7 +27597,7 @@
 "rv-534-del",
 "srcl",
 "src/render/cover.c",
-"534:hi = c->band + c->rows - 1;",
+"535:hi = c->band + c->rows - 1;",
 ";",
 [
 "testRender_vectors",
@@ -27626,7 +27626,7 @@
 "rv-536-le",
 "srcl",
 "src/render/cover.c",
-"536:<=",
+"537:<=",
 "<",
 [
 "testRender_vectors",
@@ -27655,7 +27655,7 @@
 "rv-541-del",
 "srcl",
 "src/render/cover.c",
-"541:c->rev = 0;",
+"542:c->rev = 0;",
 ";",
 [
 "testRender_vectors",
@@ -28728,7 +28728,7 @@
 "rv-670-lt",
 "srcl",
 "src/render/cover.c",
-"670:<",
+"671:<",
 "<=",
 [
 "testRender_vectors",
@@ -29250,7 +29250,7 @@
 "rv-732-and",
 "srcl",
 "src/render/cover.c",
-"732:&&",
+"733:&&",
 "||",
 [
 "testRender_vectors",
@@ -29279,7 +29279,7 @@
 "rv-732-lt",
 "srcl",
 "src/render/cover.c",
-"732:<",
+"733:<",
 "<=",
 [
 "testRender_vectors",
@@ -29366,7 +29366,7 @@
 "rv-697-lt",
 "srcl",
 "src/render/cover.c",
-"697:<",
+"698:<",
 "<=",
 [
 "testRender_vectors",
@@ -29917,7 +29917,7 @@
 "rv-741-lt",
 "srcl",
 "src/render/cover.c",
-"741:<",
+"742:<",
 "<=",
 [
 "testRender_vectors",
@@ -35050,7 +35050,7 @@
 "rv-1239-neg",
 "srcl",
 "src/render/cover.c",
-"1239:(from >= 0)",
+"1340:(from >= 0)",
 "(!(from >= 0))",
 [
 "testRender_vectors",
@@ -37196,7 +37196,7 @@
 "rv-1503-lt",
 "srcl",
 "src/render/cover.c",
-"1503:<",
+"1604:<",
 "<=",
 [
 "testRender_vectors",
@@ -37805,7 +37805,7 @@
 "rv-1544-lt",
 "srcl",
 "src/render/cover.c",
-"1544:<",
+"1645:<",
 "<=",
 [
 "testRender_vectors",
@@ -38356,7 +38356,7 @@
 "rv-1541-lt",
 "srcl",
 "src/render/cover.c",
-"1541:<",
+"1642:<",
 "<=",
 [
 "testRender_vectors",
@@ -38530,7 +38530,7 @@
 "rv-1587-le",
 "srcl",
 "src/render/cover.c",
-"1587:<=",
+"1688:<=",
 "<",
 [
 "testRender_vectors",
@@ -39806,7 +39806,7 @@
 "rv-1648-lt",
 "srcl",
 "src/render/cover.c",
-"1648:<",
+"1749:<",
 "<=",
 [
 "testRender_vectors",
@@ -47317,7 +47317,7 @@
 "rx-1041-lt",
 "srcl",
 "src/render/exact.c",
-"1041:<",
+"1286:<",
 "<=",
 [
 "testRender_vectors",
@@ -47346,7 +47346,7 @@
 "rx-1042-del",
 "srcl",
 "src/render/exact.c",
-"1042:left += jget(c, 0, h);",
+"1287:left += jget(c, 0, h);",
 ";",
 [
 "testRender_vectors",
@@ -47375,7 +47375,7 @@
 "rx-1046-or",
 "srcl",
 "src/render/exact.c",
-"1046:||",
+"1291:||",
 "&&",
 [
 "testRender_vectors",
@@ -47404,7 +47404,7 @@
 "rx-1046-neg",
 "srcl",
 "src/render/exact.c",
-"1046:(w0 < 0 || w0 > 1)",
+"1291:(w0 < 0 || w0 > 1)",
 "(!(w0 < 0 || w0 > 1))",
 [
 "testRender_vectors",
@@ -47433,7 +47433,7 @@
 "rx-1051-lt",
 "srcl",
 "src/render/exact.c",
-"1051:<",
+"1296:<",
 "<=",
 [
 "testRender_vectors",
@@ -47462,7 +47462,7 @@
 "rx-1053-le",
 "srcl",
 "src/render/exact.c",
-"1053:<=",
+"1298:<=",
 "<",
 [
 "testRender_vectors",
@@ -47491,7 +47491,7 @@
 "rx-1053-neg",
 "srcl",
 "src/render/exact.c",
-"1053:(q->py <= h && h < q->py + q->dy)",
+"1298:(q->py <= h && h < q->py + q->dy)",
 "(!(q->py <= h && h < q->py + q->dy))",
 [
 "testRender_vectors",
@@ -47520,7 +47520,7 @@
 "rx-1054-del",
 "srcl",
 "src/render/exact.c",
-"1054:f[np++] = q;",
+"1299:f[np++] = q;",
 ";",
 [
 "testRender_vectors",
@@ -47549,7 +47549,7 @@
 "rx-1057-eq",
 "srcl",
 "src/render/exact.c",
-"1057:==",
+"1302:==",
 "!=",
 [
 "testRender_vectors",
@@ -47578,7 +47578,7 @@
 "rx-1057-neg",
 "srcl",
 "src/render/exact.c",
-"1057:(np == 1)",
+"1302:(np == 1)",
 "(!(np == 1))",
 [
 "testRender_vectors",
@@ -47607,7 +47607,7 @@
 "rx-1059-or",
 "srcl",
 "src/render/exact.c",
-"1059:||",
+"1304:||",
 "&&",
 [
 "testRender_vectors",
@@ -47636,7 +47636,7 @@
 "rx-1059-neg",
 "srcl",
 "src/render/exact.c",
-"1059:(w1 < 0 || w1 > 1)",
+"1304:(w1 < 0 || w1 > 1)",
 "(!(w1 < 0 || w1 > 1))",
 [
 "testRender_vectors",
@@ -47665,7 +47665,7 @@
 "rx-1072-neg",
 "srcl",
 "src/render/exact.c",
-"1072:((top < 0 && bot > 0) || (top > 0 && bot < 0) || (top == 0 && bot == 0))",
+"1317:((top < 0 && bot > 0) || (top > 0 && bot < 0) || (top == 0 && bot == 0))",
 "(!((top < 0 && bot > 0) || (top > 0 && bot < 0) || (top == 0 && bot == 0)))",
 [
 "testRender_vectors",
@@ -47694,7 +47694,7 @@
 "rx-1075-or",
 "srcl",
 "src/render/exact.c",
-"1075:||",
+"1320:||",
 "&&",
 [
 "testRender_vectors",
@@ -47723,7 +47723,7 @@
 "rx-1075-eq",
 "srcl",
 "src/render/exact.c",
-"1075:==",
+"1320:==",
 "!=",
 [
 "testRender_vectors",
@@ -47752,7 +47752,7 @@
 "rx-1080-neg",
 "srcl",
 "src/render/exact.c",
-"1080:(w1 < 0 || w1 > 1 || w2 < 0 || w2 > 1)",
+"1325:(w1 < 0 || w1 > 1 || w2 < 0 || w2 > 1)",
 "(!(w1 < 0 || w1 > 1 || w2 < 0 || w2 > 1))",
 [
 "testRender_vectors",
@@ -47781,7 +47781,7 @@
 "rx-1084-del",
 "srcl",
 "src/render/exact.c",
-"1084:h = yb;",
+"1329:h = yb;",
 ";",
 [
 "testRender_vectors",
@@ -47810,8 +47810,8 @@
 "rx-1091-neg",
 "srcl",
 "src/render/exact.c",
-"1091:(gshcpu_exact_hook)",
-"(!(gshcpu_exact_hook))",
+"1336:(gshcpu_exact_hook && params->mode != GSHCPU_EXACT_GROUP)",
+"(!(gshcpu_exact_hook && params->mode != GSHCPU_EXACT_GROUP))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -47839,7 +47839,7 @@
 "rx-1097-ne",
 "srcl",
 "src/render/exact.c",
-"1097:!=",
+"1345:!=",
 "==",
 [
 "testRender_vectors",
@@ -47868,7 +47868,7 @@
 "rx-1097-neg",
 "srcl",
 "src/render/exact.c",
-"1097:(status != GSHCPU_EXACT_OK)",
+"1345:(status != GSHCPU_EXACT_OK)",
 "(!(status != GSHCPU_EXACT_OK))",
 [
 "testRender_vectors",
@@ -47897,7 +47897,7 @@
 "rx-1102-eq",
 "srcl",
 "src/render/exact.c",
-"1102:==",
+"1350:==",
 "!=",
 [
 "testRender_vectors",
@@ -47926,7 +47926,7 @@
 "rx-1102-and",
 "srcl",
 "src/render/exact.c",
-"1102:&&",
+"1350:&&",
 "||",
 [
 "testRender_vectors",
@@ -47955,7 +47955,7 @@
 "rx-1102-neg",
 "srcl",
 "src/render/exact.c",
-"1102:(params->mode == GSHCPU_EXACT_OVERLAP && c.weighted <= 1u)",
+"1350:(params->mode == GSHCPU_EXACT_OVERLAP && c.weighted <= 1u)",
 "(!(params->mode == GSHCPU_EXACT_OVERLAP && c.weighted <= 1u))",
 [
 "testRender_vectors",
@@ -47984,7 +47984,7 @@
 "rx-1111-del",
 "srcl",
 "src/render/exact.c",
-"1111:status = tops(&c, cell);",
+"1359:status = tops(&c, cell);",
 ";",
 [
 "testRender_vectors",
@@ -48013,7 +48013,7 @@
 "rx-1112-ne",
 "srcl",
 "src/render/exact.c",
-"1112:!=",
+"1360:!=",
 "==",
 [
 "testRender_vectors",
@@ -48042,7 +48042,7 @@
 "rx-1112-neg",
 "srcl",
 "src/render/exact.c",
-"1112:(status != GSHCPU_EXACT_OK)",
+"1360:(status != GSHCPU_EXACT_OK)",
 "(!(status != GSHCPU_EXACT_OK))",
 [
 "testRender_vectors",
@@ -48071,7 +48071,7 @@
 "rx-1116-eq2",
 "srcl",
 "src/render/exact.c",
-"1116:de == GS",
+"1364:de == GS",
 "de != GS",
 [
 "testRender_vectors",
@@ -48100,7 +48100,7 @@
 "rx-1117-and",
 "srcl",
 "src/render/exact.c",
-"1117:&&",
+"1365:&&",
 "||",
 [
 "testRender_vectors",
@@ -48129,7 +48129,7 @@
 "rx-1117-neg",
 "srcl",
 "src/render/exact.c",
-"1117:(simple && !gshcpu_exact_check)",
+"1365:(simple && !gshcpu_exact_check)",
 "(!(simple && !gshcpu_exact_check))",
 [
 "testRender_vectors",
@@ -48158,7 +48158,7 @@
 "rx-1126-or",
 "srcl",
 "src/render/exact.c",
-"1126:||",
+"1375:||",
 "&&",
 [
 "testRender_vectors",
@@ -48187,8 +48187,8 @@
 "rx-1126-neg",
 "srcl",
 "src/render/exact.c",
-"1126:(may_pass(c.nfrag, params->max_crossings) || (gshcpu_exact_check && c.nfrag >= 2))",
-"(!(may_pass(c.nfrag, params->max_crossings) || (gshcpu_exact_check && c.nfrag >= 2)))",
+"1375:(may_pass(c.nfrag, budget) || (gshcpu_exact_check && c.nfrag >= 2))",
+"(!(may_pass(c.nfrag, budget) || (gshcpu_exact_check && c.nfrag >= 2)))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -48216,7 +48216,7 @@
 "rx-1128-del",
 "srcl",
 "src/render/exact.c",
-"1128:status = walk_slabs(&c, 1, params->max_crossings ? params->max_crossings : UINT64_MAX, &crossings);",
+"1377:status = walk_slabs(&c, 1, budget ? budget : UINT64_MAX, &crossings);",
 ";",
 [
 "testRender_vectors",
@@ -48245,7 +48245,7 @@
 "rx-1130-ne",
 "srcl",
 "src/render/exact.c",
-"1130:!=",
+"1379:!=",
 "==",
 [
 "testRender_vectors",
@@ -48274,7 +48274,7 @@
 "rx-1130-neg",
 "srcl",
 "src/render/exact.c",
-"1130:(status != GSHCPU_EXACT_OK)",
+"1379:(status != GSHCPU_EXACT_OK)",
 "(!(status != GSHCPU_EXACT_OK))",
 [
 "testRender_vectors",
@@ -48303,7 +48303,7 @@
 "rx-1138-ne",
 "srcl",
 "src/render/exact.c",
-"1138:!=",
+"1387:!=",
 "==",
 [
 "testRender_vectors",
@@ -48332,7 +48332,7 @@
 "rx-1138-neg",
 "srcl",
 "src/render/exact.c",
-"1138:(status != GSHCPU_EXACT_OK)",
+"1387:(status != GSHCPU_EXACT_OK)",
 "(!(status != GSHCPU_EXACT_OK))",
 [
 "testRender_vectors",
@@ -48361,7 +48361,7 @@
 "rx-1141-ne",
 "srcl",
 "src/render/exact.c",
-"1141:!=",
+"1390:!=",
 "==",
 [
 "testRender_vectors",
@@ -48390,7 +48390,7 @@
 "rx-1141-neg",
 "srcl",
 "src/render/exact.c",
-"1141:(counted && gshcpu_exact_check && c.events != crossings)",
+"1390:(counted && gshcpu_exact_check && c.events != crossings)",
 "(!(counted && gshcpu_exact_check && c.events != crossings))",
 [
 "testRender_vectors",
@@ -48419,7 +48419,7 @@
 "rx-1152-eq",
 "srcl",
 "src/render/exact.c",
-"1152:==",
+"1401:==",
 "!=",
 [
 "testRender_vectors",
@@ -48448,7 +48448,7 @@
 "rx-1152-neg",
 "srcl",
 "src/render/exact.c",
-"1152:(params->mode == GSHCPU_EXACT_OVERLAP)",
+"1401:(params->mode == GSHCPU_EXACT_OVERLAP)",
 "(!(params->mode == GSHCPU_EXACT_OVERLAP))",
 [
 "testRender_vectors",
@@ -48477,7 +48477,7 @@
 "rx-1157-and",
 "srcl",
 "src/render/exact.c",
-"1157:&&",
+"1406:&&",
 "||",
 [
 "testRender_vectors",
@@ -48506,7 +48506,7 @@
 "rx-1157-ne",
 "srcl",
 "src/render/exact.c",
-"1157:!=",
+"1406:!=",
 "==",
 [
 "testRender_vectors",
@@ -48535,7 +48535,7 @@
 "rx-1157-neg",
 "srcl",
 "src/render/exact.c",
-"1157:(simple && *out != 0)",
+"1406:(simple && *out != 0)",
 "(!(simple && *out != 0))",
 [
 "testRender_vectors",
@@ -48564,7 +48564,7 @@
 "rx-1164-del",
 "srcl",
 "src/render/exact.c",
-"1164:note(&c, c.events);",
+"1417:note(&c, c.events);",
 ";",
 [
 "testRender_vectors",
@@ -48593,7 +48593,7 @@
 "rx-1174-ne",
 "srcl",
 "src/render/exact.c",
-"1174:!=",
+"1430:!=",
 "==",
 [
 "testRender_vectors",
@@ -48622,7 +48622,7 @@
 "rx-1174-neg",
 "srcl",
 "src/render/exact.c",
-"1174:(status != GSHCPU_EXACT_OK)",
+"1430:(status != GSHCPU_EXACT_OK)",
 "(!(status != GSHCPU_EXACT_OK))",
 [
 "testRender_vectors",
@@ -48651,8 +48651,8 @@
 "rx-1179-neg",
 "srcl",
 "src/render/exact.c",
-"1179:(c.nfrag >= 2 && may_pass(c.nfrag, params->max_crossings))",
-"(!(c.nfrag >= 2 && may_pass(c.nfrag, params->max_crossings)))",
+"1436:(c.nfrag >= 2 && may_pass(c.nfrag, budget))",
+"(!(c.nfrag >= 2 && may_pass(c.nfrag, budget)))",
 [
 "testRender_vectors",
 "testRender_parts",
@@ -48680,7 +48680,7 @@
 "rx-1180-del",
 "srcl",
 "src/render/exact.c",
-"1180:status = walk_slabs(&c, 1, params->max_crossings, crossings);",
+"1437:status = walk_slabs(&c, 1, budget, crossings);",
 ";",
 [
 "testRender_vectors",
@@ -48709,7 +48709,7 @@
 "rx-1199-gt",
 "srcl",
 "src/render/exact.c",
-"1199:>",
+"1458:>",
 ">=",
 [
 "testRender_vectors",
@@ -48738,7 +48738,7 @@
 "rx-1207-eq",
 "srcl",
 "src/render/exact.c",
-"1207:==",
+"1466:==",
 "!=",
 [
 "testRender_vectors",
@@ -48767,7 +48767,7 @@
 "rx-1207-neg",
 "srcl",
 "src/render/exact.c",
-"1207:(parts == 3)",
+"1466:(parts == 3)",
 "(!(parts == 3))",
 [
 "testRender_vectors",
@@ -48796,7 +48796,7 @@
 "rx-1222-del",
 "srcl",
 "src/render/exact.c",
-"1222:memset(ex, 0, sizeof *ex);",
+"1481:memset(ex, 0, sizeof *ex);",
 ";",
 [
 "testRender_vectors",
@@ -48825,7 +48825,7 @@
 "rx-1223-del",
 "srcl",
 "src/render/exact.c",
-"1223:ex->max_pieces = max_pieces;",
+"1482:ex->max_pieces = max_pieces;",
 ";",
 [
 "testRender_vectors",
@@ -48854,7 +48854,7 @@
 "rx-1224-del",
 "srcl",
 "src/render/exact.c",
-"1224:ex->count = (uint32_t *)(void *)carve(&at, cells * sizeof(uint32_t));",
+"1483:ex->count = (uint32_t *)(void *)carve(&at, cells * sizeof(uint32_t));",
 ";",
 [
 "testRender_vectors",
@@ -48883,7 +48883,7 @@
 "rx-1225-del",
 "srcl",
 "src/render/exact.c",
-"1225:ex->slot = (uint32_t *)(void *)carve(&at, cells * sizeof(uint32_t));",
+"1484:ex->slot = (uint32_t *)(void *)carve(&at, cells * sizeof(uint32_t));",
 ";",
 [
 "testRender_vectors",
@@ -48912,7 +48912,7 @@
 "rx-1226-del",
 "srcl",
 "src/render/exact.c",
-"1226:ex->pool_cap = pool_pieces(max_pieces);",
+"1485:ex->pool_cap = pool_pieces(max_pieces);",
 ";",
 [
 "testRender_vectors",
@@ -48941,7 +48941,7 @@
 "rx-1227-del",
 "srcl",
 "src/render/exact.c",
-"1227:ex->pool = (GSHCPU_Piece *)(void *)carve(&at, ex->pool_cap * sizeof(GSHCPU_Piece));",
+"1486:ex->pool = (GSHCPU_Piece *)(void *)carve(&at, ex->pool_cap * sizeof(GSHCPU_Piece));",
 ";",
 [
 "testRender_vectors",
@@ -48970,7 +48970,7 @@
 "rx-1228-del",
 "srcl",
 "src/render/exact.c",
-"1228:gshcpu_exact_scratch_init(&ex->scratch, carve(&at, gshcpu_exact_scratch_bytes(max_pieces, parts)), max_pieces, parts);",
+"1487:gshcpu_exact_scratch_init(&ex->scratch, carve(&at, gshcpu_exact_scratch_bytes(max_pieces, parts)), max_pieces, parts);",
 ";",
 [
 "testRender_vectors",
@@ -48999,7 +48999,7 @@
 "rx-1229-eq",
 "srcl",
 "src/render/exact.c",
-"1229:==",
+"1488:==",
 "!=",
 [
 "testRender_vectors",
@@ -49028,7 +49028,7 @@
 "rx-1229-neg",
 "srcl",
 "src/render/exact.c",
-"1229:(parts == 3)",
+"1488:(parts == 3)",
 "(!(parts == 3))",
 [
 "testRender_vectors",
@@ -49057,7 +49057,7 @@
 "rx-1230-del",
 "srcl",
 "src/render/exact.c",
-"1230:ex->union_k = (uint16_t *)(void *)carve(&at, cells * sizeof(uint16_t));",
+"1489:ex->union_k = (uint16_t *)(void *)carve(&at, cells * sizeof(uint16_t));",
 ";",
 [
 "testRender_vectors",
@@ -49086,7 +49086,7 @@
 "rx-1231-del",
 "srcl",
 "src/render/exact.c",
-"1231:ex->clip_k = (uint16_t *)(void *)carve(&at, cells * sizeof(uint16_t));",
+"1490:ex->clip_k = (uint16_t *)(void *)carve(&at, cells * sizeof(uint16_t));",
 ";",
 [
 "testRender_vectors",
@@ -49115,7 +49115,7 @@
 "rx-1232-del",
 "srcl",
 "src/render/exact.c",
-"1232:ex->prefix = (int64_t *)(void *)carve(&at, (width + 1u) * 3u * sizeof(int64_t));",
+"1491:ex->prefix = (int64_t *)(void *)carve(&at, (width + 1u) * 3u * sizeof(int64_t));",
 ";",
 [
 "testRender_vectors",
@@ -49144,7 +49144,7 @@
 "rx-1252-lt",
 "srcl",
 "src/render/exact.c",
-"1252:<",
+"1534:<",
 "<=",
 [
 "testRender_vectors",
@@ -49173,7 +49173,7 @@
 "rx-1255-del",
 "srcl",
 "src/render/exact.c",
-"1255:lo = mid;",
+"1537:lo = mid;",
 ";",
 [
 "testRender_vectors",
@@ -49202,7 +49202,7 @@
 "rx-1257-del",
 "srcl",
 "src/render/exact.c",
-"1257:hi = mid;",
+"1539:hi = mid;",
 ";",
 [
 "testRender_vectors",
@@ -49231,7 +49231,7 @@
 "rx-1274-ne",
 "srcl",
 "src/render/exact.c",
-"1274:!=",
+"1556:!=",
 "==",
 [
 "testRender_vectors",
@@ -49260,7 +49260,7 @@
 "rx-1274-neg",
 "srcl",
 "src/render/exact.c",
-"1274:(crossings != 0 && crossings < k)",
+"1556:(crossings != 0 && crossings < k)",
 "(!(crossings != 0 && crossings < k))",
 [
 "testRender_vectors",
@@ -49289,7 +49289,7 @@
 "rx-1275-del",
 "srcl",
 "src/render/exact.c",
-"1275:k = crossings;",
+"1557:k = crossings;",
 ";",
 [
 "testRender_vectors",
@@ -54390,7 +54390,7 @@
 "rs-875-or",
 "srcl",
 "src/render/sink.c",
-"875:||",
+"878:||",
 "&&",
 [
 "testRender_vectors",
@@ -55382,7 +55382,7 @@
 "rs-1003-str",
 "srcl",
 "src/render/sink.c",
-"1003:c",
+"1304:c",
 "Z",
 [
 "testRender_vectors",
@@ -55971,7 +55971,7 @@
 "rs-1114-ne",
 "srcl",
 "src/render/sink.c",
-"1114:!=",
+"1417:!=",
 "==",
 [
 "testRender_vectors",
@@ -57459,7 +57459,7 @@
 "rs-1272-or",
 "srcl",
 "src/render/sink.c",
-"1272:||",
+"1575:||",
 "&&",
 [
 "testRender_vectors",
@@ -58017,7 +58017,7 @@
 "rs-1366-ne",
 "srcl",
 "src/render/sink.c",
-"1366:!=",
+"1693:!=",
 "==",
 [
 "testRender_vectors",
@@ -64465,7 +64465,7 @@
 "rs-2053-ne",
 "srcl",
 "src/render/sink.c",
-"2053:!=",
+"2380:!=",
 "==",
 [
 "testRender_vectors",
@@ -64868,7 +64868,7 @@
 "rs-2068-eq",
 "srcl",
 "src/render/sink.c",
-"2068:==",
+"2395:==",
 "!=",
 [
 "testRender_vectors",
@@ -65302,7 +65302,7 @@
 "rs-2128-ne",
 "srcl",
 "src/render/sink.c",
-"2128:!=",
+"2455:!=",
 "==",
 [
 "testRender_vectors",
@@ -66015,7 +66015,7 @@
 "rs-2188-and",
 "srcl",
 "src/render/sink.c",
-"2188:&&",
+"2515:&&",
 "||",
 [
 "testRender_vectors",
@@ -66976,7 +66976,7 @@
 "rs-2329-eq",
 "srcl",
 "src/render/sink.c",
-"2329:==",
+"2656:==",
 "!=",
 [
 "testRender_vectors",
@@ -72711,7 +72711,7 @@
 "rs-3070-and",
 "srcl",
 "src/render/sink.c",
-"3070:&&",
+"3709:&&",
 "||",
 [
 "testRender_vectors",
@@ -72742,7 +72742,7 @@
 "rs-3070-eq",
 "srcl",
 "src/render/sink.c",
-"3070:==",
+"3709:==",
 "!=",
 [
 "testRender_vectors",
@@ -75904,7 +75904,7 @@
 "rs-3253-ne",
 "srcl",
 "src/render/sink.c",
-"3253:!=",
+"3892:!=",
 "==",
 [
 "testRender_vectors",
@@ -76400,7 +76400,7 @@
 "rs-3276-eq",
 "srcl",
 "src/render/sink.c",
-"3276:==",
+"3915:==",
 "!=",
 [
 "testRender_vectors",
@@ -80611,7 +80611,7 @@
 "rs-618-or",
 "srcl",
 "src/render/sink.c",
-"618:||",
+"621:||",
 "&&",
 [
 "testRender_vectors",
@@ -81699,7 +81699,7 @@
 "rs-2232-eq",
 "srcl",
 "src/render/sink.c",
-"2232:==",
+"2559:==",
 "!=",
 [
 "testRender_vectors",
@@ -82275,7 +82275,7 @@
 "rs-2461-ne",
 "srcl",
 "src/render/sink.c",
-"2461:!=",
+"2788:!=",
 "==",
 [
 "testRender_vectors",

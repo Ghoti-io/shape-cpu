@@ -95,8 +95,8 @@ TEST(CoverageLimits, TheDefaultsAreWhatTheHeaderSays) {
   EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_AREA_PIXEL_WORK, (uint64_t)1 << 20);
   EXPECT_EQ(l.max_image_work, 0u) << "zero is the default, 2^30, for the texels and cells one image item visits (IC9)";
   EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK, (uint64_t)1 << 30);
-  // The same layout on every target: four sizes and twelve 64-bit fields, none of it padding the sizes would not.
-  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 12 * sizeof(uint64_t));
+  // The same layout on every target: four sizes and thirteen 64-bit fields, none of it padding the sizes would not.
+  EXPECT_EQ(sizeof(GSHCPU_Limits), 4 * sizeof(size_t) + 13 * sizeof(uint64_t));
   EXPECT_EQ(offsetof(GSHCPU_Limits, max_area_pixel_work), offsetof(GSHCPU_Limits, fill_coverage) + sizeof(uint64_t))
       << "appended after fill_coverage";
   EXPECT_EQ(offsetof(GSHCPU_Limits, max_image_work), offsetof(GSHCPU_Limits, max_area_pixel_work) + sizeof(uint64_t))
@@ -116,6 +116,11 @@ TEST(CoverageLimits, TheDefaultsAreWhatTheHeaderSays) {
   EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_UNION_TESTS, (uint64_t)1 << 26);
   EXPECT_EQ(offsetof(GSHCPU_Limits, max_union_tests), offsetof(GSHCPU_Limits, max_hatch_lines) + sizeof(uint64_t))
       << "appended after max_hatch_lines";
+  EXPECT_EQ(l.max_union_pieces, 0u) << "zero is the default, 2^17 pieces kept for one group of one union push (CG9)";
+  EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_UNION_PIECES, (uint64_t)1 << 17);
+  EXPECT_EQ(GSHCPU_LIMITS_MAX_UNION_PIECES, (uint64_t)1 << 22);
+  EXPECT_EQ(offsetof(GSHCPU_Limits, max_union_pieces), offsetof(GSHCPU_Limits, max_union_tests) + sizeof(uint64_t))
+      << "appended after max_union_tests";
   EXPECT_EQ(offsetof(GSHCPU_Limits, max_exact_crossings), offsetof(GSHCPU_Limits, max_exact_fragments) + sizeof(uint64_t))
       << "appended after max_exact_fragments";
   EXPECT_EQ(offsetof(GSHCPU_Limits, stroke_coverage), offsetof(GSHCPU_Limits, max_exact_crossings) + sizeof(uint64_t))

@@ -522,6 +522,29 @@ def scripted():
     out["scripted-hatch-cached.bin"] = header(request=0) + body_with_line([fill(0), hatches["families"], hatches["families"], fill(1)])
     out["scripted-hatch-lines-limit.bin"] = header(limit=0x40) + body_with_line([fill(0), hatches["families"], fill(1)])
     out["scripted-hatch-lines-limit-strict.bin"] = header(request=STRICT, limit=0x40 | 3 << 3) + body_with_line([fill(0), hatches["stretch"], fill(1)])
+    # Shape-exact-primitives story A3b: a clip push whose rule byte is 0xFE or 0xFF takes a union of two to four members from the bytes that
+    # follow (fuzz_render.c, record): a count byte (2 + b % 3), then for each member a path pick, a placement byte (a multiple of 4 is
+    # followed by a map; any other is the identity) and a rule byte (bit 0: even-odd).  The paths here are the square (0), the cubic bulge (1)
+    # and the line (2): the square and the bulge overlap (one group, made exact), the square and the line do not (the fast tier).
+    def union_clip(members, rule=0xFE, map_bytes=b"\x00"):
+        count = len(members) - 2
+        return bytes([4, 0]) + map_bytes + bytes([rule, count]) + b"".join(bytes([pick, 1, member_rule]) for pick, member_rule in members)
+
+    unions = {
+        "overlap": union_clip([(0, 0), (1, 0)]),                       # the square and the bulge: one group of two
+        "rules": union_clip([(0, 0), (1, 1), (0, 1)]),                 # three members under both rules, the same square twice
+        "fast": union_clip([(0, 0), (2, 0)]),                          # the square and a line: disjoint boxes
+        "four": union_clip([(0, 0), (1, 0), (2, 1), (1, 1)]),          # four members
+    }
+    for name, item in unions.items():
+        items = [fill(0), item, fill(1), fill(3), POP, fill(0, ROTATED)]
+        out["scripted-union-%s.bin" % name] = header(request=0) + body_with_line(items)
+        out["scripted-union-%s-float.bin" % name] = header(target=T64 | 3) + body_with_line(items)
+        out["scripted-union-%s-memory-damage.bin" % name] = header(request=CALLER_MEMORY | DAMAGE) + body_with_line(items)
+    out["scripted-union-limit.bin"] = header(limit=5) + body_with_line([fill(0), unions["overlap"], fill(1), POP])
+    out["scripted-union-limit-strict.bin"] = header(request=STRICT, limit=5 | 2 << 3) + body_with_line([fill(0), unions["rules"], fill(1), POP])
+    out["scripted-union-crossings.bin"] = header(limit=6 | 1 << 3) + body_with_line([fill(0), unions["four"], fill(1), POP])
+    out["scripted-union-mapped.bin"] = header(request=0) + body_with_line([group(), union_clip([(0, 0), (1, 0)], 0xFF, bytes([3, 40])), fill(1), POP, POP])
     out["scripted-pattern-limit.bin"] = header(limit=3 << 3) + body_with_line([fill(0), lattices["overlap"], fill(1)])
     out["scripted-pattern-limit-strict.bin"] = header(request=STRICT, limit=5 << 3) + body_with_line([fill(0), lattices["gapped"], fill(1)])
     out["scripted-pattern-cell-cap.bin"] = header(limit=2 | 16) + body_with_line([fill(0), lattices["period"], fill(1)])

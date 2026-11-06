@@ -157,6 +157,7 @@ typedef struct Cover {
   int64_t lo[GSHCPU_RENDER_BAND_ROWS]; /* per row of the band; > hi when the row has none */
   int64_t hi[GSHCPU_RENDER_BAND_ROWS];
   GSHCPU_Exact * ex;    /* the exact step (UC1 to UC7), or NULL: then nothing below is touched */
+  GSHCPU_Group_Capture * cap; /* a union group's sweep (CG7): keep the pixels the marks choose, instead of making a cell exact */
   int rev;              /* the edge being cut goes up and is cut from its lower end's partner: its pieces are handed on reversed */
   int64_t cstride;      /* the columns of ex's count and slot arrays: the walk's width */
   int store;            /* the second pass over the band: keep the pieces of the cells in the window, change nothing */
@@ -815,6 +816,23 @@ static int any_multi8(const uint32_t * p) {
   return ((w[0] | w[1] | w[2] | w[3]) & 0xfffffffefffffffeULL) != 0;
 }
 
+/** Whether any of the eight counts at @p p is nonzero. */
+static int any_nonzero8(const uint32_t * p) {
+  uint64_t w[4];
+  memcpy(w, p, sizeof w);
+  return (w[0] | w[1] | w[2] | w[3]) != 0;
+}
+
+/** The mark of the group's pixel (@p px, @p py) in absolute columns and rows; the pixel is in the marks' rectangle (a member's sweep is met with it). */
+static uint8_t * group_mark(const GSHCPU_Group_Capture * cap, int64_t px, int64_t py) {
+  return cap->mark + (size_t)((py - cap->rect.y0) * (cap->rect.x1 - cap->rect.x0) + (px - cap->rect.x0));
+}
+
+/** Whether the pixel (@p px, @p py) is one a group's sweep keeps: the marks count two or more pieces of the group in it. */
+static int group_wanted(const GSHCPU_Group_Capture * cap, int64_t px, int64_t py) {
+  return (*group_mark(cap, px, py) & GSHCPU_GROUP_COUNT) >= 2u;
+}
+
 /**
  * The exact step over the band just deposited (UC3 to UC7): every cell of the drawn rectangle that holds two or more
  * pieces has its area made the union's, by changing its entry in the area array so that the sweep, whichever it is, folds
@@ -824,6 +842,7 @@ static int any_multi8(const uint32_t * p) {
  */
 static int exact_band(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_t count) {
   GSHCPU_Exact * ex = c->ex;
+  GSHCPU_Group_Capture * cap = c->cap;
   int64_t width = c->rect.x1 - c->rect.x0;
   int64_t total = c->rows * width;
   GSHCPU_Exact_Params params;
@@ -850,12 +869,12 @@ static int exact_band(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_t
       }
       size_t base = (size_t)(r * c->cstride + (c->rect.x0 - c->walk.x0));
       while (x <= xe) {
-        if (x + 7 <= xe && !any_multi8(&ex->count[base + (size_t)x])) {
+        if (x + 7 <= xe && !(cap ? any_nonzero8(&ex->count[base + (size_t)x]) : any_multi8(&ex->count[base + (size_t)x]))) {
           x += 8; /* eight cells that need nothing: most of a row between its edges */
           continue;
         }
         uint32_t n = ex->count[base + (size_t)x];
-        if (n >= 2) {
+        if (cap ? (n >= 1 && group_wanted(cap, c->rect.x0 + x, c->band + r)) : n >= 2) {
           if (kept + n > ex->pool_cap) {
             full = 1;
             break;
@@ -903,7 +922,7 @@ static int exact_band(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_t
       }
       size_t cbase = (size_t)(r * c->cstride + (c->rect.x0 - c->walk.x0));
       for (int64_t j = j0; j <= j1; j++) {
-        if (j + 7 <= j1 && !any_multi8(&ex->count[cbase + (size_t)(j - 1)])) {
+        if (j + 7 <= j1 && !(cap ? any_nonzero8(&ex->count[cbase + (size_t)(j - 1)]) : any_multi8(&ex->count[cbase + (size_t)(j - 1)]))) {
           for (int t = 0; t < 8; t++) {
             sum += cv[j + t]; /* no cell of the eight changes: only the running sum moves */
           }
@@ -918,6 +937,27 @@ static int exact_band(Cover * c, const GSHGEOM_Flat_Path * const * paths, size_t
         }
         size_t k = exact_cell_index(c, c->rect.x0 + (j - 1), c->band + r);
         uint32_t n = ex->count[k];
+        if (cap) {
+          if (ex->slot[k] == GSHCPU_EXACT_NO_SLOT) {
+            continue; /* not a pixel the marks chose (the selection above gave a place in the pool to those and to no other) */
+          }
+          /* CG7: keep the member's pieces in this pixel, and the cover to its left and the dense area, for the group's step. */
+          if (cap->piece_cap - cap->piece_n < n) {
+            return 1; /* the pieces kept would pass max_union_pieces: the sink's limit */
+          }
+          GSHCPU_Group_Record * rec = &cap->records[cap->record_n++];
+          const GSHCPU_Piece * from = ex->pool + (ex->slot[k] - n);
+          rec->cell = (uint32_t)((c->band + r - cap->rect.y0) * (cap->rect.x1 - cap->rect.x0) + (c->rect.x0 + (j - 1) - cap->rect.x0));
+          rec->part = cap->part;
+          rec->first = (uint32_t)cap->piece_n;
+          rec->count = n;
+          rec->a_left = left;
+          rec->dense = ex->eps * (sum * (ONE_PIXEL * 2) - ar[j]);
+          memcpy(cap->pieces + cap->piece_n, from, (size_t)n * sizeof *from);
+          cap->piece_n += n;
+          ex->work += n;
+          continue;
+        }
         if (n < 2) {
           continue;
         }
@@ -961,12 +1001,13 @@ GSHCPU_Result gshcpu_render_cover_counted(const GSHGEOM_Flat_Path * const * path
  */
 static GSHCPU_Result cover_run(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule, GSHCPU_Rect rect,
     GSHCPU_Rect walk, uint8_t * out, uint8_t * rem, uint16_t * plane, GSHCPU_Rect prect, int64_t * acc, uint64_t max_deposits,
-    uint64_t * cells, GSHCPU_Exact * ex) {
+    uint64_t * cells, GSHCPU_Exact * ex, GSHCPU_Group_Capture * gcap) {
   Cover c;
   memset(&c, 0, sizeof c);
   c.rect = rect;
   c.walk = walk;
   c.ex = ex;
+  c.cap = gcap;
   c.cstride = walk.x1 - walk.x0;
   c.stride = rect.x1 - rect.x0 + 1;
   c.max_deposits = max_deposits;
@@ -1021,8 +1062,13 @@ static GSHCPU_Result cover_run(const GSHGEOM_Flat_Path * const * paths, size_t c
         uint16_t * row = plane + (size_t)((band - prect.y0 + r) * (prect.x1 - prect.x0) + (rect.x0 - prect.x0));
         for (int64_t j = 1; j <= width; j++) {
           accumulated += cv[j] * (ONE_PIXEL * 2);
-          uint32_t sum = (uint32_t)row[j - 1] + gshcpu_fold_area(accumulated - ar[j], rule);
+          const uint32_t area = gshcpu_fold_area(accumulated - ar[j], rule);
+          uint32_t sum = (uint32_t)row[j - 1] + area;
           row[j - 1] = (uint16_t)(sum > 8192u ? 8192u : sum); /* CU18: saturated at the whole pixel */
+          if (gcap && area >= 8192u && ex->count[exact_cell_index(&c, rect.x0 + (j - 1), band + r)] == 0) {
+            /* CG7: a member without a piece here that covers the pixel whole makes the group's area the whole pixel. */
+            *group_mark(gcap, rect.x0 + (j - 1), band + r) |= (uint8_t)GSHCPU_GROUP_FULL;
+          }
         }
         continue;
       }
@@ -1049,19 +1095,74 @@ GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths,
     GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells,
     GSHCPU_Exact * ex) {
   GSHCPU_Rect none = {0, 0, 0, 0};
-  return cover_run(paths, count, rule, rect, walk, out, NULL, NULL, none, acc, max_deposits, cells, ex);
+  return cover_run(paths, count, rule, rect, walk, out, NULL, NULL, none, acc, max_deposits, cells, ex, NULL);
 }
 
 GSHCPU_Result gshcpu_render_cover_area(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
     GSHCPU_Rect rect, GSHCPU_Rect walk, uint16_t * plane, GSHCPU_Rect prect, int64_t * acc, uint64_t max_deposits,
     uint64_t * cells) {
-  return cover_run(paths, count, rule, rect, walk, NULL, NULL, plane, prect, acc, max_deposits, cells, NULL);
+  return cover_run(paths, count, rule, rect, walk, NULL, NULL, plane, prect, acc, max_deposits, cells, NULL, NULL);
 }
 
 GSHCPU_Result gshcpu_render_cover_split(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
     GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, uint8_t * rem, int64_t * acc, uint64_t max_deposits, uint64_t * cells) {
   GSHCPU_Rect none = {0, 0, 0, 0};
-  return cover_run(paths, count, rule, rect, walk, out, rem, NULL, none, acc, max_deposits, cells, NULL);
+  return cover_run(paths, count, rule, rect, walk, out, rem, NULL, none, acc, max_deposits, cells, NULL, NULL);
+}
+
+GSHCPU_Result gshcpu_render_cover_group(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule, GSHCPU_Rect rect,
+    uint16_t * plane, GSHCPU_Rect prect, GSHCPU_Group_Capture * cap, GSHCPU_Exact * ex, int64_t * acc, uint64_t max_deposits,
+    uint64_t * cells) {
+  GSHCPU_Result r = cover_run(paths, count, rule, rect, rect, NULL, NULL, plane, prect, acc, max_deposits, cells, ex, cap);
+  return r;
+}
+
+GSHCPU_Result gshcpu_render_cover_marks(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHCPU_Rect rect, GSHCPU_Group_Capture * cap,
+    GSHCPU_Exact * ex, uint64_t max_deposits, uint64_t * cells) {
+  Cover c;
+  memset(&c, 0, sizeof c);
+  *cells = 0;
+  if (gshcpu_render_rect_empty(rect)) {
+    return GSHCPU_OK;
+  }
+  c.rect = rect;
+  c.walk = rect;
+  c.ex = ex;
+  c.cstride = rect.x1 - rect.x0;
+  c.stride = rect.x1 - rect.x0 + 1;
+  c.max_deposits = max_deposits;
+  const int64_t width = rect.x1 - rect.x0;
+  Ranges ranges;
+  if (count == 1 && paths[0]) {
+    ranges_begin(&c, &ranges, paths[0]);
+  }
+  for (int64_t band = rect.y0; band < rect.y1; band += GSHCPU_RENDER_BAND_ROWS) {
+    c.band = band;
+    c.rows = rect.y1 - band < (int64_t)GSHCPU_RENDER_BAND_ROWS ? rect.y1 - band : (int64_t)GSHCPU_RENDER_BAND_ROWS;
+    exact_clear(&c);
+    for (size_t i = 0; i < count && !c.over; i++) {
+      if (paths[i]) {
+        path_edges(&c, paths[i]);
+      }
+    }
+    if (c.over) {
+      *cells = c.cells;
+      return GSHCPU_ERR_LIMIT;
+    }
+    for (int64_t r = 0; r < c.rows; r++) {
+      const uint32_t * counts = ex->count + (size_t)(r * c.cstride);
+      for (int64_t x = 0; x < width; x++) {
+        if (counts[x] == 0) {
+          continue;
+        }
+        uint8_t * mark = group_mark(cap, rect.x0 + x, band + r);
+        const uint32_t held = (uint32_t)(*mark & GSHCPU_GROUP_COUNT) + counts[x];
+        *mark = (uint8_t)(held > GSHCPU_GROUP_COUNT ? GSHCPU_GROUP_COUNT : held);
+      }
+    }
+  }
+  *cells = c.cells;
+  return GSHCPU_OK;
 }
 
 /* --- a bound of the cells, from the edges alone ------------------------------------------------------- */

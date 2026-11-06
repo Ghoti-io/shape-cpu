@@ -118,7 +118,8 @@ enum {
   OUT_GENERAL_NESTED, OUT_GENERAL_CALLER_MEMORY, OUT_GENERAL_DAMAGE, OUT_GENERAL_STROKE,
   OUT_PATTERN_DRAWN, OUT_PATTERN_OVERLAP, OUT_PATTERN_PERIOD, OUT_PATTERN_TIERS_EQUAL, OUT_PATTERN_CACHED, OUT_PATTERN_NESTED,
   OUT_PATTERN_STROKE, OUT_PATTERN_LIMIT, OUT_PATTERN_CALLER_MEMORY, OUT_PATTERN_DAMAGE, OUT_PATTERN_GAVE_UP,
-  OUT_HATCH_DRAWN, OUT_HATCH_DASHED, OUT_HATCH_NESTING, OUT_HATCH_CACHED, OUT_HATCH_CALLER_MEMORY, OUT_HATCH_NOTICE, OUT_HATCH_LINES_LIMIT, OUT_COUNT
+  OUT_HATCH_DRAWN, OUT_HATCH_DASHED, OUT_HATCH_NESTING, OUT_HATCH_CACHED, OUT_HATCH_CALLER_MEMORY, OUT_HATCH_NOTICE, OUT_HATCH_LINES_LIMIT,
+  OUT_UNION_FAST, OUT_UNION_GENERAL, OUT_UNION_GROUP, OUT_UNION_LIMIT, OUT_UNION_TIERS_EQUAL, OUT_UNION_DAMAGE, OUT_UNION_CALLER_MEMORY, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -154,7 +155,10 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "the period tier given up for the general tier (PC9)",
     "a render with a hatch fill drawn (HX13)", "a hatch with a dashed family drawn (HX6)", "a hatch of the outer or ignore nesting drawn (HX4)",
     "a hatch expansion served from the cache (HX13)", "a hatch render in caller memory (HX13)", "a hatch fill that draws nothing, noticed (HX9)",
-    "a hatch refused for the lines limit (HX12)"};
+    "a hatch refused for the lines limit (HX12)",
+    "a union clip drawn by the fast tier (FT-U1)", "a union clip drawn by the general tier (CG10)", "a group of overlapping members made exact (CG7)",
+    "a union clip refused for a sink limit (CG9)", "a union render equal to the render with the fast tier off (CG4)",
+    "a damage-limited render of a union equal to the whole render (CG9)", "a union render in caller memory (CG8)"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -290,6 +294,7 @@ typedef struct World {
   size_t hatch_dashed;               /* ... with a dashed family */
   size_t hatch_nested;               /* ... of the outer or ignore nesting */
   size_t hatch_nothing;              /* ... that draw nothing (a spacing of 0, a width of 0, a singular map) */
+  size_t unions;                     /* clip pushes recorded that name a union of members (A3b: a rule byte of 0xFE or 0xFF) */
   const GSHSCENE_Resource * tile_style; /* the style of a tile's stroke, made on first use */
 } World;
 
@@ -1238,11 +1243,34 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
       gshscene_resource_release(pat);
     } else if (op == 4 && r && depth < 16) {
       map_of(in, &map);
-      if (gshscene_list_clip_push(list, r, &map, next(in) & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, 0, 0.0) ==
+      const uint8_t rule_byte = next(in);
+      const GSHSCENE_Resource * pushed = r;
+      const GSHSCENE_Resource * united = NULL;
+      if ((rule_byte & 0xFE) == 0xFE && w->path_count >= 2) {
+        /* A3b: the clip is a union of two to four members, each a path with a map and a rule of its own (the members' boxes may overlap,
+         * touch or be apart; a path of degenerate geometry is a member that is refused or empty). */
+        GSHSCENE_Clip_Member members[4];
+        const int count = 2 + next(in) % 3;
+        for (int k = 0; k < count; k++) {
+          memset(&members[k], 0, sizeof members[k]);
+          members[k].resource = w->paths[next(in) % w->path_count];
+          const uint8_t placement = next(in);
+          if (placement % 4 == 0) {
+            map_of(in, &members[k].map);
+          }
+          members[k].rule = next(in) & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO;
+        }
+        if (gshscene_store_intern_clip_union(w->store, members, (size_t)count, &united) == GSHSCENE_OK) {
+          pushed = united;
+        }
+      }
+      if (gshscene_list_clip_push(list, pushed, &map, rule_byte & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, 0, 0.0) ==
           GSHSCENE_OK) {
         open[depth++] = 0;
         clips++;
+        w->unions += united != NULL;
       }
+      gshscene_resource_release(united); /* the list holds its own reference */
     } else if (op == 5 && depth < 16) {
       GSHSCENE_Group group;
       memset(&group, 0, sizeof group);
@@ -1510,8 +1538,9 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     case 4:
       limits.max_bytes = 1 + (limit_byte >> 3) % 64;
       break;
-    case 5: /* UC9: the pieces of a stroke part in one pixel */
+    case 5: /* UC9: the pieces of a stroke part in one pixel; CG9: and the pieces a union's group keeps */
       limits.max_exact_fragments = 2 + (limit_byte >> 3) % 24;
+      limits.max_union_pieces = 1 + (uint64_t)((limit_byte >> 3) % 24) * 3u;
       break;
     case 6: /* UC19: the crossings of a stroke part in one pixel, a table from one to a thousand */
       limits.max_exact_crossings = crossings_budget(limit_byte >> 3);
@@ -1721,6 +1750,15 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
     /* The sink claims the seven kinds it draws: nothing is refused for its kind, and a stroke is never refused for its
      * style (every feature is met by expansion, SC1). */
     CHECK(e.reason != GSHSCENE_REASON_ITEM_KIND && e.reason != GSHSCENE_REASON_STROKE_STYLE);
+    /* CG10: this sink claims both union capabilities: a union is never refused for the caps (only for a sink limit, which is a resource limit). */
+    CHECK(e.reason != GSHSCENE_REASON_CLIP_UNION && e.reason != GSHSCENE_REASON_UNION_OVERLAP);
+    if (e.reason == GSHSCENE_REASON_RESOURCE_LIMIT && e.chain_count == 1) {
+      const GSHSCENE_Item * pushed = NULL;
+      if (gshscene_list_item(list, e.chain[0], &pushed) == GSHSCENE_OK && pushed->kind == GSHSCENE_ITEM_CLIP_PUSH &&
+          gshscene_resource_kind(pushed->resource) == GSHSCENE_RESOURCE_CLIP_UNION) {
+        outcomes[OUT_UNION_LIMIT]++;
+      }
+    }
     /* This sink strokes runs (ST8): the plan never refuses a stroke for its centerline. */
     CHECK(e.reason != GSHSCENE_REASON_STROKE_CENTERLINE);
     if (world.images > 0 && e.chain_count > 0) {
@@ -1827,6 +1865,10 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   outcomes[OUT_HATCH_NESTING] += r == GSHSCENE_OK && counters.hatches > 0 && world.hatch_nested > 0;
   outcomes[OUT_HATCH_CACHED] += counters.hatches > 0 && counters.cache_hits > 0;
   outcomes[OUT_HATCH_CALLER_MEMORY] += r == GSHSCENE_OK && counters.hatches > 0 && (request.flags & GSHSCENE_RENDER_CALLER_MEMORY);
+  outcomes[OUT_UNION_FAST] += r == GSHSCENE_OK && counters.union_fast > 0;
+  outcomes[OUT_UNION_GENERAL] += r == GSHSCENE_OK && counters.union_general > 0;
+  outcomes[OUT_UNION_GROUP] += r == GSHSCENE_OK && counters.union_groups > 0 && counters.union_exact > 0;
+  outcomes[OUT_UNION_CALLER_MEMORY] += r == GSHSCENE_OK && counters.union_general > 0 && (request.flags & GSHSCENE_RENDER_CALLER_MEMORY);
   /* UC4: the pieces of every cell the exact step made reproduce what the rasterizer summed, whatever the geometry. */
   CHECK(counters.exact_failures == 0);
   const uint64_t first_entries = entries_hash(report);
@@ -1939,6 +1981,28 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
           gshscene_sink_destroy(general);
           gimg_raster_destroy(other);
         }
+        /* CG4: a render that drew a union is the render with the fast tier off, every union then the general tier's, bit for bit, with
+         * the same report; the general tier is the oracle of the fast one (AD-13). */
+        if (counters.union_fast + counters.union_general > 0) {
+          GSHSCENE_Sink * general = NULL;
+          GIMG_Raster * other = copy_of(backdrop, format);
+          GSHCPU_Render_Counters general_counters;
+          if (other && gshcpu_render_sink_create_tiered(NULL, NULL, &limits, GSHCPU_RENDER_TIERS_ALL & ~(unsigned)GSHCPU_RENDER_TIER_UNION,
+                  &general_counters, NULL, NULL, &general) == GSHCPU_OK) {
+            target.surface = other;
+            GSHSCENE_Result ru = gshscene_sink_render(general, &request);
+            CHECK(ru == GSHSCENE_OK || ru == GSHSCENE_ERR_OOM);
+            if (ru == GSHSCENE_OK) {
+              CHECK(same_bytes(raster, other));
+              CHECK(entries_hash(report) == first_entries);
+              CHECK(general_counters.union_fast == 0);
+              outcomes[OUT_UNION_TIERS_EQUAL]++;
+            }
+            target.surface = again;
+          }
+          gshscene_sink_destroy(general);
+          gimg_raster_destroy(other);
+        }
         /* MC8: a render that composited a masked group is the render with both mask tiers off, bit for bit. */
         if (counters.masks > 0) {
           GSHSCENE_Sink * general = NULL;
@@ -1998,6 +2062,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
             outcomes[OUT_DAMAGE]++;
             outcomes[OUT_PATTERN_DAMAGE] += counters.patterns > 0;
             outcomes[OUT_MASK_DAMAGE] += counters.masks > 0;
+            outcomes[OUT_UNION_DAMAGE] += counters.union_fast + counters.union_general > 0;
             outcomes[OUT_GENERAL_DAMAGE] += counters.general_layers > 0;
           }
         }

@@ -274,5 +274,21 @@ render hatch-maps rgba8 f095c585fcb17a39
 render hatch-maps rgba8-premultiplied 0f9203da520d301a
 render hatch-maps rgbaf32 334df0b17a14115e
 render hatch-maps rgbaf32-premultiplied dec384b4866eef09
-hash b57bca042addafe0
-count 272
+render union-overlap rgba8 5829862b39383ce7
+render union-overlap rgba8-premultiplied 0c6df9767e77c548
+render union-overlap rgbaf32 d4ef01b8d4b2d42c
+render union-overlap rgbaf32-premultiplied 3aebba31f7fa5e5b
+render union-groups rgba8 073459c5db23bc56
+render union-groups rgba8-premultiplied 3963d8af39574125
+render union-groups rgbaf32 13ef0926f4a7a611
+render union-groups rgbaf32-premultiplied d1d2f2b9f8b16d96
+render union-nested rgba8 6cb75635a51691db
+render union-nested rgba8-premultiplied ff8da6e8d2d54bb4
+render union-nested rgbaf32 047e76c13edcc86b
+render union-nested rgbaf32-premultiplied cf23c0fe14efcffc
+render union-abutting rgba8 a362475c9c2c3a76
+render union-abutting rgba8-premultiplied 149649827a30a415
+render union-abutting rgbaf32 abb284c62de051c9
+render union-abutting rgbaf32-premultiplied 3b962c347bad455a
+hash 693d868a665f8d00
+count 288
