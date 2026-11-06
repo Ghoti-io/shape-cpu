@@ -2611,7 +2611,10 @@ PLANTS += [
     ('rp-s4-clip-outside-the-damage-skipped', "src", RS, '  if (!gshcpu_render_rect_empty(clip->whole)) {\n    if (drawn) {', '  if (drawn) {\n    if (drawn) {', S4_TESTS),
     ('rp-s4-stroke-paint-only-when-drawn', "src", RS, '  result = pat_paint_copy(run, L, u, &c, rect, whole, cov, NULL); /* S4: the paint is made ready over the whole render\'s part, drawn or not */', '  if (!gshcpu_render_rect_empty(rect)) {\n    result = pat_paint_copy(run, L, u, &c, rect, whole, cov, NULL);\n  }', S4_TESTS),
     ('rp-s4-overlap-pass-copies-of-the-damage', "src", RS, '    result = pat_pass(run, L, tile, overlaps, L->period ? prect : whole);', '    result = pat_pass(run, L, tile, overlaps, prect);', S4_TESTS),
-    ('rp-s4-overlap-pass-after-abort-copies-of-the-damage', "src", RS, '      result = pat_pass(run, L, tile, overlaps, whole);', '      result = pat_pass(run, L, tile, overlaps, rect);', S4_TESTS),
+    # Removed, rp-s4-overlap-pass-after-abort-copies-of-the-damage: equivalent.  The pass is drawn over the damage's rectangle instead of the whole
+    # render's only after the period window has been given up, and the window is taken only when it lies in that rectangle; a rectangle that holds
+    # the window of an overlapping lattice holds a whole copy of every class, so a copy outside it cannot refuse where the ones inside do not.  The
+    # witness, which holds with or without the plant, is RenderPatternRules.ADamageThatTheWindowFitsInRefusesWhatTheWholeRenderDoesOverCellsThatOverlap.
     ('rp-s4-copy-without-pixels-counted', "src", RS, '  if (!gshcpu_render_rect_empty(rc)) {\n    L->urect = gshcpu_render_rect_join(L->urect, rect_moved(rc, c->sx, c->sy));\n    L->copies++;\n  }', '  {\n    L->urect = gshcpu_render_rect_join(L->urect, rect_moved(rc, c->sx, c->sy));\n    L->copies++;\n  }', S4_TESTS),
 ]
 
@@ -2690,9 +2693,83 @@ SURVIVORS = {
 }
 
 
+# PLANT_OBJ_EQUIV=1: the mechanical proof of equivalence.  A plant of one source file is compiled beside the unplanted file, both from a
+# copy of the tree at the same relative path, with -g0, no identification string and the copy's prefix mapped away; if the two objects
+# are byte for byte the same, or their full disassemblies and section contents are (the symbol table and the relocations included),
+# the mutant is the same program and no test can tell it from the code.  Printed as `equiv` with the digest; a plant whose objects differ
+# is `differs` (a test must catch it, or a test is missing), one that does not compile is `nocompile` (the compiler caught it).
+# Header plants are not decided by this (every object that includes the header is rebuilt): they print `skipped`.
+def _object_text(obj):
+    out = []
+    for args in (["-d", "-r", "--no-show-raw-insn"], ["-s"], ["-t"]):
+        r = subprocess.run(["objdump"] + args + [str(obj)], capture_output=True, text=True)
+        out.append(r.stdout)
+    return "\n".join(out)
+
+
+def object_equivalence(plant):
+    pid, kind, fname, old, new, _tests = plant
+    if kind not in ("src", "srcl") or fname.endswith(".h"):
+        return pid, "skipped", "not a plant of one source file"
+    d = WORK / ("eq-" + pid)
+    shutil.rmtree(d, ignore_errors=True)
+    d.mkdir(parents=True)
+    original = (ROOT / fname).read_text()
+    try:
+        text = apply(original, old, new, pid) if kind == "src" else apply_line(original, old, new, pid)
+    except RuntimeError as e:
+        return pid, "error", str(e).splitlines()[0]
+    objs = []
+    for tag, body in (("control", original), ("planted", text)):
+        root = d / tag
+        shutil.copytree(ROOT / "src", root / "src", dirs_exist_ok=True)
+        (root / fname).write_text(body)
+        obj = root / "x.o"
+        r = run(CC + CFLAGS + ["-g0", "-fno-ident", "-ffile-prefix-map=%s=." % root, "-c", str(root / fname), "-o", str(obj)])
+        if r.returncode != 0:
+            shutil.rmtree(d, ignore_errors=True)
+            return pid, "nocompile", r.stderr.strip().splitlines()[0][:100] if r.stderr.strip() else ""
+        objs.append(obj)
+    same = objs[0].read_bytes() == objs[1].read_bytes()
+    how = "identical object bytes"
+    if not same:
+        a, b = _object_text(objs[0]), _object_text(objs[1])
+        same = a == b
+        how = "identical disassembly, section contents, symbols and relocations"
+    import hashlib
+    digest = hashlib.sha256(objs[0].read_bytes()).hexdigest()[:16]
+    shutil.rmtree(d, ignore_errors=True)
+    return pid, ("equiv" if same else "differs"), (how + ", control object sha256 " + digest) if same else ""
+
+
+def object_equivalence_main(plants):
+    counts = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=JOBS) as pool:
+        for pid, verdict, detail in pool.map(object_equivalence, plants):
+            counts[verdict] = counts.get(verdict, 0) + 1
+            print("%-9s %-40s %s" % (verdict, pid, detail))
+    print("object equivalence: %d plants: %s" % (len(plants), ", ".join("%d %s" % (v, k) for k, v in sorted(counts.items()))))
+    return counts
+
+
 def main():
     shutil.rmtree(WORK, ignore_errors=True)
     WORK.mkdir(parents=True)
+    if os.environ.get("PLANT_OBJ_EQUIV") == "check":
+        # The plants tools/equivalent-plants.json holds are equivalent by their object code: every one must say so again.
+        import json as _eqjson
+        with open(ROOT / "tools" / "equivalent-plants.json") as _f:
+            listed = [tuple(x) for x in _eqjson.load(_f)]
+        counts = object_equivalence_main(listed)
+        if counts.get("equiv", 0) != len(listed):
+            print("FAIL  tools/equivalent-plants.json names plants that are not object-identical")
+            return 1
+        print("ok    %d plants of tools/equivalent-plants.json are equivalent by their object code" % len(listed))
+        return 0
+    if os.environ.get("PLANT_OBJ_EQUIV"):
+        chosen = [p for p in PLANTS if not ONLY or re.search(ONLY, p[0])]
+        object_equivalence_main(chosen)
+        return 0
     srcs = sources()
     failures = 0
     known = 0

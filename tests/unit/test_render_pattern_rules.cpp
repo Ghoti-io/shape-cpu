@@ -1257,6 +1257,94 @@ TEST(RenderPatternRules, AUnionsDensestPixelInATileIsMetWhateverTheDamageDraws) 
   rf_release(&c);
 }
 
+TEST(RenderPatternRules, ALimitMetInANestedPatternIsMetWhateverTheDamageDraws) {
+  // S4: the copies of a nested pattern are those of every copy of the outer lattice that the whole render draws, not only of the copies the
+  // damage reaches (design.md, PC8).  The inner tile holds a gradient past the sampling domain in a whole cell, or a union whose densest pixel
+  // is past a cap, and the outer tile paints a fill with that pattern.  The damage is inside the corner copy of the outer lattice, whose
+  // cell is cut to 3 by 3 pixels by the render's edge: no inner copy in it is whole, and the inner pattern is refused in every other copy of
+  // the outer one.  A copy outside the damage has an empty rectangle and a whole part, and its units are tested with those.
+  for (int kind = 0; kind < 2; kind++) {
+    RF_Ctx c;
+    rf_begin(&c);
+    GSHSCENE_List * inner = rf_open(&c);
+    if (kind == 0) {
+      const double up = std::ldexp(1.0, 58);
+      GSHSCENE_Gradient_Stop stops[2] = {rf_stop(0.0, rf_solid(1, 1, 0, 1)), rf_stop(1.0, rf_solid(0, 0.2, 0.9, 1))};
+      GSHSCENE_Gradient g = rf_linear(0, 0, 0x1p60, 0, 0, 0, GSHSCENE_EXTEND_PAD);
+      rf_check(&c, gshgeom_map_scale(2, 0x1p-64, 0x1p-64, 1.0, &g.map) == GSHGEOM_OK);
+      GSHGEOM_Map down;
+      rf_check(&c, gshgeom_map_scale(2, 1.0 / up, 1.0 / up, 1.0, &down) == GSHGEOM_OK);
+      rf_fill(&c, inner, rf_rect(&c, 0.5 * up, 0.5 * up, 64.0 * up, 64.0 * up), &down, GSHGEOM_FILL_NONZERO,
+          rf_gradient_paint(rf_gradient(&c, g, stops, 2), 0.9), 0, 0.0);
+    } else {
+      GSHSCENE_Clip_Member m[6];
+      for (int i = 0; i < 6; i++) {
+        m[i] = rf_member(rf_rect(&c, 30.0 + 0.5 * i, 30.0 + 0.25 * i, 50.0 + 0.5 * i, 50.0 + 0.25 * i), GSHGEOM_FILL_NONZERO, nullptr);
+      }
+      rf_check(&c, gshscene_list_clip_push(inner, rf_union(&c, m, 6), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(&c, inner, rf_rect(&c, 0, 0, 64, 64), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.3, 0.1, 0.8), 0, 0.0);
+      rf_check(&c, gshscene_list_clip_pop(inner) == GSHSCENE_OK);
+    }
+    const GSHSCENE_Resource * inner_pat = rf_pattern(&c, rf_picture_of(&c, inner), 0, 0, 64, 64, 64, 64, 1, 1, rf_move(0.0, 0.0), nullptr);
+    GSHSCENE_List * outer = rf_open(&c);
+    rf_fill(&c, outer, rf_rect(&c, 0, 0, 64, 64), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(inner_pat, 1.0), 0, 0.0);
+    const GSHSCENE_Resource * outer_pat = rf_pattern(&c, rf_picture_of(&c, outer), 0, 0, 64, 64, 64, 64, 1, 1, rf_move(0.0, 0.0), nullptr);
+    GSHSCENE_List * l = rf_open(&c);
+    rf_fill(&c, l, rf_rect(&c, 0, 0, 195, 131), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(outer_pat, 1.0), 0, 0.0);
+    rf_close(&c, l);
+    ASSERT_EQ(c.failed, 0) << kind;
+    GSHCPU_Limits limits;
+    gshcpu_limits_default(&limits);
+    limits.max_exact_fragments = kind == 1 ? 3 : limits.max_exact_fragments;
+    TSink whole_sink(kNoPeriod, &limits);
+    Out whole = draw(whole_sink.sink, l, 195, 131);
+    ASSERT_EQ(whole.result, GSHSCENE_OK) << kind;
+    EXPECT_EQ(whole.summary.by_class[GSHSCENE_ENTRY_REFUSED], 1u) << kind << ": the whole render";
+    for (const GSHSCENE_Rect & damage : {GSHSCENE_Rect{193, 129, 195, 131}, GSHSCENE_Rect{193, 0, 195, 131}, GSHSCENE_Rect{0, 0, 8, 8}}) {
+      TSink sink(kNoPeriod, &limits);
+      Out part = draw(sink.sink, l, 195, 131, GSHCPU_FORMAT_RGBA8_STRAIGHT, 0, nullptr, nullptr, &damage);
+      ASSERT_EQ(part.result, GSHSCENE_OK) << kind;
+      EXPECT_EQ(part.summary.by_class[GSHSCENE_ENTRY_REFUSED], 1u) << kind << ", damage " << damage.x0 << "," << damage.y0;
+    }
+    rf_release(&c);
+  }
+}
+
+TEST(RenderPatternRules, ADamageThatTheWindowFitsInRefusesWhatTheWholeRenderDoesOverCellsThatOverlap) {
+  // The witness of an argued equivalence (PC9, S4).  The period window is taken only when it lies in the rectangle the damage leaves, and a
+  // rectangle that holds the window of an overlapping lattice holds a whole copy of every class: the copy that refuses in the whole render
+  // is in the rectangle too, so the pass that gives the window up and draws the rectangle's copies (the plain rectangle, or the whole
+  // render's, as the pass does) finds the refusal either way.  Asserted here for the overlapping lattice of 60 with a cell of 64 whose tile
+  // is past the domain, and a damage as small as the window (60 by 60) at each corner of a 127 by 127 render.
+  RF_Ctx c;
+  rf_begin(&c);
+  const double up = std::ldexp(1.0, 58);
+  GSHSCENE_Gradient_Stop stops[2] = {rf_stop(0.0, rf_solid(1, 1, 0, 1)), rf_stop(1.0, rf_solid(0, 0.2, 0.9, 1))};
+  GSHSCENE_Gradient g = rf_linear(0, 0, 0x1p60, 0, 0, 0, GSHSCENE_EXTEND_PAD);
+  rf_check(&c, gshgeom_map_scale(2, 0x1p-64, 0x1p-64, 1.0, &g.map) == GSHGEOM_OK);
+  GSHGEOM_Map down;
+  rf_check(&c, gshgeom_map_scale(2, 1.0 / up, 1.0 / up, 1.0, &down) == GSHGEOM_OK);
+  GSHSCENE_List * t = rf_open(&c);
+  rf_fill(&c, t, rf_rect(&c, 0.5 * up, 0.5 * up, 64.0 * up, 64.0 * up), &down, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(&c, g, stops, 2), 0.9), 0, 0.0);
+  const GSHSCENE_Resource * pat = rf_pattern(&c, rf_picture_of(&c, t), 0, 0, 64, 64, 60, 60, 1, 1, rf_move(0.0, 0.0), nullptr);
+  GSHSCENE_List * l = rf_open(&c);
+  rf_fill(&c, l, rf_rect(&c, 0, 0, 127, 127), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  rf_close(&c, l);
+  ASSERT_EQ(c.failed, 0);
+  TSink whole_sink(kAll);
+  Out whole = draw(whole_sink.sink, l, 127, 127);
+  ASSERT_EQ(whole.result, GSHSCENE_OK);
+  EXPECT_EQ(whole.summary.by_class[GSHSCENE_ENTRY_REFUSED], 1u);
+  for (const GSHSCENE_Rect & damage : {GSHSCENE_Rect{0, 0, 60, 60}, GSHSCENE_Rect{67, 0, 127, 60}, GSHSCENE_Rect{0, 67, 60, 127}, GSHSCENE_Rect{67, 67, 127, 127}}) {
+    TSink sink(kAll);
+    Out part = draw(sink.sink, l, 127, 127, GSHCPU_FORMAT_RGBA8_STRAIGHT, 0, nullptr, nullptr, &damage);
+    ASSERT_EQ(part.result, GSHSCENE_OK);
+    EXPECT_EQ(part.summary.by_class[GSHSCENE_ENTRY_REFUSED], 1u) << damage.x0 << "," << damage.y0;
+  }
+  rf_release(&c);
+}
+
 TEST(RenderPatternRules, ARegionPastTheRangeInACellsFrameIsALimitUnderBothTiers) {
   // PC3, PC8: a use of the plane in a cell 25 million pixels wide, translated by 20 million, is drawn over the region of the copy in the cell's own
   // frame, which lies 20 million pixels from its origin: past the range the scan converter takes.  That is the sink's resource limit, reported, and
