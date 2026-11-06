@@ -1405,8 +1405,8 @@ TEST(RenderClipUnionGeneral, TheGeneralTierBillsTheComparisonsOfItsGroupsAndTheL
   EXPECT_EQ(draw(la, 5, 1, general_only()).counters.union_tests, 3u + 3u);
 }
 
-TEST(RenderClipUnionGeneral, AUnionInAPatternsTileIsStillTheSinksResourceLimitForThePattern) {
-  // CU21 is not built, with the general tier either: a union in a tile is refused for the use painted with the pattern (documented).
+TEST(RenderClipUnionGeneral, AUnionInAPatternsTileIsTheUnionDrawnInEachCopy) {
+  // CU21: overlapping members in a tile, drawn as the tile's picture instanced at each copy's place is.
   Scene s;
   const GSHSCENE_Resource * u = make_union(s, {member(s.rect(0, 0, 4, 6)), member(s.rect(3, 0, 6, 6))});
   GSHSCENE_List * t = s.open();
@@ -1434,10 +1434,21 @@ TEST(RenderClipUnionGeneral, AUnionInAPatternsTileIsStillTheSinksResourceLimitFo
   ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
   Draw d = draw(l, 12, 12);
   ASSERT_EQ(d.result, GSHSCENE_OK);
-  EXPECT_EQ(d.count(GSHSCENE_ENTRY_REFUSED, GSHSCENE_REASON_RESOURCE_LIMIT), 1u);
-  for (uint8_t a : alphas(d)) {
-    EXPECT_EQ(a, 0u);
+  EXPECT_EQ(d.count(GSHSCENE_ENTRY_REFUSED), 0u);
+  GSHSCENE_List * direct = s.open();
+  for (double y : {0.0, 6.0}) {
+    for (double x : {0.0, 6.0}) {
+      GSHGEOM_Map at;
+      ASSERT_EQ(gshgeom_map_translate(2, x, y, 0.0, &at), GSHGEOM_OK);
+      ASSERT_EQ(gshscene_list_instance(direct, tile, &at, 0, 0.0), GSHSCENE_OK);
+    }
   }
+  ASSERT_EQ(gshscene_list_close(direct), GSHSCENE_OK);
+  Draw e = draw(direct, 12, 12);
+  ASSERT_EQ(e.result, GSHSCENE_OK);
+  EXPECT_EQ(d.bytes, e.bytes);
+  EXPECT_GT(d.counters.union_groups, 0u);
+  EXPECT_NE(d.hash, 0u);
 }
 
 TEST(RenderClipUnionGeneral, TheWorkspaceMeasuredForAnOverlappingUnionIsEnoughAndOneByteLessIsNot) {

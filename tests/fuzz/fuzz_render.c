@@ -119,7 +119,7 @@ enum {
   OUT_PATTERN_DRAWN, OUT_PATTERN_OVERLAP, OUT_PATTERN_PERIOD, OUT_PATTERN_TIERS_EQUAL, OUT_PATTERN_CACHED, OUT_PATTERN_NESTED,
   OUT_PATTERN_STROKE, OUT_PATTERN_LIMIT, OUT_PATTERN_CALLER_MEMORY, OUT_PATTERN_DAMAGE, OUT_PATTERN_GAVE_UP,
   OUT_HATCH_DRAWN, OUT_HATCH_DASHED, OUT_HATCH_NESTING, OUT_HATCH_CACHED, OUT_HATCH_CALLER_MEMORY, OUT_HATCH_NOTICE, OUT_HATCH_LINES_LIMIT,
-  OUT_UNION_FAST, OUT_UNION_GENERAL, OUT_UNION_GROUP, OUT_UNION_LIMIT, OUT_UNION_TIERS_EQUAL, OUT_UNION_DAMAGE, OUT_UNION_CALLER_MEMORY, OUT_COUNT
+  OUT_UNION_FAST, OUT_UNION_GENERAL, OUT_UNION_GROUP, OUT_UNION_LIMIT, OUT_UNION_TIERS_EQUAL, OUT_UNION_DAMAGE, OUT_UNION_CALLER_MEMORY, OUT_UNION_TILE, OUT_UNION_TILE_LIMIT, OUT_COUNT
 };
 
 static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal while drawing (a sink's own limit)",
@@ -158,7 +158,8 @@ static const char * const outcome_names[OUT_COUNT] = {"a render", "a refusal whi
     "a hatch refused for the lines limit (HX12)",
     "a union clip drawn by the fast tier (FT-U1)", "a union clip drawn by the general tier (CG10)", "a group of overlapping members made exact (CG7)",
     "a union clip refused for a sink limit (CG9)", "a union render equal to the render with the fast tier off (CG4)",
-    "a damage-limited render of a union equal to the whole render (CG9)", "a union render in caller memory (CG8)"};
+    "a damage-limited render of a union equal to the whole render (CG9)", "a union render in caller memory (CG8)",
+    "a union clip in a pattern's tile drawn (CU21)", "a pattern use refused for the limit of a union in its tile (CU21, CG9)"};
 
 static unsigned long outcomes[OUT_COUNT];
 
@@ -295,6 +296,7 @@ typedef struct World {
   size_t hatch_nested;               /* ... of the outer or ignore nesting */
   size_t hatch_nothing;              /* ... that draw nothing (a spacing of 0, a width of 0, a singular map) */
   size_t unions;                     /* clip pushes recorded that name a union of members (A3b: a rule byte of 0xFE or 0xFF) */
+  size_t tile_unions;                /* ... in a pattern's tile (CU21: the clip of a tile whose last fill's rule byte is 0xC0 or more) */
   const GSHSCENE_Resource * tile_style; /* the style of a tile's stroke, made on first use */
 } World;
 
@@ -910,6 +912,7 @@ static const GSHSCENE_Resource * pattern_of(Input * in, World * w, int depth) {
   const size_t fills = 1u + cfg % 3u;
   int holds_pattern = 0;
   int holds_stroke = 0;
+  int holds_union = 0;
   for (size_t i = 0; i < fills; i++) {
     GSHGEOM_Map map;
     GSHSCENE_Paint paint;
@@ -946,7 +949,26 @@ static const GSHSCENE_Resource * pattern_of(Input * in, World * w, int depth) {
       group_open = gshscene_list_group_push(tile_list, &group, 0, 0.0) == GSHSCENE_OK;
     }
     if ((cfg & 0x80) && i + 1 == fills) {
-      clip_open = gshscene_list_clip_push(tile_list, path, &map, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK;
+      const GSHSCENE_Resource * pushed = path;
+      const GSHSCENE_Resource * united = NULL;
+      if ((rule & 0xC0) == 0xC0 && w->path_count >= 2) {
+        /* CU21: the clip is a union of two or three members, the path and others from the rule byte (bits 2 to 5 pick them, bit 1 gives the
+         * second member a rule of its own), so that the members' boxes may overlap, touch or be apart. */
+        GSHSCENE_Clip_Member members[3];
+        const int count = 2 + (rule >> 5) % 2;
+        for (int k = 0; k < count; k++) {
+          memset(&members[k], 0, sizeof members[k]);
+          members[k].resource = k == 0 ? path : w->paths[((size_t)rule + (size_t)k * 5u) % w->path_count];
+          members[k].rule = k == 1 && (rule & 2) ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO;
+          gshgeom_map_identity(2, &members[k].map);
+        }
+        if (gshscene_store_intern_clip_union(w->store, members, (size_t)count, &united) == GSHSCENE_OK) {
+          pushed = united;
+        }
+      }
+      clip_open = gshscene_list_clip_push(tile_list, pushed, &map, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK;
+      holds_union += clip_open && united != NULL;
+      gshscene_resource_release(united); /* the list holds its own reference */
     }
     GSHSCENE_Result fr;
     if (past) {
@@ -1063,6 +1085,7 @@ static const GSHSCENE_Resource * pattern_of(Input * in, World * w, int depth) {
   w->pattern_integers += pt.repeat_x && pt.repeat_y && (tint % 8) <= 5 && pt.x_step == (double)(int)pt.x_step && pt.y_step == (double)(int)pt.y_step;
   w->pattern_nested += holds_pattern;
   w->pattern_strokes += holds_stroke > 0;
+  w->tile_unions += holds_union > 0;
   return pattern;
 }
 
@@ -1868,6 +1891,8 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
   outcomes[OUT_UNION_FAST] += r == GSHSCENE_OK && counters.union_fast > 0;
   outcomes[OUT_UNION_GENERAL] += r == GSHSCENE_OK && counters.union_general > 0;
   outcomes[OUT_UNION_GROUP] += r == GSHSCENE_OK && counters.union_groups > 0 && counters.union_exact > 0;
+  outcomes[OUT_UNION_TILE_LIMIT] += world.tile_unions > 0 && (limit_byte & 7) == 5 && limit_refused > 0 && counters.patterns > 0;
+  outcomes[OUT_UNION_TILE] += r == GSHSCENE_OK && counters.patterns > 0 && world.tile_unions > 0 && counters.union_general > 0;
   outcomes[OUT_UNION_CALLER_MEMORY] += r == GSHSCENE_OK && counters.union_general > 0 && (request.flags & GSHSCENE_RENDER_CALLER_MEMORY);
   /* UC4: the pieces of every cell the exact step made reproduce what the rasterizer summed, whatever the geometry. */
   CHECK(counters.exact_failures == 0);

@@ -405,8 +405,8 @@ TEST(RenderClipUnion, AMemberOverACapRefusesTheWholePushAndNothingIsDrawnWithItL
   EXPECT_TRUE(found) << "a cap that the small member meets and the many-edged one does not";
 }
 
-TEST(RenderClipUnion, AUnionInAPatternsTileIsTheSinksResourceLimitForThePatternAndNeverDrawnWithoutIt) {
-  // CU21 is not built: the use painted with the pattern is refused RESOURCE_LIMIT (PC8's rule for a tile), the union is not dropped.
+TEST(RenderClipUnion, AUnionInAPatternsTileIsDrawnByTheGeneralTierWhateverItsMembersAre) {
+  // CU21: the union in a tile is formed in each copy; two members that abut are the fast tier's outside a tile, and the general tier's in it.
   Scene s;
   const GSHSCENE_Resource * u = make_union(s, {member(s.rect(0, 0, 3, 6)), member(s.rect(3, 0, 6, 6))});
   GSHSCENE_List * t = s.open();
@@ -434,10 +434,12 @@ TEST(RenderClipUnion, AUnionInAPatternsTileIsTheSinksResourceLimitForThePatternA
   ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
   Draw d = draw(l, 12, 12);
   ASSERT_EQ(d.result, GSHSCENE_OK);
-  EXPECT_EQ(d.count(GSHSCENE_ENTRY_REFUSED, GSHSCENE_REASON_RESOURCE_LIMIT), 1u);
+  EXPECT_EQ(d.count(GSHSCENE_ENTRY_REFUSED), 0u);
   for (uint8_t a : alphas(d)) {
-    EXPECT_EQ(a, 0u);
+    EXPECT_EQ(a, 255u) << "the two halves are the whole cell, red in every copy";
   }
+  EXPECT_EQ(d.counters.union_fast, 0u);
+  EXPECT_GT(d.counters.union_general, 0u);
 }
 
 TEST(RenderClipUnion, TheWorkspaceMeasuredForAUnionIsExactlyEnoughAndAUnionRendersInIt) {

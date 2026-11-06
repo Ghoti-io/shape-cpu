@@ -289,5 +289,9 @@ render union-abutting rgba8 afc11b41475509b5
 render union-abutting rgba8-premultiplied 8fbc34c52d04acde
 render union-abutting rgbaf32 abb284c62de051c9
 render union-abutting rgbaf32-premultiplied 3b962c347bad455a
-hash d22511b80d13ead0
-count 288
+render pattern-union rgba8 2773cb90feae79e6
+render pattern-union rgba8-premultiplied 2969875a82e07b8d
+render pattern-union rgbaf32 a1d4df1537ecec00
+render pattern-union rgbaf32-premultiplied 23e87477e6df448b
+hash 63823e54f07a228b
+count 292

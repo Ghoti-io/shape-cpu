@@ -481,6 +481,10 @@ def scripted():
         "stroke": pattern_fill(0x10, cell4, 0, 1, tile_fill(2) + tile_fill(0)),             # a stroke in the tile
         "group": pattern_fill(0x21, cell4, 0, 1, tile_fill(0, 4) + tile_fill(1)),          # a multiply group in the tile
         "clip": pattern_fill(0x80, cell4, 0, 2, tile_fill(0) + tile_fill(1)),              # a clip around the last
+        # CU21: a clip around the last fill whose rule byte is 0xC0 or more is a union of the path and one or two others (bits 5, 1 and 0xC0)
+        "tile-union": pattern_fill(0x82, cell4, 0, 2, tile_fill(0) + tile_fill(1, rule=0xC0)),            # abutting cells, a fraction moved by whole pixels
+        "tile-union-three": pattern_fill(0x83, cell4, 0, 1, tile_fill(1) + tile_fill(0) + tile_fill(0, rule=0xE2)),    # three members, the second even-odd
+        "tile-union-overlap": pattern_fill(0x84, cell4, 2 | 2 << 4, 1, tile_fill(1, rule=0xC4)),  # cells of 4 in steps of 3
         "tint": pattern_fill(0, cell4, 0, 0x31, tile_fill(0)),                              # uncolored
         "once": pattern_fill(0, cell4, 0, 0x41, tile_fill(0)),                              # repeat_x 0
         "far": pattern_fill(0, cell4, 0, 6, tile_fill(0)),                                  # a lattice far from the target
@@ -545,6 +549,8 @@ def scripted():
     out["scripted-union-limit-strict.bin"] = header(request=STRICT, limit=5 | 2 << 3) + body_with_line([fill(0), unions["rules"], fill(1), POP])
     out["scripted-union-crossings.bin"] = header(limit=6 | 1 << 3) + body_with_line([fill(0), unions["four"], fill(1), POP])
     out["scripted-union-mapped.bin"] = header(request=0) + body_with_line([group(), union_clip([(0, 0), (1, 0)], 0xFF, bytes([3, 40])), fill(1), POP, POP])
+    out["scripted-pattern-tile-union-limit.bin"] = header(limit=5 | 0 << 3) + body_with_line([fill(0), lattices["tile-union"], fill(1)])
+    out["scripted-pattern-tile-union-limit-strict.bin"] = header(request=STRICT, limit=5 | 0 << 3) + body_with_line([fill(0), lattices["tile-union-three"], fill(1)])
     out["scripted-pattern-limit.bin"] = header(limit=3 << 3) + body_with_line([fill(0), lattices["overlap"], fill(1)])
     out["scripted-pattern-limit-strict.bin"] = header(request=STRICT, limit=5 << 3) + body_with_line([fill(0), lattices["gapped"], fill(1)])
     out["scripted-pattern-cell-cap.bin"] = header(limit=2 | 16) + body_with_line([fill(0), lattices["period"], fill(1)])

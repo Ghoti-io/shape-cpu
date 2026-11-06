@@ -249,6 +249,58 @@ const GSHSCENE_Resource * interior_tile(RF_Ctx * c, int v) {
       rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
       break;
     }
+    case 12: { // a union clip (CU21): three members, two of which overlap and one of which stands apart, around a solid and a gradient
+      static const double tri[6] = {4.0, 3.5, 6.5, 6.25, 3.25, 6.0};
+      GSHSCENE_Clip_Member m[3] = {rf_member(rf_rect(c, 1.5, 1.5, 4.5, 4.5), GSHGEOM_FILL_NONZERO, nullptr),
+          rf_member(rf_rect(c, 3.0, 2.25, 6.5, 5.0), GSHGEOM_FILL_NONZERO, nullptr), rf_member(rf_polygon(c, tri, 3), GSHGEOM_FILL_NONZERO, nullptr)};
+      rf_check(c, gshscene_list_clip_push(t, rf_union(c, m, 3), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.2, 0.3, 0.9), 0, 0.0);
+      rf_fill(c, t, rf_rect(c, 2.0, 4.5, 6.0, 6.5), nullptr, GSHGEOM_FILL_NONZERO,
+          rf_gradient_paint(rf_gradient(c, rf_linear(2, 0, 6, 0, 0, 0, GSHSCENE_EXTEND_PAD), stops, 2), 0.9), 0, 0.0);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      rf_fill(c, t, rf_rect(c, 5.0, 1.5, 6.5, 2.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.1, 0.1, 1.0), 0, 0.0);
+      break;
+    }
+    case 13: { // a union clip inside a clip, a group around it, and a second union after it: the coverages multiply, and a block leaves nothing behind
+      GSHGEOM_Map at = rf_move(4.0, 4.0);
+      rf_check(c, gshscene_list_clip_push(t, rf_circle(c, 2.6), &at, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_general(c, t, 0, 0, 0.8, GSHSCENE_COMPOSITE_SRC_OVER, nullptr);
+      GSHSCENE_Clip_Member a[2] = {rf_member(rf_rect(c, 1.5, 1.5, 4.25, 6.5), GSHGEOM_FILL_NONZERO, nullptr),
+          rf_member(rf_rect(c, 3.5, 3.0, 6.5, 5.5), GSHGEOM_FILL_NONZERO, nullptr)};
+      rf_check(c, gshscene_list_clip_push(t, rf_union(c, a, 2), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.2, 0.9, 1.0), 0, 0.0);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      rf_pop(c, t);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      GSHSCENE_Clip_Member b[2] = {rf_member(rf_rect(c, 5.0, 5.0, 6.5, 6.5), GSHGEOM_FILL_NONZERO, nullptr),
+          rf_member(rf_rect(c, 1.5, 5.5, 3.0, 6.5), GSHGEOM_FILL_NONZERO, nullptr)};
+      rf_check(c, gshscene_list_clip_push(t, rf_union(c, b, 2), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.8, 0.1, 0.9), 0, 0.0);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      break;
+    }
+    case 14: { // a union of curves and an even-odd star, one member under a rotation: the members' own rules and maps
+      GSHGEOM_Map turn, move, at;
+      gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 25.0, &turn);
+      move = rf_move(4.0, 4.0);
+      gshgeom_map_compose(&move, &turn, &at);
+      GSHSCENE_Clip_Member m[3] = {rf_member(rf_star(c, 4.0, 4.0, 2.4), GSHGEOM_FILL_EVEN_ODD, nullptr),
+          rf_member(rf_blob(c, 2.0, 2.25, 1.9), GSHGEOM_FILL_NONZERO, nullptr),
+          rf_member(rf_rect(c, -1.25, -0.5, 1.25, 0.5), GSHGEOM_FILL_NONZERO, &at)};
+      rf_check(c, gshscene_list_clip_push(t, rf_union(c, m, 3), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.5, 0.2, 0.85), 0, 0.0);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      break;
+    }
+    case 15: { // one fill under a union clip of three members: nothing else in the tile overlaps it
+      static const double tri[6] = {4.0, 3.5, 6.5, 6.25, 3.25, 6.0};
+      GSHSCENE_Clip_Member m[3] = {rf_member(rf_rect(c, 1.5, 1.5, 4.5, 4.5), GSHGEOM_FILL_NONZERO, nullptr),
+          rf_member(rf_rect(c, 3.0, 2.25, 6.5, 5.0), GSHGEOM_FILL_NONZERO, nullptr), rf_member(rf_polygon(c, tri, 3), GSHGEOM_FILL_NONZERO, nullptr)};
+      rf_check(c, gshscene_list_clip_push(t, rf_union(c, m, 3), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(c, t, rf_rect(c, 1.5, 1.5, 6.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.2, 0.3, 0.9), 0, 0.0);
+      rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+      break;
+    }
     default:
       break;
   }
@@ -320,7 +372,7 @@ TEST(RenderPatternRules, ATileInsideItsCellIsThePictureDrawnOnceForEachCopy) {
   // (two in force at once, a block after a block, a clip inside a group), groups, strokes of every alignment and an image: every bookkeeping of a unit's
   // accumulator, its clips, its shifts and its weights is told from a wrong one by the pixels.
   const double lattices[4][4] = {{8, 8, 0.3, 0.45}, {10, 9, 0.7, 0.2}, {6, 6, 0.25, 0.5}, {8, 8, 0.0, 0.0}};
-  for (int variant = 0; variant < 12; variant++) {
+  for (int variant = 0; variant < 16; variant++) {
     for (const auto & l : lattices) {
       Twin tw(variant, l[0], l[1], l[2], l[3]);
       for (GSHCPU_Format format : {GSHCPU_FORMAT_RGBA8_STRAIGHT, GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED}) {
@@ -566,7 +618,7 @@ TEST(RenderPatternRules, AStrokeCutToItsCellIsTheStrokeUnderAClipOfTheCell) {
 TEST(RenderPatternRules, AnOuterClipWeighsTheFillOnceAndTheCellOriginIsHonored) {
   // PC2: the clips in force around the use weigh the fill and never a copy (so the edge of an outer clip is its coverage once, not squared); and
   // the cell's own origin (x, y) places the cell: a tile whose content straddles a cell that is not at the origin is cut where the cell is.
-  for (int variant : {0, 2, 3}) {
+  for (int variant : {0, 2, 3, 15}) { // 15: one fill under a union clip (two fills that overlap are a group, which the outer clip weighs once: not the explicit copies' item by item)
     Twin tw(variant, 8, 8, 0.3, 0.45, 1);
     TSink a(kAll), b(kAll);
     Out p = draw(a.sink, tw.pattern, 72, 56);
@@ -1159,7 +1211,7 @@ TEST(RenderPatternRules, ANestedPatternAndAnExtentThatDoesNotStartAtTheOriginKee
   // PC3: a pattern inside a tile is drawn in the copy's own frame, whose pixels the pass keeps at the place they have in the device (the copy's whole-pixel
   // shift is part of where they are kept).  Over an extent that begins well inside the canvas, a frame that forgot the shift would address the pixels
   // before its layer, which belong to the layer of the pass around it.
-  for (int variant : {6, 10}) {
+  for (int variant : {6, 10, 12, 14}) {
     for (double step : {8.0, 11.0}) {
       Twin tw(variant, step, step, 0.3, 0.45);
       for (const auto & e : {std::array<int, 4>{16, 12, 72, 56}, std::array<int, 4>{30, 20, 70, 50}}) {

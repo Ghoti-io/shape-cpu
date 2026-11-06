@@ -929,8 +929,16 @@ and a member over a cap refuses the whole push: a union is never drawn with a me
 
 **Memory (CU20).** The plane lives in the item arena (so a list with no union has the memory, the work counts and the pixels it
 had): `measure_one` counts the plane (two bytes for each pixel of the region) and then the geometry of the member that takes the most.
-**Not built: a union in a pattern's tile (CU21).** `pat_clip_push` answers `ERR_LIMIT` for one, which is the sink's resource limit (PC8)
-for the use painted with the pattern, never a union drawn with a member left out; the per-copy plane is a story of its own.
+**A union in a pattern's tile (CU21)** is formed in each copy by the general tier, never the fast one: `union_push_general` is the plane
+(`union_area`, which forms a union's area over the members it is handed and returns the plane unquantized) read once and quantized, and
+`pat_cover_union` is the same plane read in a copy. The members are the clip's under the copy's canonical map, and each outline is cut to the cell's
+quadrilateral (CK1) before it is swept, as a single clip's is; the groups are those of the uncut boxes, which are coarser than the cut members need
+and so still exact. The byte of a pixel in a copy is `min(255, area / 32)` and the remainder of the area is kept, as a single clip's is
+(`gshcpu_fold_split`), so the clip block's device plane is the byte made once from the sum of the copies' areas (PC4) and a unit's weight in a
+copy is the byte. A tile that holds a union is not drawn by the period window (its limits are those of the groups of a copy, which the window's copies
+do not vouch for), the predicate's comparisons are billed once for a pass (the walks of a tile of overlapping cells after the first bill nothing), and
+the measure takes the general tier's memory for it whatever the members' boxes. A limit of the union is the resource limit of the use painted
+with the pattern, and a fill under the clip forms the union again in each copy it draws.
 A union in a mask's picture or around or inside a non-isolated or knockout group is an ordinary clip of an ordinary unit: the clip is a
 byte coverage by the time a group sees it.
 

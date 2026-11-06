@@ -202,6 +202,21 @@ struct Scene {
         case 4:
           EXPECT_EQ(gshscene_list_clip_push(l, polygon(op.points, op.point_count), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0), GSHSCENE_OK);
           break;
+        case 6: { // a union clip (CU21): the members are the convex regions of the vector, each under the identity and the nonzero rule
+          std::vector<GSHSCENE_Clip_Member> members;
+          for (int m = 0; m < op.member_count; m++) {
+            GSHSCENE_Clip_Member member{};
+            member.resource = polygon(op.members[m].points, op.members[m].point_count);
+            member.rule = GSHGEOM_FILL_NONZERO;
+            gshgeom_map_identity(2, &member.map);
+            members.push_back(member);
+          }
+          const GSHSCENE_Resource * u = nullptr;
+          EXPECT_EQ(gshscene_store_intern_clip_union(st.store, members.data(), members.size(), &u), GSHSCENE_OK);
+          st.held.push_back(u);
+          EXPECT_EQ(gshscene_list_clip_push(l, u, nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0), GSHSCENE_OK);
+          break;
+        }
         default:
           EXPECT_EQ(gshscene_list_clip_pop(l), GSHSCENE_OK);
           break;

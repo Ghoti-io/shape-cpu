@@ -94,6 +94,7 @@
  * | union-groups | groups of overlapping members beside members that stand alone: a ring with a triangle across its hole, two crossing rectangles, a tripled contour that overlaps itself and a star apart |
  * | union-nested | a union under a rotation inside a clip block inside a translucent group, its members each under a map of their own, and a union of members that touch at a quarter pixel with two that overlap |
  * | union-abutting | rectangles that share edges at quarter pixels and a corner, a union of triangles that share a diagonal, and the same members as a union beside an overlapping one |
+ * | pattern-union | (shape-exact-primitives story CU21) union clips in a pattern's tile: members that cross the cell edges on an abutting lattice at a fraction, three members (a star under even-odd, a blob and a turned bar) on cells that overlap, a union inside a clip under a gapped skew, and a gradient under a union on a lattice of whole-pixel steps |
  */
 
 #ifndef GHOTI_IO_GSHCPU_TEST_RENDER_FIXTURES_H
@@ -3301,6 +3302,58 @@ static inline GSHSCENE_List * rf_union_abutting(RF_Ctx * c) {
   return l;
 }
 
+/** A tile of a union clip (CU21): the cell (0, 0, 6, 6), a fill of the cell under the union of @p n members, and a fill outside the clip. */
+static inline const GSHSCENE_Resource * rf_tile_union(RF_Ctx * c, const GSHSCENE_Clip_Member * members, size_t n, GSHSCENE_Paint under) {
+  GSHSCENE_List * t = rf_open(c);
+  rf_fill(c, t, rf_rect(c, 0, 0, 6, 6), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.85, 0.9, 0.8, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_clip_push(t, rf_union(c, members, n), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, t, rf_rect(c, -1, -1, 7, 7), NULL, GSHGEOM_FILL_NONZERO, under, 0, 0.0);
+  rf_check(c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+  return rf_picture_of(c, t);
+}
+
+static inline GSHSCENE_List * rf_pattern_union(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.93, 0.9, 1.0), 0, 0.0);
+  /* Members that cross the cell edges: each copy's union is cut to its cell, and the copies' areas add at a seam. */
+  GSHSCENE_Clip_Member spill[3] = {rf_member(rf_rect(c, -0.75, 0.75, 3.5, 2.5), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_rect(c, 2.25, -1.0, 6.75, 3.25), GSHGEOM_FILL_NONZERO, NULL), rf_member(rf_rect(c, 1.0, 3.5, 5.5, 5.25), GSHGEOM_FILL_NONZERO, NULL)};
+  const GSHSCENE_Resource * crossing = rf_pattern(c, rf_tile_union(c, spill, 3, rf_solid(0.75, 0.15, 0.2, 0.9)), 0, 0, 6, 6, 6, 6, 1, 1,
+      rf_move(0.3, 0.45), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 1, 23, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(crossing, 1.0), 0, 0.0);
+  /* A star under even-odd, a blob and a turned bar, on cells that overlap (PC6). */
+  GSHGEOM_Map turn, to, at;
+  gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 30.0, &turn);
+  to = rf_move(3.0, 3.0);
+  gshgeom_map_compose(&to, &turn, &at);
+  GSHSCENE_Clip_Member curved[3] = {rf_member(rf_star(c, 3.0, 3.0, 2.8), GSHGEOM_FILL_EVEN_ODD, NULL),
+      rf_member(rf_blob(c, 0.75, 0.75, 1.6), GSHGEOM_FILL_NONZERO, NULL), rf_member(rf_rect(c, -2.5, -0.4, 2.5, 0.4), GSHGEOM_FILL_NONZERO, &at)};
+  const GSHSCENE_Resource * overlapping = rf_pattern(c, rf_tile_union(c, curved, 3, rf_solid(0.1, 0.35, 0.8, 0.85)), 0, 0, 6, 6, 4.5, 5.0, 1, 1,
+      rf_move(0.0, 0.25), NULL);
+  rf_fill(c, l, rf_rect(c, 25, 1, 47, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(overlapping, 1.0), 0, 0.0);
+  /* A union inside a clip, on a gapped lattice under a skew. */
+  GSHSCENE_Clip_Member pair[2] = {rf_member(rf_rect(c, 0.5, 0.5, 4.0, 3.5), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_rect(c, 2.5, 2.5, 5.5, 5.5), GSHGEOM_FILL_NONZERO, NULL)};
+  GSHSCENE_List * inner = rf_open(c);
+  GSHGEOM_Map mid = rf_move(3.0, 3.0);
+  rf_check(c, gshscene_list_clip_push(inner, rf_circle(c, 3.4), &mid, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_clip_push(inner, rf_union(c, pair, 2), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(c, inner, rf_rect(c, 0, 0, 6, 6), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.6, 0.3, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_clip_pop(inner) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_clip_pop(inner) == GSHSCENE_OK);
+  const GSHSCENE_Resource * gapped = rf_pattern(c, rf_picture_of(c, inner), 0, 0, 6, 6, 8.25, 7.5, 1, 1, rf_affine(c, 1.0, 0.0, 0.35, 1.0, 0.1, 0.2), NULL);
+  rf_fill(c, l, rf_rect(c, 1, 21, 23, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(gapped, 1.0), 0, 0.0);
+  /* A gradient under a union on whole-pixel steps. */
+  GSHSCENE_Gradient_Stop stops[2] = {rf_stop(0.0, rf_solid(1, 0.9, 0, 1)), rf_stop(1.0, rf_solid(0, 0.2, 0.9, 1))};
+  const GSHSCENE_Resource * grad = rf_gradient(c, rf_linear(0, 0, 6, 6, 0, 0, GSHSCENE_EXTEND_PAD), stops, 2);
+  GSHSCENE_Clip_Member trio[3] = {rf_member(rf_rect(c, 0, 0, 3, 3), GSHGEOM_FILL_NONZERO, NULL), rf_member(rf_rect(c, 2, 2, 6, 5), GSHGEOM_FILL_NONZERO, NULL),
+      rf_member(rf_rect(c, 4.5, 0.5, 6, 2), GSHGEOM_FILL_NONZERO, NULL)};
+  const GSHSCENE_Resource * whole = rf_pattern(c, rf_tile_union(c, trio, 3, rf_gradient_paint(grad, 1.0)), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(2.0, 1.0), NULL);
+  rf_fill(c, l, rf_rect(c, 25, 21, 47, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(whole, 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
 typedef struct RF_Fixture {
   const char * name;
   RF_Build build;
@@ -3379,6 +3432,7 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"union-groups", rf_union_groups},
     {"union-nested", rf_union_nested},
     {"union-abutting", rf_union_abutting},
+    {"pattern-union", rf_pattern_union},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

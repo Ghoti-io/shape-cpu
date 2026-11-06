@@ -543,8 +543,10 @@
  *   `max_exact_crossings` (UC19) or than `2^25` (CG6); (d) more pieces kept than `GSHCPU_Limits.max_union_pieces` (default 2^17, ceiling 2^22) in a
  *   group; (e) comparisons past `max_union_tests` (CG11); (f) a group whose rectangle has more than `2^32 - 1` pixels (a kept record names its pixel by
  *   a 32-bit index).  Not refused: a rule for each member (nonzero and even-odd mix freely), any orientation, a member that overlaps itself, a depth of
- *   overlap, a group of up to the store's `max_clip_members` (1024).  Still refused, and documented: a union in a pattern's tile (CU21, PC8's rule
- *   for the use painted with the pattern), and a glyph run from a font as a member (`ERR_UNSUPPORTED` when the union is interned, CU-D8).
+ *   overlap, a group of up to the store's `max_clip_members` (1024).  Still refused, and documented: a glyph run from a font as a member
+ *   (`ERR_UNSUPPORTED` when the union is interned, CU-D8).  A union in a pattern's tile is formed in each copy by this tier, its members cut to the cell, and a
+ *   limit of it refuses the use painted with the pattern (CU21: the area is the plane `union_area` forms, the byte and the remainder as a single clip's, the copies'
+ *   areas add as PC4 says, the predicate is billed once for a pass, and a tile that holds one is not drawn by the period window).
  * - **CG10 Tiers, caps, counters.**  `GSHCPU_RENDER_TIER_UNION` (FT-U1) and `GSHCPU_RENDER_TIER_UNION_GENERAL` are separate switches: the sink claims `CLIP_UNION`
  *   while either is on and `CLIP_UNION_GENERAL` while the second is; with the first off and the second on every union is the general tier's, the switch that
  *   forces it.  The counters are `union_general` (pushes), `union_groups` (groups of several members made exact), `union_exact` (pixels made exact) and
