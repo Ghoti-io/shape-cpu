@@ -470,10 +470,7 @@ KLR = K + L + R
 
 PLANTS = [
     # --- the constants of the definition --------------------------------------
-    ("pixel-bits", "src", CV, "#define PIXEL_BITS 6", "#define PIXEL_BITS 5", KLR),
     ("one-pixel", "src", CV, "#define ONE_PIXEL 64", "#define ONE_PIXEL 32", KLR),
-    ("area-shift-no-plus-one", "src", CV, "#define AREA_SHIFT (2 * PIXEL_BITS + 1 - 8)", "#define AREA_SHIFT (2 * PIXEL_BITS - 8)", KLR),
-    ("area-shift-eight-bits", "src", CV, "#define AREA_SHIFT (2 * PIXEL_BITS + 1 - 8)", "#define AREA_SHIFT (2 * PIXEL_BITS + 1 - 7)", KLR),
     ("min-cells-zero", "src", CV, "#define MIN_CELLS 64u", "#define MIN_CELLS 0u", KL),
 
     # --- integer division -----------------------------------------------------
@@ -521,11 +518,8 @@ PLANTS = [
     ("scanline-last-piece", "src", CV, "  cell_add(raster, ex2, ey, to.y - cursor.y,\n      cursor.x - ex2 * ONE_PIXEL, to.x - ex2 * ONE_PIXEL);", "  cell_add(raster, ex2, ey, to.y - from.y,\n      cursor.x - ex2 * ONE_PIXEL, to.x - ex2 * ONE_PIXEL);", K),
 
     # --- an edge ------------------------------------------------------------------------
-    ("line-keeps-horizontal-pen", "src", CV, "  raster->current = to;\n  if (from.y == to.y) {", "  if (from.y == to.y) {", K),
     ("line-horizontal-test", "src", CV, "  if (from.y == to.y) {\n    /* A horizontal edge", "  if (from.y != to.y) {\n    /* A horizontal edge", K),
     ("line-single-row-test", "src", CV, "  if (ey1 == ey2) {\n    edge_scanline(raster, ey1, from, to);", "  if (ey1 != ey2) {\n    edge_scanline(raster, ey1, from, to);", K),
-    ("line-step", "src", CV, "  step = dy > 0 ? 1 : -1;\n  cursor = from;", "  step = dy > 0 ? -1 : 1;\n  cursor = from;", K),
-    ("line-boundary", "src", CV, "    const int32_t boundary = (step > 0 ? ey + 1 : ey) * ONE_PIXEL;", "    const int32_t boundary = (step > 0 ? ey : ey + 1) * ONE_PIXEL;", K),
     ("line-boundary-x-truncates", "src", CV, "        + round_div((int64_t)(boundary - from.y) * dx, dy));\n    GSHGEOM_Device_Point split;\n\n    split.x = at_x;", "        + ((int64_t)(boundary - from.y) * dx) / dy);\n    GSHGEOM_Device_Point split;\n\n    split.x = at_x;", K),
     ("line-boundary-x-from", "src", CV, "    const int32_t at_x = (int32_t)(from.x\n        + round_div", "    const int32_t at_x = (int32_t)(to.x\n        + round_div", K),
     ("line-cursor-not-advanced", "src", CV, "    edge_scanline(raster, ey, cursor, split);\n    cursor = split;", "    edge_scanline(raster, ey, cursor, split);", K),
@@ -548,16 +542,6 @@ PLANTS = [
     ("sort-cursor-failure-leaks-rows", "src", CV, "      allocator->free_fn(allocator->ctx, sorted);\n      allocator->free_fn(allocator->ctx, rows);\n      return GSHCPU_ERR_OOM;\n    }\n    memcpy(cursor", "      allocator->free_fn(allocator->ctx, sorted);\n      return GSHCPU_ERR_OOM;\n    }\n    memcpy(cursor", L),
 
     # --- from area to coverage ---------------------------------------------------------------
-    ("area-no-abs", "src", CV, "  if (value < 0) {\n    value = -value;\n  }", "  if (value < 0) {\n    value = value;\n  }", K),
-    ("area-abs-before-shift", "src", CV, "  int64_t value = area >> AREA_SHIFT;\n\n  if (value < 0) {\n    value = -value;\n  }", "  int64_t value = (area < 0 ? -area : area) >> AREA_SHIFT;", K),
-    ("fold-modulus", "src", CV, "    value &= 511;", "    value &= 255;", K),
-    ("fold-ramp-knee", "src", CV, "    if (value > 256) {\n      value = 512 - value;", "    if (value >= 256) {\n      value = 512 - value;", K),
-    ("fold-ramp-top", "src", CV, "      value = 512 - value;", "      value = 511 - value;", K),
-    ("fold-full", "src", CV, "    else if (value == 256) {\n      value = 255;", "    else if (value == 256) {\n      value = 254;", K),
-    ("fold-full-removed", "src", CV, "    else if (value == 256) {\n      value = 255;\n    }", "    else if (value == 256) {\n      value = 0;\n    }", K),
-    ("saturate-threshold", "src", CV, "  else if (value >= 256) {\n    value = 255;", "  else if (value > 256) {\n    value = 255;", K),
-    ("saturate-value", "src", CV, "  else if (value >= 256) {\n    value = 255;", "  else if (value >= 256) {\n    value = 254;", K),
-    ("rule-test", "src", CV, "  if (fill == GSHGEOM_FILL_EVEN_ODD) {\n    /* Winding 2", "  if (fill == GSHGEOM_FILL_NONZERO) {\n    /* Winding 2", K),
     ("span-writes-count-minus-one", "src", CV, "  memset(line + from, value, (size_t)count);", "  memset(line + from, value, (size_t)count - 1u);", K),
     ("span-row", "src", CV, "  line = coverage->data + (size_t)row * coverage->stride;\n  memset", "  line = coverage->data + (size_t)row;\n  memset", K),
 
@@ -872,7 +856,6 @@ PLANTS += [
     ("r-premultiplied-forms", "src", RC, "  return format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED || format == GSHCPU_FORMAT_RGBAF32_PREMULTIPLIED;",
      "  return format == GSHCPU_FORMAT_RGBA8_PREMULTIPLIED;", RT),
     # --- the clipped scan converter ---------------------------------------------------------------------------------
-    ("r-cover-area-shift", "src", RV, "#define AREA_SHIFT (2 * PIXEL_BITS + 1 - 8)", "#define AREA_SHIFT (2 * PIXEL_BITS - 8)", RT),
     ("r-cover-pixel", "src", RV, "#define ONE_PIXEL 64", "#define ONE_PIXEL 63", RT),
     ("r-cover-fold-column", "src", RV, "int64_t column = ex < c->rect.x0 ? 0 : ex - c->rect.x0 + 1;",
      "int64_t column = ex < c->rect.x0 ? 1 : ex - c->rect.x0 + 1;", RT),
@@ -881,9 +864,6 @@ PLANTS += [
     ("r-cover-cells-limit", "src", RV, "  if (c->cells >= c->max_deposits) {\n    c->over = 1;\n    return;\n  }\n  c->cells++;\n  if (c->ex) {", "  if (c->cells > c->max_deposits) {\n    c->over = 1;\n    return;\n  }\n  c->cells++;\n  if (c->ex) {", RT),
     ("r-cover-fold-cells-limit", "src", RV, "  if (c->cells >= c->max_deposits) {\n    c->over = 1;\n    return;\n  }\n  c->cells++;\n  if (!c->cover) {\n    return; /* counted, not drawn */", "  if (c->cells > c->max_deposits) {\n    c->over = 1;\n    return;\n  }\n  c->cells++;\n  if (!c->cover) {\n    return; /* counted, not drawn */", RT),
     ("r-cover-sweep-scale", "src", RV, "      int64_t accumulated = cv[0] * (ONE_PIXEL * 2);\n      for (int64_t j = 1; j <= width; j++) {\n        accumulated += cv[j] * (ONE_PIXEL * 2);\n        line[j - 1] = fold(accumulated - ar[j], rule, ex != NULL);", "      int64_t accumulated = cv[0] * ONE_PIXEL;\n      for (int64_t j = 1; j <= width; j++) {\n        accumulated += cv[j] * (ONE_PIXEL * 2);\n        line[j - 1] = fold(accumulated - ar[j], rule, ex != NULL);", RT),
-    ("r-cover-even-odd-fold", "src", RV, "      value = 512 - value;", "      value = 511 - value;", RT),
-    ("r-cover-even-odd-mask", "src", RV, "    value &= 511;", "    value &= 1023;", RT),
-    ("r-cover-saturate", "src", RV, "  } else if (value >= 256) {\n    value = 255;", "  } else if (value >= 255) {\n    value = 254;", RT),
     ("r-cover-row-cut", "src", RV, "p.x = from.x + round_div((b - from.y) * (to.x - from.x), to.y - from.y);",
      "p.x = from.x + (b - from.y) * (to.x - from.x) / (to.y - from.y);", RT),
     ("r-cover-column-cut", "src", RV, "p.y = from.y + round_div((b - from.x) * (to.y - from.y), to.x - from.x);",
@@ -1129,7 +1109,6 @@ PLANTS += [
     ("sc8-sparse-not-cleared", "src", RV, "      cv[j] = 0;\n      ar[j] = 0;\n      if (v != 0) {", "      if (v != 0) {", RST),
     ("sc8-sparse-skips-a-span", "src", RV, "    if (from >= 0) {\n      batch_add(&batch, c->band + r, c->rect.x0 + (from - 1), (size_t)(end - from + 1), line + (from - j0));", "    if (from >= 0 && end > from) {\n      batch_add(&batch, c->band + r, c->rect.x0 + (from - 1), (size_t)(end - from + 1), line + (from - j0));", RST),
     ("sc8-sparse-run-not-closed", "src", RV, "      } else if (from >= 0) {\n        batch_add(&batch, c->band + r, c->rect.x0 + (from - 1), (size_t)(j - from), line + (from - j0));\n        from = -1;\n      }\n      j++;", "      }\n      j++;", RST),
-    ("sc8-sparse-quiet-value", "src", RV, "        uint8_t q = fold(accumulated, rule, magnitude);", "        uint8_t q = fold(accumulated - 1, rule, magnitude);", RST),
     ("sc8-sparse-quiet-extent", "src", RV, "      while (k <= end && cv[k] == 0 && ar[k] == 0) {", "      while (k <= end && cv[k] == 0) {", RST),
     ("sc8-sparse-first-run-column", "src", RV, "        if (from < 0) {\n          from = j;\n        }\n        line[j - j0] = v;", "        if (from < 0) {\n          from = j + 1;\n        }\n        line[j - j0] = v;", RST),
     # SC4, SC6, SC11: what draws nothing, the limits and the work
@@ -1192,12 +1171,8 @@ PLANTS += [
     ("uc4-fold-column-left-out-aligned", "src", RV, "          row[0] = cv[0];", "          row[0] = 0;", UCX),
     # UC5: slabs, order, winding
     # UC6: the shared area
-    ("uc7-fold-signed", "src", RV, "  if (magnitude) {\n    uint64_t m = (uint64_t)(area < 0 ? -area : area);", "  if (0 && magnitude) {\n    uint64_t m = (uint64_t)(area < 0 ? -area : area);", UCXB),
-    ("uc7-even-odd-ramp-dropped", "src", RV, "      if (m > 8192u) {\n        m = 16384u - m;\n      }", "", UCXB),
-    ("uc7-even-odd-period", "src", RV, "      m &= 16383u; /* 2 * 2^13", "      m &= 32767u; /* 2 * 2^13", UCXB),
     ("uc7-shared-not-subtracted", "src", RV, "        int64_t value = dense - shared;\n        if (value < 0) {\n          value = 0;\n        }\n        ar[j] = accumulated - ex->eps * value;", "        int64_t value = dense;\n        if (value < 0) {\n          value = 0;\n        }\n        ar[j] = accumulated - ex->eps * value;", UCX),
     # UC2, UC3: pieces and which cells
-    ("uc2-cut-from-upper-end-dropped", "src", RV, "  if (c->ex && from.y > to.y) {", "  if (0) {", UCXB),
     ("uc2-flat-pieces-not-counted", "src", RV, "    if (c->ex && piece_kind(ex, a, b) == 2) {", "    if (c->ex && piece_kind(ex, a, b) == 3) {", UCX),
     ("uc2-flat-piece-any-touch", "src", RV, "  return a.x == left || b.x == left ? 2 : 0;", "  return a.x == left ? 2 : 0;", UCX),
     ("uc2-flat-edges-not-walked", "src", RV, "    if (c->ex) {\n      flat_edge(c, from, to);\n    }", "", UCX),
@@ -1215,7 +1190,6 @@ PLANTS += [
     ("uc8-complement-flag-dropped", "src", RV, "  three.complement = complement;", "  three.complement = 0;", UCX),
     ("uc8-clip-rule-dropped", "src", RV, "  three.even_odd = in[2].rule == GSHGEOM_FILL_EVEN_ODD;", "  three.even_odd = 0;", UCX),
     ("uc8-joint-step-skipped", "src", RSK, "  if (aligned.path && ex && joint_tier) {", "  if (0) {", UCB),
-    ("uc8-clip-fold-signed", "src", RV, "          line[j - 1] = fold(accumulated - ar[j], in[p].rule, 1);", "          line[j - 1] = fold(accumulated - ar[j], in[p].rule, p < 2);", UCXB),
     # UC9: the cap, the field, the refusal
     ("uc9-cap-off-by-one", "src", RV, "  if ((uint64_t)*n >= c->ex->max_pieces) {", "  if ((uint64_t)*n > c->ex->max_pieces) {", UCX),
     ("uc9-cap-falls-back-to-dense", "src", RV, "  if ((uint64_t)*n >= c->ex->max_pieces) {\n    c->over = 1;\n    return;\n  }", "  if ((uint64_t)*n >= c->ex->max_pieces) {\n    return;\n  }", UCX),
@@ -1874,25 +1848,25 @@ PLANTS += [
     ('rp-unit-third-copy-unweighted', "src", RS, '      a[i] += (double)m * s[i];', '      a[i] += s[i];', RP_TESTS),
     ('rp-unit-sum-not-kept', "src", RS, '  L->sum8[p] += m;\n}', '}', RP_TESTS),
     ('rp-unit-count-not-kept', "src", RS, '    if (c < 255) {\n      L->cnt[p] = (uint8_t)(c + 1);\n    }', '', RP_TESTS),
-    ('rp-unit-single-copy-through-mean', "src", RS, '          if (c == 1) {\n        painter_pixel(run, frame, x, y, L->sum8[p], &L->acc[4u * p]);\n        continue;\n      }', '', RP_TESTS),
-    ('rp-unit-shape-not-saturated', "src", RS, '      painter_pixel(run, frame, x, y, total > 255u ? 255u : total, s);', '      painter_pixel(run, frame, x, y, total, s);', RP_TESTS),
-    ('rp-unit-shape-always-whole', "src", RS, '      painter_pixel(run, frame, x, y, total > 255u ? 255u : total, s);', '      painter_pixel(run, frame, x, y, 255u, s);', RP_TESTS),
+    ('rp-unit-single-copy-through-mean', "src", RS, '      if (c == 1) {\n        painter_pixel(run, frame, x, y, pat_level8(L->sum8[p]), &L->acc[4u * p]);\n        continue;\n      }', '', RP_TESTS),
+    ('rp-unit-shape-not-saturated', "src", RS, '      painter_pixel(run, frame, x, y, pat_level8(total), s);', '      painter_pixel(run, frame, x, y, total >> GSHCPU_FOLD_AREA_SHIFT, s);', RP_TESTS),
+    ('rp-unit-shape-always-whole', "src", RS, '      painter_pixel(run, frame, x, y, pat_level8(total), s);', '      painter_pixel(run, frame, x, y, 255u, s);', RP_TESTS),
     ('rp-unit-mean-not-renormalized', "src", RS, '        s[i] = L->acc[4u * p + (size_t)i] / (double)total;', '        s[i] = L->acc[4u * p + (size_t)i] / 255.0;', RP_TESTS),
     ('rp-unit-counts-not-cleared', "src", RS, '      L->cnt[p] = 0;\n          if (c == 1) {', '          if (c == 1) {', RP_TESTS),
     ('rp-unit-empty-region-applies', "src", RS, '  const GSHCPU_Rect u = L->urect;\n  if (gshcpu_render_rect_empty(u)) {\n    return;\n  }\n  widen_w(run, frame, u, u);', '  const GSHCPU_Rect u = L->urect;\n  widen_w(run, frame, u, u);', RP_TESTS),
     ('rp-unit-work-not-counted', "src", RS, '  run->work += (uint64_t)(u.x1 - u.x0) * (uint64_t)(u.y1 - u.y0);\n  L->urect.x1 = L->urect.x0;', '  L->urect.x1 = L->urect.x0;', RP_TESTS),
     ('rp-unit-region-not-reset', "src", RS, "  L->urect.x1 = L->urect.x0;\n  L->urect.y1 = L->urect.y0;\n}\n\n/** The source of the pixel (@p x, @p y) of a painter's frame", "}\n\n/** The source of the pixel (@p x, @p y) of a painter's frame", RP_TESTS),
-    ('rp-unit-zero-weight-added', "src", RS, '      const uint32_t m8 = cov[(size_t)(y - rc.y0) * w + (size_t)(x - rc.x0)];\n      if (m8 == 0) {\n        continue;\n      }\n      const int64_t dx', '      const uint32_t m8 = cov[(size_t)(y - rc.y0) * w + (size_t)(x - rc.x0)];\n      const int64_t dx', RP_TESTS),
+    ('rp-unit-zero-weight-added', "src", RS, '      if (m == 0) {\n        continue;\n      }\n      const int64_t dx', '      const int64_t dx', RP_TESTS),
     ('rp-unit-source-refused-added', "src", RS, '      if (painter_source(&p, x, y, s)) {\n              pat_add(L, at(run, dx, dy), m, s);\n      }', '      painter_source(&p, x, y, s);\n      pat_add(L, at(run, dx, dy), m, s);', RP_TESTS),
-    ('rp-unit-clips-not-folded', "src", RS, '  if (!gshcpu_render_rect_empty(rc) && u->frame->clip_base < run->clip_count) {\n    const GSHSCENE_Result f = pat_fold_clips(run, L, u->frame, c, rc, cov);', '  if (0 && !gshcpu_render_rect_empty(rc) && u->frame->clip_base < run->clip_count) {\n    const GSHSCENE_Result f = pat_fold_clips(run, L, u->frame, c, rc, cov);', RP_TESTS),
-    ('rp-clip-fold-empty-clip-keeps-coverage', "src", RS, '    if (!have) {\n      memset(cov, 0, n); /* the clip holds nothing of this copy here */\n      return GSHSCENE_OK;\n    }', '    if (!have) {\n      continue;\n    }', RP_TESTS),
+    ('rp-unit-clips-not-folded', "src", RS, '  if (!gshcpu_render_rect_empty(rc) && u->frame->clip_base < run->clip_count) {\n    const GSHSCENE_Result f = pat_fold_clips(run, L, u->frame, c, rc, cov, rem);', '  if (0 && !gshcpu_render_rect_empty(rc) && u->frame->clip_base < run->clip_count) {\n    const GSHSCENE_Result f = pat_fold_clips(run, L, u->frame, c, rc, cov, rem);', RP_TESTS),
+    ('rp-clip-fold-empty-clip-keeps-coverage', "src", RS, '    if (!have) {\n      memset(cov, 0, n); /* the clip holds nothing of this copy here */\n      if (rem) {\n        memset(rem, 0, n);\n      }\n      return GSHSCENE_OK;\n    }', '    if (!have) {\n      continue;\n    }', RP_TESTS),
     ('rp-clip-fold-outside-rect-kept', "src", RS, '          const uint32_t m = (x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) ? L->tmp[(size_t)(y - r.y0) * rw + (size_t)(x - r.x0)] : 0u;', '          const uint32_t m = (x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) ? L->tmp[(size_t)(y - r.y0) * rw + (size_t)(x - r.x0)] : 255u;', RP_TESTS),
-    ('rp-clip-fold-not-weighed', "src", RS, '          *at_cov = (uint8_t)gshcpu_render_weigh(*at_cov, m);', '          *at_cov = (uint8_t)m;', RP_TESTS),
-    ('rp-clip-fold-whole-rect-not-weighed', "src", RS, '        cov[i] = (uint8_t)gshcpu_render_weigh(cov[i], L->tmp[i]);', '        cov[i] = L->tmp[i];', RP_TESTS),
+    ('rp-clip-fold-not-weighed', "src", RS, '          pat_weigh(&cov[at_px], rem ? &rem[at_px] : NULL, m);', '          cov[at_px] = (uint8_t)m;', RP_TESTS),
+    ('rp-clip-fold-whole-rect-not-weighed', "src", RS, '        pat_weigh(&cov[i], rem ? &rem[i] : NULL, L->tmp[i]);', '        cov[i] = L->tmp[i];', RP_TESTS),
     ('rp-clip-fold-tmp-not-cleared', "src", RS, '    memset(L->tmp, 0, n);\n    GSHSCENE_Result res = pat_cover(', '    GSHSCENE_Result res = pat_cover(', RP_TESTS),
-    ('rp-clip-union-unsaturated', "src", RS, "      *at_clip = (uint8_t)(sum > 255u ? 255u : sum); /* PC4: a clip is the union of its copies' restricted regions */", '      *at_clip = (uint8_t)sum;', RP_TESTS),
-    ('rp-clip-union-last-copy-only', "src", RS, '      const uint32_t sum = (uint32_t)*at_clip + m8;', '      const uint32_t sum = m8;', RP_TESTS),
-    ('rp-clip-copy-shift-lost', "src", RS, '      uint8_t * at_clip = &clip->coverage[(size_t)(y + c.sy - clip->rect.y0) * cw + (size_t)(x + c.sx - clip->rect.x0)];', '      uint8_t * at_clip = &clip->coverage[(size_t)(y - clip->rect.y0) * cw + (size_t)(x - clip->rect.x0)];', RP_TESTS),
+    ('rp-clip-union-unsaturated', "src", RS, '          clip->coverage[(size_t)(y - clip->rect.y0) * cw + (size_t)(x - clip->rect.x0)] = (uint8_t)pat_level8(L->sum8[p]);', '          clip->coverage[(size_t)(y - clip->rect.y0) * cw + (size_t)(x - clip->rect.x0)] = (uint8_t)(L->sum8[p] >> GSHCPU_FOLD_AREA_SHIFT);', RP_TESTS),
+    ('rp-clip-union-last-copy-only', "src", RS, '      } else {\n        L->sum8[p] += m;\n      }', '      } else {\n        L->sum8[p] = m;\n      }', RP_TESTS),
+    ('rp-clip-copy-shift-lost', "src", RS, '      const size_t p = at(run, x + c.sx, y + c.sy);', '      const size_t p = at(run, x, y);', RP_TESTS),
     ('rp-clip-memory-not-cleared', "src", RS, '    memset(clip->coverage, 0, (size_t)(clip->rect.x1 - clip->rect.x0) * (size_t)(clip->rect.y1 - clip->rect.y0));\n    GSHSCENE_Result r = pat_each(run, L, clip->rect, pat_clip_copy, &u);', '    GSHSCENE_Result r = pat_each(run, L, clip->rect, pat_clip_copy, &u);', RP_TESTS),
     ('rp-clip-not-kept-for-the-copies', "src", RS, '    memcpy(pc->maps, run->maps, count * sizeof *pc->maps);', '    memset(pc->maps, 0, count * sizeof *pc->maps);', RP_TESTS),
     ('rp-clip-maps-short', "src", RS, '    memcpy(pc->maps, run->maps, count * sizeof *pc->maps);', '    memcpy(pc->maps, run->maps, (count - 1u) * sizeof *pc->maps);', RP_TESTS),
@@ -2113,12 +2087,12 @@ PLANTS += [
      'row[j - 1] = (uint16_t)sum;',
      ['testRender_clip_union']),
     ('cu-cover-plane-signed-fold', 'src', 'src/render/cover.c',
-     'uint32_t sum = (uint32_t)row[j - 1] + fold_area(accumulated - ar[j], rule);',
-     'uint32_t sum = (uint32_t)row[j - 1] + fold_area(accumulated - ar[j] > 0 ? accumulated - ar[j] : 0, rule);',
+     'uint32_t sum = (uint32_t)row[j - 1] + gshcpu_fold_area(accumulated - ar[j], rule);',
+     'uint32_t sum = (uint32_t)row[j - 1] + gshcpu_fold_area(accumulated - ar[j] > 0 ? accumulated - ar[j] : 0, rule);',
      ['testRender_clip_union']),
-    ('cu-cover-even-odd-as-nonzero', 'src', 'src/render/cover.c',
-     '  if (rule == GSHGEOM_FILL_EVEN_ODD) {\n    m &= 16383u;',
-     '  if (rule == (GSHGEOM_Fill_Rule)99) {\n    m &= 16383u;',
+    ('cu-cover-even-odd-as-nonzero', 'srct', 'src/core/fold.h',
+     '  if (rule == GSHGEOM_FILL_EVEN_ODD) {\n    m &= 2u',
+     '  if (rule == (GSHGEOM_Fill_Rule)99) {\n    m &= 2u',
      ['testRender_clip_union']),
     ('cu-cover-plane-row-offset', 'src', 'src/render/cover.c',
      ' + (rect.x0 - prect.x0));\n        for',
@@ -2238,6 +2212,62 @@ PLANTS += [
     ('hx-core-default', 'src', 'src/core/core.c', '  limits->max_hatch_lines = 0; /* the default, GSHCPU_LIMITS_DEFAULT_MAX_HATCH_LINES */', '  limits->max_hatch_lines = 1;', HXS),
 ]
 
+# --- F3: the magnitude fold (fold.h), the cut from the upper end in every sweep, and the area a pattern's copies add (PC4) ----------
+# One plant for each rule and branch of the shared fold, of the edge that is cut from its upper end and deposits negated when it goes up, and
+# of the remainder a copy carries to the pattern's sum.  `srct`: the tests include fold.h themselves, so they are built against the planted tree.
+FD = "src/core/fold.h"
+F3H = ["testCoverage", "testRender", "testRender_vectors", "testRender_pattern", "testRender_pattern_rules", "testRender_clip_union",
+       "testCoverage_limits", "testRender_exact", "probe"]
+F3G = ["testCoverage", "testRender", "testRender_vectors", "testCoverage_limits", "testRender_exact", "testRender_clip_union",
+       "testRender_stroke", "testRender_pattern", "probe"]
+F3P = ["testRender_pattern_rules", "testRender_pattern", "testRender_pattern_period", "testRender", "testRender_vectors"]
+PLANTS += [
+    ("f3-pixel-bits", "srct", FD, "#define GSHCPU_FOLD_PIXEL_BITS 6", "#define GSHCPU_FOLD_PIXEL_BITS 5", F3H),
+    ("f3-area-shift-no-plus-one", "srct", FD, "#define GSHCPU_FOLD_AREA_SHIFT (2 * GSHCPU_FOLD_PIXEL_BITS + 1 - 8)", "#define GSHCPU_FOLD_AREA_SHIFT (2 * GSHCPU_FOLD_PIXEL_BITS - 8)", F3H),
+    ("f3-area-shift-eight-bits", "srct", FD, "#define GSHCPU_FOLD_AREA_SHIFT (2 * GSHCPU_FOLD_PIXEL_BITS + 1 - 8)", "#define GSHCPU_FOLD_AREA_SHIFT (2 * GSHCPU_FOLD_PIXEL_BITS + 1 - 7)", F3H),
+    ("f3-whole-pixel", "srct", FD, "#define GSHCPU_FOLD_WHOLE (INT64_C(2) << (2 * GSHCPU_FOLD_PIXEL_BITS))", "#define GSHCPU_FOLD_WHOLE (INT64_C(1) << (2 * GSHCPU_FOLD_PIXEL_BITS))", F3H),
+    ("f3-fold-sign-kept", "srct", FD, "  uint64_t m = (uint64_t)(area < 0 ? -area : area);", "  uint64_t m = (uint64_t)area;", F3H),
+    ("f3-fold-floor-after-sign", "srct", FD, "  const uint32_t level = gshcpu_fold_area(area, rule) >> GSHCPU_FOLD_AREA_SHIFT;\n  return", "  const uint32_t level = (gshcpu_fold_area(area, rule) + (area < 0 ? 31u : 0u)) >> GSHCPU_FOLD_AREA_SHIFT;\n  return", F3H),
+    ("f3-fold-rule-swapped", "srct", FD, "  if (rule == GSHGEOM_FILL_EVEN_ODD) {\n    m &= 2u", "  if (rule != GSHGEOM_FILL_EVEN_ODD) {\n    m &= 2u", F3H),
+    ("f3-even-odd-period-one-pixel", "srct", FD, "    m &= 2u * (uint64_t)GSHCPU_FOLD_WHOLE - 1u;", "    m &= (uint64_t)GSHCPU_FOLD_WHOLE - 1u;", F3H),
+    ("f3-even-odd-period-four-pixels", "srct", FD, "    m &= 2u * (uint64_t)GSHCPU_FOLD_WHOLE - 1u;", "    m &= 4u * (uint64_t)GSHCPU_FOLD_WHOLE - 1u;", F3H),
+    ("f3-even-odd-ramp-dropped", "srct", FD, "    if (m > (uint64_t)GSHCPU_FOLD_WHOLE) {\n      m = 2u * (uint64_t)GSHCPU_FOLD_WHOLE - m;\n    }", "", F3H),
+    ("f3-even-odd-ramp-top", "srct", FD, "      m = 2u * (uint64_t)GSHCPU_FOLD_WHOLE - m;", "      m = 2u * (uint64_t)GSHCPU_FOLD_WHOLE - m + 1u;", F3H),
+    ("f3-nonzero-cap-never", "srct", FD, "  } else if (m > (uint64_t)GSHCPU_FOLD_WHOLE) {", "  } else if (m > 2u * (uint64_t)GSHCPU_FOLD_WHOLE) {", F3H),
+    ("f3-byte-whole-is-zero", "srct", FD, "  return (uint8_t)(level >= 256u ? 255u : level);", "  return (uint8_t)(level > 256u ? 255u : level);", F3H),
+    ("f3-byte-whole-is-254", "srct", FD, "  return (uint8_t)(level >= 256u ? 255u : level);", "  return (uint8_t)(level >= 256u ? 254u : level);", F3H),
+    ("f3-split-remainder-masked", "srct", FD, "  *rem = (uint8_t)(whole - (byte << GSHCPU_FOLD_AREA_SHIFT));", "  *rem = (uint8_t)(whole & 31u);", F3H),
+    ("f3-split-remainder-zero", "srct", FD, "  *rem = (uint8_t)(whole - (byte << GSHCPU_FOLD_AREA_SHIFT));", "  *rem = 0;", F3H),
+    # the scan converter of coverage.c: an edge is cut from its upper end, an upward one deposits the negation
+    ("f3-cv-up-edge-not-negated", "src", CV, "    raster->flip = true;\n    edge_down(raster, to, from);", "    raster->flip = false;\n    edge_down(raster, to, from);", K),
+    ("f3-cv-flip-not-reset", "src", CV, "    edge_down(raster, to, from);\n    raster->flip = false;\n    return;", "    edge_down(raster, to, from);\n    return;", K),
+    ("f3-cv-flip-ignored", "src", CV, "  if (raster->flip) {\n    dy = -dy;", "  if (0) {\n    dy = -dy;", K),
+    ("f3-cv-pen-not-moved", "src", CV, "  raster->current = to;\n  if (from.y > to.y) {", "  if (from.y > to.y) {", K),
+    ("f3-cv-row-boundary-above", "src", CV, "    const int32_t boundary = (ey + 1) * ONE_PIXEL;", "    const int32_t boundary = ey * ONE_PIXEL;", K),
+    ("f3-cv-row-cut-from-end", "src", CV, "    const int32_t at_x = (int32_t)(from.x\n        + round_div((int64_t)(boundary - from.y) * dx, dy));", "    const int32_t at_x = (int32_t)(to.x\n        + round_div((int64_t)(boundary - to.y) * dx, dy));", K),
+    # the dense cover of render/cover.c
+    ("f3-rv-up-edge-dropped", "src", RV, "  if (from.y > to.y) {\n    Point t = from;", "  if (0 && from.y > to.y) {\n    Point t = from;", F3G),
+    ("f3-rv-up-piece-not-reversed", "src", RV, "  if (c->rev) {\n    piece(c, ex, ey, b, a);", "  if (0) {\n    piece(c, ex, ey, b, a);", F3G),
+    ("f3-rv-up-edge-left-deposit", "src", RV, "    fold_deposit(c, ey, c->rev ? a.y - b.y : b.y - a.y);", "    fold_deposit(c, ey, b.y - a.y);", F3G),
+    ("f3-rv-row-boundary-above", "src", RV, "    Point b = ey == ey2 ? to : row_cut(from, to, (ey + 1) * ONE_PIXEL);", "    Point b = ey == ey2 ? to : row_cut(from, to, ey * ONE_PIXEL);", F3G),
+    ("f3-rv-row-cut-from-end", "src", RV, "    Point a = ey == ey1 ? from : row_cut(from, to, ey * ONE_PIXEL);", "    Point a = ey == ey1 ? from : row_cut(to, from, ey * ONE_PIXEL);", F3G),
+    ("f3-rv-split-remainder-lost", "src", RV, "          line[j - 1] = gshcpu_fold_split(accumulated - ar[j], rule, &rline[j - 1]);", "          line[j - 1] = gshcpu_fold(accumulated - ar[j], rule);\n          rline[j - 1] = 0;", F3P),
+    ("f3-rv-split-row-offset", "src", RV, "        uint8_t * rline = rem + (size_t)((band - rect.y0 + r) * width);", "        uint8_t * rline = rem + (size_t)(r * width);", F3P),
+    ("f3-rv-split-branch-off", "src", RV, "      if (rem) {\n        uint8_t * rline", "      if (0 && rem) {\n        uint8_t * rline", F3P),
+    # the pattern's sum (PC4)
+    ("f3-rs-pat-split-not-used", "src", RS, "      GSHCPU_Result r = rem ? gshcpu_render_cover_split(", "      GSHCPU_Result r = 0 ? gshcpu_render_cover_split(", F3P),
+    ("f3-rs-pat-remainder-not-passed", "src", RS, "run->coverage, L->rem, have);", "run->coverage, NULL, have);", F3P),
+    ("f3-rs-pat-remainder-not-added", "src", RS, "      const uint32_t m = ((uint32_t)cov[at_px] << GSHCPU_FOLD_AREA_SHIFT) + (rem ? rem[at_px] : 0u);", "      const uint32_t m = ((uint32_t)cov[at_px] << GSHCPU_FOLD_AREA_SHIFT);", F3P),
+    ("f3-rs-pat-byte-shift", "src", RS, "      const uint32_t m = ((uint32_t)cov[at_px] << GSHCPU_FOLD_AREA_SHIFT) + (rem ? rem[at_px] : 0u);", "      const uint32_t m = ((uint32_t)cov[at_px] << (GSHCPU_FOLD_AREA_SHIFT - 1)) + (rem ? rem[at_px] : 0u);", F3P),
+    ("f3-rs-pat-level-whole", "src", RS, "  return level > 255u ? 255u : level;", "  return level > 256u ? 255u : level;", F3P),
+    ("f3-rs-pat-level-shift", "src", RS, "  const uint32_t level = a >> GSHCPU_FOLD_AREA_SHIFT;\n  return level", "  const uint32_t level = a >> (GSHCPU_FOLD_AREA_SHIFT - 1);\n  return level", F3P),
+    ("f3-rs-pat-weighed-keeps-remainder", "src", RS, "    *rem = 0;", "    *rem = *rem;", F3P),
+    ("f3-rs-pat-clip-remainder-lost", "src", RS, "      const uint32_t m = ((uint32_t)run->coverage[at_px] << GSHCPU_FOLD_AREA_SHIFT) + L->rem[at_px];", "      const uint32_t m = ((uint32_t)run->coverage[at_px] << GSHCPU_FOLD_AREA_SHIFT);", F3P),
+    ("f3-rs-pat-clip-first-copy-lost", "src", RS, "        L->cnt[p] = 1;\n        L->sum8[p] = m;", "        L->cnt[p] = 1;\n        L->sum8[p] = 0;", F3P),
+    ("f3-rs-pat-clip-count-not-cleared", "src", RS, "(uint8_t)pat_level8(L->sum8[p]);\n          L->cnt[p] = 0;", "(uint8_t)pat_level8(L->sum8[p]);", F3P),
+    ("f3-rs-pat-clip-untouched-written", "src", RS, "        if (L->cnt[p] != 0) {\n          clip->coverage", "        if (1) {\n          clip->coverage", F3P),
+]
+
 SURVIVORS = {
     # masks-images-patterns story H1 (hx-): equivalent mutants, each with the cause.
     'hx-notice': 'equivalent in what is asked for: measure_one tests the notice of the original fill item, where the plant reads a stroke notice of a fill (no style, so nothing noticed) and goes on to expand a hatch that draws nothing - an empty pen, a singular map or no spacing - which opens no lines and so no arena memory; the peak, and the block asked for under caller memory, are the same (testRender_hatch holds the need of those three below that of a drawing hatch)',
@@ -2302,8 +2332,6 @@ SURVIVORS = {
     "uc3-window-unbounded": "not seen by a plain build: it writes past the piece pool, which a sanitizer sees",
     "uc4-remainder-unchecked": "not seen: the check of the dense area after it refuses an inconsistent cover with the same status; "
         "the case is a cover the remainder alone refuses",
-    "uc7-even-odd-period": "not seen: needs a pixel wound between two and four areas under the even-odd rule in the clip part of an "
-        "aligned stroke (a triple overlap), which no test builds",
     "uc14-gap-step-multiplicity": "not seen: needs coincident pieces of one direction at a gap step of a cell that has other "
         "pieces (the mid-gap variant is caught)",
     "rv-670-lt": "not seen by a plain build: `p <= n` reads one part past the three that both callers pass (an array on the stack), "

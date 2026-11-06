@@ -72,17 +72,18 @@ def rdiv(num, den):
 
 
 def fold(area, fill):
-    v = area >> 5
-    v = abs(v)
+    """The coverage byte of an accumulated area (1/8192 of a pixel) under a rule: the magnitude first, reduced by
+    the rule while it is exact (nonzero holds it at one pixel; even-odd takes it modulo two pixels and reflects what
+    is past one), then the floor in 256ths with a whole pixel held at 255.  Either way round gives the same byte."""
+    m = abs(area)
     if fill == 1:
-        v &= 511
-        if v > 256:
-            v = 512 - v
-        elif v == 256:
-            v = 255
-    elif v >= 256:
-        v = 255
-    return v
+        m %= 16384
+        if m > 8192:
+            m = 16384 - m
+    elif m > 8192:
+        m = 8192
+    v = m >> 5
+    return 255 if v >= 256 else v
 
 
 def model(contours, fill, left, top, w, h):
@@ -90,9 +91,10 @@ def model(contours, fill, left, top, w, h):
     # The library's array merges a crossing only into the entry made just
     # before it, so its length (what max_cells caps) is the number of times the
     # cell changed along the walk, not the number of distinct cells.
-    state = {"last": None, "entries": 0}
+    state = {"last": None, "entries": 0, "sign": 1}
 
     def add(ex, ey, dy, fx1, fx2):
+        dy *= state["sign"]
         if dy == 0:
             return
         assert 0 <= ex < w and 0 <= ey < h, "a cell outside the rectangle"
@@ -121,6 +123,16 @@ def model(contours, fill, left, top, w, h):
         add(ex2, ey, ty - cy, cx - ex2 * ONE, tx - ex2 * ONE)
 
     def line(fx, fy, tx, ty):
+        # An edge is cut from its upper end whichever way it is traversed; an edge that goes up deposits the
+        # negation of what the same edge going down does.  A region and its reverse have the same cells, negated.
+        if fy > ty:
+            state["sign"] = -1
+            line_down(tx, ty, fx, fy)
+            state["sign"] = 1
+        else:
+            line_down(fx, fy, tx, ty)
+
+    def line_down(fx, fy, tx, ty):
         if fy == ty:
             return
         ey1, ey2 = fy // ONE, ty // ONE
@@ -128,15 +140,14 @@ def model(contours, fill, left, top, w, h):
             scan(ey1, fx, fy, tx, ty)
             return
         dy, dx = ty - fy, tx - fx
-        step = 1 if dy > 0 else -1
         cx, cy = fx, fy
         ey = ey1
         while ey != ey2:
-            b = (ey + 1 if step > 0 else ey) * ONE
+            b = (ey + 1) * ONE
             sx = fx + rdiv((b - fy) * dx, dy)
             scan(ey, cx, cy, sx, b)
             cx, cy = sx, b
-            ey += step
+            ey += 1
         scan(ey2, cx, cy, tx, ty)
 
     for contour in contours:
@@ -196,10 +207,9 @@ def exact(contours, fill, left, top, w, h):
                 for sx in range(ONE):
                     x2 = ((left + px) * ONE + sx) * 2 + 1
                     s += winding(contours, x2, y2)
-            # The library accumulates the signed area with the opposite sign
-            # for a clockwise contour; the fold takes the floor of the signed
-            # area before the absolute value.
-            rows[py][px] = fold(-2 * s, fill)
+            # 2 * s is the area in 1/8192 of a pixel (a sub-cell is 1/4096); its
+            # sign is the winding's direction and the fold takes the magnitude.
+            rows[py][px] = fold(2 * s, fill)
     return rows
 
 
@@ -290,6 +300,68 @@ def cases():
     return out
 
 
+def fold_rational(area, fill):
+    """The fold as an exact rational, in a program that shares nothing with fold() above: the area in pixels is a
+    Fraction, the rule reduces it (nonzero holds it at one pixel; even-odd takes it modulo two and reflects what is
+    past one), and the byte is the floor of 256 times it, with a whole pixel held at 255."""
+    from fractions import Fraction
+    import math
+    t = Fraction(abs(area), 8192)
+    if fill == 1:
+        t = t % 2
+        if t > 1:
+            t = 2 - t
+    elif t > 1:
+        t = Fraction(1)
+    return min(255, math.floor(t * 256))
+
+
+FOLD_FROM, FOLD_TO = -40000, 40000
+
+
+def fold_table():
+    """Every area from FOLD_FROM to FOLD_TO under each rule, as the bytes fold_rational gives (asserted equal to
+    fold, and to the same area negated), and their hash."""
+    table = []
+    for fill in (0, 1):
+        for a in range(FOLD_FROM, FOLD_TO + 1):
+            v = fold_rational(a, fill)
+            assert v == fold(a, fill) == fold(-a, fill) == fold_rational(-a, fill), (a, fill)
+            table.append(v)
+    return table
+
+
+def fold_spots():
+    """The areas at which a level changes, one either side: the floor's edge, the whole pixel, the ramp's top and bottom."""
+    spots = set()
+    for k in (0, 1, 2, 3, 127, 128, 255, 256, 257, 383, 384, 385, 510, 511, 512, 513):
+        for d in (-1, 0, 1, 31, 33):
+            spots.add(32 * k + d)
+    for a in (8191, 8192, 8193, 16383, 16384, 16385, 24575, 24576, 24577, 32767, 32768, 32769):
+        spots.add(a)
+    out = []
+    for a in sorted(spots):
+        for sign in (1, -1):
+            for fill in (0, 1):
+                out.append((sign * a, fill, fold_rational(sign * a, fill)))
+    return out
+
+
+def twinned(all_cases):
+    """Every case, and after it the same region wound the other way round (each contour's points reversed): the
+    coverage of a region does not depend on the direction of its contours, so the twin's rows are the case's, and
+    the generator stops if its own two programs disagree on that."""
+    out = []
+    for name, fill, contours, axis in all_cases:
+        out.append((name, fill, contours, axis))
+        reverse = [c[::-1] for c in contours]
+        left, top, wd, ht = margin_rect(contours)
+        assert model(contours, fill, left, top, wd, ht) == model(reverse, fill, left, top, wd, ht), \
+            "%s: the model's rows depend on the winding direction" % name
+        out.append((name + "-reversed", fill, reverse, axis))
+    return out
+
+
 def hexrows(rows):
     return "".join("%02x" % b for r in rows for b in r)
 
@@ -331,7 +403,7 @@ def emit():
     w("inline const std::vector<Fill> & fills() {")
     w("  static const std::vector<Fill> all = {")
     n_axis = 0
-    for name, fill, contours, axis in cases():
+    for name, fill, contours, axis in twinned(cases()):
         left, top, wd, ht = margin_rect(contours)
         m = model(contours, fill, left, top, wd, ht)
         if axis:
@@ -373,10 +445,34 @@ def emit():
     w("  return all;")
     w("}")
     w("")
+    # The fold of an accumulated area (fold.h): the exact-rational table's hash over every area in a range under each
+    # rule, and the spots where a level changes.
+    table = fold_table()
+    w("// The fold of an accumulated area (1/8192 of a pixel) into 0..255: fold_rational() over every area from")
+    w("// kFoldFrom to kFoldTo under each rule (nonzero, then even-odd), FNV-1a 64 over the bytes, and the spots at which")
+    w("// a level changes (one value either side of each, both signs, both rules).")
+    w("constexpr int64_t kFoldFrom = %d;" % FOLD_FROM)
+    w("constexpr int64_t kFoldTo = %d;" % FOLD_TO)
+    w("constexpr uint64_t kFoldHash = 0x%016xull;" % fnv(bytes(table)))
+    w("")
+    w("struct FoldSpot {")
+    w("  int64_t area;")
+    w("  int fill;")
+    w("  unsigned byte;")
+    w("};")
+    w("")
+    w("inline const std::vector<FoldSpot> & fold_spots() {")
+    w("  static const std::vector<FoldSpot> all = {")
+    for a, fill, v in fold_spots():
+        w("    {%d, %d, %du}," % (a, fill, v))
+    w("  };")
+    w("  return all;")
+    w("}")
+    w("")
     w("}  // namespace known")
     w("")
     w("#endif  // GHOTI_IO_GSHCPU_KNOWN_ANSWERS_H")
-    sys.stderr.write("%d cases (%d axis-aligned, checked against the definition)\n" % (len(cases()), n_axis))
+    sys.stderr.write("%d cases (%d axis-aligned, checked against the definition)\n" % (len(twinned(cases())), n_axis))
     return "\n".join(lines) + "\n"
 
 

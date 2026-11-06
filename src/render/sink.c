@@ -36,6 +36,8 @@
 
 #include "render_internal.h"
 
+#include "../core/fold.h"
+
 #include <ghoti.io/cutil/safemath.h>
 #include <ghoti.io/shape-geometry/clip.h>
 #include <ghoti.io/shape-geometry/device.h>
@@ -324,10 +326,11 @@ struct Pat_Level {
   int single;                /* overlapping cells (PC6): one copy at a time, in lattice order */
   int64_t ci, cj;
   GSHCPU_Rect urect;         /* the pixels the unit being drawn has accumulated */
-  uint32_t * sum8;           /* PC4: the unit's accumulator, a pixel of the region each: the sum of the copies' weights ... */
+  uint32_t * sum8;           /* PC4: the unit's accumulator, a pixel of the region each: the sum of the copies' areas in 1/8192 pixel ... */
   uint8_t * cnt;             /* ... how many copies touched it ... */
-  double * acc;              /* ... and the first copy's source, or the sum of the sources weighted by the 8-bit weights */
+  double * acc;              /* ... and the first copy's source, or the sum of the sources weighted by the areas */
   uint8_t * coverage;        /* this level's coverage buffers (the Run's are swapped for them while the pass runs) */
+  uint8_t * rem;             /* PC4: the area the coverage's byte leaves out, in 1/8192 pixel (gshcpu_fold_split), of the copy being drawn */
   uint8_t * cov_aligned;
   uint8_t * cov_clip;
   uint8_t * cov_result;
@@ -762,7 +765,7 @@ static GSHCPU_Rect whole_of(const GSHSCENE_Target * target) {
 
 /** Where the parts of one pass level's memory lie (PC11): the record, the unit's accumulator, and the coverage buffers. */
 typedef struct Pat_Offsets {
-  size_t at_sum8, at_cnt, at_acc, at_coverage, at_aligned, at_clip, at_result, at_tmp, at_pclips, at_pmaps, bytes;
+  size_t at_sum8, at_cnt, at_acc, at_coverage, at_rem, at_aligned, at_clip, at_result, at_tmp, at_pclips, at_pmaps, bytes;
 } Pat_Offsets;
 
 /** The sizes of one level's memory for @p pixels pixels; 0 on overflow. */
@@ -771,7 +774,7 @@ static int pat_offsets(size_t pixels, int aligned, size_t clips, size_t levels, 
   size_t ignored;
   const int ok = place(&at, sizeof(Pat_Level), &ignored) && place(&at, mul3(pixels, sizeof(uint32_t), 1), &o->at_sum8) &&
       place(&at, pixels, &o->at_cnt) && place(&at, mul3(pixels, 4u, sizeof(double)), &o->at_acc) &&
-      place(&at, pixels, &o->at_coverage) && place(&at, aligned ? pixels : 0, &o->at_aligned) &&
+      place(&at, pixels, &o->at_coverage) && place(&at, pixels, &o->at_rem) && place(&at, aligned ? pixels : 0, &o->at_aligned) &&
       place(&at, aligned ? pixels : 0, &o->at_clip) && place(&at, aligned ? pixels : 0, &o->at_result) &&
       place(&at, pixels, &o->at_tmp) && place(&at, mul3(clips, sizeof(Pat_Clip), 1), &o->at_pclips) &&
       place(&at, mul3(clips, sat_add(levels, 2u), sizeof(GSHGEOM_Map)), &o->at_pmaps);
@@ -3551,8 +3554,14 @@ static GSHSCENE_Result pat_each(Run * run, Pat_Level * L, GSHCPU_Rect rect, Pat_
   return g == GSHGEOM_OK ? GSHSCENE_OK : GSHSCENE_ERR_LIMIT;
 }
 
-/* PC4: the unit's accumulator.  A pixel holds the weights of the copies that touched it (sum8), how many did, and either the one
- * copy's source or the sum of the sources, each weighed by its 8-bit weight. */
+/** PC4: the byte of an area @p a of the copies of a pixel, in 1/8192 pixel: its floor in 256ths, held at 255 (the quantization, once, of the sum). */
+static inline uint32_t pat_level8(uint32_t a) {
+  const uint32_t level = a >> GSHCPU_FOLD_AREA_SHIFT;
+  return level > 255u ? 255u : level;
+}
+
+/* PC4: the unit's accumulator.  A pixel holds the areas of the copies that touched it (sum8), how many did, and either the one
+ * copy's source or the sum of the sources, each weighed by its area. */
 static inline void pat_add(Pat_Level * L, size_t p, uint32_t m, const double s[4]) {
   double * a = &L->acc[4u * p];
   const uint8_t c = L->cnt[p];
@@ -3599,7 +3608,7 @@ static void pat_finish(Run * run, Pat_Level * L, Frame * frame) {
       }
       L->cnt[p] = 0;
           if (c == 1) {
-        painter_pixel(run, frame, x, y, L->sum8[p], &L->acc[4u * p]);
+        painter_pixel(run, frame, x, y, pat_level8(L->sum8[p]), &L->acc[4u * p]);
         continue;
       }
       const uint32_t total = L->sum8[p];
@@ -3607,7 +3616,7 @@ static void pat_finish(Run * run, Pat_Level * L, Frame * frame) {
       for (int i = 0; i < 4; i++) {
         s[i] = L->acc[4u * p + (size_t)i] / (double)total;
       }
-      painter_pixel(run, frame, x, y, total > 255u ? 255u : total, s);
+      painter_pixel(run, frame, x, y, pat_level8(total), s);
     }
   }
   run->work += (uint64_t)(u.x1 - u.x0) * (uint64_t)(u.y1 - u.y0);
@@ -3708,7 +3717,7 @@ static void period_guard_stroke(Run * run, Pat_Level * L, const GSHCPU_Stroke * 
  * is the rectangle the coverage is written for, @p wc what the whole render draws of the copy (where cells are counted).
  */
 static GSHSCENE_Result pat_cover(Run * run, Pat_Level * L, const GSHSCENE_Item * item, GSHGEOM_Map * maps, size_t count, const Pat_Copy * c,
-    GSHCPU_Rect * rc, GSHCPU_Rect * wc, uint8_t * out, int * have) {
+    GSHCPU_Rect * rc, GSHCPU_Rect * wc, uint8_t * out, uint8_t * rem, int * have) {
   Cpu_Sink * cs = run->cs;
   *have = 0;
   if (run->item_alloc == &run->arena.self) {
@@ -3773,7 +3782,8 @@ static GSHSCENE_Result pat_cover(Run * run, Pat_Level * L, const GSHSCENE_Item *
         rect.x1 = rect.x0;
         rect.y1 = rect.y0;
       }
-      GSHCPU_Result r = gshcpu_render_cover_counted(paths, n, item->fill_rule, rect, *wc, out, run->acc, cs->max_deposits, &cells);
+      GSHCPU_Result r = rem ? gshcpu_render_cover_split(paths, n, item->fill_rule, rect, *wc, out, rem, run->acc, cs->max_deposits, &cells)
+                            : gshcpu_render_cover_counted(paths, n, item->fill_rule, rect, *wc, out, run->acc, cs->max_deposits, &cells);
       run->acc_zero = 0;
       run->work += cells;
       result = scene_result(r);
@@ -3804,14 +3814,28 @@ static GSHSCENE_Result pat_copy_coverage(Run * run, Pat_Level * L, const GSHSCEN
   if (!rect_in_range(*wc)) {
     return GSHSCENE_ERR_LIMIT;
   }
-  return pat_cover(run, L, item, run->maps, count, c, rc, wc, run->coverage, have);
+  return pat_cover(run, L, item, run->maps, count, c, rc, wc, run->coverage, L->rem, have);
+}
+
+/**
+ * PC4: the coverage of a pixel, @p cov and the area @p rem its byte leaves out (NULL: none), weighed by the clip's byte @p m (D8).  The
+ * byte is weighed as ever, so that a pixel only one copy touches is the byte the explicit instance draws (N7), and the area the byte leaves
+ * out is dropped: a clip's weight is of a byte, a clip in a tile is cut to the copy's cell, and the seam of a weighed copy is the product of
+ * two coverages that no sum of areas makes whole.  Only a copy that no clip weighs adds its exact area.
+ */
+static inline void pat_weigh(uint8_t * cov, uint8_t * rem, uint32_t m) {
+  *cov = (uint8_t)gshcpu_render_weigh(*cov, m);
+  if (rem) {
+    *rem = 0;
+  }
 }
 
 /**
  * PC4: the weight of the unit's coverage @p cov over @p rc in the copy @p c under the clips of the tile in force in @p frame, each
  * clip made again for this copy (its outline under the copy's canonical map, cut to the cell): D8's fold with the copy's own clips.
  */
-static GSHSCENE_Result pat_fold_clips(Run * run, Pat_Level * L, const Frame * frame, const Pat_Copy * c, GSHCPU_Rect rc, uint8_t * cov) {
+static GSHSCENE_Result pat_fold_clips(Run * run, Pat_Level * L, const Frame * frame, const Pat_Copy * c, GSHCPU_Rect rc, uint8_t * cov,
+    uint8_t * rem) {
   const size_t n = (size_t)(rc.x1 - rc.x0) * (size_t)(rc.y1 - rc.y0);
   for (size_t k = frame->clip_base; k < run->clip_count; k++) {
     const Pat_Clip * pc = &L->pclips[k];
@@ -3819,12 +3843,15 @@ static GSHSCENE_Result pat_fold_clips(Run * run, Pat_Level * L, const Frame * fr
     GSHCPU_Rect w = rc;
     int have = 0;
     memset(L->tmp, 0, n);
-    GSHSCENE_Result res = pat_cover(run, L, pc->item, pc->maps, pc->count, c, &r, &w, L->tmp, &have);
+    GSHSCENE_Result res = pat_cover(run, L, pc->item, pc->maps, pc->count, c, &r, &w, L->tmp, NULL, &have);
     if (res != GSHSCENE_OK) {
       return res;
     }
     if (!have) {
       memset(cov, 0, n); /* the clip holds nothing of this copy here */
+      if (rem) {
+        memset(rem, 0, n);
+      }
       return GSHSCENE_OK;
     }
     /* pat_cover wrote L->tmp over r, a rectangle inside rc; the pixels of rc outside r are 0. */
@@ -3834,13 +3861,13 @@ static GSHSCENE_Result pat_fold_clips(Run * run, Pat_Level * L, const Frame * fr
       for (int64_t y = rc.y0; y < rc.y1; y++) {
         for (int64_t x = rc.x0; x < rc.x1; x++) {
           const uint32_t m = (x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1) ? L->tmp[(size_t)(y - r.y0) * rw + (size_t)(x - r.x0)] : 0u;
-          uint8_t * at_cov = &cov[(size_t)(y - rc.y0) * cw + (size_t)(x - rc.x0)];
-          *at_cov = (uint8_t)gshcpu_render_weigh(*at_cov, m);
+          const size_t at_px = (size_t)(y - rc.y0) * cw + (size_t)(x - rc.x0);
+          pat_weigh(&cov[at_px], rem ? &rem[at_px] : NULL, m);
         }
       }
     } else {
       for (size_t i = 0; i < n; i++) {
-        cov[i] = (uint8_t)gshcpu_render_weigh(cov[i], L->tmp[i]);
+        pat_weigh(&cov[i], rem ? &rem[i] : NULL, L->tmp[i]);
       }
     }
   }
@@ -3857,10 +3884,10 @@ typedef struct Pat_Unit {
 
 /** The weights of the coverage @p cov of the copy @p c, folded with the clips in force (D8) and painted by the item's paint at the canonical position (PC3), added to the unit. */
 static GSHSCENE_Result pat_paint_copy(Run * run, Pat_Level * L, const Pat_Unit * u, const Pat_Copy * c, GSHCPU_Rect rc, GSHCPU_Rect wc,
-    uint8_t * cov) {
+    uint8_t * cov, uint8_t * rem) {
   Painter p;
   if (!gshcpu_render_rect_empty(rc) && u->frame->clip_base < run->clip_count) {
-    const GSHSCENE_Result f = pat_fold_clips(run, L, u->frame, c, rc, cov);
+    const GSHSCENE_Result f = pat_fold_clips(run, L, u->frame, c, rc, cov, rem);
     if (f != GSHSCENE_OK) {
       return f;
     }
@@ -3878,13 +3905,14 @@ static GSHSCENE_Result pat_paint_copy(Run * run, Pat_Level * L, const Pat_Unit *
   const size_t w = (size_t)(rc.x1 - rc.x0);
   for (int64_t y = rc.y0; y < rc.y1; y++) {
     for (int64_t x = rc.x0; x < rc.x1; x++) {
-      const uint32_t m8 = cov[(size_t)(y - rc.y0) * w + (size_t)(x - rc.x0)];
-      if (m8 == 0) {
+      const size_t at_px = (size_t)(y - rc.y0) * w + (size_t)(x - rc.x0);
+      /* already weighed by this copy's clips (pat_fold_clips); the area of the copy here, in 1/8192 pixel (a stroke's has only its byte) */
+      const uint32_t m = ((uint32_t)cov[at_px] << GSHCPU_FOLD_AREA_SHIFT) + (rem ? rem[at_px] : 0u);
+      if (m == 0) {
         continue;
       }
       const int64_t dx = x + c->sx;
       const int64_t dy = y + c->sy;
-      const uint32_t m = m8; /* already weighed by this copy's clips (pat_fold_clips) */
       double s[4];
       if (painter_source(&p, x, y, s)) {
               pat_add(L, at(run, dx, dy), m, s);
@@ -3912,7 +3940,7 @@ static GSHSCENE_Result pat_fill_copy(Run * run, Pat_Level * L, int64_t i, int64_
   if (r != GSHSCENE_OK || !have) {
     return r;
   }
-  return pat_paint_copy(run, L, u, &c, rc, wc, run->coverage);
+  return pat_paint_copy(run, L, u, &c, rc, wc, run->coverage, L->rem);
 }
 
 /** PC4: a fill of the tile: one element over all the copies. */
@@ -3936,7 +3964,6 @@ static GSHSCENE_Result pat_fill(Run * run, const GSHSCENE_Item * item, const siz
 
 static GSHSCENE_Result pat_clip_copy(Run * run, Pat_Level * L, int64_t i, int64_t j, void * ctx) {
   const Pat_Unit * u = ctx;
-  Clip * clip = &run->clips[run->clip_count];
   Pat_Copy c;
   GSHSCENE_Result r = pat_copy_open(L, i, j, &c);
   if (r != GSHSCENE_OK) {
@@ -3949,16 +3976,21 @@ static GSHSCENE_Result pat_clip_copy(Run * run, Pat_Level * L, int64_t i, int64_
     return r;
   }
   const size_t w = (size_t)(rc.x1 - rc.x0);
-  const size_t cw = (size_t)(clip->rect.x1 - clip->rect.x0);
   for (int64_t y = rc.y0; y < rc.y1; y++) {
     for (int64_t x = rc.x0; x < rc.x1; x++) {
-      const uint32_t m8 = run->coverage[(size_t)(y - rc.y0) * w + (size_t)(x - rc.x0)];
-      if (m8 == 0) {
+      const size_t at_px = (size_t)(y - rc.y0) * w + (size_t)(x - rc.x0);
+      const uint32_t m = ((uint32_t)run->coverage[at_px] << GSHCPU_FOLD_AREA_SHIFT) + L->rem[at_px];
+      if (m == 0) {
         continue;
       }
-      uint8_t * at_clip = &clip->coverage[(size_t)(y + c.sy - clip->rect.y0) * cw + (size_t)(x + c.sx - clip->rect.x0)];
-      const uint32_t sum = (uint32_t)*at_clip + m8;
-      *at_clip = (uint8_t)(sum > 255u ? 255u : sum); /* PC4: a clip is the union of its copies' restricted regions */
+      /* PC4: a clip is the union of its copies' restricted regions: their areas add, and the byte is made once, in pat_clip_push. */
+      const size_t p = at(run, x + c.sx, y + c.sy);
+      if (L->cnt[p] == 0) {
+        L->cnt[p] = 1;
+        L->sum8[p] = m;
+      } else {
+        L->sum8[p] += m;
+      }
     }
   }
   run->work += (uint64_t)w * (uint64_t)(rc.y1 - rc.y0);
@@ -3996,6 +4028,17 @@ static GSHSCENE_Result pat_clip_push(Run * run, const GSHSCENE_Item * item, cons
     L->base = L->base0;
     if (r != GSHSCENE_OK) {
       return r;
+    }
+    /* PC4: the union of the copies' regions, quantized once: the byte of the sum of their areas, held at 255. */
+    const size_t cw = (size_t)(clip->rect.x1 - clip->rect.x0);
+    for (int64_t y = clip->rect.y0; y < clip->rect.y1; y++) {
+      for (int64_t x = clip->rect.x0; x < clip->rect.x1; x++) {
+        const size_t p = at(run, x, y);
+        if (L->cnt[p] != 0) {
+          clip->coverage[(size_t)(y - clip->rect.y0) * cw + (size_t)(x - clip->rect.x0)] = (uint8_t)pat_level8(L->sum8[p]);
+          L->cnt[p] = 0;
+        }
+      }
     }
   }
   run->clip_count++;
@@ -4073,7 +4116,7 @@ static GSHSCENE_Result pat_stroke_copy(Run * run, Pat_Level * L, int64_t i, int6
   }
   gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, strokes));
   if (!gshcpu_render_rect_empty(rect)) {
-    result = pat_paint_copy(run, L, u, &c, rect, whole, cov);
+    result = pat_paint_copy(run, L, u, &c, rect, whole, cov, NULL);
   }
   gshcpu_render_stroke_close(cache, &s);
   return result;
@@ -4323,6 +4366,7 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
   L->cnt = lb + po.at_cnt;
   L->acc = (double *)(void *)(lb + po.at_acc);
   L->coverage = lb + po.at_coverage;
+  L->rem = lb + po.at_rem;
   L->cov_aligned = run->layout.aligned ? lb + po.at_aligned : NULL;
   L->cov_clip = run->layout.aligned ? lb + po.at_clip : NULL;
   L->cov_result = run->layout.aligned ? lb + po.at_result : NULL;

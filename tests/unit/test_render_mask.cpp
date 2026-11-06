@@ -1195,7 +1195,9 @@ TEST(RenderMask, AListWithNoMaskedGroupHasTheWorkspaceAndTheWorkItHadBeforeMasks
     {"glyphs", 105663, 1201, 2, 2, 2, 96863},
     {"maps", 101135, 1178, 4, 4, 4, 98863},
     {"font-fast", 107247, 1066, 3, 3, 3, 96863},
-    {"font-general", 109823, 1157, 2, 2, 2, 96863},
+    // font-general: 1156 deposits, one fewer than before F3: an edge is cut from its upper end whichever way it is traversed, which merges one
+    // more crossing into the cell before it.
+    {"font-general", 109823, 1156, 2, 2, 2, 96863},
     {"gradient-linear", 164335, 544, 3, 3, 3, 163103},
     {"gradient-radial", 166495, 832, 4, 4, 4, 163183},
     {"gradient-sweep", 165535, 559, 4, 4, 4, 163263},

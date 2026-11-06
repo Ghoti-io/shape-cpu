@@ -645,6 +645,51 @@ TEST(RenderPatternRules, AGroupAroundAClipBlockTakesTheUnionOfTheCopiesClips) {
   }
 }
 
+TEST(RenderPatternRules, TheCopiesOfAPixelAddTheirAreasAndAWeighedCopyAddsItsWeighedByte) {
+  // PC4, F3: the copies of a cell-filling fill add their exact areas, and the byte is made once from the sum.  The lattice sits at (19/64, 29/64)
+  // of a pixel, so the pixel at a corner of four cells has the four areas 2 * 19 * 29, 2 * 19 * 35, 2 * 45 * 29 and 2 * 45 * 35 in 1/8192 pixel
+  // (1102, 1330, 2610, 3150): bytes 34, 41, 81 and 98 with the remainders 14, 18, 18 and 14, which sum to the whole pixel, 8192, so the pixel is
+  // opaque (the sum of the bytes is 254, one short of it, and the sum of the floors was the seam of the fold this replaced).  Under a clip block
+  // the same cells weigh each copy by the clip cut to its cell, the same coverage: a byte weighed by a byte, (34 * 34 + 127) / 255 and the
+  // others, 5, 7, 26 and 38, and a weighed copy adds that byte and not its area (the remainder is dropped), so the pixel is 76.
+  // Variant 2: a group around the fill inside a clip block: the group is weighed at its pop by the clip block's union of the copies' regions,
+  // whose areas add as well (PC4), so the corner is opaque there too.
+  for (int variant = 0; variant < 3; variant++) {
+    const int clipped = variant == 1;
+    RF_Ctx c;
+    rf_begin(&c);
+    GSHSCENE_List * t = rf_open(&c);
+    if (variant) {
+      rf_check(&c, gshscene_list_clip_push(t, rf_rect(&c, 0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+    }
+    if (variant == 2) {
+      rf_general(&c, t, 0, 0, 1.0, GSHSCENE_COMPOSITE_SRC_OVER, nullptr);
+    }
+    rf_fill(&c, t, rf_rect(&c, 0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.5, 0.8, 1.0), 0, 0.0);
+    if (variant == 2) {
+      rf_pop(&c, t);
+    }
+    if (variant) {
+      rf_check(&c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+    }
+    const GSHSCENE_Resource * tile = rf_picture_of(&c, t);
+    const GSHSCENE_Resource * pat = rf_pattern(&c, tile, 0, 0, 8, 8, 8, 8, 1, 1, rf_move(19.0 / 64.0, 29.0 / 64.0), nullptr);
+    GSHSCENE_List * l = rf_open(&c);
+    rf_fill(&c, l, rf_rect(&c, 0, 0, 40, 32), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+    rf_close(&c, l);
+    TSink s(kAll);
+    Out out = draw(s.sink, l, 40, 32, GSHCPU_FORMAT_RGBAF32_STRAIGHT);
+    ASSERT_EQ(out.result, GSHSCENE_OK);
+    // On a float target over a zero backdrop, the alpha is the weight (shape) over 255.
+    for (int x : {8, 16, 24, 32}) {
+      float alpha;
+      std::memcpy(&alpha, &out.bytes[(size_t)(4 * (8 * 40 + x) + 3) * sizeof(float)], sizeof alpha);
+      EXPECT_NEAR(alpha * 255.0f, clipped ? 76.0f : 255.0f, 0.01f) << "variant " << variant << " corner " << x;
+    }
+    rf_release(&c);
+  }
+}
+
 TEST(RenderPatternRules, AnEmptyTileStillPaysForTheLayerAndAUseOutsideTheExtentDrawsNothing) {
   // PC11, PC2: the pass's apply over the use's pixels is work even when the tile draws nothing; and a use none of whose pixels is in the extent is
   // skipped without a refusal, the target as it was.

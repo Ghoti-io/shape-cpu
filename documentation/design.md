@@ -24,14 +24,30 @@ tolerance less 0.29 units by a proved rule. Each subpath is closed (an open one 
 `cover`, the signed height of the crossing in 26.6 units, and `area`, that
 height times the sum of the crossing's two x positions within the cell. An edge
 is cut at each pixel boundary, the crossing at a boundary rounded once (half
-away from zero) and shared by the pieces either side, so the walk stays closed.
-A sweep along each row accumulates `cover` times 128 from left to right, which
+away from zero) and shared by the pieces either side, so the walk stays closed;
+the cut is made **from the edge's upper end** whichever way the edge is traversed,
+and an edge that goes up deposits the negation of what the same edge going down
+does. A sweep along each row accumulates `cover` times 128 from left to right, which
 is the winding number times a pixel's area, and the cell's own pixel takes
-`cover - area`. The accumulated area is shifted right by `2 * 6 + 1 - 8` (so a
-fully covered pixel is 256), then the absolute value is taken (so the floor
-comes before it: a negative area rounds away from zero) and folded by the rule:
-nonzero saturates at 255; even-odd folds modulo 512 (winding 2 is outside
-again), a ramp up to 256 and back, 256 itself being 255.
+`cover - area`.
+
+**The fold (F3).** The accumulated area `a` is in units of 1/8192 of a pixel (a
+fully covered pixel is `2 * 64 * 64`), and its sign is the winding's direction, which says nothing about how much
+is covered. The fold (`src/core/fold.h`, one function for this scan converter and for the sink's cover) takes the
+magnitude first, reduces it by the rule while it is still exact, and only then takes the floor:
+`m = |a|`; under nonzero `m = min(m, 8192)`; under even-odd `m = m mod 16384`, and `16384 - m` where that exceeds
+8192 (winding 2 is outside again, a ramp up to a whole pixel and back); the byte is `min(255, floor(m / 32))`, a whole
+pixel (256) being 255. For a square of 63/64 of a pixel on a side, the pixel that holds its far corner has the area
+63 * 63 / 4096 of a pixel, 248.06 of 256 levels: its byte is 248 whichever way the square is wound. The
+fold this replaced shifted the signed area first, which rounds a negative area away from zero, so a region wound the
+other way came out one level high in a pixel whose area was not a whole level (and, under even-odd, the ramp back
+down rounded the other way for either direction); strokes and union clips already folded the magnitude (UC7, CU18).
+Together with the cut from the upper end, which makes the pieces of a region and of its reverse the same pieces
+with every deposit negated, this makes the coverage of a region **independent of the winding direction of its
+contours**, bit for bit: the accumulated areas of the reverse are the negations of the originals, and the fold
+of a magnitude cannot tell them apart. (A reverse of *one* contour of several is another region, and the winding
+number says so.) The lean cover of `GSHCPU_FILL_COVERAGE_FAST` is its own named approximation and is not part of
+this statement.
 
 This is FreeType's `ftgrays` arithmetic with 6 sub-pixel bits instead of 8,
 because 26.6 is the family's pixel space.
@@ -381,6 +397,18 @@ the form that keeps a single copy equal to the plain fill bit for bit. Each clip
 meets it (its outline cut to that copy's cell), and the unit's weight in a copy is its coverage weighed by that copy's own clips; the
 union of a clip over the copies (saturating) is what a group inside or around the clip block is weighed by at its pop.
 
+**The copies add areas, not floors (PC4, F3).** The byte of a copy is the floor of its area, and the floor of a sum is
+not the sum of the floors: the four cells that meet in a pixel at a lattice vertex have areas that sum to a whole
+pixel (8192) and bytes that sum to 254, one short of it for the usual fractions. The signed fold hid this for wound-one-way
+cells (its rounding up made the four bytes sum to 258, held at 255) and not for the others, so a seam-free background
+(PT6) was seam-free by the direction of its contours. The dense cover therefore also gives, for a copy that no clip
+weighs, the part of the area its byte leaves out (`gshcpu_render_cover_split`: `area = 32 * byte + rem`, `rem` at most
+31, or 32 for a whole pixel whose byte is held at 255), the unit's accumulator and the clip block's hold the **sum of the areas**, and
+the byte of a pixel is made once from the sum, `min(255, floor(sum / 32))`; the mean source is weighed by the areas. A pixel only one copy
+touches is its byte, as before (N7). A copy that a clip of the tile weighs adds its weighed byte and not its area (the clip is cut to
+the copy's cell, the weight is of a byte, and the product of two coverages at a seam is not made whole by any sum), so the seam of a clipped
+cell-filling fill is the product the text of D8 states. A stroke in a tile adds its byte (the exact step has already made one).
+
 **Overlapping cells (PC6) and blend modes.** When a step is smaller than the cell on an axis that repeats, the copies are drawn one at a
 time in lattice order, each with all its units onto the lattice layer (source-over of an isolated copy is drawing it there; a tile that
 holds a blend mode is drawn the same way, as one non-isolated, non-knockout group over the lattice layer). The cells' coverage is not
@@ -705,11 +733,8 @@ the first measurement of the exact step, where the sum's overlap had hidden it. 
 upper end, and deposited in its own direction. This changes which lattice points a stroke's pixels are the area of, and no
 fill's.
 
-**The fold.** The accumulation of a stroke is negative (its pieces are wound so), and the shared fold shifts before it
-drops the sign, so a stroke part would come out a level high wherever the area is not a whole level; its even-odd ramp back
-down (512 less the shifted value) rounds the other way again, so the clip of an aligned stroke under even-odd would be high
-wherever the odd winding is the larger. The stroke's parts fold the magnitude, reduced by the rule before the shift: the
-floor of a level either way round.
+**The fold.** The accumulation of a stroke is negative (its pieces are wound so); every fold in the library takes the magnitude,
+reduced by the rule before the shift (F3, above), so a stroke part is the floor of a level either way round, and so is a fill.
 
 **Windows and memory.** The pieces of the exact cells of a band go in a pool by a counting sort (a count per cell from the
 first pass, a second pass over the edges storing them); a band whose exact cells hold more than the pool is made exact a
@@ -887,13 +912,12 @@ restates it.
 A clip push may name a clip union (shape-scene `clip_union.h`). The sink claims `CLIP_UNION` while `GSHCPU_RENDER_TIER_UNION` is on and never
 `CLIP_UNION_GENERAL`, so the planning pass refuses a union whose members it cannot show disjoint (`UNION_OVERLAP`) and `clip_push` only
 ever sees a union it can draw exactly. **The arithmetic (CU18).** Each member, taken through `gshscene_clip_union_member_item`, is
-swept by the dense cover with the **magnitude fold and no final shift** (`fold_area`, the rule-reduced area in 1/8192 pixel, the number
+swept by the dense cover with the **magnitude fold and no final shift** (`gshcpu_fold_area`, the rule-reduced area in 1/8192 pixel, the number
 the byte is the shift of) and added into one `uint16` plane over the union's rectangle, each pixel held at 8192; when the last member
 is in, each plane value `s` becomes the clip's byte `min(255, s >> 5)`: the sum is quantized once. The byte path of the cover calls the same
-`fold_area` and its bits do not move. The union never uses `GSHCPU_FILL_COVERAGE_FAST`: that mode rounds to 255ths and holds the
-magnitude, and a union drawn by it would be a second definition. The fold is of the magnitude, so a member wound the other way gives
-the same union (a single clip's signed fold differs by one level in a pixel that is not a whole level; that is recorded as a defect to be
-fixed in its own story, not changed here).
+`gshcpu_fold_area`, which is the fold of every fill and clip (F3). The union never uses `GSHCPU_FILL_COVERAGE_FAST`: that mode rounds to 255ths and holds the
+magnitude, and a union drawn by it would be a second definition. A member wound the other way gives the same union, and a union of one
+member, recorded as the single clip, gives the same coverage as the union of it and an empty member (F3: a single clip folds the magnitude too).
 
 **The push (CU19).** `unit()` bills the predicate's comparisons of every union push that is not inside a skipped block, in unit order and
 whatever the damage excludes, against `GSHCPU_Limits.max_union_tests` (default 2^26, `UINT64_MAX` no cap); the push at which the running

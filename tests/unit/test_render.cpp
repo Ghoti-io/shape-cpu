@@ -780,6 +780,73 @@ TEST(RenderHash, EveryChannelAndThePlaceOfTheExtentAreHashed) {
   }
 }
 
+/* --- the fold of the magnitude (F3) --------------------------------------------------------------- */
+
+namespace {
+
+/** A polygon of @p pts, or of the same points reversed. */
+const GSHSCENE_Resource * polygon_of(RF_Ctx * c, const std::vector<std::pair<double, double>> & pts, bool reversed) {
+  GSHGEOM_Path * p = rf_path(c);
+  const size_t n = pts.size();
+  for (size_t i = 0; i < n; i++) {
+    const auto & q = pts[reversed ? n - 1 - i : i];
+    i == 0 ? gshgeom_path_move_to(p, rf_pt(q.first, q.second)) : gshgeom_path_line_to(p, rf_pt(q.first, q.second));
+  }
+  gshgeom_path_close(p);
+  return rf_intern(c, p);
+}
+
+/** The raster of a fill of @p pts (as a fill when @p as_clip is 0, else as the clip of a fill of the whole raster), as bytes. */
+std::string drawn_polygon(const std::vector<std::pair<double, double>> & pts, bool reversed, GSHGEOM_Fill_Rule rule, int as_clip) {
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_List * l = rf_open(&c);
+  if (as_clip) {
+    rf_check(&c, gshscene_list_clip_push(l, polygon_of(&c, pts, reversed), nullptr, rule, 0, 0.0) == GSHSCENE_OK);
+    rf_fill(&c, l, rf_rect(&c, 0, 0, 48, 40), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.4, 0.8, 1.0), 0, 0.0);
+    rf_check(&c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+  } else {
+    rf_fill(&c, l, polygon_of(&c, pts, reversed), nullptr, rule, rf_solid(0.2, 0.4, 0.8, 1.0), 0, 0.0);
+  }
+  rf_close(&c, l);
+  SinkRef sink;
+  ReportRef report;
+  RasterRef out(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, 48, 40));
+  GSHSCENE_Target tp = target_of(out.raster, &c.target_map);
+  GSHSCENE_Render_Request rq = request_of(l, &tp, report.report);
+  EXPECT_EQ(gshscene_sink_render(sink.sink, &rq), GSHSCENE_OK);
+  std::string bytes = out.bytes();
+  rf_release(&c);
+  return bytes;
+}
+
+} // namespace
+
+TEST(RenderFold, AFillAndASingleClipAreTheSameWoundEitherWayRoundUnderBothRules) {
+  // The shared fold takes the magnitude of the accumulated area (fold.h): a pixel whose area is not a whole level is the floor of it
+  // however the contours are wound, and an edge is cut from its upper end, so the reverse of a polygon has the same pieces.  Slanted edges,
+  // a self-intersecting star and a vertex at a fraction of a pixel, as a fill and as the clip of a fill of the raster.
+  const std::vector<std::vector<std::pair<double, double>>> shapes = {
+      {{4.3, 3.7}, {40.6, 9.2}, {21.1, 35.9}},
+      {{24.0, 2.3}, {38.7, 36.1}, {5.4, 14.2}, {43.1, 14.2}, {9.9, 36.1}},
+      {{3.5, 3.5}, {44.25, 3.5}, {44.25, 36.75}, {3.5, 36.75}, {20.3, 20.1}},
+  };
+  for (const auto & pts : shapes) {
+    for (GSHGEOM_Fill_Rule rule : {GSHGEOM_FILL_NONZERO, GSHGEOM_FILL_EVEN_ODD}) {
+      for (int as_clip = 0; as_clip < 2; as_clip++) {
+        const std::string a = drawn_polygon(pts, false, rule, as_clip);
+        const std::string b = drawn_polygon(pts, true, rule, as_clip);
+        EXPECT_EQ(a, b) << "rule " << rule << (as_clip ? " as a clip" : " as a fill");
+        size_t partial = 0;
+        for (size_t i = 3; i < a.size(); i += 4) {
+          partial += (unsigned char)a[i] != 0 && (unsigned char)a[i] != 255;
+        }
+        EXPECT_GT(partial, 20u) << "partly covered pixels to differ in";
+      }
+    }
+  }
+}
+
 int main(int argc, char ** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

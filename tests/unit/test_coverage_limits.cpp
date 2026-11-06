@@ -494,11 +494,16 @@ TEST(CoverageHostile, TheEdgeOfTheMarginIsHandled) {
   Cov out;
   ASSERT_EQ(gshcpu_coverage_fill(path, GSHGEOM_FILL_NONZERO, 0, 0, 5, 5, nullptr, nullptr, &out.c), GSHCPU_OK);
   EXPECT_EQ(gshcpu_coverage_at(&out.c, 0, 0), 255);
-  // 63/64 in each direction: the exact value is 256 * 63 * 63 / 4096 = 248.06.
-  // The contour runs clockwise on the screen, so its accumulated area is
-  // negative, and the fold takes the floor of the signed area before the
-  // absolute value: 249 (the moved code's rule, pinned by the known answers).
-  EXPECT_EQ(gshcpu_coverage_at(&out.c, 4, 4), 249);
+  // 63/64 in each direction: the exact value is 256 * 63 * 63 / 4096 = 248.06,
+  // and the fold takes the floor of the magnitude of the area, 248, whichever
+  // way the contour is wound (F3; the signed fold this replaced gave 249 for
+  // the clockwise one).
+  EXPECT_EQ(gshcpu_coverage_at(&out.c, 4, 4), 248);
+  Path reversed;
+  reversed.polygon({{0, 0}, {0, 5 * 64 - 1}, {5 * 64 - 1, 5 * 64 - 1}, {5 * 64 - 1, 0}});
+  Cov back;
+  ASSERT_EQ(gshcpu_coverage_fill(reversed, GSHGEOM_FILL_NONZERO, 0, 0, 5, 5, nullptr, nullptr, &back.c), GSHCPU_OK);
+  EXPECT_EQ(gshcpu_coverage_at(&back.c, 4, 4), 248);
 }
 
 // --- allocation failure ---------------------------------------------------------------

@@ -19,6 +19,8 @@
 #include "coverage_helpers.h"
 #include "known_answers.h"
 
+#include "../../src/core/fold.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -120,9 +122,8 @@ TEST(Coverage, EitherWindingGivesTheSameCoverageForOneContour) {
   Cov a, b;
   ASSERT_EQ(fill_into(cw, GSHGEOM_FILL_NONZERO, 0, 0, 7, 7, a), GSHCPU_OK);
   ASSERT_EQ(fill_into(ccw, GSHGEOM_FILL_NONZERO, 0, 0, 7, 7, b), GSHCPU_OK);
-  // The area of a pixel is the same either way; the fold takes the floor of
-  // the signed area before the absolute value, so the two can differ by one
-  // level on a partly covered pixel and nowhere else.
+  // The area of a pixel is the same either way, up to the sign, and the fold takes the floor of the magnitude: the two are equal, byte for
+  // byte (F3; the fold this replaced differed by one level on a partly covered pixel).
   int worst = 0;
   for (uint32_t y = 0; y < 7; ++y) {
     for (uint32_t x = 0; x < 7; ++x) {
@@ -130,7 +131,8 @@ TEST(Coverage, EitherWindingGivesTheSameCoverageForOneContour) {
                                        - (int)gshcpu_coverage_at(&b.c, x, y)));
     }
   }
-  EXPECT_LE(worst, 1);
+  EXPECT_EQ(worst, 0);
+  EXPECT_EQ(a.hex(), b.hex());
 }
 
 // --- slanted shapes against the exact area -------------------------------------
@@ -140,7 +142,7 @@ TEST(Coverage, SlantedPolygonsAreWithinTheRoundingBoundOfTheExactArea) {
   // split point is rounded once to 1/64 pixel, which moves the edge by at
   // most 1/128 pixel along the boundary; a pixel has at most two such points
   // on one edge, and each moves the area by at most 1/128 of a pixel, which is
-  // 2 of the 256 levels.  Taking the floor of the signed area adds at most 1.
+  // 2 of the 256 levels.  Taking the floor of the magnitude adds at most 1.
   constexpr int kBound = 5;
   int worst = 0;
   long compared = 0;
@@ -511,6 +513,97 @@ TEST(CoverageTrim, KeepsAnIsolatedPixelAtEachCorner) {
   EXPECT_EQ(gshcpu_coverage_at(&out.c, 5, 0), 64);
   EXPECT_EQ(gshcpu_coverage_at(&out.c, 0, 4), 64);
   EXPECT_EQ(gshcpu_coverage_at(&out.c, 5, 4), 64);
+}
+
+// --- the fold of the magnitude (F3) ----------------------------------------
+
+TEST(CoverageFold, EveryAreaInTheRangeIsTheExactRationalsByteUnderBothRules) {
+  // known::kFoldHash is the hash of fold_rational() (tools/gen-coverage-vectors.py: a Fraction, the rule applied to the area in pixels,
+  // the floor of 256 times it) over every area from kFoldFrom to kFoldTo under each rule; the library's fold is hashed the same way.
+  uint64_t h = 0xCBF29CE484222325ull;
+  for (int fill = 0; fill < 2; fill++) {
+    for (int64_t a = known::kFoldFrom; a <= known::kFoldTo; a++) {
+      h = (h ^ gshcpu_fold(a, static_cast<GSHGEOM_Fill_Rule>(fill))) * 0x100000001B3ull;
+    }
+  }
+  EXPECT_EQ(h, known::kFoldHash);
+  for (const known::FoldSpot & k : known::fold_spots()) {
+    EXPECT_EQ(gshcpu_fold(k.area, static_cast<GSHGEOM_Fill_Rule>(k.fill)), k.byte) << k.area << " rule " << k.fill;
+  }
+}
+
+TEST(CoverageFold, AnAreaAndItsNegationAreTheSameByteAndTheSplitIsTheAreaExactly) {
+  for (int fill = 0; fill < 2; fill++) {
+    const GSHGEOM_Fill_Rule rule = static_cast<GSHGEOM_Fill_Rule>(fill);
+    for (int64_t a = 0; a <= known::kFoldTo; a++) {
+      ASSERT_EQ(gshcpu_fold(a, rule), gshcpu_fold(-a, rule)) << a;
+      uint8_t rem = 99;
+      const uint8_t byte = gshcpu_fold_split(-a, rule, &rem);
+      ASSERT_EQ(byte, gshcpu_fold(a, rule));
+      // 32 * byte + rem is the rule-reduced area, and a remainder of a whole level is only a whole pixel's (byte 255, 32).
+      ASSERT_EQ(32u * byte + rem, gshcpu_fold_area(a, rule)) << a;
+      ASSERT_TRUE(rem < 32u || (byte == 255u && rem == 32u)) << a;
+    }
+  }
+}
+
+TEST(CoverageFold, ARegionAndItsReverseHaveTheSameCoverageBitForBitUnderBothRules) {
+  // The old fold shifted the signed area before it dropped the sign, so a region wound the other way came out a level high in a pixel whose
+  // area was not a whole level; and an edge was cut from the end it was traversed from, so a reverse could differ by a rounding.  Random
+  // polygons of one to three contours, slanted edges and self-overlaps among them, each filled and then filled reversed.
+  uint64_t seed = 0x9E3779B97F4A7C15ull;
+  auto next = [&seed]() {
+    seed ^= seed >> 12;
+    seed ^= seed << 25;
+    seed ^= seed >> 27;
+    return seed * 2685821657736338717ull;
+  };
+  size_t partial = 0;
+  for (int i = 0; i < 600; i++) {
+    std::vector<Contour> contours;
+    const int n = 1 + static_cast<int>(next() % 3);
+    for (int c = 0; c < n; c++) {
+      Contour pts;
+      const int m = 3 + static_cast<int>(next() % 6);
+      for (int k = 0; k < m; k++) {
+        pts.push_back({static_cast<int32_t>(64 + next() % (30 * 64)), static_cast<int32_t>(64 + next() % (30 * 64))});
+      }
+      contours.push_back(pts);
+    }
+    Path fwd, rev;
+    for (const Contour & c : contours) {
+      fwd.polygon(c);
+      rev.polygon(Contour(c.rbegin(), c.rend()));
+    }
+    for (int fill = 0; fill < 2; fill++) {
+      Cov a, b;
+      ASSERT_EQ(fill_into(fwd, static_cast<GSHGEOM_Fill_Rule>(fill), 0, 0, 34, 34, a), GSHCPU_OK);
+      ASSERT_EQ(fill_into(rev, static_cast<GSHGEOM_Fill_Rule>(fill), 0, 0, 34, 34, b), GSHCPU_OK);
+      ASSERT_EQ(a.hex(), b.hex()) << "polygon " << i << " rule " << fill;
+      for (uint32_t y = 0; y < 34; y++) {
+        for (uint32_t x = 0; x < 34; x++) {
+          const uint8_t v = gshcpu_coverage_at(&a.c, x, y);
+          partial += v != 0 && v != 255;
+        }
+      }
+    }
+  }
+  EXPECT_GT(partial, 10000u) << "the polygons have pixels of partial coverage to differ in";
+}
+
+TEST(CoverageFold, ARectangleWoundEitherWayRoundIsTheFloorOfItsAreaInThePixelItPartlyCovers) {
+  // 13/64 by 5/64 of a pixel: area 65/4096, 130 in 1/8192, 130 / 32 = 4.06: level 4 (the old fold gave 5 for the clockwise winding).
+  Path cw, ccw;
+  cw.polygon({{64, 64}, {64 + 13, 64}, {64 + 13, 64 + 5}, {64, 64 + 5}});
+  ccw.polygon({{64, 64}, {64, 64 + 5}, {64 + 13, 64 + 5}, {64 + 13, 64}});
+  for (int fill = 0; fill < 2; fill++) {
+    Cov a, b;
+    ASSERT_EQ(fill_into(cw, static_cast<GSHGEOM_Fill_Rule>(fill), 0, 0, 3, 3, a), GSHCPU_OK);
+    ASSERT_EQ(fill_into(ccw, static_cast<GSHGEOM_Fill_Rule>(fill), 0, 0, 3, 3, b), GSHCPU_OK);
+    EXPECT_EQ(gshcpu_coverage_at(&a.c, 1, 1), 4);
+    EXPECT_EQ(gshcpu_coverage_at(&b.c, 1, 1), 4);
+    EXPECT_EQ(a.hex(), b.hex());
+  }
 }
 
 int main(int argc, char ** argv) {

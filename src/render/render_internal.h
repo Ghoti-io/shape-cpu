@@ -258,6 +258,14 @@ GSHCPU_Result gshcpu_render_cover_area(const GSHGEOM_Flat_Path * const * paths, 
 GSHCPU_Result gshcpu_render_cover_counted(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
     GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells);
 
+/**
+ * ::gshcpu_render_cover_counted, and for each pixel of @p rect the area its byte leaves out in @p rem (`gshcpu_fold_split`, fold.h):
+ * the pixel's rule-reduced area in 1/8192 pixel is `32 * out + rem`.  The copies of a pattern's tile add these areas (PC4), so that a
+ * pixel several cells share has the byte of the sum of their areas and not the sum of their bytes.  @p rem has the size of @p out.
+ */
+GSHCPU_Result gshcpu_render_cover_split(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, uint8_t * rem, int64_t * acc, uint64_t max_deposits, uint64_t * cells);
+
 /** The memory and settings of the exact step (below). */
 typedef struct GSHCPU_Exact GSHCPU_Exact;
 

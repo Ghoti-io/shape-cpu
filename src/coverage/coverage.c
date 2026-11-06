@@ -54,25 +54,17 @@
 
 #include <ghoti.io/shape-geometry/flatten.h>
 
+#include "../core/fold.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
 /** Sub-pixel bits: 26.6, the same everywhere in the family. */
-#define PIXEL_BITS 6
+#define PIXEL_BITS GSHCPU_FOLD_PIXEL_BITS
 /** One pixel in 26.6. */
 #define ONE_PIXEL 64
-
-/**
- * The shift that turns an accumulated area into 0..256.
- *
- * A fully covered pixel accumulates `2 * ONE_PIXEL * ONE_PIXEL`, and 256 is
- * full coverage, so the shift is `2 * PIXEL_BITS + 1 - 8`.  Spelled from
- * PIXEL_BITS rather than as 5, so that changing the sub-pixel resolution cannot
- * leave this behind.
- */
-#define AREA_SHIFT (2 * PIXEL_BITS + 1 - 8)
 
 /** Smallest cell allocation. */
 #define MIN_CELLS 64u
@@ -106,6 +98,7 @@ typedef struct Raster {
   uint32_t height;
 
   GSHGEOM_Device_Point current; /* Where the pen is, 26.6, rectangle-relative. */
+  bool flip;                    /* The edge being cut was traversed upward and is cut from its upper end: its pieces deposit negated. */
   bool dropped;                 /* A cell fell outside the rectangle. */
 } Raster;
 
@@ -193,6 +186,9 @@ static void cell_add(Raster * raster, int32_t ex, int32_t ey, int32_t dy,
     int32_t fx1, int32_t fx2) {
   Cell * cell = NULL;
 
+  if (raster->flip) {
+    dy = -dy; /* the piece of an edge traversed upward: what it deposits is the opposite of the downward piece's */
+  }
   if (dy == 0) {
     /* A horizontal crossing contributes no winding and no area.  Skipped
      * rather than recorded, because a cell of zeroes changes the sweep's cell
@@ -293,21 +289,19 @@ static void edge_scanline(Raster * raster, int32_t ey,
 }
 
 /**
- * Accumulate one edge of the flattened path, from the pen to @p to.
+ * Accumulate the edge from @p from to @p to, which does not go up: its pieces in the rows it crosses.  The caller has made it
+ * so (an edge that goes up is handed here reversed, with `flip` set).
  *
  * Rows are y-down here.
  */
-static void edge_line(Raster * raster, GSHGEOM_Device_Point to) {
-  GSHGEOM_Device_Point from = raster->current;
+static void edge_down(Raster * raster, GSHGEOM_Device_Point from, GSHGEOM_Device_Point to) {
   int32_t ey1;
   int32_t ey2;
   int32_t dy;
   int32_t dx;
-  int32_t step;
   int32_t ey;
   GSHGEOM_Device_Point cursor;
 
-  raster->current = to;
   if (from.y == to.y) {
     /* A horizontal edge crosses no scanline and so contributes nothing.  This
      * is not an optimisation: giving it a row to belong to would require
@@ -323,10 +317,9 @@ static void edge_line(Raster * raster, GSHGEOM_Device_Point to) {
   }
   dy = to.y - from.y;
   dx = to.x - from.x;
-  step = dy > 0 ? 1 : -1;
   cursor = from;
-  for (ey = ey1; ey != ey2; ey += step) {
-    const int32_t boundary = (step > 0 ? ey + 1 : ey) * ONE_PIXEL;
+  for (ey = ey1; ey != ey2; ey++) {
+    const int32_t boundary = (ey + 1) * ONE_PIXEL;
     const int32_t at_x = (int32_t)(from.x
         + round_div((int64_t)(boundary - from.y) * dx, dy));
     GSHGEOM_Device_Point split;
@@ -340,6 +333,27 @@ static void edge_line(Raster * raster, GSHGEOM_Device_Point to) {
     }
   }
   edge_scanline(raster, ey2, cursor, to);
+}
+
+/**
+ * Accumulate one edge of the flattened path, from the pen to @p to.
+ *
+ * F3: an edge is cut from its upper end whichever way it is traversed, and an edge that goes up deposits the negation of the
+ * pieces the same edge going down would.  Every cut point is the rounding of a cut from its edge's own start, so cut from the
+ * other end it may be a unit away; a region wound the other way round would otherwise differ in the pixels such an edge crosses.
+ * With the fold of the magnitude (fold.h), the coverage is the same for a region and its reverse, bit for bit.
+ */
+static void edge_line(Raster * raster, GSHGEOM_Device_Point to) {
+  const GSHGEOM_Device_Point from = raster->current;
+
+  raster->current = to;
+  if (from.y > to.y) {
+    raster->flip = true;
+    edge_down(raster, to, from);
+    raster->flip = false;
+    return;
+  }
+  edge_down(raster, from, to);
 }
 
 /* --- the sweep ------------------------------------------------------------- */
@@ -450,33 +464,10 @@ static GSHCPU_Result sort_cells(Raster * raster, size_t ** out_rows) {
   return GSHCPU_OK;
 }
 
-/** Turn an accumulated area into 8-bit coverage under the fill rule. */
-static uint8_t area_to_coverage(int64_t area, GSHGEOM_Fill_Rule fill) {
-  int64_t value = area >> AREA_SHIFT;
-
-  if (value < 0) {
-    value = -value;
-  }
-  if (fill == GSHGEOM_FILL_EVEN_ODD) {
-    /* Winding 2 is outside again, so the ramp folds every 512. */
-    value &= 511;
-    if (value > 256) {
-      value = 512 - value;
-    }
-    else if (value == 256) {
-      value = 255;
-    }
-  }
-  else if (value >= 256) {
-    value = 255;
-  }
-  return (uint8_t)value;
-}
-
 /** Write a run of pixels at one coverage. */
 static void write_span(GSHCPU_Coverage * coverage, uint32_t row, int32_t from,
     int32_t count, int64_t area) {
-  const uint8_t value = area_to_coverage(area, coverage->fill);
+  const uint8_t value = gshcpu_fold(area, coverage->fill);
   uint8_t * line;
 
   if (value == 0 || count <= 0 || from >= (int32_t)coverage->width) {

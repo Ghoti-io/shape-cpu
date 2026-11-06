@@ -61,12 +61,14 @@
 
 #include "render_internal.h"
 
+#include "../core/fold.h"
+
 #include <string.h>
 
-/** Sub-pixel bits, the pixel and the shift into 0..256: coverage.c's. */
-#define PIXEL_BITS 6
+/** Sub-pixel bits, the pixel and the shift into 0..256: coverage.c's, and the fold's (fold.h). */
+#define PIXEL_BITS GSHCPU_FOLD_PIXEL_BITS
 #define ONE_PIXEL 64
-#define AREA_SHIFT (2 * PIXEL_BITS + 1 - 8)
+#define AREA_SHIFT GSHCPU_FOLD_AREA_SHIFT
 
 /* --- rectangles ---------------------------------------------------------------------------- */
 
@@ -495,11 +497,11 @@ static void flat_edge(Cover * c, Point from, Point to) {
 }
 
 /**
- * One edge: its pieces in the rows of the band.  With the exact step an edge that goes up is cut from its upper end, so
- * that the two copies of one segment that two pieces of an outline share, one in each direction, are cut at the same
+ * One edge: its pieces in the rows of the band.  An edge that goes up is cut from its upper end (F3, and UC2 for the exact
+ * step), so that the two copies of one segment that two pieces of an outline share, one in each direction, are cut at the same
  * points (every cut point is the rounding of a cut from its edge's own start: from the other end it may be a unit
- * away, and the sliver between the copies would be a hole in the union).  What is deposited is the same edge, in its
- * own direction.
+ * away, and the sliver between the copies would be a hole in the union), and so that a region and its reverse have the same
+ * pieces.  What is deposited is the same edge, in its own direction.
  */
 static void edge(Cover * c, Point from, Point to) {
   if (from.y == to.y) {
@@ -515,7 +517,7 @@ static void edge(Cover * c, Point from, Point to) {
   if (ymax <= top || ymin >= bottom) {
     return;
   }
-  if (c->ex && from.y > to.y) {
+  if (from.y > to.y) {
     Point t = from;
     from = to;
     to = t;
@@ -523,9 +525,8 @@ static void edge(Cover * c, Point from, Point to) {
   }
   int64_t ey1 = floor_div(from.y, ONE_PIXEL);
   int64_t ey2 = floor_div(to.y, ONE_PIXEL);
-  int down = ey2 > ey1;
-  int64_t lo = ey1 < ey2 ? ey1 : ey2;
-  int64_t hi = ey1 < ey2 ? ey2 : ey1;
+  int64_t lo = ey1;
+  int64_t hi = ey2;
   if (lo < c->band) {
     lo = c->band;
   }
@@ -533,57 +534,11 @@ static void edge(Cover * c, Point from, Point to) {
     hi = c->band + c->rows - 1;
   }
   for (int64_t ey = lo; ey <= hi; ey++) {
-    Point a = ey == ey1 ? from : row_cut(from, to, (down ? ey : ey + 1) * ONE_PIXEL);
-    Point b = ey == ey2 ? to : row_cut(from, to, (down ? ey + 1 : ey) * ONE_PIXEL);
+    Point a = ey == ey1 ? from : row_cut(from, to, ey * ONE_PIXEL);
+    Point b = ey == ey2 ? to : row_cut(from, to, (ey + 1) * ONE_PIXEL);
     scanline(c, ey, a, b);
   }
   c->rev = 0;
-}
-
-/**
- * coverage.c's fold of an accumulated area into 0..255 under @p rule.  Its shift rounds toward negative infinity before
- * the sign is dropped, so a region wound the other way (a stroke's pieces are, UC1) comes out one level up wherever the
- * area is not a whole level, and its even-odd ramp back down (512 less the shifted value) rounds the other way again:
- * @p magnitude folds the area's magnitude, reduced by the rule before it is shifted, so that the coverage is the floor of
- * the level of the area of the region either way round (the fold of UC7).
- */
-/**
- * CU18: the rule-reduced magnitude of an accumulated area, in units of 1/8192 of a pixel, `0 <= result <= 8192`: what the byte is the
- * shift of.  A union adds these over its members and shifts once.
- */
-static uint32_t fold_area(int64_t area, GSHGEOM_Fill_Rule rule) {
-  uint64_t m = (uint64_t)(area < 0 ? -area : area);
-  if (rule == GSHGEOM_FILL_EVEN_ODD) {
-    m &= 16383u; /* 2 * 2^13: the winding's parity repeats every two pixels' area */
-    if (m > 8192u) {
-      m = 16384u - m;
-    }
-  } else if (m > 8192u) {
-    m = 8192u; /* nonzero: a pixel's area held at the whole pixel */
-  }
-  return (uint32_t)m;
-}
-
-static uint8_t fold(int64_t area, GSHGEOM_Fill_Rule rule, int magnitude) {
-  if (magnitude) {
-    uint64_t level = fold_area(area, rule) >> AREA_SHIFT;
-    return (uint8_t)(level >= 256u ? 255u : level);
-  }
-  int64_t value = area >> AREA_SHIFT;
-  if (value < 0) {
-    value = -value;
-  }
-  if (rule == GSHGEOM_FILL_EVEN_ODD) {
-    value &= 511;
-    if (value > 256) {
-      value = 512 - value;
-    } else if (value == 256) {
-      value = 255;
-    }
-  } else if (value >= 256) {
-    value = 255;
-  }
-  return (uint8_t)value;
 }
 
 static Point point_of(GSHGEOM_Device_Point p) {
@@ -1002,10 +957,10 @@ GSHCPU_Result gshcpu_render_cover_counted(const GSHGEOM_Flat_Path * const * path
 
 /**
  * The dense sweep of @p paths over @p rect.  With @p plane NULL the bytes go to @p out; else the rule-reduced area of each pixel
- * (fold_area, CU18) is added into @p plane, a `uint16` per pixel of @p prect (which holds @p rect), each held at 8192.
+ * (gshcpu_fold_area, CU18) is added into @p plane, a `uint16` per pixel of @p prect (which holds @p rect), each held at 8192.
  */
 static GSHCPU_Result cover_run(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule, GSHCPU_Rect rect,
-    GSHCPU_Rect walk, uint8_t * out, uint16_t * plane, GSHCPU_Rect prect, int64_t * acc, uint64_t max_deposits,
+    GSHCPU_Rect walk, uint8_t * out, uint8_t * rem, uint16_t * plane, GSHCPU_Rect prect, int64_t * acc, uint64_t max_deposits,
     uint64_t * cells, GSHCPU_Exact * ex) {
   Cover c;
   memset(&c, 0, sizeof c);
@@ -1066,15 +1021,23 @@ static GSHCPU_Result cover_run(const GSHGEOM_Flat_Path * const * paths, size_t c
         uint16_t * row = plane + (size_t)((band - prect.y0 + r) * (prect.x1 - prect.x0) + (rect.x0 - prect.x0));
         for (int64_t j = 1; j <= width; j++) {
           accumulated += cv[j] * (ONE_PIXEL * 2);
-          uint32_t sum = (uint32_t)row[j - 1] + fold_area(accumulated - ar[j], rule);
+          uint32_t sum = (uint32_t)row[j - 1] + gshcpu_fold_area(accumulated - ar[j], rule);
           row[j - 1] = (uint16_t)(sum > 8192u ? 8192u : sum); /* CU18: saturated at the whole pixel */
         }
         continue;
       }
       uint8_t * line = out + (size_t)((band - rect.y0 + r) * width);
+      if (rem) {
+        uint8_t * rline = rem + (size_t)((band - rect.y0 + r) * width);
+        for (int64_t j = 1; j <= width; j++) {
+          accumulated += cv[j] * (ONE_PIXEL * 2);
+          line[j - 1] = gshcpu_fold_split(accumulated - ar[j], rule, &rline[j - 1]);
+        }
+        continue;
+      }
       for (int64_t j = 1; j <= width; j++) {
         accumulated += cv[j] * (ONE_PIXEL * 2);
-        line[j - 1] = fold(accumulated - ar[j], rule, ex != NULL);
+        line[j - 1] = gshcpu_fold(accumulated - ar[j], rule);
       }
     }
   }
@@ -1086,13 +1049,19 @@ GSHCPU_Result gshcpu_render_cover_exact(const GSHGEOM_Flat_Path * const * paths,
     GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits, uint64_t * cells,
     GSHCPU_Exact * ex) {
   GSHCPU_Rect none = {0, 0, 0, 0};
-  return cover_run(paths, count, rule, rect, walk, out, NULL, none, acc, max_deposits, cells, ex);
+  return cover_run(paths, count, rule, rect, walk, out, NULL, NULL, none, acc, max_deposits, cells, ex);
 }
 
 GSHCPU_Result gshcpu_render_cover_area(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
     GSHCPU_Rect rect, GSHCPU_Rect walk, uint16_t * plane, GSHCPU_Rect prect, int64_t * acc, uint64_t max_deposits,
     uint64_t * cells) {
-  return cover_run(paths, count, rule, rect, walk, NULL, plane, prect, acc, max_deposits, cells, NULL);
+  return cover_run(paths, count, rule, rect, walk, NULL, NULL, plane, prect, acc, max_deposits, cells, NULL);
+}
+
+GSHCPU_Result gshcpu_render_cover_split(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
+    GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, uint8_t * rem, int64_t * acc, uint64_t max_deposits, uint64_t * cells) {
+  GSHCPU_Rect none = {0, 0, 0, 0};
+  return cover_run(paths, count, rule, rect, walk, out, rem, NULL, none, acc, max_deposits, cells, NULL);
 }
 
 /* --- a bound of the cells, from the edges alone ------------------------------------------------------- */
@@ -1230,7 +1199,6 @@ static int zero8(const int64_t * cv, const int64_t * ar) {
  * constant, which is the dense sweep's value there too (the fold column is a deposit at column 0).
  */
 static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t * line, GSHCPU_Span_Fn fn, void * ctx) {
-  const int magnitude = c->ex != NULL;
   Batch batch;
   batch.c = c;
   batch.fn = fn;
@@ -1260,7 +1228,7 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
     int64_t j = j0;
     while (j <= end) {
       accumulated += cv[j] * (ONE_PIXEL * 2);
-      uint8_t v = fold(accumulated - ar[j], rule, magnitude);
+      uint8_t v = gshcpu_fold(accumulated - ar[j], rule);
       cv[j] = 0;
       ar[j] = 0;
       if (v != 0) {
@@ -1282,7 +1250,7 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
         k++;
       }
       if (k > j) {
-        uint8_t q = fold(accumulated, rule, magnitude);
+        uint8_t q = gshcpu_fold(accumulated, rule);
         if (q != 0) {
           if (from < 0) {
             from = j;
@@ -1296,7 +1264,7 @@ static void sweep_band(Cover * c, GSHGEOM_Fill_Rule rule, int64_t width, uint8_t
       }
     }
     /* after the last deposit the accumulated cover is the coverage, to the end of the row */
-    uint8_t tail = fold(accumulated, rule, magnitude);
+    uint8_t tail = gshcpu_fold(accumulated, rule);
     if (tail != 0 && end < width) {
       if (from < 0) {
         from = end + 1;
@@ -1725,7 +1693,7 @@ GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHC
         int64_t accumulated = cv[0] * (ONE_PIXEL * 2);
         for (int64_t j = 1; j <= width; j++) {
           accumulated += cv[j] * (ONE_PIXEL * 2);
-          line[j - 1] = fold(accumulated - ar[j], in[p].rule, 1);
+          line[j - 1] = gshcpu_fold(accumulated - ar[j], in[p].rule);
         }
         if (p == 2) {
           for (int64_t j = 0; j < width; j++) {

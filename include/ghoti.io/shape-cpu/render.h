@@ -735,12 +735,18 @@
  *   the shift: copies of equal fractions, and a pattern moved by whole pixels, are the same bits moved.  A shifted coordinate past
  *   ::GSHCPU_RENDER_COORD_LIMIT is `RESOURCE_LIMIT`.
  * - **PC4 A unit with copies.**  Each unit of the tile (a fill, a stroke, a clip push) is one element over all the copies of its use.  At
- *   a pixel, copy `x` has the 8-bit coverage `m_x`, its own coverage folded with the clips of the tile in force *in that copy* (each clip
- *   cut to that copy's cell, D8), and the source `S_x`.  The element has the shape `min(255, sum m_x) / 255` and the mean source
- *   `sum(m_x S_x) / sum(m_x)`, summed in lattice order with no fused multiply-add: the waist's `(1 - sum w_x A_x) L + sum w_x S_x` with
- *   `w_x = m_x / max(255, sum m)`, to within one rounding of the mean; a pixel only one copy touches is N7 exactly.  A clip is made again for
- *   each copy (its outline under that copy's canonical map, cut to that copy's cell); a clip block, to a group inside or around it, is the
- *   saturating union of its copies' coverages.
+ *   a pixel, copy `x` has the coverage `m_x`, its own coverage folded with the clips of the tile in force *in that copy* (each clip
+ *   cut to that copy's cell, D8), and the source `S_x`.  **The copies add areas, not floors (F3):** a copy that no clip weighs has the area
+ *   `a_x` of its region in the pixel in 1/8192 pixel (the byte `m_x` is `min(255, floor(a_x / 32))` and the part the byte leaves out is
+ *   carried), and the element has the shape `min(255, floor(sum a_x / 32)) / 255`, the byte of the sum of the areas, made once, and the
+ *   mean source `sum(a_x S_x) / sum(a_x)`, summed in lattice order with no fused multiply-add: the waist's `(1 - sum w_x A_x) L + sum w_x S_x`
+ *   with `w_x = a_x / max(8192, sum a)`, to within one rounding of the mean.  The cells of a lattice that meet in a pixel have areas that sum to
+ *   the whole pixel, so a cell-filling fill is opaque at every seam and at every vertex whichever way its contours are wound; the sum of
+ *   their floors is not (254 at a vertex for the usual fractions).  A copy that a clip of the tile weighs has the weighed byte `m_x` and no
+ *   remainder (the clip is cut to the copy's cell, the weight is of a byte, and the product of two coverages at a seam is not made whole by a
+ *   sum), and so has a stroke (the exact step has made its byte); a pixel only one copy touches is N7 exactly, the byte.  A clip is made again
+ *   for each copy (its outline under that copy's canonical map, cut to that copy's cell); a clip block, to a group inside or around it, is
+ *   the union of its copies' regions: the byte of the sum of their areas, held at 255.
  * - **PC5 Groups, strokes, images and nested patterns in the tile.**  A group is one group over all copies, popped once.  A stroke is one
  *   unit: the expansion's body and aligned part are cut to the cell by the convex clip (CK1; in this copy's stroke only), and SC5 composes
  *   the cut parts with the clip path, so a stroke that ends at a cell edge leaves no seam.  An image paint, a gradient or a pattern is evaluated per copy under the copy's canonical map; a pattern in a tile is a
