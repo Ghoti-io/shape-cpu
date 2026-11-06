@@ -1098,7 +1098,7 @@ TEST(RenderPatternRules, ALimitMetInsideATileIsMetWhateverTheDamageDraws) {
   // render's edge are smaller and stand inside the domain.  A damage that meets only the cut copies draws only those, and used to find
   // nothing to refuse where the whole render refuses the use.  The scale puts a cell 64 pixels in either direction past the domain and one
   // that is a few pixels across inside it; the render is cut so that its corner copy is 3 pixels wide and tall (7 where the cells overlap, where it is the only copy
-  // that holds the pixels past the tail of the one before), and the damage is that copy alone, or the copies of an edge, or a part inside.  The cells abut or overlap (PC6), where the tile is walked for one copy at
+  // that holds the pixels past the tail of the one before), and the damage is that copy alone (inside its cell, so that no neighbor's cell touches it: a cell that only touches the damage is still drawn), or the copies of an edge, or a part inside.  The cells abut or overlap (PC6), where the tile is walked for one copy at
   // a time.
   struct Row {
     const char * what;
@@ -1111,7 +1111,7 @@ TEST(RenderPatternRules, ALimitMetInsideATileIsMetWhateverTheDamageDraws) {
     GSHSCENE_Rect corner;
     unsigned refused;   // the report's refusals of the whole render
   };
-  const GSHSCENE_Rect abut = {192, 128, 195, 131}, overlap = {124, 124, 127, 127};
+  const GSHSCENE_Rect abut = {193, 129, 195, 131}, overlap = {125, 125, 127, 127};
   const Row rows[] = {
       {"a stroke painted with a pattern whose tile fills past the domain", 1, 0, 58, 64.0, 64, 195, 131, abut, 1},
       {"a stroke painted with a pattern whose tile strokes past the domain", 1, 1, 58, 64.0, 64, 195, 131, abut, 1},
