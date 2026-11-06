@@ -4686,6 +4686,10 @@ typedef struct Pat_Unit {
 static GSHSCENE_Result pat_paint_copy(Run * run, Pat_Level * L, const Pat_Unit * u, const Pat_Copy * c, GSHCPU_Rect rc, GSHCPU_Rect wc,
     uint8_t * cov, uint8_t * rem) {
   Painter p;
+  if (gshcpu_render_rect_empty(rc)) {
+    rc.x1 = rc.x0; /* a copy the damage does not reach: nothing to draw, in the form every painter takes (no negative width) */
+    rc.y1 = rc.y0;
+  }
   if (!gshcpu_render_rect_empty(rc) && u->frame->clip_base < run->clip_count) {
     const GSHSCENE_Result f = pat_fold_clips(run, L, u->frame, c, rc, cov, rem);
     if (f != GSHSCENE_OK) {
