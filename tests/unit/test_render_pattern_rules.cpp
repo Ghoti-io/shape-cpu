@@ -552,6 +552,7 @@ TEST(RenderPatternRules, ACancelInsideAPassStopsBeforeTheNextCopyAndTheWorkIsCou
   Out o = draw(s.sink, l, 200, 150, GSHCPU_FORMAT_RGBA8_STRAIGHT, 0, &cancel);
   EXPECT_EQ(o.result, GSHSCENE_ERR_CANCELLED);
   EXPECT_LT(ca.after, full / 40) << "the pass went on for " << ca.after << " allocations after the token was set, of " << full;
+  rf_release(&c);
 }
 
 TEST(RenderPatternRules, AStrokeCutToItsCellIsTheStrokeUnderAClipOfTheCell) {
