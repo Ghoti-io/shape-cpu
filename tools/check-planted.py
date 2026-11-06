@@ -2643,8 +2643,6 @@ SURVIVORS = {
     "rp-unit-count-not-kept": "equivalent: a pixel's count is compared only with 0, 1 and 'more'; the byte saturates at 255 only so that it cannot wrap to 0, and a count stuck at 2 takes the same branches",
     "rp-unit-empty-region-applies": 'equivalent: an empty rectangle makes widen_w do nothing and both loops visit no pixel, and the work added is the area of an empty rectangle, zero',
     "rp-unit-region-not-reset": "equivalent: pattern_begin, pat_fill and pat_stroke each empty the unit's rectangle before they use it, and pat_clip_copy does not read it",
-    "rp-tier-gradient-guard-lost": "not seen: needs a gradient painted over a fill in a corner of a cell whose far corners leave the sampling domain (2^128) while the fill's pixels do not, drawn by the window; scales of the gradient's map from 2^-135 to 2^-95 and from 2^-140 to 2^140 with a cell 200,000 pixels wide were swept (the image guard of the same shape is caught by a cell of that size) and none gave a give-up for a gradient",
-    "rp-tier-gradient-guard-over-the-drawn-rect": 'not seen: the same case as rp-tier-gradient-guard-lost',
     "rj-element-backdrop-aliased-after-the-first-channel": "equivalent: the step copies the backdrop into the operator's operand before it writes "
         "the layer, and writes each channel from the same channel of both, so the layer being its own backdrop changes nothing",
     "rj-element-other-operators-weigh-by-the-shape": "equivalent: every element of an operator that is not PDF's has its shape equal to its "

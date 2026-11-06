@@ -1036,6 +1036,59 @@ TEST(RenderPatternRules, ACellPastTheRangeGivesTheWindowUpWhoseCopiesAreInRange)
   rf_release(&c);
 }
 
+TEST(RenderPatternRules, AGradientOverASmallFillWhoseCellLeavesTheDomainGivesTheWindowUp) {
+  // PC9, G14: a gradient is sampled only where it is drawn, and a fill that is refused for leaving the sampling domain (2^128 in the gradient's own
+  // coordinates) is refused where the whole render draws it.  The window draws the copies it meets, cut by the render's edges, and cannot tell that a
+  // copy elsewhere is whole, so it vouches for the gradient only when the whole cell is in the domain; otherwise the pass gives the window up and the
+  // general tier decides every copy.  A gradient's own map holds at most 2^64 (G14), so the scale that carries the cell past the domain is made by
+  // the fill's map as well: the fill is written 2^k times larger and its map scales it back by 2^-k, and the gradient map scales by 2^-64, so the
+  // gradient-space point of a pixel is 2^(64 + k) times its position in the cell.  At k = 58 the fill's corner (7.5 pixels) is at 2^125 and the cell's
+  // far edge (64.5) at 2^128, past half the domain.  The same picture and the same report either way; the window is given up when the cell leaves
+  // the domain whatever the fill does, stands when the cell does not, and a fill that is itself past the domain is the limit of both tiers.
+  struct Row {
+    const char * what;
+    int k;              // the fill's scale, as a power of two
+    double fill;        // the fill's far edge in the cell
+    unsigned refused;   // the report's refusals
+    unsigned gave_up;   // the window given up
+  };
+  const Row rows[] = {
+      {"a small fill, a cell past the domain", 58, 7.5, 0, 1},
+      {"a small fill, a cell inside the domain", 30, 7.5, 0, 0},
+      {"a fill past the domain", 58, 64.0, 1, 0},
+      {"a fill and a cell inside it", 40, 64.0, 0, 0},
+  };
+  for (const Row & row : rows) {
+    RF_Ctx c;
+    rf_begin(&c);
+    const double up = std::ldexp(1.0, row.k);
+    GSHSCENE_Gradient_Stop stops[2] = {rf_stop(0.0, rf_solid(1, 1, 0, 1)), rf_stop(1.0, rf_solid(0, 0.2, 0.9, 1))};
+    GSHSCENE_Gradient g = rf_linear(0, 0, 0x1p60, 0, 0, 0, GSHSCENE_EXTEND_PAD);
+    rf_check(&c, gshgeom_map_scale(2, 0x1p-64, 0x1p-64, 1.0, &g.map) == GSHGEOM_OK);
+    GSHGEOM_Map down;
+    rf_check(&c, gshgeom_map_scale(2, 1.0 / up, 1.0 / up, 1.0, &down) == GSHGEOM_OK);
+    GSHSCENE_List * t = rf_open(&c);
+    rf_fill(&c, t, rf_rect(&c, 0.5 * up, 0.5 * up, row.fill * up, row.fill * up), &down, GSHGEOM_FILL_NONZERO,
+        rf_gradient_paint(rf_gradient(&c, g, stops, 2), 0.9), 0, 0.0);
+    const GSHSCENE_Resource * pat = rf_pattern(&c, rf_picture_of(&c, t), 0, 0, 64, 64, 64, 64, 1, 1, rf_move(0.0, 0.0), nullptr);
+    GSHSCENE_List * l = rf_open(&c);
+    rf_fill(&c, l, rf_rect(&c, 0, 0, 200, 150), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+    rf_close(&c, l);
+    ASSERT_EQ(c.failed, 0) << row.what;
+    TSink on(kAll), off(kNoPeriod);
+    Out a = draw(on.sink, l, 200, 150);
+    Out b = draw(off.sink, l, 200, 150);
+    ASSERT_EQ(a.result, GSHSCENE_OK) << row.what;
+    ASSERT_EQ(b.result, GSHSCENE_OK) << row.what;
+    EXPECT_EQ(a.bytes, b.bytes) << row.what;
+    EXPECT_EQ(a.summary.by_class[GSHSCENE_ENTRY_REFUSED], row.refused) << row.what;
+    EXPECT_EQ(b.summary.by_class[GSHSCENE_ENTRY_REFUSED], row.refused) << row.what;
+    EXPECT_EQ(on.counters.period_aborts, row.gave_up) << row.what;
+    EXPECT_EQ(on.counters.pattern_period, (row.refused || row.gave_up) ? 0u : 1u) << row.what << ": the window draws when nothing stops it";
+    rf_release(&c);
+  }
+}
+
 TEST(RenderPatternRules, ARegionPastTheRangeInACellsFrameIsALimitUnderBothTiers) {
   // PC3, PC8: a use of the plane in a cell 25 million pixels wide, translated by 20 million, is drawn over the region of the copy in the cell's own
   // frame, which lies 20 million pixels from its origin: past the range the scan converter takes.  That is the sink's resource limit, reported, and
