@@ -2596,6 +2596,25 @@ PLANTS += [
      '  Union_Plan * pl = &ua->pl;', CU21T),
 ]
 
+# S4 (pass B): the in-tile limits of every copy of the whole render, the damage notwithstanding.  The unit enumerates the copies of
+# `wreach` (the whole render's part of the unit), a copy the damage does not reach is covered and tested with nothing to draw, and the
+# overlapping pass walks the copies of the whole use.  ALimitMetInsideATileIsMetWhateverTheDamageDraws (fills and strokes, abutting and
+# overlapping cells) and ADepositCap... hold them.
+S4_TESTS = ["testRender_pattern_rules", "testRender_pattern_union", "testRender_pattern", "testRender_conformance", "probe"]
+PLANTS += [
+    ('rp-s4-fill-copies-of-the-damage', "src", RS, '  GSHSCENE_Result r = pat_each(run, L, u.wreach, pat_fill_copy, &u);', '  GSHSCENE_Result r = pat_each(run, L, u.reach, pat_fill_copy, &u);', S4_TESTS),
+    ('rp-s4-stroke-copies-of-the-damage', "src", RS, '  GSHSCENE_Result r = pat_each(run, L, u.wreach, pat_stroke_copy, &u);', '  GSHSCENE_Result r = pat_each(run, L, u.reach, pat_stroke_copy, &u);', S4_TESTS),
+    ('rp-s4-fill-unit-outside-the-damage-skipped', "src", RS,
+     '  if (gshcpu_render_rect_empty(u.wreach)) {\n    return GSHSCENE_OK; /* nothing of the unit is in the whole render */\n  }\n  L->urect.x1 = L->urect.x0;\n  L->urect.y1 = L->urect.y0;\n  /* S4: the copies of the whole render, not only the ones the damage draws, so that a limit met inside a copy (a cell cap, a gradient\n   * or an image past G14\'s domain, a coordinate past the range) refuses the use whatever the damage; a copy the damage does not reach\n   * is covered and tested over the whole render\'s part of it and draws nothing. */\n  GSHSCENE_Result r = pat_each(run, L, u.wreach, pat_fill_copy, &u);',
+     '  if (gshcpu_render_rect_empty(u.reach)) {\n    return GSHSCENE_OK; /* nothing of the unit is in the whole render */\n  }\n  L->urect.x1 = L->urect.x0;\n  L->urect.y1 = L->urect.y0;\n  /* S4: the copies of the whole render, not only the ones the damage draws, so that a limit met inside a copy (a cell cap, a gradient\n   * or an image past G14\'s domain, a coordinate past the range) refuses the use whatever the damage; a copy the damage does not reach\n   * is covered and tested over the whole render\'s part of it and draws nothing. */\n  GSHSCENE_Result r = pat_each(run, L, u.wreach, pat_fill_copy, &u);', S4_TESTS),
+    ('rp-s4-clip-copies-of-the-damage', "src", RS, '    GSHSCENE_Result r = pat_each(run, L, clip->whole, pat_clip_copy, &u); /* S4: the copies of the whole render */', '    GSHSCENE_Result r = pat_each(run, L, clip->rect, pat_clip_copy, &u); /* S4: the copies of the whole render */', S4_TESTS),
+    ('rp-s4-clip-outside-the-damage-skipped', "src", RS, '  if (!gshcpu_render_rect_empty(clip->whole)) {\n    if (drawn) {', '  if (drawn) {\n    if (drawn) {', S4_TESTS),
+    ('rp-s4-stroke-paint-only-when-drawn', "src", RS, '  result = pat_paint_copy(run, L, u, &c, rect, whole, cov, NULL); /* S4: the paint is made ready over the whole render\'s part, drawn or not */', '  if (!gshcpu_render_rect_empty(rect)) {\n    result = pat_paint_copy(run, L, u, &c, rect, whole, cov, NULL);\n  }', S4_TESTS),
+    ('rp-s4-overlap-pass-copies-of-the-damage', "src", RS, '    result = pat_pass(run, L, tile, overlaps, L->period ? prect : whole);', '    result = pat_pass(run, L, tile, overlaps, prect);', S4_TESTS),
+    ('rp-s4-overlap-pass-after-abort-copies-of-the-damage', "src", RS, '      result = pat_pass(run, L, tile, overlaps, whole);', '      result = pat_pass(run, L, tile, overlaps, rect);', S4_TESTS),
+    ('rp-s4-copy-without-pixels-counted', "src", RS, '  if (!gshcpu_render_rect_empty(rc)) {\n    L->urect = gshcpu_render_rect_join(L->urect, rect_moved(rc, c->sx, c->sy));\n    L->copies++;\n  }', '  {\n    L->urect = gshcpu_render_rect_join(L->urect, rect_moved(rc, c->sx, c->sy));\n    L->copies++;\n  }', S4_TESTS),
+]
+
 SURVIVORS = {
     # shape-exact-primitives CU21 (cu21-): equivalent, each with the argument and the check that backs it.
     'cu21-cut-count-is-the-uncut-count': 'equivalent: the entries of the cut array past the ones kept are NULL (calloc), and every cover function skips a NULL path as it skips the NULL entries of a geometry',
