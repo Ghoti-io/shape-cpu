@@ -73,7 +73,8 @@ struct Out {
 };
 
 Out draw(GSHSCENE_Sink * sink, const GSHSCENE_List * list, uint32_t w, uint32_t h, GSHCPU_Format format = GSHCPU_FORMAT_RGBA8_STRAIGHT,
-    uint32_t flags = 0, GSHSCENE_Cancel * cancel = nullptr, const GSHSCENE_Color_Space * target_space = nullptr) {
+    uint32_t flags = 0, GSHSCENE_Cancel * cancel = nullptr, const GSHSCENE_Color_Space * target_space = nullptr,
+    const GSHSCENE_Rect * damage = nullptr) {
   RasterRef raster(rf_raster(format, w, h));
   unsigned char * px = (unsigned char *)gimg_raster_pixels(raster.raster);
   for (size_t i = 0; i < gimg_raster_stride_bytes(raster.raster) * h; i++) {
@@ -87,6 +88,7 @@ Out draw(GSHSCENE_Sink * sink, const GSHSCENE_List * list, uint32_t w, uint32_t 
   if (target_space) {
     t.blend_space = *target_space;
   }
+  t.damage = damage;
   GSHSCENE_Render_Request req = request_of(list, &t, report.report);
   req.flags = flags;
   req.cancel = cancel;
@@ -1088,6 +1090,139 @@ TEST(RenderPatternRules, AGradientOverASmallFillWhoseCellLeavesTheDomainGivesThe
     EXPECT_EQ(on.counters.pattern_period, (row.refused || row.gave_up) ? 0u : 1u) << row.what << ": the window draws when nothing stops it";
     rf_release(&c);
   }
+}
+
+TEST(RenderPatternRules, ALimitMetInsideATileIsMetWhateverTheDamageDraws) {
+  // S4, PC8: a damage-limited render is a window onto the whole render and refuses exactly what the whole render refuses.  A fill or a stroke
+  // in a tile that is painted with a gradient past the sampling domain (G14) is refused for the copies that are whole; the copies cut by the
+  // render's edge are smaller and stand inside the domain.  A damage that meets only the cut copies draws only those, and used to find
+  // nothing to refuse where the whole render refuses the use.  The scale puts a cell 64 pixels in either direction past the domain and one
+  // that is a few pixels across inside it; the render is cut so that its corner copy is 3 pixels wide and tall (7 where the cells overlap, where it is the only copy
+  // that holds the pixels past the tail of the one before), and the damage is that copy alone, or the copies of an edge, or a part inside.  The cells abut or overlap (PC6), where the tile is walked for one copy at
+  // a time.
+  struct Row {
+    const char * what;
+    int outer;          // the unit painted with the pattern: a fill of the render, or a stroke across it (whose rectangle the damage cuts)
+    int stroke;         // the tile's unit: a fill, or a stroke of a line along the cell
+    int k;              // the scale of the unit, as a power of two
+    double edge;        // the unit's far edge in the cell
+    double step;        // the lattice's step: 64 abuts, less overlaps
+    uint32_t w, h;      // the render
+    GSHSCENE_Rect corner;
+    unsigned refused;   // the report's refusals of the whole render
+  };
+  const GSHSCENE_Rect abut = {192, 128, 195, 131}, overlap = {124, 124, 127, 127};
+  const Row rows[] = {
+      {"a stroke painted with a pattern whose tile fills past the domain", 1, 0, 58, 64.0, 64, 195, 131, abut, 1},
+      {"a stroke painted with a pattern whose tile strokes past the domain", 1, 1, 58, 64.0, 64, 195, 131, abut, 1},
+      {"a stroke painted with a pattern of cells that overlap, filled", 1, 0, 58, 64.0, 60, 127, 127, overlap, 1},
+      {"a stroke painted with a pattern of cells that overlap, stroked", 1, 1, 58, 64.0, 60, 127, 127, overlap, 1},
+      {"a stroke painted with a pattern whose tile fills inside the domain", 1, 0, 58, 7.5, 64, 195, 131, abut, 0},
+      {"a fill painted with a pattern whose tile fills past the domain", 0, 0, 58, 64.0, 64, 195, 131, abut, 1},
+      {"a fill painted with a pattern whose tile strokes past the domain", 0, 1, 58, 64.0, 64, 195, 131, abut, 1},
+      {"a fill painted with a pattern of cells that overlap", 0, 0, 58, 64.0, 60, 127, 127, overlap, 1},
+  };
+  for (const Row & row : rows) {
+    RF_Ctx c;
+    rf_begin(&c);
+    const double up = std::ldexp(1.0, row.k);
+    GSHSCENE_Gradient_Stop stops[2] = {rf_stop(0.0, rf_solid(1, 1, 0, 1)), rf_stop(1.0, rf_solid(0, 0.2, 0.9, 1))};
+    GSHSCENE_Gradient g = rf_linear(0, 0, 0x1p60, 0, 0, 0, GSHSCENE_EXTEND_PAD);
+    rf_check(&c, gshgeom_map_scale(2, 0x1p-64, 0x1p-64, 1.0, &g.map) == GSHGEOM_OK);
+    GSHGEOM_Map down;
+    rf_check(&c, gshgeom_map_scale(2, 1.0 / up, 1.0 / up, 1.0, &down) == GSHGEOM_OK);
+    GSHSCENE_List * t = rf_open(&c);
+    const GSHSCENE_Paint paint = rf_gradient_paint(rf_gradient(&c, g, stops, 2), 0.9);
+    if (row.stroke) {
+      const double line[4] = {0.5 * up, 0.5 * up, row.edge * up, row.edge * up};
+      rf_stroke(&c, t, rf_polyline(&c, line, 2, 0), rf_pen(&c, 1.5 * up, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &down, paint);
+    } else {
+      rf_fill(&c, t, rf_rect(&c, 0.5 * up, 0.5 * up, row.edge * up, row.edge * up), &down, GSHGEOM_FILL_NONZERO, paint, 0, 0.0);
+    }
+    const GSHSCENE_Resource * pat =
+        rf_pattern(&c, rf_picture_of(&c, t), 0, 0, 64, 64, row.step, row.step, 1, 1, rf_move(0.0, 0.0), nullptr);
+    GSHSCENE_List * l = rf_open(&c);
+    if (row.outer) {
+      // a butt-capped line along the render's middle, wide enough to cover it all
+      const double across[4] = {-10.0, 0.5 * row.h, row.w + 10.0, 0.5 * row.h};
+      rf_stroke(&c, l, rf_polyline(&c, across, 2, 0), rf_pen(&c, 4.0 * (row.w + row.h), GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), nullptr,
+          rf_pattern_paint(pat, 1.0));
+    } else {
+      rf_fill(&c, l, rf_rect(&c, 0, 0, row.w, row.h), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+    }
+    rf_close(&c, l);
+    ASSERT_EQ(c.failed, 0) << row.what;
+    const GSHSCENE_Rect damages[] = {row.corner, {row.corner.x0, 0, (int32_t)row.w, (int32_t)row.h}, {0, 0, 8, (int32_t)row.h},
+        {(int32_t)row.w / 2, (int32_t)row.h / 2, (int32_t)row.w / 2 + 10, (int32_t)row.h / 2 + 5}, {0, row.corner.y0, (int32_t)row.w, (int32_t)row.h}};
+    for (unsigned tiers : {kAll, kNoPeriod}) {
+      TSink whole_sink(tiers);
+      Out whole = draw(whole_sink.sink, l, row.w, row.h);
+      ASSERT_EQ(whole.result, GSHSCENE_OK) << row.what;
+      EXPECT_EQ(whole.summary.by_class[GSHSCENE_ENTRY_REFUSED], row.refused) << row.what << ": the whole render";
+      for (const GSHSCENE_Rect & damage : damages) {
+        TSink sink(tiers);
+        Out part = draw(sink.sink, l, row.w, row.h, GSHCPU_FORMAT_RGBA8_STRAIGHT, 0, nullptr, nullptr, &damage);
+        ASSERT_EQ(part.result, GSHSCENE_OK) << row.what;
+        EXPECT_EQ(part.summary.by_class[GSHSCENE_ENTRY_REFUSED], row.refused)
+            << row.what << ": damage " << damage.x0 << "," << damage.y0 << "," << damage.x1 << "," << damage.y1 << " refuses what the whole render does";
+        EXPECT_EQ(part.entries, whole.entries) << row.what;
+        for (int64_t y = damage.y0; y < damage.y1; y++) {
+          for (int64_t x = damage.x0; x < damage.x1; x++) {
+            const size_t at_px = ((size_t)y * row.w + (size_t)x) * 4u;
+            ASSERT_EQ(part.bytes.compare(at_px, 4, whole.bytes, at_px, 4), 0) << row.what << " at " << x << "," << y;
+          }
+        }
+      }
+    }
+    rf_release(&c);
+  }
+}
+
+TEST(RenderPatternRules, ADepositCapMetByAClipInATileIsMetWhateverTheDamageDraws) {
+  // S4, PC4, PC8: the same for a clip in the tile, whose coverage in a copy is the cell deposits of the clip's path in that copy.  The clip is a
+  // zigzag across the 64 pixel cell, which a whole copy deposits more cells for than the cap and the corner copy (3 by 3) does not; the
+  // damage is that one copy, and the use is refused all the same.
+  RF_Ctx c;
+  rf_begin(&c);
+  double zig[2 * 40];
+  for (int i = 0; i < 40; i++) {
+    zig[2 * i] = (i % 2) ? 2.0 : 62.0;
+    zig[2 * i + 1] = 1.0 + 1.5 * i;
+  }
+  GSHSCENE_List * t = rf_open(&c);
+  rf_check(&c, gshscene_list_clip_push(t, rf_polyline(&c, zig, 40, 1), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  rf_fill(&c, t, rf_rect(&c, 0, 0, 64, 64), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.3, 0.1, 0.8), 0, 0.0);
+  rf_check(&c, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+  const GSHSCENE_Resource * pat = rf_pattern(&c, rf_picture_of(&c, t), 0, 0, 64, 64, 64, 64, 1, 1, rf_move(0.0, 0.0), nullptr);
+  GSHSCENE_List * l = rf_open(&c);
+  rf_fill(&c, l, rf_rect(&c, 0, 0, 131, 131), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  rf_close(&c, l);
+  ASSERT_EQ(c.failed, 0);
+  const GSHSCENE_Rect damages[] = {{128, 128, 131, 131}, {128, 0, 131, 131}, {0, 0, 4, 4}};
+  for (uint64_t cap : {uint64_t(250), uint64_t(100000)}) {
+    GSHCPU_Limits limits;
+    gshcpu_limits_default(&limits);
+    limits.max_deposits = cap;
+    TSink whole_sink(kNoPeriod, &limits);
+    Out whole = draw(whole_sink.sink, l, 131, 131);
+    ASSERT_EQ(whole.result, GSHSCENE_OK);
+    const unsigned refused = cap == 250 ? 1u : 0u;
+    EXPECT_EQ(whole.summary.by_class[GSHSCENE_ENTRY_REFUSED], refused) << "cap " << cap << ": the whole render";
+    for (const GSHSCENE_Rect & damage : damages) {
+      TSink sink(kNoPeriod, &limits);
+      Out part = draw(sink.sink, l, 131, 131, GSHCPU_FORMAT_RGBA8_STRAIGHT, 0, nullptr, nullptr, &damage);
+      ASSERT_EQ(part.result, GSHSCENE_OK);
+      EXPECT_EQ(part.summary.by_class[GSHSCENE_ENTRY_REFUSED], refused)
+          << "cap " << cap << ", damage " << damage.x0 << "," << damage.y0 << "," << damage.x1 << "," << damage.y1;
+      for (int64_t y = damage.y0; y < damage.y1; y++) {
+        for (int64_t x = damage.x0; x < damage.x1; x++) {
+          const size_t at_px = ((size_t)y * 131u + (size_t)x) * 4u;
+          ASSERT_EQ(part.bytes.compare(at_px, 4, whole.bytes, at_px, 4), 0) << "cap " << cap << " at " << x << "," << y;
+        }
+      }
+    }
+  }
+  rf_release(&c);
 }
 
 TEST(RenderPatternRules, ARegionPastTheRangeInACellsFrameIsALimitUnderBothTiers) {

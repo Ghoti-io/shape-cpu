@@ -568,6 +568,11 @@ def scripted():
     # Found by the second soak: a cell cap met in the whole render and not in the damage-limited one, so an item was
     # refused in one and drawn in the other and the pixels inside the damage differed (Implementation Notes of story
     # 16). Fixed 2026-10-21 (S4); the harness compares inside the damage with no tolerance for it.
+    # Found by pass B's libFuzzer run: a stroke painted with a pattern whose tile holds a gradient fill that leaves the sampling domain in the
+    # whole copies of the lattice and not in the cut ones; the damage-limited render drew only the cut ones and refused nothing (S4).
+    out["regression-tile-limit-outside-damage.bin"] = base64.b64decode(
+        "PIoAAAAAAgUCAgAAAAAACQIAAAAAAQkJAAAAAAECCQAAAAABAAAAAAAABQMCCQAAAAAAAAAJAAkJBAAAAAAAAAUCDAACAAAAAAAP/wICAgIJAw"
+        "kCAAACAQICAgIJAwkCAAACAwAAAMhkMv8CAAAAAMhkMv8C+AAbAAcAAMhkMv8CAAABAMhkMv8CAA==")
     out["regression-cells-damage-differs.bin"] = base64.b64decode(
         "9BgAWsyop3vto1FSswDDWgVM3Wc837Z/Bhr8trLLWZ+T+zR4Kv4uM8LbHINihtt8J+Yff5kQmyh+3NASYQKDo4hSD1YkaL2jnZauWqEjRcW5S+MV"
         "TYEs5O3+VcU8cwKp97YVqjP+tkKYlPe40dOONqAWqnu2fwYa/Layy1mfk/s0eCr+LjPCg2KG23wn5h9/mb/Zk6LFN3COUCe4RAEAAAAAAAAzLrJp"

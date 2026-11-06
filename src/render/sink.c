@@ -4722,8 +4722,10 @@ static GSHSCENE_Result pat_paint_copy(Run * run, Pat_Level * L, const Pat_Unit *
   if (p.image) {
     run->work += p.im.visits;
   }
-  L->urect = gshcpu_render_rect_join(L->urect, rect_moved(rc, c->sx, c->sy));
-  L->copies++;
+  if (!gshcpu_render_rect_empty(rc)) {
+    L->urect = gshcpu_render_rect_join(L->urect, rect_moved(rc, c->sx, c->sy));
+    L->copies++;
+  }
   return GSHSCENE_OK;
 }
 
@@ -4749,12 +4751,15 @@ static GSHSCENE_Result pat_fill(Run * run, const GSHSCENE_Item * item, const siz
   Frame * frame = &run->frames[run->top];
   Pat_Unit u = {item, chain, count, frame, reach_of(run, frame->clip_base, run->clip_count),
       whole_reach_of(run, frame->clip_base, run->clip_count)};
-  if (gshcpu_render_rect_empty(u.reach)) {
-    return GSHSCENE_OK;
+  if (gshcpu_render_rect_empty(u.wreach)) {
+    return GSHSCENE_OK; /* nothing of the unit is in the whole render */
   }
   L->urect.x1 = L->urect.x0;
   L->urect.y1 = L->urect.y0;
-  GSHSCENE_Result r = pat_each(run, L, u.reach, pat_fill_copy, &u);
+  /* S4: the copies of the whole render, not only the ones the damage draws, so that a limit met inside a copy (a cell cap, a gradient
+   * or an image past G14's domain, a coordinate past the range) refuses the use whatever the damage; a copy the damage does not reach
+   * is covered and tested over the whole render's part of it and draws nothing. */
+  GSHSCENE_Result r = pat_each(run, L, u.wreach, pat_fill_copy, &u);
   L->base = L->base0;
   if (r == GSHSCENE_OK) {
     pat_finish(run, L, frame);
@@ -4813,16 +4818,22 @@ static GSHSCENE_Result pat_clip_push(Run * run, const GSHSCENE_Item * item, cons
     pc->maps = L->pmaps + run->clip_count * (run->layout.levels + 2u);
     memcpy(pc->maps, run->maps, count * sizeof *pc->maps);
   }
-  if (gshcpu_render_rect_empty(clip->rect)) {
+  const int drawn = !gshcpu_render_rect_empty(clip->rect);
+  if (!drawn) {
     clip->rect.x1 = clip->rect.x0;
     clip->rect.y1 = clip->rect.y0;
-  } else {
-    memset(clip->coverage, 0, (size_t)(clip->rect.x1 - clip->rect.x0) * (size_t)(clip->rect.y1 - clip->rect.y0));
-    GSHSCENE_Result r = pat_each(run, L, clip->rect, pat_clip_copy, &u);
+  }
+  if (!gshcpu_render_rect_empty(clip->whole)) {
+    if (drawn) {
+      memset(clip->coverage, 0, (size_t)(clip->rect.x1 - clip->rect.x0) * (size_t)(clip->rect.y1 - clip->rect.y0));
+    }
+    GSHSCENE_Result r = pat_each(run, L, clip->whole, pat_clip_copy, &u); /* S4: the copies of the whole render */
     L->base = L->base0;
     if (r != GSHSCENE_OK) {
       return r;
     }
+  }
+  if (drawn) {
     /* PC4: the union of the copies' regions, quantized once: the byte of the sum of their areas, held at 255. */
     const size_t cw = (size_t)(clip->rect.x1 - clip->rect.x0);
     for (int64_t y = clip->rect.y0; y < clip->rect.y1; y++) {
@@ -4909,9 +4920,7 @@ static GSHSCENE_Result pat_stroke_copy(Run * run, Pat_Level * L, int64_t i, int6
     return scene_result(r);
   }
   gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, strokes));
-  if (!gshcpu_render_rect_empty(rect)) {
-    result = pat_paint_copy(run, L, u, &c, rect, whole, cov, NULL);
-  }
+  result = pat_paint_copy(run, L, u, &c, rect, whole, cov, NULL); /* S4: the paint is made ready over the whole render's part, drawn or not */
   gshcpu_render_stroke_close(cache, &s);
   return result;
 }
@@ -4921,12 +4930,15 @@ static GSHSCENE_Result pat_stroke(Run * run, const GSHSCENE_Item * item, const s
   Frame * frame = &run->frames[run->top];
   Pat_Unit u = {item, chain, count, frame, reach_of(run, frame->clip_base, run->clip_count),
       whole_reach_of(run, frame->clip_base, run->clip_count)};
-  if (gshcpu_render_rect_empty(u.reach)) {
-    return GSHSCENE_OK;
+  if (gshcpu_render_rect_empty(u.wreach)) {
+    return GSHSCENE_OK; /* nothing of the unit is in the whole render */
   }
   L->urect.x1 = L->urect.x0;
   L->urect.y1 = L->urect.y0;
-  GSHSCENE_Result r = pat_each(run, L, u.reach, pat_stroke_copy, &u);
+  /* S4: the copies of the whole render, not only the ones the damage draws, so that a limit met inside a copy (a cell cap, a gradient
+   * or an image past G14's domain, a coordinate past the range) refuses the use whatever the damage; a copy the damage does not reach
+   * is covered and tested over the whole render's part of it and draws nothing. */
+  GSHSCENE_Result r = pat_each(run, L, u.wreach, pat_stroke_copy, &u);
   L->base = L->base0;
   if (r == GSHSCENE_OK) {
     pat_finish(run, L, frame);
@@ -5316,7 +5328,7 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
   }
   if (!served) {
     L->guard = L->period;
-    result = pat_pass(run, L, tile, overlaps, prect);
+    result = pat_pass(run, L, tile, overlaps, L->period ? prect : whole);
     L->guard = 0;
     if (L->period && L->abort_tier && (result == GSHSCENE_OK || result == GSHSCENE_ERR_LIMIT)) {
       /* PC9: a copy the window cannot vouch for: give the window up, and draw the use's rectangle by the general tier. */
@@ -5339,7 +5351,7 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
       for (int64_t y = rect.y0; y < rect.y1; y++) {
         memset(L->cnt + at(run, rect.x0, y), 0, (size_t)(rect.x1 - rect.x0));
       }
-      result = pat_pass(run, L, tile, overlaps, rect);
+      result = pat_pass(run, L, tile, overlaps, whole);
     } else if (L->period && result == GSHSCENE_OK) {
       widen(run, f, prect); /* the window made ready whole: the pixels no unit reached are transparent */
       if (pcache && gshcpu_period_cache_fits(pcache, (size_t)(L->per.p * L->per.s))) {
