@@ -472,37 +472,56 @@ TEST(RenderPatternUnion, AMaskedGroupInATileOverAUnionIsMeasuredAndDrawnInTheCal
   }
 }
 
-TEST(RenderPatternUnion, AWideShortTargetsMeasureIsTheGeneralTiersWhateverTheMembersBoxesShow) {
-  // CU20: the accumulator of the general tier is as wide as the target and many rows deep, where the fast tier's plane is two bytes a pixel; on a
-  // target a few pixels tall the first is many times the second, so a measure that took a tile's disjoint union for the fast tier's would be short.
-  // The tile holds the union directly (a) and in the picture of a mask that a group takes (b).
+TEST(RenderPatternUnion, AWideCellOnAShortTargetIsMeasuredAsTheGeneralTierAndNotTheFastTiers) {
+  // CU20, CU21: the general tier's accumulator is as wide as the union's rectangle in a copy (here a cell 3000 pixels wide, 16 rows of 16-byte
+  // cells a column: some 770 kB) where the fast tier's plane is two bytes a pixel of a target 4000 by 6 (48 kB).  A tile forms every union by the
+  // general tier, so a measure that took a tile's disjoint union for the fast tier's would be a fifth of what the pass takes: the render in exactly
+  // the measured bytes would run the arena out, and one byte below the measure is refused.  The union is in the tile (a) and in the picture of a
+  // mask that a group of the tile takes (b); its two members are provably disjoint (boxes that only touch).
   for (int where = 0; where < 2; where++) {
     Scene s;
     GSHSCENE_List * t = s.open();
     GSHSCENE_Paint p = rh::solid(0.8, 0.2, 0.3, 0.9);
-    const GSHSCENE_Resource * u = make_union(s, members_of(s, false));
-    GSHSCENE_Group g{};
+    const GSHSCENE_Resource * u = make_union(s, {member(s.rect(0, 2, 3000, 3)), member(s.rect(0, 3, 3000, 4))});
     if (where == 0) {
       EXPECT_EQ(gshscene_list_clip_push(t, u, nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0), GSHSCENE_OK);
     } else {
       GSHSCENE_List * mp = s.open();
       GSHSCENE_Paint w = rh::solid(1, 1, 1, 1);
       EXPECT_EQ(gshscene_list_clip_push(mp, u, nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0), GSHSCENE_OK);
-      EXPECT_EQ(gshscene_list_fill(mp, s.rect(0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, &w, 0, 0.0), GSHSCENE_OK);
+      EXPECT_EQ(gshscene_list_fill(mp, s.rect(0, 0, 3000, 5), nullptr, GSHGEOM_FILL_NONZERO, &w, 0, 0.0), GSHSCENE_OK);
       EXPECT_EQ(gshscene_list_clip_pop(mp), GSHSCENE_OK);
-      g = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, s.alpha_mask(s.picture(mp)));
+      GSHSCENE_Group g = s.group(1.0, GSHSCENE_COMPOSITE_SRC_OVER, s.alpha_mask(s.picture(mp)));
       EXPECT_EQ(gshscene_list_group_push(t, &g, 0, 0.0), GSHSCENE_OK);
     }
-    EXPECT_EQ(gshscene_list_fill(t, s.rect(0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, &p, 0, 0.0), GSHSCENE_OK);
+    EXPECT_EQ(gshscene_list_fill(t, s.rect(0, 0, 3000, 5), nullptr, GSHGEOM_FILL_NONZERO, &p, 0, 0.0), GSHSCENE_OK);
     EXPECT_EQ(where == 0 ? gshscene_list_clip_pop(t) : gshscene_list_group_pop(t), GSHSCENE_OK);
-    GSHSCENE_List * l = use_of(s, pattern_of(s, s.picture(t), 8, 8, 0.3, 0.45), 4000, 6);
+    GSHSCENE_List * l = use_of(s, pattern_of(s, s.picture(t), 3000, 3000, 0.0, 0.0), 4000, 6);
     Draw plain = draw(l, 4000, 6);
     Options cm;
     cm.flags = GSHSCENE_RENDER_CALLER_MEMORY;
-    Draw in_memory = draw(l, 4000, 6, cm);
+    Draw in_memory = draw(l, 4000, 6, cm); // draw() gives the render exactly the measured bytes
     ASSERT_EQ(plain.result, GSHSCENE_OK);
+    EXPECT_GT(plain.counters.union_general, 0u) << "the union is formed";
+    EXPECT_TRUE(std::any_of(plain.bytes.begin(), plain.bytes.end(), [](char c) { return c != 0; }));
     ASSERT_EQ(in_memory.result, GSHSCENE_OK) << "where " << where;
     EXPECT_EQ(plain.bytes, in_memory.bytes);
+    EXPECT_GT(in_memory.need, 700000u) << "the accumulator is a large part of the measure";
+    // One byte short of the measure is refused, and nothing is drawn.
+    RasterRef r(blank(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, 4000, 6));
+    SinkRef sink;
+    ReportRef report;
+    GSHSCENE_Target tg = target_of(r.raster);
+    GSHSCENE_Render_Request req = request_of(l, &tg, report.report);
+    size_t need = 0;
+    ASSERT_EQ(gshscene_sink_workspace_bytes(sink.sink, &req, &need), GSHSCENE_OK);
+    std::vector<unsigned char> mem(need);
+    req.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+    req.workspace = mem.data();
+    req.workspace_bytes = need - 1u;
+    EXPECT_EQ(gshscene_sink_render(sink.sink, &req), GSHSCENE_ERR_LIMIT) << "where " << where;
+    const std::string untouched = r.bytes();
+    EXPECT_TRUE(std::all_of(untouched.begin(), untouched.end(), [](char c) { return c == 0; }));
   }
 }
 
