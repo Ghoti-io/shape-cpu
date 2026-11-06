@@ -46,7 +46,7 @@
  * ## Curves, open subpaths, orientation
  *
  * A quadratic or cubic in the device path is flattened by `shape-geometry`'s
- * integer flattener (revision ::GSHGEOM_FLATTEN_REVISION, tolerance
+ * integer flattener (tolerance
  * ::GSHGEOM_FLATTEN_TOLERANCE) and then filled; a caller that has its own
  * polyline passes lines.  A subpath that is not closed is filled as if it were:
  * the closing line is implicit, as in every fill.  The flattener is not

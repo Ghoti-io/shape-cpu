@@ -17,13 +17,10 @@ violation by `make check-gates`.
 
 Device space has its origin at the top-left corner of the top-left pixel, y
 down, and a coordinate is an `int32` count of 1/64 pixel. A device path is
-flattened by `shape-geometry`'s integer flattener (tolerance 1/16 pixel,
-revision 2 for quadratics and cubics) into polylines; a rational curve (a circle
-or an ellipse, whether written as conics or as an arc) takes `shape-geometry`'s conic
-route (flattener revision 3), which holds it within the tolerance less 0.29 units by a
-proved rule where revision 2 held it to a fixed two units, so a render that fills or
-clips with a circle or an ellipse has the vertices of the new rule and no other render
-moved. Each subpath is closed (an open one is filled as if closed). Every edge deposits two signed numbers into each cell it crosses:
+flattened by `shape-geometry`'s integer flattener (tolerance 1/16 pixel)
+into polylines; a rational curve (a circle or an ellipse, whether written as conics
+or as an arc) takes `shape-geometry`'s conic route, which holds it within the
+tolerance less 0.29 units by a proved rule. Each subpath is closed (an open one is filled as if closed). Every edge deposits two signed numbers into each cell it crosses:
 `cover`, the signed height of the crossing in 26.6 units, and `area`, that
 height times the sum of the crossing's two x positions within the cell. An edge
 is cut at each pixel boundary, the crossing at a boundary rounded once (half
@@ -354,6 +351,9 @@ sink converts it from the target's space into the mask's render space `R`, as it
 painted in. That is what ISO 32000-1 says of a transparency group (Table 147 makes a group's color space the one colors are
 converted into when painted into the group, and 11.3.4 converts source colors to the blending color space), and a soft mask is derived
 from such a group (11.6.5.2); CSS Masking likewise converts only at the luminance step. shape-scene's oracle draws the
+picture the same way, so the installed `mask_vectors.h` and this sink agree on all 485 vectors, among them 24 whose `R` is another space
+than the target's (an earlier reading of the oracle took such a paint as already in `R`, and those 24 vectors moved when it was corrected).
+
 ### Patterns (PC1 to PC12)
 
 A pattern is a picture repeated on a lattice and the paint that fills with it (shape-scene's PT1 to PT14). The sink draws the
@@ -407,8 +407,6 @@ that are drawn.
 buffer and a record, and nests as the patterns do; under `CALLER_MEMORY` all of it is in the caller's block, the geometry of a tile's units
 comes from the arena above the item that is painted with the pattern, and the size the sink reports is a bound that is never too small.
 
-picture the same way, so the installed `mask_vectors.h` and this sink agree on all 485 vectors, among them 24 whose `R` is another space
-than the target's (an earlier reading of the oracle took such a paint as already in `R`, and those 24 vectors moved when it was corrected).
 **The period tier (PC9).** A pattern whose step vectors `a` and `b` are integer vectors (every component an exact integer below `2^31`,
 both axes repeating, `D = a_x b_y - a_y b_x` nonzero and at most `2^31`) has a lattice picture that a translation by any `i a + j b` leaves
 unchanged: every copy has the fraction of `tau`, so every copy is the first copy's bits moved by whole pixels. Such a pass is drawn **over a
