@@ -2698,7 +2698,13 @@ SURVIVORS = {
         "whose piece ends at (0, 64), made with a scratch, leaves a later cell the area it has with a scratch of its own",
     "rv-670-lt": "not seen by a plain build: `p <= n` reads one part past the three that both callers pass (an array on the stack), "
         "which a sanitizer sees and the plant harness does not run",
-    "uc15-meeting-depth-rounded": "not seen: needs a meeting whose depth is not a multiple of 1/1024 at a resolution where the "
+    "rv-741-lt": "not seen by a plain build: `p <= n` reads one part past the three that the caller passes (an array on the stack); seen by "
+        "`make test-asan` (UBSan: index 3 out of bounds for type 'uint32_t [3]', checked 2026-11-07 on this plant), which the plant harness does not run",
+    "rv-1503-lt": "not seen by a plain build or by test-asan (checked 2026-11-07): the band's clearing loop `i <= total` writes 0xffff one element "
+        "past `union_k` and `clip_k`, which are carved from one arena back to back; the written value is the initial value of the next array's first "
+        "element, so nothing reads a changed byte; it is an out-of-bounds write all the same, left open: the next step is a caller-memory test whose "
+        "block of memory is a malloc of exactly the size the report names for the render, under ASan",
+    "uc15-meeting-depth-rounded-2": "not seen in the sweep that keeps the cell's own exchanges (the group sweep's copy, uc15-meeting-depth-rounded, is caught by the union vectors): needs a meeting whose depth is not a multiple of 1/1024 at a resolution where the "
         "rounding changes a level",
 }
 
@@ -2760,6 +2766,25 @@ def object_equivalence_main(plants):
             print("%-9s %-40s %s" % (verdict, pid, detail))
     print("object equivalence: %d plants: %s" % (len(plants), ", ".join("%d %s" % (v, k) for k, v in sorted(counts.items()))))
     return counts
+
+
+# Plants whose text moved with the code they plant (tools/reanchored-plants.json: the same defects, re-found in the code as it stands by
+# matching the lines of the old text against the file; each is run like any other and must be caught).  They replace the entries of the
+# same id above.
+_reanchored = ROOT / "tools" / "reanchored-plants.json"
+if _reanchored.exists():
+    with open(_reanchored) as _f:
+        _rp = [tuple(x) for x in _json.load(_f)]
+    _rp_ids = {x[0] for x in _rp}
+    PLANTS = [x for x in PLANTS if x[0] not in _rp_ids] + _rp
+
+# Plants a test that is not in their lists catches (a sweep with PLANT_ALL_TESTS=1 found them): tools/extra-catchers.json names that test for
+# each, so the plain sweep sees them caught.
+_extra = ROOT / "tools" / "extra-catchers.json"
+if _extra.exists():
+    with open(_extra) as _f:
+        _ex = _json.load(_f)
+    PLANTS = [x if x[0] not in _ex else tuple(list(x[:5]) + [list(x[5]) + [t for t in _ex[x[0]] if t not in x[5]]]) for x in PLANTS]
 
 
 def main():

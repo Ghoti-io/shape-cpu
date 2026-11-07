@@ -1,0 +1,26 @@
+{
+ "rs-2793-eq": [
+  "testRender_hatch"
+ ],
+ "rm-whole-window-not-restored": [
+  "testRender"
+ ],
+ "rm-layout-masked-list-not-wide": [
+  "testRender_fast_fill"
+ ],
+ "rp-paint-position-shift-lost": [
+  "testRender"
+ ],
+ "r-clip-memory": [
+  "testRender_clip_union"
+ ],
+ "ris-clips-unweighed": [
+  "testRender_pattern_rules"
+ ],
+ "rm-layout-pictures-clips-omitted": [
+  "testRender"
+ ],
+ "rm-layout-pictures-gradients-omitted": [
+  "testRender"
+ ]
+}
