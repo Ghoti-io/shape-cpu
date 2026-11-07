@@ -573,6 +573,10 @@ def scripted():
     out["regression-tile-limit-outside-damage.bin"] = base64.b64decode(
         "PIoAAAAAAgUCAgAAAAAACQIAAAAAAQkJAAAAAAECCQAAAAABAAAAAAAABQMCCQAAAAAAAAAJAAkJBAAAAAAAAAUCDAACAAAAAAAP/wICAgIJAw"
         "kCAAACAQICAgIJAwkCAAACAwAAAMhkMv8CAAAAAMhkMv8C+AAbAAcAAMhkMv8CAAABAMhkMv8CAA==")
+    # Found by pass B's libFuzzer run (UBSan): a union whose device box has the most negative 26.6 coordinate, which box_floor negated as an int32.
+    out["regression-box-floor-of-int32-min.bin"] = base64.b64decode(
+        "PAoAAAACBQICAAAAAAAJAgAAAAABCQkAAAAAAQI7CQAAAAABAAAAAAAABQMCCQAAAAAAAAAJAAkHBAAAAAAAAAUCDAACAAAAAAAP/wIAAAAAAQ"
+        "ECAgICCQMJAgAAAgECAgICCQMJAgAAAgYAAADIZDP/AgAEAAD+AQABAAEGAAAAAxTIZDP/AgA=")
     out["regression-cells-damage-differs.bin"] = base64.b64decode(
         "9BgAWsyop3vto1FSswDDWgVM3Wc837Z/Bhr8trLLWZ+T+zR4Kv4uM8LbHINihtt8J+Yff5kQmyh+3NASYQKDo4hSD1YkaL2jnZauWqEjRcW5S+MV"
         "TYEs5O3+VcU8cwKp97YVqjP+tkKYlPe40dOONqAWqnu2fwYa/Layy1mfk/s0eCr+LjPCg2KG23wn5h9/mb/Zk6LFN3COUCe4RAEAAAAAAAAzLrJp"

@@ -957,10 +957,10 @@ static int skip_step(Skip * s, const GSHSCENE_Item * item, size_t count) {
 
 /** floor and ceiling of a 26.6 coordinate in whole pixels. */
 static int64_t box_floor(int32_t v) {
-  return v >= 0 ? (int64_t)v / 64 : -(((int64_t)-v + 63) / 64);
+  return v >= 0 ? (int64_t)v / 64 : -((-(int64_t)v + 63) / 64); /* widened before the negation: INT32_MIN is a coordinate */
 }
 static int64_t box_ceil(int32_t v) {
-  return v >= 0 ? ((int64_t)v + 63) / 64 : -(((int64_t)-v) / 64);
+  return v >= 0 ? ((int64_t)v + 63) / 64 : -((-(int64_t)v) / 64);
 }
 
 /* --- the general tier of a union clip (story A3b, CG1 to CG12) ------------------------------------------------------------- */
