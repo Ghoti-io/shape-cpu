@@ -573,6 +573,11 @@ def scripted():
     out["regression-tile-limit-outside-damage.bin"] = base64.b64decode(
         "PIoAAAAAAgUCAgAAAAAACQIAAAAAAQkJAAAAAAECCQAAAAABAAAAAAAABQMCCQAAAAAAAAAJAAkJBAAAAAAAAAUCDAACAAAAAAAP/wICAgIJAw"
         "kCAAACAQICAgIJAwkCAAACAwAAAMhkMv8CAAAAAMhkMv8C+AAbAAcAAMhkMv8CAAABAMhkMv8CAA==")
+    # Found by pass B's libFuzzer run (CG4): a union with a member that can touch no pixel (a hairline on a pixel boundary far outside the sink's
+    # range): the fast tier refused the push for its geometry where the general tier skipped the member.
+    out["regression-union-member-without-pixels.bin"] = base64.b64decode(
+        "PAAABQACBQKjAgAAAAAACQIAAAAAAQkJAAAAAAECCQAAAAABAAAAAAAABQMCCQAAAAAAAAAJAAkJBAAAAAAAAAUCDAACAAAAAAAP/wIAAAAAAQ"
+        "ECAgICCQMJAgAAAgECAgICCQMJAgAAAgQAAADIZDL/AgAEAAD+AQAABgEBAAABAMhkNP8CAAYA")
     # Found by pass B's libFuzzer run (UBSan): a union whose device box has the most negative 26.6 coordinate, which box_floor negated as an int32.
     out["regression-box-floor-of-int32-min.bin"] = base64.b64decode(
         "PAoAAAACBQICAAAAAAAJAgAAAAABCQkAAAAAAQI7CQAAAAABAAAAAAAABQMCCQAAAAAAAAAJAAkHBAAAAAAAAAUCDAACAAAAAAAP/wIAAAAAAQ"

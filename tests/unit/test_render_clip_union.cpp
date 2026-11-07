@@ -90,6 +90,57 @@ TEST(RenderClipUnion, EveryPolygonVectorIsTheOraclesByteForByteWhichTierDrawsIt)
   EXPECT_GE(general, 20u);
 }
 
+TEST(RenderClipUnion, AMemberWithNoPixelsContributesNothingAndIsNeverRefusedForItsGeometryByEitherTier) {
+  // CG4, AD-13: where the fast tier applies, it and the general tier give the same picture and the same report.  A member that can touch no
+  // pixel (a hairline on a pixel boundary, two points, one point, a zero-height line) contributes nothing to the union: the exact oracle's
+  // union is of the members' regions and a zero-area region adds none.  It is not swept, and the sink's coordinate range, which a member's
+  // geometry can pass without its device box leaving the 26.6 representation (20 million pixels), refuses a member that has pixels and
+  // nothing else: the fast tier refused the push for it and the general tier, which skips a member with an empty rectangle, drew the
+  // union (found by libFuzzer).  The union is drawn, the same by both tiers and the same as the union of the square alone.
+  struct Degenerate {
+    const char * what;
+    std::vector<double> xy;
+  };
+  const Degenerate members[] = {
+      {"a hairline on a pixel boundary 20 million pixels away", {2.0e7, 3.0, 2.0e7, 9.0}},
+      {"a hairline on a pixel boundary in the render", {5.0, 3.0, 5.0, 9.0}},
+      {"a zero-height line 20 million pixels away", {2.0e7, 4.0, 2.0e7 + 5.0, 4.0}},
+      {"one point twice, far away", {-3.0e7, 8.0, -3.0e7, 8.0}},
+      {"one point twice, in the render", {6.0, 6.0, 6.0, 6.0}},
+  };
+  const unsigned fast = GSHCPU_RENDER_TIERS_ALL, general_only = GSHCPU_RENDER_TIERS_ALL & ~(unsigned)GSHCPU_RENDER_TIER_UNION;
+  Draw want;
+  {
+    Scene s;
+    const GSHSCENE_Resource * u = make_union(s, {member(s.polygon({2, 2, 10, 2, 10, 10, 2, 10}))});
+    want = draw(clipped_fill(s, u, 16, 16), 16, 16);
+    ASSERT_EQ(want.result, GSHSCENE_OK);
+  }
+  for (const Degenerate & d : members) {
+    for (int first = 0; first < 2; first++) {
+      Scene s;
+      const GSHSCENE_Resource * sq = s.polygon({2, 2, 10, 2, 10, 10, 2, 10});
+      const GSHSCENE_Resource * deg = s.polygon(d.xy);
+      std::vector<GSHSCENE_Clip_Member> m = first ? std::vector<GSHSCENE_Clip_Member>{member(deg), member(sq)}
+                                                  : std::vector<GSHSCENE_Clip_Member>{member(sq), member(deg)};
+      const GSHSCENE_Resource * u = make_union(s, m);
+      GSHSCENE_List * l = clipped_fill(s, u, 16, 16);
+      Options o_fast, o_general;
+      o_fast.tiers = fast;
+      o_general.tiers = general_only;
+      Draw a = draw(l, 16, 16, o_fast);
+      Draw b = draw(l, 16, 16, o_general);
+      ASSERT_EQ(a.result, GSHSCENE_OK) << d.what;
+      ASSERT_EQ(b.result, GSHSCENE_OK) << d.what;
+      EXPECT_EQ(a.count(GSHSCENE_ENTRY_REFUSED), 0u) << d.what << " (fast tier, member " << (first ? "first" : "second") << ")";
+      EXPECT_EQ(b.count(GSHSCENE_ENTRY_REFUSED), 0u) << d.what << " (general tier)";
+      EXPECT_EQ(a.bytes, b.bytes) << d.what << ": the tiers draw one picture";
+      EXPECT_EQ(a.bytes, want.bytes) << d.what << ": the member adds nothing to the square";
+      EXPECT_EQ(a.chains, b.chains) << d.what << ": and report the same";
+    }
+  }
+}
+
 TEST(RenderClipUnion, TwoAbuttingHalvesAreWholeWhereTheMaskOfTheSameShapesIsThreeQuarters) {
   Scene s;
   const GSHSCENE_Resource * u =

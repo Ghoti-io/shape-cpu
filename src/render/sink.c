@@ -2977,6 +2977,23 @@ static GSHSCENE_Result stroke(Run * run, const GSHSCENE_Item * item, const size_
 
 
 /**
+ * The pixels a union's member can touch: the floor and the ceiling of its device box, or none when the box is empty or has no area in
+ * whole pixels (a hairline on a pixel boundary, a member of one point or two).  Such a member contributes nothing to the union and is not
+ * swept, measured or refused for its geometry by either tier (CG4: the general tier skips it; the fast tier must not refuse a push for it).
+ * @return 1 and the rectangle, or 0.
+ */
+static int union_member_pixels(const GSHGEOM_Device_Box * db, GSHCPU_Rect * m) {
+  if (db->empty) {
+    return 0;
+  }
+  m->x0 = box_floor(db->x0);
+  m->y0 = box_floor(db->y0);
+  m->x1 = box_ceil(db->x1);
+  m->y1 = box_ceil(db->y1);
+  return !gshcpu_render_rect_empty(*m);
+}
+
+/**
  * CU18, CU19: a union clip.  Each member is swept by the dense cover, the magnitude fold and no final shift, into one plane of
  * `uint16` over the union's rectangle, each pixel held at 8192; when the last member is in, each plane value becomes the clip's byte
  * `min(255, s >> 5)`.  The members come from the one member item (CU14); a member refused refuses the whole push.
@@ -3000,10 +3017,10 @@ static GSHSCENE_Result union_push_fast(Run * run, const GSHSCENE_Item * item, co
     if (br != GSHSCENE_OK) {
       return GSHSCENE_ERR_INTERNAL;
     }
-    if (db.empty) {
+    GSHCPU_Rect m;
+    if (!union_member_pixels(&db, &m)) {
       continue;
     }
-    GSHCPU_Rect m = {box_floor(db.x0), box_floor(db.y0), box_ceil(db.x1), box_ceil(db.y1)};
     if (!have) {
       bound = m;
       have = 1;
@@ -3048,6 +3065,12 @@ static GSHSCENE_Result union_push_fast(Run * run, const GSHSCENE_Item * item, co
   GSHSCENE_Result result = GSHSCENE_OK;
   int refused = 0;
   for (size_t i = 0; i < n && result == GSHSCENE_OK && !refused; i++) {
+    GSHGEOM_Device_Box mdb;
+    GSHCPU_Rect mpx;
+    if (gshscene_clip_union_member_box(item, i, run->maps, count - 1, target_map(run), &mdb) != GSHSCENE_OK ||
+        !union_member_pixels(&mdb, &mpx)) {
+      continue; /* the box was formed by the first loop: a member with no pixels is skipped, as the general tier skips it */
+    }
     GSHSCENE_Item member;
     if (gshscene_clip_union_member_item(item, i, &member) != GSHSCENE_OK) {
       result = GSHSCENE_ERR_INTERNAL;

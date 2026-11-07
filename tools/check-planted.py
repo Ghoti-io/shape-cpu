@@ -2618,6 +2618,16 @@ PLANTS += [
     ('rp-s4-copy-without-pixels-counted', "src", RS, '  if (!gshcpu_render_rect_empty(rc)) {\n    L->urect = gshcpu_render_rect_join(L->urect, rect_moved(rc, c->sx, c->sy));\n    L->copies++;\n  }', '  {\n    L->urect = gshcpu_render_rect_join(L->urect, rect_moved(rc, c->sx, c->sy));\n    L->copies++;\n  }', S4_TESTS),
 ]
 
+# CG4 (pass B): a member of a union that can touch no pixel is skipped by the fast tier as the general tier skips it; neither refuses the
+# push for the geometry of such a member.
+UNION_TESTS = ["testRender_clip_union", "testRender_clip_union_general", "testRender_conformance", "probe"]
+PLANTS += [
+    ('rp-union-fast-member-without-pixels-swept', "src", RS, "        !union_member_pixels(&mdb, &mpx)) {\n      continue; /* the box was formed by the first loop", "        0) {\n      continue; /* the box was formed by the first loop", UNION_TESTS),
+    ('rp-union-fast-member-without-pixels-bounds', "src", RS, "    if (!union_member_pixels(&db, &m)) {\n      continue;\n    }\n    if (!have) {", "    if (!union_member_pixels(&db, &m)) {\n      m = GSHCPU_Rect{0, 0, 0, 0};\n    }\n    if (!have) {", UNION_TESTS),
+    ('rp-union-member-pixels-empty-box-only', "src", RS, "  return !gshcpu_render_rect_empty(*m);\n}", "  return 1;\n}", UNION_TESTS),
+    ('rp-union-member-pixels-floor-ceil-swapped', "src", RS, "  m->x0 = box_floor(db->x0);\n  m->y0 = box_floor(db->y0);\n  m->x1 = box_ceil(db->x1);", "  m->x0 = box_ceil(db->x0);\n  m->y0 = box_floor(db->y0);\n  m->x1 = box_ceil(db->x1);", UNION_TESTS),
+]
+
 SURVIVORS = {
     # shape-exact-primitives CU21 (cu21-): equivalent, each with the argument and the check that backs it.
     'cu21-cut-count-is-the-uncut-count': 'equivalent: the entries of the cut array past the ones kept are NULL (calloc), and every cover function skips a NULL path as it skips the NULL entries of a geometry',

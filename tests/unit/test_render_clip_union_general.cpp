@@ -294,6 +294,21 @@ TEST(RenderClipUnionGeneral, TheGeneralTierEqualsTheFastTierOnGeneratedDisjointU
     if (members.size() < 2) {
       continue;
     }
+    // A member that can touch no pixel is in the population too (CG4: neither tier may refuse the union for it, nor draw it differently):
+    // a hairline on a pixel boundary, a zero-height line, and one point twice, in the render and 20 million pixels away (the sink's range
+    // is passed by its geometry before its 26.6 box is).  The population of this test did not hold one before pass B, and the fast tier
+    // refused the push for such a member where the general tier skipped it.
+    if (g.below(3) == 0) {
+      const double far = g.below(2) ? 2.0e7 : 0.0, nx = (double)g.between(0, W), ny = (double)g.between(0, H);
+      switch (g.below(3)) {
+        case 0: members.insert(members.begin() + g.below((int)members.size() + 1), member(s.polygon({far + nx, ny, far + nx, ny + 3.0})));
+          break;
+        case 1: members.push_back(member(s.polygon({far + nx, ny, far + nx + 4.0, ny})));
+          break;
+        default: members.insert(members.begin(), member(s.polygon({far - nx, ny, far - nx, ny})));
+          break;
+      }
+    }
     GSHSCENE_List * l = clipped_fill(s, make_union(s, members), W, H);
     const Draw fast = draw(l, W, H);
     const Draw forced = draw(l, W, H, general_only());
