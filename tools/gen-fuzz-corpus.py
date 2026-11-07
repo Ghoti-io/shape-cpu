@@ -582,6 +582,11 @@ def scripted():
     out["regression-box-floor-of-int32-min.bin"] = base64.b64decode(
         "PAoAAAACBQICAAAAAAAJAgAAAAABCQkAAAAAAQI7CQAAAAABAAAAAAAABQMCCQAAAAAAAAAJAAkHBAAAAAAAAAUCDAACAAAAAAAP/wIAAAAAAQ"
         "ECAgICCQMJAgAAAgECAgICCQMJAgAAAgYAAADIZDP/AgAEAAD+AQABAAEGAAAAAxTIZDP/AgA=")
+    # Found by pass B's libFuzzer run: a strict request whose dual render (the earlier step as the second engine) refuses an item for its limit,
+    # which the strict request returns as the render's refusal where the check allowed only the limit.
+    out["regression-strict-dual-refusal.bin"] = base64.b64decode(
+        "PAEAAD8CBQICAAAAAAAJAgAAAAABCQkAAAAABAIJAAAAAAEAAAAAAAAFAwIJAAAAAAAAAAkACQkEAAAAAAAABQIMAAIAAAAAAA//AgAAAAABAQ"
+        "ICAgIJAwkLAAACAQICAgIJAwkCAAACAgAAAMhkMv8CBgUMQAABAMhkMv8CBg==")
     out["regression-cells-damage-differs.bin"] = base64.b64decode(
         "9BgAWsyop3vto1FSswDDWgVM3Wc837Z/Bhr8trLLWZ+T+zR4Kv4uM8LbHINihtt8J+Yff5kQmyh+3NASYQKDo4hSD1YkaL2jnZauWqEjRcW5S+MV"
         "TYEs5O3+VcU8cwKp97YVqjP+tkKYlPe40dOONqAWqnu2fwYa/Layy1mfk/s0eCr+LjPCg2KG23wn5h9/mb/Zk6LFN3COUCe4RAEAAAAAAAAzLrJp"

@@ -1964,7 +1964,9 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
             gshcpu_exact_hook = gshcpu_s4b_exact_cell;
             GSHSCENE_Result r5 = gshscene_sink_render(dual, &request);
             gshcpu_exact_hook = NULL;
-            CHECK(r5 == GSHSCENE_OK || r5 == GSHSCENE_ERR_OOM || r5 == GSHSCENE_ERR_LIMIT);
+            /* a request that is strict turns an item the earlier step refuses for its limit into the render's refusal, as the first render's is */
+            CHECK(r5 == GSHSCENE_OK || r5 == GSHSCENE_ERR_OOM || r5 == GSHSCENE_ERR_LIMIT ||
+                (r5 == GSHSCENE_ERR_REFUSED && (request.flags & GSHSCENE_RENDER_STRICT)));
             /* Where it is exact enough: no pixel holds more pieces of a part than it was written for and no winding is past its
              * 255 (the library's own cells are then the exact area, the earlier step's within a unit of it). */
             /* The earlier step has no crossings budget (the hook replaces the step that counts them), so where the budget
