@@ -10,6 +10,8 @@
 
 #include "stroke_helpers.h"
 
+#include "../support/exact_s4b.h"
+
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -358,6 +360,93 @@ TEST(RenderExact, EveryPixelOfRandomSetsOfPiecesIsTheAreaOfTheirUnionAndTheIdent
   }
   std::printf("exact step vs the instrument: 120 random sets, %ld pixels, %ld made exact, worst %.2f levels\n", pixels, exact, worst);
   EXPECT_GT(exact, 200) << "the sets overlap: the step has work";
+}
+
+namespace {
+
+/** What the cell hook below saw: the cells compared, and the widest gap between the step and the earlier one, in doubled units. */
+struct TwoSteps {
+  uint64_t cells = 0;
+  int64_t widest = 0;
+  uint64_t refused_by_one = 0;
+};
+TwoSteps g_two;
+
+/** The library's step and the earlier step on the same cell: the library's value is the one returned, so the render goes on as it does. */
+int both_steps(const GSHCPU_Exact_Params * params, GSHCPU_Exact_Scratch * s, const GSHCPU_Exact_Cell * cell, int64_t * out,
+    uint64_t * work) {
+  GSHCPU_Exact_Cell_Fn saved = gshcpu_exact_hook;
+  gshcpu_exact_hook = nullptr;
+  uint64_t spare = 0;
+  int64_t a = 0;
+  int ra = gshcpu_exact_cell(params, s, cell, &a, work);
+  gshcpu_exact_hook = saved;
+  int64_t b = 0;
+  int rb = gshcpu_s4b_exact_cell(params, s, cell, &b, &spare);
+  g_two.cells++;
+  if (ra == GSHCPU_EXACT_OK && rb == GSHCPU_EXACT_OK) {
+    int64_t gap = a > b ? a - b : b - a;
+    g_two.widest = gap > g_two.widest ? gap : g_two.widest;
+  } else if (ra != rb) {
+    g_two.refused_by_one++;
+  }
+  *out = a;
+  return ra;
+}
+
+}  // namespace
+
+TEST(RenderExact, TheStepAndTheEarlierStepGiveTheSameDoubledAreaInEveryCellOfRandomSetsWithinTheEarlierStepsOwnRounding) {
+  // The bytes of a pixel are the area to a level; a fault of a few thousandths of a pixel in a cell's area is invisible in them. This reads
+  // the area itself, in the doubled units the step returns, against the step of strokes story S4b kept in the tests, for every cell of many
+  // random sets; the earlier step's own roundings bound the gap (measured on this population, the widest gap with both steps correct is the
+  // bound below), and a fault in the sweep's accounting of an exchange moves some cell by far more.
+  std::mt19937 rng(31337);
+  g_two = TwoSteps();
+  gshcpu_exact_hook = both_steps;
+  for (int round = 0; round < 3000; round++) {
+    std::vector<Contour> polys;
+    int n = 6 + (int)(rng() % 30);
+    for (int i = 0; i < n; i++) {
+      polys.push_back(random_piece(rng, -U, 5 * U));
+    }
+    Flat f(polys);
+    Covered c = cover_exact(f, rect_of(0, 0, 4, 4));
+    ASSERT_EQ(c.result, GSHCPU_OK) << round;
+  }
+  gshcpu_exact_hook = nullptr;
+  std::printf("exact step vs the earlier step: %llu cells, widest gap %lld doubled units, refused by one only %llu\n",
+      (unsigned long long)g_two.cells, (long long)g_two.widest, (unsigned long long)g_two.refused_by_one);
+  EXPECT_GT(g_two.cells, 20000u);
+  EXPECT_EQ(g_two.refused_by_one, 0u);
+  EXPECT_LE(g_two.widest, 1) << "the earlier step rounds in its own procedure: a unit, measured on this population";
+}
+
+TEST(RenderExact, ManyPiecesCrossingAtManyPlacesAreTheAreaOfTheirUnionToo) {
+  // The sweep reorders the fragments of a cell as they cross; a pair that exchanges makes its neighbours new pairs. A few pieces seldom
+  // exchange more than once in a cell, so these are many (up to 40) and thin, the slanted bars most, crossing the 4 by 4 pixels again and again.
+  std::mt19937 rng(777);
+  double worst = 0;
+  long exchanged = 0;
+  for (int round = 0; round < 700; round++) {
+    std::vector<Contour> polys;
+    int n = 8 + (int)(rng() % 33);
+    for (int i = 0; i < n; i++) {
+      Contour c = random_piece(rng, -U, 5 * U);
+      polys.push_back(c);
+    }
+    Flat f(polys);
+    Covered c = cover_exact(f, rect_of(0, 0, 4, 4));
+    ASSERT_EQ(c.result, GSHCPU_OK) << round;
+    ASSERT_EQ(c.failures, 0u) << round;
+    std::vector<double> ref = reference(polys, 4, 4);
+    double w = worst_off(c, ref);
+    EXPECT_LE(w, 1.5) << "round " << round;
+    worst = std::max(worst, w);
+    exchanged += (long)c.exact_cells;
+  }
+  std::printf("exact step vs the instrument: 700 sets of 8 to 40 pieces, %ld cells made exact, worst %.2f levels\n", exchanged, worst);
+  EXPECT_GT(exchanged, 2000);
 }
 
 TEST(RenderExact, NonOverlappingShapesAreTheirAreaToo) {
