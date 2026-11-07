@@ -2704,6 +2704,16 @@ SURVIVORS = {
         "past `union_k` and `clip_k`, which are carved from one arena back to back; the written value is the initial value of the next array's first "
         "element, so nothing reads a changed byte; it is an out-of-bounds write all the same, left open: the next step is a caller-memory test whose "
         "block of memory is a malloc of exactly the size the report names for the render, under ASan",
+    "rp-chain-singular-not-refused": "OPEN (pass B 2026-11-07, not seen by any test, nor by the sweep with every test tried): the pattern pass refuses an item whose "
+        "chain cannot be composed with the target's map; the plant drops that refusal. Either an earlier check refuses every such chain (then this is "
+        "a repeated guard, to be shown by a test that feeds a pattern fill a singular placement and reads the earlier refusal), or a test of the "
+        "refusal is missing: the next step is that test",
+    "rp-tier-nested-pattern-allowed": "OPEN (pass B 2026-11-07, not seen by any test, nor with every test tried): the period tier is not taken for a tile that holds "
+        "a pattern; the plant lets the guard on that fact through and no counter or byte differs, so a later check refuses the tier for the same "
+        "tile or the tier draws the same bytes there: the next step is a test that reads the tier's counter for a tile that holds a pattern with an "
+        "integer period of its own, in the render whose outer pass would otherwise take the tier",
+    "rp-facts-pattern-fill-missed": "OPEN (pass B 2026-11-07, not seen by any test, nor with every test tried): the walk that finds the facts of a tile does not note a "
+        "pattern fill in it; the guard that reads the fact is the one above (rp-tier-nested-pattern-allowed): the two are one test to write",
     "uc15-meeting-depth-rounded-2": "not seen in the sweep that keeps the cell's own exchanges (the group sweep's copy, uc15-meeting-depth-rounded, is caught by the union vectors): needs a meeting whose depth is not a multiple of 1/1024 at a resolution where the "
         "rounding changes a level",
 }
@@ -2777,6 +2787,13 @@ if _reanchored.exists():
         _rp = [tuple(x) for x in _json.load(_f)]
     _rp_ids = {x[0] for x in _rp}
     PLANTS = [x for x in PLANTS if x[0] not in _rp_ids] + _rp
+
+# Plants that do not compile (tools/retired-plants.json: id -> why): the compiler refuses the mutant, so there is nothing for a test to catch.
+_retired_file = ROOT / "tools" / "retired-plants.json"
+if _retired_file.exists():
+    with open(_retired_file) as _f:
+        _retired = _json.load(_f)
+    PLANTS = [x for x in PLANTS if x[0] not in _retired]
 
 # Plants a test that is not in their lists catches (a sweep with PLANT_ALL_TESTS=1 found them): tools/extra-catchers.json names that test for
 # each, so the plain sweep sees them caught.
