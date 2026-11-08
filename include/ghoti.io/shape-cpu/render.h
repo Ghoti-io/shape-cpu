@@ -51,7 +51,7 @@
  * interpolation space); every image filter, edge mode and format and `IMAGE_FILTER_SPACES` (masks-images-patterns story I3, the
  * Images section below); `STROKE_EXPAND` and no stroke feature native (SC1); no `THREAD_AFFINE` (what it holds
  * across renders, the cache of SC7, is guarded by one lock, so renders on distinct surfaces may run at once) and no
- * `PREPARE`.  Cancel is `BETWEEN_UNITS` (each unit
+ * `PREPARE`.  It claims `ANTIALIAS_NONE` (AC1 to AC6, below).  Cancel is `BETWEEN_UNITS` (each unit
  * of the list's expansion); the work between two checks is counted in
  * `"cells+points+pixels+texels"` and its bound (SC11) is, for an aligned stroke,
  * `3 max_points + max_deposits + 2 max_bytes + elements * GSHGEOM_STROKE_MAX_DEPTH` plus the exact step's bound and
@@ -869,6 +869,43 @@
  *   step for each element of the region.
  * - **Caller memory and bounds.**  The pieces and the outline are in the caller's block, sized as a stroke's is (measure_items); a hatch
  *   fill's reach is its region's outset by the pen (shape-scene's HX15), which the expansion's boxes give exactly.
+ *
+ * ### Coverage by the centers of the pixels (AC1 to AC6; shape-scene's AA1 to AA6)
+ *
+ * A fill or a stroke whose `antialias` is `GSHSCENE_ANTIALIAS_NONE` has, in the pixel `(x, y)`, the coverage 255 when the point
+ * `(64 x + 32, 64 y + 32)` (the pixel's center in 1/64 pixel) is inside the item's shape and 0 when it is not, and everything after it (the
+ * clips, the paint, the opacity, the operator, the layer of a group) is as for any coverage.  The sink claims
+ * `GSHSCENE_CAP_ANTIALIAS_NONE`.
+ *
+ * - **AC1 The rule.**  Inside is the winding of the flattened device outline at the center, by the item's fill rule (a stroke's, the nonzero
+ *   rule), with a center on an edge or a vertex decided by the top-left rule: the winding of the point moved by an infinitely small
+ *   `(e, e^2)`, which is computed exactly in integers.  An edge from `p` to `q` straddles the center `c` when exactly one of `p.y <= c.y`
+ *   and `q.y <= c.y` holds, meets the line `y = c.y` at `x_e`, and counts, with the sign of `q.y - p.y`, when `x_e > c.x`; the sum is the
+ *   winding.  The point of the rule is exactness: the same winding is found whichever way a contour goes, with no tolerance, and a center
+ *   on an edge belongs to the shape on its right or below it, so that shapes sharing an edge neither overlap nor leave a gap.  The glyphs
+ *   of a run and the contours of a path add their windings, as their areas add.  `list.h` (shape-scene) states it in full.
+ * - **AC2 One coverage, every tier.**  The fast fill coverage (`GSHCPU_FILL_COVERAGE_FAST`), the fast stroke coverage and the sparse
+ *   composite of a stroke are all areas, summed and rounded, and a center is decided exactly, so an item with the mode takes none of
+ *   them: whatever the limits say, it is covered by `gshcpu_render_cover_center` (a function of the edges and the rule, with no
+ *   dependence on a tier, the cache, the damage or the caller's memory).  The result is the same bytes in every combination, which a
+ *   test holds against an independent reference.  The exact union of a stroke's pieces (UC1) has nothing to make exact: a center is
+ *   inside the union of the pieces when the winding of all of them, the nonzero rule, says so, and the exact step is not used.
+ * - **AC3 Strokes.**  A stroke is expanded as any stroke is (SC3: the translation's fraction in the outline, whole pixels in the shift),
+ *   and the parts of an aligned stroke are each decided by AC1 and composed by SC5's formula, which on 0 and 255 is the union of the body
+ *   with the aligned part met with the clip or its complement.  The centers are those of the device's pixels: the canonical frame is
+ *   the device's moved by whole pixels, which moves no center across an edge.  A hatch is the stroke of its lines and is decided so.
+ * - **AC4 Patterns.**  An item painted with a pattern is covered per copy of the lattice (the items inside a tile are items of their own, covered as any item is).  The copy's cell is the
+ *   quadrilateral PC3 names, and the item is not cut to it (a point of a cut outline is rounded to the lattice, so a center near the edge
+ *   it moved could change sides): a center is inside the item by AC1 and inside the cell's quadrilateral by AC1 as well, and the cells of a
+ *   lattice meet at their edges without overlap or gap, so every center is covered by one copy.  The area a byte leaves out (PC4)
+ *   is 0 for a pixel nothing covers and 32 of 8192 for a whole one.
+ * - **AC5 The limit.**  The work is the cell deposits of the other coverage: here one deposit is one edge's crossing of one row's center line
+ *   (an edge that straddles it), counted over the rows of what the whole render draws of the item (S4), so a count past
+ *   `max_deposits` is the item's `RESOURCE_LIMIT` whatever the damage, before anything is written; and the pixels of the item's rectangle,
+ *   which are bounded by `max_bytes`, are added.  A deposit is never more than a cell's, so an item the other coverage draws within the cap
+ *   is drawn here.
+ * - **AC6 What is not decided here.**  A clip's edge (`CLIP_AA`) and a union clip's are antialiased whatever the items in a block ask; a
+ *   fill of the plane has no outline, covers every pixel the clips allow, and the mode is nothing to it.
  *
  * ### Memory (S9)
  *

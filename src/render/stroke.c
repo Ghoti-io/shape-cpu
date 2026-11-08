@@ -478,6 +478,24 @@ void gshcpu_render_stroke_close(GSHCPU_Stroke_Cache * cache, GSHCPU_Stroke * s) 
   s->note_count = 0;
 }
 
+GSHCPU_Result gshcpu_render_stroke_cell(const GSHCPU_Stroke * s, const GSHGEOM_Device_Point quad[4], const GSHGEOM_Allocator * alloc,
+    const GSHGEOM_Limits * limits, GSHGEOM_Flat_Path ** out) {
+  /* The cell is the device's and the outline's frame is that shifted by whole pixels (SC3), as in gshcpu_render_stroke_cut. */
+  GSHGEOM_Device_Point frame[4];
+  for (int k = 0; k < 4; k++) {
+    const int64_t x = (int64_t)quad[k].x - 64 * s->shift_x;
+    const int64_t y = (int64_t)quad[k].y - 64 * s->shift_y;
+    if (x < INT32_MIN || x > INT32_MAX || y < INT32_MIN || y > INT32_MAX) {
+      return GSHCPU_ERR_LIMIT;
+    }
+    frame[k].x = (int32_t)x;
+    frame[k].y = (int32_t)y;
+  }
+  const GSHGEOM_Flat_Subpath sub = {0, 4, 1};
+  const GSHGEOM_Result g = gshgeom_flat_path_from_points(frame, 4, &sub, 1, alloc, limits, out);
+  return g == GSHGEOM_OK ? GSHCPU_OK : g == GSHGEOM_ERR_OOM ? GSHCPU_ERR_OOM : GSHCPU_ERR_LIMIT;
+}
+
 GSHCPU_Result gshcpu_render_stroke_cut(GSHCPU_Stroke * s, const GSHGEOM_Device_Point quad[4], const GSHGEOM_Allocator * alloc,
     const GSHGEOM_Limits * limits) {
   /* The outline is in its canonical frame and the device's is that frame shifted by whole pixels (SC3), so the cell, which is the device's, is
@@ -650,6 +668,10 @@ static int count_whole(const GSHCPU_Stroke * s, const Part * parts, size_t n, ui
 GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect reach, GSHCPU_Rect whole,
     uint64_t max_deposits, int64_t * acc, size_t acc_stride, GSHCPU_Exact * ex, int joint_tier, const GSHCPU_Stroke_Buffers * buffers, uint8_t ** k,
     GSHCPU_Rect * rect, GSHCPU_Rect * whole_rect, uint64_t * cells) {
+  const int center = buffers->center;
+  if (center) {
+    ex = NULL; /* AA2: a center is decided by the winding at it; no pixel holds pieces to make exact */
+  }
   Part body = part_rects(s, GSHCPU_STROKE_BODY, reach, whole);
   Part aligned = part_rects(s, GSHCPU_STROKE_ALIGNED, reach, whole);
   Part clip = part_rects(s, GSHCPU_STROKE_CLIP, reach, whole);
@@ -708,8 +730,13 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
     uint8_t * out = p == 0 ? buffers->body : p == 1 ? buffers->aligned : buffers->clip;
     GSHGEOM_Fill_Rule rule = p == 2 ? gshgeom_stroke_outline_clip_rule(s->outline) : GSHGEOM_FILL_NONZERO;
     uint64_t used = 0;
-    GSHCPU_Result r = gshcpu_render_cover_exact(&part->cover, 1, rule, moved(part->rect, s->shift_x, s->shift_y),
-        moved(walks[p], s->shift_x, s->shift_y), out, acc, max_deposits - total, &used, p == GSHCPU_STROKE_CLIP ? NULL : ex);
+    /* AA2: a pattern cell's quadrilateral meets the body and the aligned part and not the clip, which only selects within the aligned
+     * part (its complement is the aligned part's own, and met with the cell it would let the cell's outside in). */
+    GSHCPU_Result r = center
+        ? gshcpu_render_cover_center(&part->cover, 1, rule, p == GSHCPU_STROKE_CLIP ? NULL : buffers->mask,
+              moved(part->rect, s->shift_x, s->shift_y), moved(walks[p], s->shift_x, s->shift_y), out, acc, max_deposits - total, &used)
+        : gshcpu_render_cover_exact(&part->cover, 1, rule, moved(part->rect, s->shift_x, s->shift_y),
+              moved(walks[p], s->shift_x, s->shift_y), out, acc, max_deposits - total, &used, p == GSHCPU_STROKE_CLIP ? NULL : ex);
     total += used;
     if (r != GSHCPU_OK) {
       *cells = total;

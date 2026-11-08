@@ -958,7 +958,7 @@ PLANTS += [
     # 2026-10-21 (story 16's two decisions): the behaviour before each fix, planted back.  S4: the cell cap met only
     # where a damage-limited render draws (the walk is the rectangle drawn), and the bound that lets it skip the count
     # too low.  S9: a short workspace sized over the sink's allocator, short for an item or for the block.
-    ("rule-S4-cells-in-damage", "src", RS, "*rect, walk, out, run->acc", "*rect, *rect, out, run->acc", RT),
+    ("rule-S4-cells-in-damage", "src", RS, "gshcpu_render_cover_counted(paths, g.count, item->fill_rule, *rect, walk, out, run->acc", "gshcpu_render_cover_counted(paths, g.count, item->fill_rule, *rect, *rect, out, run->acc", RT),
     ("rule-S4-cells-bound-low", "src", RV, "  return rows + columns;", "  return rows;", RT),
     ("rule-S9-short-item-measures", "src", RS, "    return gcu_safe_add_size(request->workspace_bytes, 1u, out) ? GSHCPU_OK : GSHCPU_ERR_LIMIT;\n  }", "  }", RT),
     ("rule-S9-short-block-measures", "src", RS, "  if (request->flags & GSHSCENE_RENDER_CALLER_MEMORY) {\n    if (!request->workspace",
@@ -1876,9 +1876,9 @@ PLANTS += [
     ('rp-order-copy-error-lost', "src", RS, '    e->r = e->fn(e->run, e->L, i, j, e->ctx);\n    if (e->r != GSHSCENE_OK) {\n      return 1;\n    }', '    e->r = e->fn(e->run, e->L, i, j, e->ctx);\n    e->r = GSHSCENE_OK;', RP_TESTS),
     ('rp-each-error-lost', "src", RS, '  if (e.r != GSHSCENE_OK) {\n    return e.r;\n  }\n  return g == GSHGEOM_OK ? GSHSCENE_OK : GSHSCENE_ERR_LIMIT;', '  return g == GSHGEOM_OK ? GSHSCENE_OK : GSHSCENE_ERR_LIMIT;', RP_TESTS),
     ('rp-each-single-copy-ignored', "src", RS, '  if (L->single) {\n    return fn(run, L, L->ci, L->cj, ctx);\n  }', '', RP_TESTS),
-    ('rp-stroke-not-cut', "src", RS, '  const GSHCPU_Result cut = gshcpu_render_stroke_cut(&s, c.quad, run->item_alloc, &cs->geometry);\n  if (cut != GSHCPU_OK) {', '  const GSHCPU_Result cut = GSHCPU_OK;\n  if (cut != GSHCPU_OK) {', RP_TESTS),
+    ('rp-stroke-not-cut', "src", RS, '  const GSHCPU_Result cut = center ? gshcpu_render_stroke_cell(&s, c.quad, run->item_alloc, &cs->geometry, &cell)\n                                   : gshcpu_render_stroke_cut(&s, c.quad, run->item_alloc, &cs->geometry);\n  if (cut != GSHCPU_OK) {', '  const GSHCPU_Result cut = center ? gshcpu_render_stroke_cell(&s, c.quad, run->item_alloc, &cs->geometry, &cell)\n                                   : GSHCPU_OK;\n  if (cut != GSHCPU_OK) {', RP_TESTS),
     ('rp-stroke-cut-error-lost', "src", RS, '    return cut == GSHCPU_ERR_LIMIT ? GSHSCENE_ERR_LIMIT : scene_result(cut);\n  }\n  if (!s.drawn) {', '    return GSHSCENE_OK;\n  }\n  if (!s.drawn) {', RP_TESTS),
-    ('rp-stroke-cut-nothing-drawn-anyway', "src", RS, '  if (!s.drawn) {\n    gshcpu_render_stroke_close(cache, &s);\n    return GSHSCENE_OK;\n  }\n  if (L->guard) {', '  if (L->guard) {', RP_TESTS),
+    ('rp-stroke-cut-nothing-drawn-anyway', "src", RS, '  if (!s.drawn) {\n    gshgeom_flat_path_destroy(cell);\n    gshcpu_render_stroke_close(cache, &s);\n    return GSHSCENE_OK;\n  }\n  if (L->guard) {', '  if (L->guard) {', RP_TESTS),
     ('rp-stroke-cut-body-skipped', "src", RSK, '  for (int p = GSHCPU_STROKE_BODY; p <= GSHCPU_STROKE_ALIGNED; p++) {\n    if (!s->meta.present[p]) {\n      continue;\n    }\n    GSHGEOM_Flat_Path * cut = NULL;', '  for (int p = GSHCPU_STROKE_ALIGNED; p <= GSHCPU_STROKE_ALIGNED; p++) {\n    if (!s->meta.present[p]) {\n      continue;\n    }\n    GSHGEOM_Flat_Path * cut = NULL;', RP_TESTS),
     ('rp-stroke-cut-aligned-skipped', "src", RSK, '  for (int p = GSHCPU_STROKE_BODY; p <= GSHCPU_STROKE_ALIGNED; p++) {\n    if (!s->meta.present[p]) {\n      continue;\n    }\n    GSHGEOM_Flat_Path * cut = NULL;', '  for (int p = GSHCPU_STROKE_BODY; p < GSHCPU_STROKE_ALIGNED; p++) {\n    if (!s->meta.present[p]) {\n      continue;\n    }\n    GSHGEOM_Flat_Path * cut = NULL;', RP_TESTS),
     ('rp-stroke-cut-of-the-uncut-part', "src", RSK, 'clip_convex(cover_of(s->outline, p), frame, alloc, limits, &cut);', 'clip_convex(part_of(s->outline, p), frame, alloc, limits, &cut);', RP_TESTS),
@@ -2395,6 +2395,66 @@ PLANTS += [
 ]
 
 
+# Coverage by the centers of the pixels (shape-scene's list.h, AA1 to AA6; render.h, AC1 to AC6): the arithmetic of the rule (each row bound,
+# the center, the tie, the sign, the total, the clamp, the fold, the mask, the cap and the rows it is counted over), and the sink's use of it
+# (each tier an item must not take, the parts of a stroke, the pattern's cell, the hatch, the capability).  The rule's own reference is
+# tools/gen-center-vectors.py, whose planted defects its selftest holds.  Run alone with PLANT_ONLY='^aa-'.
+# Not planted, being equivalent in the design: the sum of the signs of the edges that straddle a center line (every contour is closed, so it
+# is zero in every row, and the code does not keep it); a quadrilateral mask on the clip part of an aligned stroke in a pattern's copy (the
+# aligned part is met with the cell already, and (a and Q) and not (c and Q) is a and Q and (not c or not Q), which Q makes (a and Q and not c));
+# and the crossings of the cell's own four edges in the count of the cap (at most two a row, below any cap a test can set between).
+AAC = ["testRender_antialias", "testRender_antialias_diff"]
+AAP = ["testRender_antialias", "testRender_antialias_diff", "probe"]
+PLANTS += [
+    ('aa-center-row-first', 'src', RV, '  int64_t a = -floor_div(-(ylo - 32), 64);', '  int64_t a = floor_div(ylo - 32, 64);', AAC),
+    ('aa-center-row-last', 'src', RV, '  int64_t b = -floor_div(-(yhi - 32), 64) - 1;', '  int64_t b = -floor_div(-(yhi - 32), 64);', AAC),
+    ('aa-center-row-line', 'src', RV, '  const int64_t t = r * ONE_PIXEL + 32 - p.y;', '  const int64_t t = r * ONE_PIXEL - p.y;', AAC),
+    ('aa-center-tie-inside', 'src', RV, '  const int64_t n = floor_div(rest == 0 ? m - 1 : m, 64);', '  const int64_t n = floor_div(m + 0 * rest, 64);', AAC),
+    ('aa-center-tie-reversed', 'src', RV, '  const int64_t n = floor_div(rest == 0 ? m - 1 : m, 64);', '  const int64_t n = floor_div(rest == 0 ? m : m - 1, 64);', AAC),
+    ('aa-center-x-origin', 'src', RV, '  const int64_t m = p.x + whole - 32;', '  const int64_t m = p.x + whole;', AAC),
+    ('aa-center-floor-of-numerator', 'src', RV, '  const int64_t whole = floor_div(numerator, dy);', '  const int64_t whole = numerator / dy;', AAC),
+    ('aa-center-sign', 'src', RV, '    q = t;\n    dir = -1;', '    q = t;\n    dir = 1;', AAC),
+    ('aa-center-first-pixel', 'src', RV, '  int64_t j = n + 1 - b->x0;', '  int64_t j = n - b->x0;', AAC),
+    ('aa-center-left-clamp', 'src', RV, '  j = j < 0 ? 0 : j;\n', '  j = j < 0 ? b->width : j;\n', AAC),
+    ('aa-center-right-bound', 'src', RV, '  if (j < b->width) {\n    b->delta[(r - b->band) * b->stride + j] += dir;', '  if (j < b->width - 1) {\n    b->delta[(r - b->band) * b->stride + j] += dir;', AAC),
+    ('aa-center-even-odd', 'src', RV, '        const int inside = rule == GSHGEOM_FILL_EVEN_ODD ? (ws & 1) != 0 : ws != 0;', '        (void)rule;\n        const int inside = ws != 0;', AAC),
+    ('aa-center-nonzero-as-positive', 'src', RV, '        const int inside = rule == GSHGEOM_FILL_EVEN_ODD ? (ws & 1) != 0 : ws != 0;', '        const int inside = rule == GSHGEOM_FILL_EVEN_ODD ? (ws & 1) != 0 : ws > 0;', AAC),
+    ('aa-center-mask-ignored', 'src', RV, '        line[j] = (uint8_t)(inside && (!mask || wc != 0) ? 255u : 0u);', '        line[j] = (uint8_t)(inside && (!mask || wc != 0 || 1) ? 255u : 0u);', AAP + ["testRender_pattern"]),
+    ('aa-center-mask-not-deposited', 'src', RV, '    if (mask) {\n      center_edges(mask, band, band + rows, center_deposit_edge, &cut);\n    }', '', AAP),
+    ('aa-center-cap-inclusive', 'src', RV, '  if (counted.total > max_deposits) {\n    return GSHCPU_ERR_LIMIT;\n  }\n  if (gshcpu_render_rect_empty(rect)) {', '  if (counted.total >= max_deposits) {\n    return GSHCPU_ERR_LIMIT;\n  }\n  if (gshcpu_render_rect_empty(rect)) {', AAC),
+    ('aa-center-cap-uncounted', 'src', RV, '  if (counted.total > max_deposits) {\n    return GSHCPU_ERR_LIMIT;\n  }\n  if (gshcpu_render_rect_empty(rect)) {', '  (void)max_deposits;\n  if (gshcpu_render_rect_empty(rect)) {', AAC),
+    ('aa-center-count-rows-of-the-rect', 'src', RV, '        center_edges(paths[i], walk.y0, walk.y1, center_count_edge, &counted);', '        center_edges(paths[i], rect.y0, rect.y1, center_count_edge, &counted);', AAC),
+    ('aa-center-paths-skipped-in-count', 'src', RV, '        center_edges(paths[i], walk.y0, walk.y1, center_count_edge, &counted);', '        (void)0;', AAC),
+    ('aa-center-band-clear', 'src', RV, '    memset(acc, 0, 2 * n * sizeof *acc);\n    for (size_t i = 0; i < count; i++) {\n      if (paths[i]) {\n        center_edges(paths[i], band, band + rows, center_deposit_edge, &shape);', '    for (size_t i = 0; i < count; i++) {\n      if (paths[i]) {\n        center_edges(paths[i], band, band + rows, center_deposit_edge, &shape);', AAC),
+    ('aa-center-closing-edge', 'src', RV, '      const Point p = point_of(points[sub.first + (k ? k - 1 : sub.count - 1)]);', '      const Point p = point_of(points[sub.first + (k ? k - 1 : k)]);', AAC),
+    ('aa-fill-hint-ignored', 'src', RS, '      if (item->kind == GSHSCENE_ITEM_FILL && item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE) {\n        /* AA2: whole or nothing', '      if (0) {\n        /* AA2: whole or nothing', AAC),
+    ('aa-fill-fast-tier', 'src', RS, '      if (item->kind == GSHSCENE_ITEM_FILL && item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE) {\n        /* AA2: whole or nothing', '      if (item->kind == GSHSCENE_ITEM_FILL && item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE && !run->cs->fast_fill) {\n        /* AA2: whole or nothing', AAC),
+    ('aa-fill-work-uncounted', 'src', RS, '        run->work += cells + (uint64_t)(rect->x1 - rect->x0) * (uint64_t)(rect->y1 - rect->y0);\n      } else if (run->cs->fast_fill', '        run->work += (uint64_t)(rect->x1 - rect->x0) * (uint64_t)(rect->y1 - rect->y0);\n      } else if (run->cs->fast_fill', AAC),
+    ('aa-fill-work-pixels', 'src', RS, '        run->work += cells + (uint64_t)(rect->x1 - rect->x0) * (uint64_t)(rect->y1 - rect->y0);\n      } else if (run->cs->fast_fill', '        run->work += cells;\n      } else if (run->cs->fast_fill', AAC),
+    ('aa-fill-acc-dirty', 'src', RS, '        r = gshcpu_render_cover_center(paths, g.count, item->fill_rule, NULL, *rect, walk, out, run->acc, run->cs->max_deposits, &cells);\n        run->acc_zero = 0;', '        r = gshcpu_render_cover_center(paths, g.count, item->fill_rule, NULL, *rect, walk, out, run->acc, run->cs->max_deposits, &cells);', AAP),
+    ('aa-fill-rule', 'src', RS, '        r = gshcpu_render_cover_center(paths, g.count, item->fill_rule, NULL, *rect, walk, out,', '        r = gshcpu_render_cover_center(paths, g.count, GSHGEOM_FILL_NONZERO, NULL, *rect, walk, out,', AAC),
+    ('aa-fill-walk-is-rect', 'src', RS, '        r = gshcpu_render_cover_center(paths, g.count, item->fill_rule, NULL, *rect, walk, out,', '        r = gshcpu_render_cover_center(paths, g.count, item->fill_rule, NULL, *rect, *rect, out,', AAC),
+    ('aa-stroke-hint-ignored', 'src', RS, '  const int center = item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE;\n  if (solid && !center && cs->fast', '  const int center = 0;\n  if (solid && !center && cs->fast', AAC),
+    ('aa-stroke-fast-tier', 'src', RS, '  if (solid && !center && cs->fast && (cs->tiers', '  if (solid && cs->fast && (cs->tiers', AAC),
+    ('aa-stroke-fast-gradient-tier', 'src', RS, '  if (!solid && !center && item->paint.kind != GSHSCENE_PAINT_PATTERN && cs->fast_fill', '  if (!solid && item->paint.kind != GSHSCENE_PAINT_PATTERN && cs->fast_fill', AAC),
+    ('aa-stroke-sparse-tier', 'src', RS, '  if (solid && !center && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits, exact)) {', '  if (solid && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits, exact)) {', AAC),
+    ('aa-stroke-buffers-center', 'src', RS, 'run->cov_clip, run->cov_result, center, NULL};\n  r = gshcpu_render_stroke_cover(', 'run->cov_clip, run->cov_result, 0, NULL};\n  r = gshcpu_render_stroke_cover(', AAC),
+    ('aa-pat-stroke-buffers-center', 'src', RS, 'run->cov_clip, run->cov_result, center, cell};', 'run->cov_clip, run->cov_result, 0, cell};', AAC + ["testRender_pattern"]),
+    ('aa-pat-stroke-mask', 'src', RS, 'run->cov_clip, run->cov_result, center, cell};', 'run->cov_clip, run->cov_result, center, NULL};', AAC),
+    ('aa-pat-stroke-hint-ignored', 'src', RS, '  const int center = item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE;\n  GSHGEOM_Flat_Path * cell = NULL;', '  const int center = 0;\n  GSHGEOM_Flat_Path * cell = NULL;', AAC),
+    ('aa-pat-fill-hint-ignored', 'src', RS, '  const int center = item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE;\n  const GSHGEOM_Flat_Path * mask = NULL;', '  const int center = 0;\n  const GSHGEOM_Flat_Path * mask = NULL;', AAC),
+    ('aa-pat-fill-mask', 'src', RS, '      mask = plane;\n      clipped = run->item_alloc->calloc_fn(', '      clipped = run->item_alloc->calloc_fn(', AAC),
+    ('aa-pat-fill-clipped-anyway', 'src', RS, '    if (center) {\n      /* AA2: the item\'s own outline, not cut', '    if (0) {\n      /* AA2: the item\'s own outline, not cut', AAC),
+    ('aa-stroke-joint-exact', 'src', RSK, '  if (center) {\n    ex = NULL; /* AA2: a center is decided', '  if (0) {\n    ex = NULL; /* AA2: a center is decided', AAC),
+    ('aa-stroke-center-part', 'src', RSK, '    GSHCPU_Result r = center\n        ? gshcpu_render_cover_center(', '    GSHCPU_Result r = 0\n        ? gshcpu_render_cover_center(', AAC),
+    ('aa-stroke-mask-on-aligned', 'src', RSK, 'p == GSHCPU_STROKE_CLIP ? NULL : buffers->mask,\n              moved(part->rect', 'p != GSHCPU_STROKE_BODY ? NULL : buffers->mask,\n              moved(part->rect', AAC),
+    ('aa-stroke-cell-shift-x', 'src', RSK, '    const int64_t x = (int64_t)quad[k].x - 64 * s->shift_x;\n    const int64_t y = (int64_t)quad[k].y - 64 * s->shift_y;\n    if (x < INT32_MIN || x > INT32_MAX || y < INT32_MIN || y > INT32_MAX) {\n      return GSHCPU_ERR_LIMIT;\n    }\n    frame[k].x = (int32_t)x;\n    frame[k].y = (int32_t)y;\n  }\n  const GSHGEOM_Flat_Subpath sub',
+     '    const int64_t x = (int64_t)quad[k].x;\n    const int64_t y = (int64_t)quad[k].y - 64 * s->shift_y;\n    if (x < INT32_MIN || x > INT32_MAX || y < INT32_MIN || y > INT32_MAX) {\n      return GSHCPU_ERR_LIMIT;\n    }\n    frame[k].x = (int32_t)x;\n    frame[k].y = (int32_t)y;\n  }\n  const GSHGEOM_Flat_Subpath sub', AAC + ["testRender_pattern"]),
+    ('aa-hatch-mode', 'src', RS, '  *out = *item;\n  out->kind = GSHSCENE_ITEM_STROKE;\n  out->style = item->paint.resource;', '  *out = *item;\n  out->antialias = 0;\n  out->kind = GSHSCENE_ITEM_STROKE;\n  out->style = item->paint.resource;', AAC),
+    ('aa-cap', 'src', RS, '  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE;', '', AAC + ["testRender"]),
+]
+
+
 # The hand-written plants no test is seen to catch, with why.  The gate prints each as "known" and does not fail on it; it fails
 # when one of them IS caught (take it out of this table then) and when a name here is not in the plant table.  The first is
 # equivalent in the design; the others are not shown to be, and each names the case a test would have to build.
@@ -2489,7 +2549,7 @@ PLANTS += [
     ("f3-rv-split-row-offset", "src", RV, "        uint8_t * rline = rem + (size_t)((band - rect.y0 + r) * width);", "        uint8_t * rline = rem + (size_t)(r * width);", F3P),
     ("f3-rv-split-branch-off", "src", RV, "      if (rem) {\n        uint8_t * rline", "      if (0 && rem) {\n        uint8_t * rline", F3P),
     # the pattern's sum (PC4)
-    ("f3-rs-pat-split-not-used", "src", RS, "      GSHCPU_Result r = rem ? gshcpu_render_cover_split(", "      GSHCPU_Result r = 0 ? gshcpu_render_cover_split(", F3P),
+    ("f3-rs-pat-split-not-used", "src", RS, "        r = rem ? gshcpu_render_cover_split(", "        r = 0 ? gshcpu_render_cover_split(", F3P),
     ("f3-rs-pat-remainder-not-passed", "src", RS, "run->coverage, L->rem, have);", "run->coverage, NULL, have);", F3P),
     ("f3-rs-pat-remainder-not-added", "src", RS, "      const uint32_t m = ((uint32_t)cov[at_px] << GSHCPU_FOLD_AREA_SHIFT) + (rem ? rem[at_px] : 0u);", "      const uint32_t m = ((uint32_t)cov[at_px] << GSHCPU_FOLD_AREA_SHIFT);", F3P),
     ("f3-rs-pat-byte-shift", "src", RS, "      const uint32_t m = ((uint32_t)cov[at_px] << GSHCPU_FOLD_AREA_SHIFT) + (rem ? rem[at_px] : 0u);", "      const uint32_t m = ((uint32_t)cov[at_px] << (GSHCPU_FOLD_AREA_SHIFT - 1)) + (rem ? rem[at_px] : 0u);", F3P),
@@ -2697,6 +2757,14 @@ SURVIVORS = {
         "and read by nothing (the sum of UC4 weights it 64 - 64, and no slab starts at 64), so the memset only keeps an uninitialised flag from being read, "
         "which a sanitizer sees and the plant harness does not run; the witness is TheStepsAtTheBottomOfTheLeftSideOfACellNeverChangeALaterCell: a cell "
         "whose piece ends at (0, 64), made with a scratch, leaves a later cell the area it has with a scratch of its own",
+    "aa-pat-fill-mask": "OPEN (2026-11-08, not seen by any test): the cell's quadrilateral as a mask of a crisp tile item's centers; without it the "
+        "pictures of TheCrispItemsOfATileAreCoveredInTheirOwnCellsOnly (a bar that spills over the cell, 128 once and never 192) are unchanged, so "
+        "something after the coverage already holds a copy's paint to its cell; the next step is to find that and either show the mask redundant "
+        "(and remove it) or find the case that needs it",
+    "aa-pat-fill-clipped-anyway": "OPEN (2026-11-08, not seen): cutting a crisp tile item to the cell by CK1, as an antialiased one is, instead of leaving it whole and "
+        "masking; no test places a center within the cut's rounding of an item's edge in a tile, which is the case this plant is the difference for",
+    "aa-stroke-mask-on-aligned": "OPEN (2026-11-08, not seen): the cell's mask on the aligned part of a crisp stroke in a tile; same witness and same observation as "
+        "aa-pat-fill-mask",
     "rv-670-lt": "not seen by a plain build: `p <= n` reads one part past the three that both callers pass (an array on the stack), "
         "which a sanitizer sees and the plant harness does not run",
     "rv-741-lt": "not seen by a plain build: `p <= n` reads one part past the three that the caller passes (an array on the stack); seen by "

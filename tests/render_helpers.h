@@ -169,11 +169,13 @@ inline GSHSCENE_List * prefix(const GSHSCENE_List * list, GSHSCENE_Store * store
     EXPECT_EQ(gshscene_list_item(list, i, &it), GSHSCENE_OK);
     switch (it->kind) {
       case GSHSCENE_ITEM_FILL:
-        EXPECT_EQ(gshscene_list_fill(out, it->resource, &it->map, it->fill_rule, &it->paint, it->layer, it->depth),
+        EXPECT_EQ(gshscene_list_fill_antialias(out, it->resource, &it->map, it->fill_rule, &it->paint,
+                      (GSHSCENE_Antialias)it->antialias, it->layer, it->depth),
             GSHSCENE_OK);
         break;
       case GSHSCENE_ITEM_STROKE:
-        EXPECT_EQ(gshscene_list_stroke(out, it->resource, it->style, &it->map, &it->paint, it->layer, it->depth),
+        EXPECT_EQ(gshscene_list_stroke_antialias(out, it->resource, it->style, &it->map, &it->paint,
+                      (GSHSCENE_Antialias)it->antialias, it->layer, it->depth),
             GSHSCENE_OK);
         break;
       case GSHSCENE_ITEM_CLIP_PUSH:

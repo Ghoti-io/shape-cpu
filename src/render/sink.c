@@ -1674,6 +1674,8 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   out->flags |= GSHSCENE_CAP_PATTERN;
   /* HX13: a hatch, drawn as the stroke of its trimmed lines. */
   out->flags |= GSHSCENE_CAP_HATCH;
+  /* AA5: a fill or a stroke that asks for no antialiasing, covered by the centers of its pixels (list.h, AA2 and AA3), in every tier. */
+  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE;
   /* CU22: a union clip whose members the predicate shows disjoint, the fast tier FT-U1; and (CG10) any union, the general tier, which
    * is a union with the capability of the disjoint ones (CU12). */
   if (cs->tiers & (GSHCPU_RENDER_TIER_UNION | GSHCPU_RENDER_TIER_UNION_GENERAL)) {
@@ -2550,7 +2552,13 @@ static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t
           gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_deposits) <= run->cs->max_deposits) {
         walk = *rect;
       }
-      if (run->cs->fast_fill && (run->cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && !gshcpu_render_rect_empty(*rect) &&
+      if (item->kind == GSHSCENE_ITEM_FILL && item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE) {
+        /* AA2: whole or nothing by the pixel's center, whichever tier the fill would take: the lean sweep and the exact cover are both
+         * areas, and a center is decided exactly, so there is one coverage and it is this. */
+        r = gshcpu_render_cover_center(paths, g.count, item->fill_rule, NULL, *rect, walk, out, run->acc, run->cs->max_deposits, &cells);
+        run->acc_zero = 0;
+        run->work += cells + (uint64_t)(rect->x1 - rect->x0) * (uint64_t)(rect->y1 - rect->y0);
+      } else if (run->cs->fast_fill && (run->cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && !gshcpu_render_rect_empty(*rect) &&
           !(sp && sp->item->paint.kind == GSHSCENE_PAINT_PATTERN) && rect->x1 - rect->x0 <= 65000 &&
           gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_deposits) <= run->cs->max_deposits) {
         /* The fast fill coverage: the lean cover of every path at once, into the coverage of the rectangle. */
@@ -2813,7 +2821,9 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
   uint8_t * cov = run->coverage;
   GSHCPU_Exact * exact = cs->tiers & GSHCPU_RENDER_TIER_EXACT ? run->exact : NULL; /* UC1 to UC11 (off only as a gate's control) */
   int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT && item->paint.kind != GSHSCENE_PAINT_IMAGE && item->paint.kind != GSHSCENE_PAINT_PATTERN;
-  if (solid && cs->fast && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits, NULL)) {
+  /* AA2: a stroke that asks for no antialiasing is covered by the centers of its pixels whichever tier it would take (the sweeps are areas). */
+  const int center = item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE;
+  if (solid && !center && cs->fast && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits, NULL)) {
     /* The fast stroke coverage: the lean cover, the pixels of its runs composed like the sparse sweep's. */
     double src[4];
     source_of(run, item, frame, src);
@@ -2870,7 +2880,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
     gshcpu_render_stroke_close(cache, &s);
     return r == GSHCPU_OK ? GSHSCENE_OK : scene_result(r);
   }
-  if (!solid && item->paint.kind != GSHSCENE_PAINT_PATTERN && cs->fast_fill && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) &&
+  if (!solid && !center && item->paint.kind != GSHSCENE_PAINT_PATTERN && cs->fast_fill && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) &&
       gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits, NULL)) {
     /* A stroke of a gradient with the fast coverage: the lean cover of its outline into the coverage of the rectangle, which the
      * gradient is then painted through as through a fill's. */
@@ -2910,7 +2920,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
       return scene_result(fr);
     }
   }
-  if (solid && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits, exact)) {
+  if (solid && !center && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits, exact)) {
     /* FT-2 (SC8): the sweep gives only the pixels that can be nonzero; the rest the general loop would skip. */
     acc_clean(run, run->layout.acc_exact);
     gshcpu_render_stroke_rects(&s, reach, wreach, &rect, &whole);
@@ -2940,7 +2950,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
     gshcpu_render_stroke_close(cache, &s);
     return r == GSHCPU_OK ? GSHSCENE_OK : r == GSHCPU_ERR_LIMIT ? refuse(run, item, chain, count) : scene_result(r);
   }
-  GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result};
+  GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result, center, NULL};
   r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_deposits, run->acc,
       2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS, exact, (cs->tiers & GSHCPU_RENDER_TIER_JOINT) != 0, &buffers, &cov, &rect, &whole, &cells);
   run->acc_zero = 0;
@@ -4554,6 +4564,9 @@ static GSHSCENE_Result pat_cover(Run * run, Pat_Level * L, const GSHSCENE_Item *
   GSHGEOM_Flat_Path ** clipped = NULL;
   GSHSCENE_Result result = GSHSCENE_OK;
   GSHCPU_Rect box = c->qbox;
+  /* AA2: an item that asks for no antialiasing is covered by the centers of the pixels (the plane's quadrilateral is the cell itself). */
+  const int center = item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE;
+  const GSHGEOM_Flat_Path * mask = NULL;
   if (gshscene_resource_kind(item->resource) == GSHSCENE_RESOURCE_PLANE) {
     result = quad_path(run, c, &plane);
     if (result != GSHSCENE_OK) {
@@ -4569,6 +4582,28 @@ static GSHSCENE_Result pat_cover(Run * run, Pat_Level * L, const GSHSCENE_Item *
       return scene_result(r);
     }
     box = gshcpu_render_rect_meet(g.box, c->qbox);
+    if (center) {
+      /* AA2: the item's own outline, not cut (a cut point is rounded, and a center near the edge it moved could change sides); the cell
+       * is the mask the centers are also tested against, so the copies of a lattice cover every center once. */
+      result = quad_path(run, c, &plane);
+      if (result != GSHSCENE_OK) {
+        gshcpu_render_geometry_release(&g, run->item_alloc);
+        return result;
+      }
+      mask = plane;
+      clipped = run->item_alloc->calloc_fn(run->item_alloc->ctx, g.count ? g.count : 1u, sizeof *clipped);
+      if (!clipped) {
+        gshgeom_flat_path_destroy(plane);
+        gshcpu_render_geometry_release(&g, run->item_alloc);
+        return GSHSCENE_ERR_OOM;
+      }
+      for (size_t k = 0; k < g.count; k++) {
+        if (g.paths[k]) {
+          clipped[n++] = g.paths[k]; /* the geometry's own: it releases them */
+        }
+      }
+      paths = (const GSHGEOM_Flat_Path * const *)(void *)clipped;
+    } else {
     clipped = run->item_alloc->calloc_fn(run->item_alloc->ctx, g.count ? g.count : 1u, sizeof *clipped);
     if (!clipped) {
       gshcpu_render_geometry_release(&g, run->item_alloc);
@@ -4591,6 +4626,7 @@ static GSHSCENE_Result pat_cover(Run * run, Pat_Level * L, const GSHSCENE_Item *
       clipped[n++] = cut;
     }
     paths = (const GSHGEOM_Flat_Path * const *)(void *)clipped;
+    }
   }
   if (result == GSHSCENE_OK && n > 0 && L->guard) {
     period_guard_cells(run, L, paths, n, c);
@@ -4605,8 +4641,21 @@ static GSHSCENE_Result pat_cover(Run * run, Pat_Level * L, const GSHSCENE_Item *
         rect.x1 = rect.x0;
         rect.y1 = rect.y0;
       }
-      GSHCPU_Result r = rem ? gshcpu_render_cover_split(paths, n, item->fill_rule, rect, *wc, out, rem, run->acc, cs->max_deposits, &cells)
-                            : gshcpu_render_cover_counted(paths, n, item->fill_rule, rect, *wc, out, run->acc, cs->max_deposits, &cells);
+      GSHCPU_Result r;
+      if (center) {
+        r = gshcpu_render_cover_center(paths, n, item->fill_rule, mask, rect, *wc, out, run->acc, cs->max_deposits, &cells);
+        if (r == GSHCPU_OK && rem && !gshcpu_render_rect_empty(rect)) {
+          /* The area a byte leaves out (PC4): none for a pixel nothing covers; 32 of 8192 for a whole one (255 * 32 + 32). */
+          const size_t pixels = (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0);
+          for (size_t i = 0; i < pixels; i++) {
+            rem[i] = out[i] ? 32u : 0u;
+          }
+        }
+        cells += (uint64_t)(rect.x1 - rect.x0) * (uint64_t)(rect.y1 - rect.y0);
+      } else {
+        r = rem ? gshcpu_render_cover_split(paths, n, item->fill_rule, rect, *wc, out, rem, run->acc, cs->max_deposits, &cells)
+                : gshcpu_render_cover_counted(paths, n, item->fill_rule, rect, *wc, out, run->acc, cs->max_deposits, &cells);
+      }
       run->acc_zero = 0;
       run->work += cells;
       result = scene_result(r);
@@ -4614,7 +4663,7 @@ static GSHSCENE_Result pat_cover(Run * run, Pat_Level * L, const GSHSCENE_Item *
     }
   }
   if (clipped) {
-    for (size_t k = 0; k < n; k++) {
+    for (size_t k = 0; k < n && !center; k++) {
       gshgeom_flat_path_destroy(clipped[k]);
     }
     run->item_alloc->free_fn(run->item_alloc->ctx, clipped);
@@ -4919,12 +4968,18 @@ static GSHSCENE_Result pat_stroke_copy(Run * run, Pat_Level * L, int64_t i, int6
   }
   /* PC5: the stroke is cut to the cell by CK1 (the body and the aligned part; the clip path restricts the aligned part, which is cut
    * already), so that the coverage of the two sides of a cell edge adds to the whole where a stroke ends at it. */
-  const GSHCPU_Result cut = gshcpu_render_stroke_cut(&s, c.quad, run->item_alloc, &cs->geometry);
+  /* AA2: a stroke covered by the centers of its pixels is not cut (a cut point is rounded, and a center near the edge it moved could change
+   * sides): the cell is a mask the centers are also tested against, so the copies of a lattice cover every center once. */
+  const int center = item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE;
+  GSHGEOM_Flat_Path * cell = NULL;
+  const GSHCPU_Result cut = center ? gshcpu_render_stroke_cell(&s, c.quad, run->item_alloc, &cs->geometry, &cell)
+                                   : gshcpu_render_stroke_cut(&s, c.quad, run->item_alloc, &cs->geometry);
   if (cut != GSHCPU_OK) {
     gshcpu_render_stroke_close(cache, &s);
     return cut == GSHCPU_ERR_LIMIT ? GSHSCENE_ERR_LIMIT : scene_result(cut);
   }
   if (!s.drawn) {
+    gshgeom_flat_path_destroy(cell);
     gshcpu_render_stroke_close(cache, &s);
     return GSHSCENE_OK;
   }
@@ -4936,18 +4991,20 @@ static GSHSCENE_Result pat_stroke_copy(Run * run, Pat_Level * L, int64_t i, int6
   uint64_t cells = 0;
   uint8_t * cov = run->coverage;
   GSHCPU_Exact * exact = cs->tiers & GSHCPU_RENDER_TIER_EXACT ? run->exact : NULL;
-  GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result};
+  GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result, center, cell};
   GSHCPU_Result r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_deposits, run->acc,
       2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS, exact, (cs->tiers & GSHCPU_RENDER_TIER_JOINT) != 0, &buffers, &cov,
       &rect, &whole, &cells);
   run->acc_zero = 0;
   run->work += cells + exact_work(run);
   if (r != GSHCPU_OK) {
+    gshgeom_flat_path_destroy(cell);
     gshcpu_render_stroke_close(cache, &s);
     return scene_result(r);
   }
   gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, strokes));
   result = pat_paint_copy(run, L, u, &c, rect, whole, cov, NULL); /* S4: the paint is made ready over the whole render's part, drawn or not */
+  gshgeom_flat_path_destroy(cell);
   gshcpu_render_stroke_close(cache, &s);
   return result;
 }

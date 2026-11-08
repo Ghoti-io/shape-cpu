@@ -94,6 +94,8 @@
  * | union-groups | groups of overlapping members beside members that stand alone: a ring with a triangle across its hole, two crossing rectangles, a tripled contour that overlaps itself and a star apart |
  * | union-nested | a union under a rotation inside a clip block inside a translucent group, its members each under a map of their own, and a union of members that touch at a quarter pixel with two that overlap |
  * | union-abutting | rectangles that share edges at quarter pixels and a corner, a union of triangles that share a diagonal, and the same members as a union beside an overlapping one |
+ * | antialias-fills | (shape-scene AA1 to AA6) fills that ask for no antialiasing beside ones that do not: a star under both rules, rectangles on whole pixels and on centers, two that share an edge in translucent paint, a blob in a clip and in an opacity group, a glyph, and a gradient, a pattern and a hatch drawn through the coverage |
+ * | antialias-strokes | strokes that ask for no antialiasing: joins and caps, dashes, a hairline, a device width, an elliptical pen, a closed square in each alignment, a gradient, and a stroke of a glyph's outlines, beside one that does not |
  * | pattern-union | (shape-exact-primitives story CU21) union clips in a pattern's tile: members that cross the cell edges on an abutting lattice at a fraction, three members (a star under even-odd, a blob and a turned bar) on cells that overlap, a union inside a clip under a gapped skew, and a gradient under a union on a lattice of whole-pixel steps |
  */
 
@@ -3359,6 +3361,115 @@ typedef struct RF_Fixture {
   RF_Build build;
 } RF_Fixture;
 
+/* --- coverage by the centers of the pixels (shape-scene's list.h, AA1 to AA6) ------------------------------------------------------ */
+
+/** A fill that asks for no antialiasing. */
+static inline void rf_fill_crisp(RF_Ctx * c, GSHSCENE_List * l, const GSHSCENE_Resource * r, const GSHGEOM_Map * map,
+    GSHGEOM_Fill_Rule rule, GSHSCENE_Paint paint, int32_t layer, double depth) {
+  rf_check(c, gshscene_list_fill_antialias(l, r, map, rule, &paint, GSHSCENE_ANTIALIAS_NONE, layer, depth) == GSHSCENE_OK);
+}
+
+/** A stroke that asks for no antialiasing. */
+static inline void rf_stroke_crisp(RF_Ctx * c, GSHSCENE_List * l, const GSHSCENE_Resource * path, const GSHSCENE_Resource * style,
+    const GSHGEOM_Map * map, GSHSCENE_Paint paint) {
+  rf_check(c, gshscene_list_stroke_antialias(l, path, style, map, &paint, GSHSCENE_ANTIALIAS_NONE, 0, 0.0) == GSHSCENE_OK);
+}
+
+/**
+ * Fills that ask for no antialiasing beside ones that do not: the star of `fill-rules` under both rules, rectangles on whole pixels and
+ * on the centers of pixels (the left and top edges in, the right and bottom out), two that share an edge at half pixels in translucent
+ * paint (no pixel twice, none missed), a blob in a clip and in an opacity group, a glyph run, and a gradient, a pattern and a hatch drawn
+ * through the coverage.
+ */
+static inline GSHSCENE_List * rf_antialias_fills(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 1, 1, 47, 39), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.92, 0.9, 0.8, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * star = rf_star(c, 9.0, 9.0, 7.5);
+  GSHGEOM_Map move = rf_move(15.5, 0.25);
+  rf_fill_crisp(c, l, star, NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.1, 0.2, 1.0), 0, 0.0);
+  rf_fill_crisp(c, l, star, &move, GSHGEOM_FILL_EVEN_ODD, rf_solid(0.1, 0.2, 0.9, 0.7), 0, 0.0);
+  GSHGEOM_Map beside = rf_move(32.0, 0.5);
+  rf_fill(c, l, star, &beside, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.5, 0.2, 1.0), 0, 0.0);
+  rf_fill_crisp(c, l, rf_rect(c, 2, 18, 8, 24), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.0, 0.0, 0.0, 1.0), 0, 0.0);
+  rf_fill_crisp(c, l, rf_rect(c, 9.5, 18.5, 15.5, 24.5), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.0, 0.0, 0.0, 1.0), 0, 0.0);
+  rf_fill_crisp(c, l, rf_rect(c, 17.5, 18.5, 21.5, 24.5), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.2, 0.1, 0.5), 0, 0.0);
+  rf_fill_crisp(c, l, rf_rect(c, 21.5, 18.5, 25.5, 24.5), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.9, 0.2, 0.1, 0.5), 0, 0.0);
+  rf_fill_crisp(c, l, rf_glyph(c, 0), &move, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.1, 0.1, 1.0), 0, 0.0);
+  /* a crisp blob in a clip, and in an opacity group */
+  rf_check(c, gshscene_list_clip_push(l, rf_rect(c, 28, 17, 40, 31), NULL, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+  rf_fill_crisp(c, l, rf_blob(c, 27.0, 17.5, 6.5), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.2, 0.8, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_clip_pop(l) == GSHSCENE_OK);
+  GSHSCENE_Group g = rf_group(0.6, GSHSCENE_COMPOSITE_SRC_OVER);
+  rf_check(c, gshscene_list_group_push(l, &g, 0, 0.0) == GSHSCENE_OK);
+  rf_fill_crisp(c, l, rf_blob(c, 3.0, 28.0, 5.0), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.6, 0.2, 1.0), 0, 0.0);
+  rf_fill_crisp(c, l, rf_blob(c, 7.5, 30.5, 5.0), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.8, 0.5, 0.1, 1.0), 0, 0.0);
+  rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  /* a gradient, a pattern and a hatch through the coverage */
+  const GSHSCENE_Gradient_Stop two[2] = {rf_stop(0.0, rf_solid(0.9, 0.1, 0.1, 1.0)), rf_stop(1.0, rf_solid(0.1, 0.2, 0.9, 1.0))};
+  rf_fill_crisp(c, l, rf_star(c, 40.0, 24.0, 6.5), NULL, GSHGEOM_FILL_NONZERO,
+      rf_gradient_paint(rf_gradient(c, rf_linear(34, 0, 46, 0, 0, 0, GSHSCENE_EXTEND_PAD), two, 2), 1.0), 0, 0.0);
+  const GSHSCENE_Resource * pat = rf_pattern(c, rf_tile_basic(c), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.3, 0.45), NULL);
+  rf_fill_crisp(c, l, rf_blob(c, 17.0, 29.5, 5.5), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * pen = rf_pen(c, 0.7, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT);
+  GSHSCENE_Hatch_Family fam[1] = {{45.0, 0.0, 0.0, 0.0, 2.0, 0, NULL}};
+  const GSHSCENE_Resource * hatch = rf_hatch(c, pen, 0, fam, 1, rf_move(0.0, 0.0), rf_solid(0.1, 0.2, 0.6, 1.0));
+  GSHGEOM_Map hat_at = rf_move(31.0, 31.5);
+  rf_fill_crisp(c, l, rf_rect(c, 0.0, 0.0, 14.0, 7.0), &hat_at, GSHGEOM_FILL_NONZERO, rf_hatch_paint(hatch, 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+/**
+ * Strokes that ask for no antialiasing: each join and cap, dashes, a hairline and a device width, an elliptical pen, a closed shape in each
+ * alignment, a stroke painted with a gradient, and a stroke of a run, beside a stroke that does not.
+ */
+static inline GSHSCENE_List * rf_antialias_strokes(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 1, 1, 47, 39), NULL, GSHGEOM_FILL_NONZERO, rf_solid(0.95, 0.95, 0.9, 1.0), 0, 0.0);
+  static const double zig[] = {3.0, 9.0, 8.0, 3.0, 13.0, 9.0, 18.0, 3.0};
+  const uint32_t joins[3] = {GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_JOIN_BEVEL};
+  for (int i = 0; i < 3; i++) {
+    GSHGEOM_Map at = rf_move(0.0, 8.0 * (double)i);
+    rf_stroke_crisp(c, l, rf_polyline(c, zig, 4, 0), rf_pen(c, 2.25, joins[i], i == 1 ? GSHSCENE_STROKE_CAP_ROUND : GSHSCENE_STROKE_CAP_SQUARE),
+        &at, rf_solid(0.1, 0.1, 0.5, 1.0));
+  }
+  GSHGEOM_Map plain = rf_move(0.0, 24.0);
+  rf_stroke(c, l, rf_polyline(c, zig, 4, 0), rf_pen(c, 2.25, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_SQUARE), &plain,
+      rf_solid(0.1, 0.1, 0.5, 1.0));
+  /* dashes, a hairline and a device width */
+  static const double dash[2] = {3.0, 2.0};
+  static const double line[] = {21.0, 4.5, 45.0, 4.5};
+  rf_stroke_crisp(c, l, rf_polyline(c, line, 2, 0),
+      rf_style(c, 1.5, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT, GSHSCENE_STROKE_DEGENERATE_DRAW,
+          dash, 2, 0.5, GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      NULL, rf_solid(0.5, 0.1, 0.1, 1.0));
+  static const double line2[] = {21.0, 9.25, 45.0, 11.75};
+  rf_stroke_crisp(c, l, rf_polyline(c, line2, 2, 0),
+      rf_style(c, 1.0, GSHSCENE_STROKE_WIDTH_DEVICE, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT, GSHSCENE_STROKE_DEGENERATE_DRAW,
+          NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO),
+      NULL, rf_solid(0.1, 0.4, 0.1, 1.0));
+  GSHGEOM_Map squash = rf_affine(c, 1.0, 0.0, 0.0, 0.4, 0.0, 14.0);
+  rf_stroke_crisp(c, l, rf_circle(c, 5.0), rf_pen(c, 2.0, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_BUTT), &squash, rf_solid(0.4, 0.1, 0.5, 1.0));
+  /* a closed square in each alignment */
+  static const double box[] = {2.0, 2.0, 12.0, 2.0, 12.0, 11.0, 2.0, 11.0};
+  const uint32_t aligns[3] = {GSHSCENE_STROKE_ALIGN_CENTER, GSHSCENE_STROKE_ALIGN_INSIDE, GSHSCENE_STROKE_ALIGN_OUTSIDE};
+  for (int i = 0; i < 3; i++) {
+    GSHGEOM_Map at = rf_move(3.0 + 15.0 * (double)i, 27.0);
+    rf_stroke_crisp(c, l, rf_polyline(c, box, 4, 1),
+        rf_style(c, 2.5, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT, GSHSCENE_STROKE_DEGENERATE_DRAW,
+            NULL, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH, aligns[i], GSHGEOM_FILL_NONZERO),
+        &at, rf_solid(0.1 + 0.3 * (double)i, 0.3, 0.6, 0.8));
+  }
+  /* a gradient across a crisp stroke, and a crisp stroke of a run's outlines */
+  const GSHSCENE_Gradient_Stop two[2] = {rf_stop(0.0, rf_solid(0.9, 0.1, 0.1, 1.0)), rf_stop(1.0, rf_solid(0.1, 0.2, 0.9, 1.0))};
+  rf_stroke_crisp(c, l, rf_star(c, 40.0, 19.0, 5.5), rf_pen(c, 1.25, GSHSCENE_STROKE_JOIN_ROUND, GSHSCENE_STROKE_CAP_BUTT), NULL,
+      rf_gradient_paint(rf_gradient(c, rf_linear(34, 0, 46, 0, 0, 0, GSHSCENE_EXTEND_PAD), two, 2), 1.0));
+  GSHGEOM_Map glyph_at = rf_move(25.0, 22.0);
+  rf_stroke_crisp(c, l, rf_glyph(c, 0), rf_pen(c, 1.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &glyph_at, rf_solid(0.1, 0.1, 0.1, 1.0));
+  rf_close(c, l);
+  return l;
+}
+
 static const RF_Fixture RF_FIXTURES[] = {
     {"fill-rules", rf_fill_rules},
     {"clip-leaf", rf_clip_leaf},
@@ -3433,6 +3544,8 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"union-nested", rf_union_nested},
     {"union-abutting", rf_union_abutting},
     {"pattern-union", rf_pattern_union},
+    {"antialias-fills", rf_antialias_fills},
+    {"antialias-strokes", rf_antialias_strokes},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])

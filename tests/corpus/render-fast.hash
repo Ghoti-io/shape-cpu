@@ -294,5 +294,13 @@ render pattern-union rgba8 2773cb90feae79e6
 render pattern-union rgba8-premultiplied 2969875a82e07b8d
 render pattern-union rgbaf32 a1d4df1537ecec00
 render pattern-union rgbaf32-premultiplied 23e87477e6df448b
-hash 35a1033ed4b3109b
-count 292
+render antialias-fills rgba8 955fdbdb74907bf3
+render antialias-fills rgba8-premultiplied 6429853a922318c2
+render antialias-fills rgbaf32 4aecd38fd99e9f69
+render antialias-fills rgbaf32-premultiplied 05d9eb49af05aa8a
+render antialias-strokes rgba8 d8c8f1b1ef69fd0d
+render antialias-strokes rgba8-premultiplied a6401e0217111894
+render antialias-strokes rgbaf32 2f22c8ca508885bf
+render antialias-strokes rgbaf32-premultiplied 20c4a5667833ff6e
+hash 6e2da2943bc3698d
+count 300

@@ -1247,9 +1247,11 @@ static int record(Input * in, GSHSCENE_List * list, World * w) {
         CHECK(sr == GSHSCENE_OK || sr == GSHSCENE_ERR_OOM || sr == GSHSCENE_ERR_LIMIT);
         w->aligned_style = st.alignment != 0;
       }
+      /* AA1: an eighth of the items ask for no antialiasing (a fill's or a stroke's), so every tier and error arm of the center coverage is reached. */
+      const GSHSCENE_Antialias aa = (rule & 0x38) == 0x28 ? GSHSCENE_ANTIALIAS_NONE : GSHSCENE_ANTIALIAS_AREA;
       GSHSCENE_Result fr = (rule & 6) == 6
-          ? (w->style ? gshscene_list_stroke(list, r, w->style, &map, &paint, 0, 0.0) : GSHSCENE_ERR_OOM)
-          : gshscene_list_fill(list, r, &map, rule & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint, 0, 0.0);
+          ? (w->style ? gshscene_list_stroke_antialias(list, r, w->style, &map, &paint, aa, 0, 0.0) : GSHSCENE_ERR_OOM)
+          : gshscene_list_fill_antialias(list, r, &map, rule & 1 ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint, aa, 0, 0.0);
       w->strokes += (rule & 6) == 6 && fr == GSHSCENE_OK;
       w->run_strokes += (rule & 6) == 6 && fr == GSHSCENE_OK && gshscene_resource_kind(r) == GSHSCENE_RESOURCE_GLYPH_RUN;
       w->aligned += (rule & 6) == 6 && fr == GSHSCENE_OK && w->aligned_style;
@@ -1373,7 +1375,8 @@ static GSHSCENE_List * twin_of(const GSHSCENE_List * list, GSHSCENE_Store * stor
     GSHSCENE_Result r = GSHSCENE_OK;
     switch (item->kind) {
       case GSHSCENE_ITEM_FILL:
-        r = gshscene_list_fill(twin, item->resource, &item->map, item->fill_rule, &item->paint, item->layer, item->depth);
+        r = gshscene_list_fill_antialias(twin, item->resource, &item->map, item->fill_rule, &item->paint,
+            (GSHSCENE_Antialias)item->antialias, item->layer, item->depth);
         break;
       case GSHSCENE_ITEM_STROKE: {
         const GSHSCENE_Resource * centerline = item->resource;
@@ -1388,7 +1391,8 @@ static GSHSCENE_List * twin_of(const GSHSCENE_List * list, GSHSCENE_Store * stor
           }
         }
         if (r == GSHSCENE_OK) {
-          r = gshscene_list_stroke(twin, centerline, item->style, &item->map, &item->paint, item->layer, item->depth);
+          r = gshscene_list_stroke_antialias(twin, centerline, item->style, &item->map, &item->paint,
+              (GSHSCENE_Antialias)item->antialias, item->layer, item->depth);
         }
         gshscene_resource_release(made);
         break;

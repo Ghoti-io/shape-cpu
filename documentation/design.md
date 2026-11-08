@@ -478,6 +478,44 @@ pass either limit (the function of the outline alone that decides the damage-ind
 tier; at the default limits that is no stroke a render draws today. Found by mutating the render fuzzer's seeds; the input is
 `regression-sparse-partial-under-budget.bin`.
 
+### Coverage by the centers of the pixels (AC1 to AC6)
+
+A fill or a stroke whose `antialias` is `GSHSCENE_ANTIALIAS_NONE` (SVG's `crispEdges` and `optimizeSpeed`) has the coverage 255 where the center
+of the pixel is inside its shape and 0 elsewhere; `render.h` states the rule, shape-scene's `list.h` (AA2, AA3) states it as the family's. This
+section says how it is computed and why that way.
+
+**One function, every tier.** The fast fill coverage, the fast stroke coverage and the sparse composite of a stroke are sums of areas, rounded;
+a center is decided exactly. There is no sense in which the lean sweep could "also" decide a center, so an item with the mode takes none of them
+and goes to `gshcpu_render_cover_center`, which is the same function whatever the limits say. The cost is that a crisp item does not take the
+fast tiers, and an item that asks for crisp edges is a small shape (SVG draws them for exactly that reason), so the fallback is the right one.
+
+**The arithmetic.** The pixel row `r` has its center line at `y = 64 r + 32` (units of 1/64 pixel). An edge from `p` to `q` straddles it when
+exactly one of `p.y <= y`, `q.y <= y` holds, that is, for `ylo <= y < yhi` where `ylo` and `yhi` are its ends in order: the rows from
+`ceil((ylo - 32) / 64)` to `ceil((yhi - 32) / 64) - 1`. In such a row the edge meets the line at `x_e = p.x + t dx / dy` with `t = y - p.y`
+(the upper end `p`, `dy > 0`), and counts for the pixel whose center `64 px + 32` is left of `x_e`: the pixels up to `n`, the floor of
+`(x_e - 32) / 64`, less one when `x_e` is a whole number of units (a center on the edge is not left of it). With `x_e = p.x + w + f` for the
+floor `w` and the fraction `f = rest / dy` of `t dx / dy`, that is `n = floor((p.x + w - 32 - [rest = 0]) / 64)`, all in `int64` (`t dx` is under
+2^62 for the coordinates the sink admits, `GSHCPU_RENDER_COORD_LIMIT`, so nothing is wider). The edge's sign is taken out of a difference array
+at `n + 1` and added to the row's total; a running sum along the row is the winding at each center, folded by the rule. One edge costs one step
+for each row it straddles, whatever the pixels it passes between, so the work is the crossings of the center lines and the pixels, not the
+cells.
+
+**Why not cut a pattern's item.** The copies of a pattern's tile are covered each in its own cell, and for the area the item's outline is cut to
+the cell's quadrilateral (CK1), so that the two sides of a cell edge sum to the whole. A cut point is rounded to the lattice, and a center a
+fraction of a unit from the edge the cut moved could change sides; so for the mode the item is not cut, and the cell's quadrilateral is one more
+contour the center is tested against, by the same rule. Cells of a lattice share their corners, so each center is in exactly one cell and every
+center is covered by one copy. The same holds for a stroke (the cell is moved into the outline's frame, `gshcpu_render_stroke_cell`), whose
+body and aligned part are met with it and whose clip is not (met with the cell its complement would let the outside in).
+
+**What the limit is.** The deposits of the rule are the edge crossings of the center lines over the rows of what the whole render draws (S4), so
+a cap decision does not depend on the damage, and one deposit of the rule is never more than a cell's, so an item the other coverage draws within
+the cap is drawn here. The rectangle's pixels are added to the work, a bound by `max_bytes`.
+
+**The gates.** `tools/gen-center-vectors.py` states the rule twice in exact rationals and by hand, is shown to fail on eight planted defects, and writes
+`tests/center_vectors.h`, the vectors of the sink's tests (fills under five exact maps, strokes of lines and squares in three alignments); a
+differential holds the sink to a brute-force evaluation over random curves, runs and strokes; fixtures of the crisp mode are in the render
+goldens in both tiers; and the planted defects of the sink's use are in `tools/check-planted.py` (`aa-`).
+
 ### Hatches (HX13; masks-images-patterns story H1)
 
 A hatch fill is drawn as the stroke of its trimmed, dashed lines: shape-geometry's hatch (HX4 to HX8) makes the pieces and their outline,

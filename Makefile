@@ -523,13 +523,18 @@ $(HASH_PROBE): tools/corpus-hash.c tests/render_fixtures.h tests/dense_vectors.h
 check-corpus-hash: $(HASH_PROBE) ## Fail unless the probe prints the committed cross-target hash (CAP-13)
 	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash tests/corpus/render.hash tests/corpus/dense.hash tests/corpus/render-fast.hash
 
-check-vectors: ## Fail if tests/known_answers.h, tests/render_vectors.h, tests/mask_vectors.h or tests/general_vectors.h is not what its independent generator writes
+check-vectors: ## Fail if tests/known_answers.h, tests/render_vectors.h, tests/mask_vectors.h, tests/general_vectors.h or tests/center_vectors.h is not what its independent generator writes
 	@python3 tools/gen-coverage-vectors.py --check
 	@python3 tools/gen-render-vectors.py --check
 	@python3 tools/gen-mask-vectors.py --check
 	@python3 tools/gen-general-vectors.py --check
 	@python3 tools/probe-groups.py --selftest
 	@python3 tools/gen-dense-cells.py --check
+	@python3 tools/gen-center-vectors.py --check
+	@python3 tools/gen-center-vectors.py --selftest
+	@for plant in top-left-reversed tie-inside centre-y-tie even-odd-as-nonzero edge-direction-ignored closing-edge-dropped winding-clamped half-open-swapped; do \
+		if python3 tools/gen-center-vectors.py --selftest --plant $$plant > /dev/null 2>&1; then \
+			echo "check-vectors: the center reference did not catch its planted defect $$plant"; exit 1; fi; done
 
 # Each planted defect in tools/check-planted.py is built into a copy of the
 # sources and must fail a test (or the probe's hash); the unplanted copy is the
