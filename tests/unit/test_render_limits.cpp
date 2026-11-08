@@ -475,6 +475,51 @@ TEST(RenderLimits, TheDashStepsOfAStrokeAreBoundedByTheCaller) {
   rf_release(&c);
 }
 
+// The caller bounds the work of the stroke expansion (`max_work`, handed to shape-geometry's budget): a stroke of round caps and joins that
+// would spend more is refused, one at the bound is drawn, and the refusal is the same with a damage (the budget is a function of the stroke).
+TEST(RenderLimits, TheWorkOfAStrokesExpansionIsBoundedByTheCallerWhateverTheDamage) {
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHSCENE_List * l = rf_open(&c);
+  static const double line[10] = {4.0, 6.0, 20.0, 40.0, 30.0, 8.0, 44.0, 38.0, 58.0, 10.0};
+  rf_stroke(&c, l, rf_polyline(&c, line, 5, 0),
+      rf_style(&c, 14.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_ROUND, 4.0, GSHSCENE_STROKE_CAP_ROUND,
+          GSHSCENE_STROKE_DEGENERATE_DRAW, nullptr, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_CENTER,
+          GSHGEOM_FILL_NONZERO),
+      nullptr, rf_solid(0.2, 0.3, 0.9, 1.0));
+  rf_close(&c, l);
+  ASSERT_EQ(c.failed, 0);
+  auto drawn = [&](uint64_t cap, const GSHSCENE_Rect * damage, uint32_t flags) {
+    GSHCPU_Limits limits;
+    gshcpu_limits_default(&limits);
+    limits.max_work = cap;
+    SinkRef sink(&limits);
+    RasterRef r(rf_raster(GSHCPU_FORMAT_RGBA8_STRAIGHT, RF_WIDTH, RF_HEIGHT));
+    Refusals refused = render_damaged(sink.sink, l, r.raster, damage, flags);
+    EXPECT_EQ(refused.result, GSHSCENE_OK);
+    return refused.rows.empty();
+  };
+  ASSERT_TRUE(drawn(UINT64_MAX, nullptr, 0));
+  ASSERT_TRUE(drawn(0, nullptr, 0)) << "the default draws it";
+  uint64_t lo = 1, hi = 1u << 20;
+  ASSERT_TRUE(drawn(hi, nullptr, 0));
+  while (lo < hi) {
+    const uint64_t mid = lo + (hi - lo) / 2;
+    if (drawn(mid, nullptr, 0)) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  EXPECT_GT(lo, 1u) << "the stroke is charged";
+  const GSHSCENE_Rect damage = {10, 4, 20, 12};
+  EXPECT_TRUE(drawn(lo, nullptr, 0));
+  EXPECT_FALSE(drawn(lo - 1, nullptr, 0));
+  EXPECT_TRUE(drawn(lo, &damage, 0));
+  EXPECT_FALSE(drawn(lo - 1, &damage, 0)) << "the refusal does not depend on the damage";
+  rf_release(&c);
+}
+
 TEST(RenderLimits, AHostileMaximalItemDoesItsWorkWithinTheDeclaredBound) {
   Store s;
   GSHSCENE_List * l = s.open();

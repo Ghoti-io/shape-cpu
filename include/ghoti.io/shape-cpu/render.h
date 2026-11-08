@@ -902,6 +902,9 @@
  * drawn.  `max_cache_bytes` bounds the stroke cache (SC7); `max_exact_fragments` the pieces of a stroke part in one
  * pixel (UC9); `max_area_pixel_work` and `max_image_work` the visits of the `AREA` filter of an image paint (IC9); `max_dash_steps` the steps of a stroke's dash pattern, which
  * are not in the work measure but cost a fraction of a microsecond each (shape-geometry refuses a stroke past it before it walks the pattern).
+ * `max_work` the work units of shape-geometry's budget that the expansion of one stroke, the lines of one hatch fill and the measure of one path may
+ * spend (its `GSHGEOM_Limits.max_work`): a stroke or a hatch fill that would spend more is refused as ::GSHSCENE_REASON_RESOURCE_LIMIT, whatever the damage, since the
+ * expansion is a function of the stroke, its map and the limits alone.
  *
  * ### Hash and dump of a render (AD-21)
  *

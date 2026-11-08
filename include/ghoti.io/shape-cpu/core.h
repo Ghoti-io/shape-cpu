@@ -278,6 +278,18 @@ typedef struct GSHCPU_Limits {
    * A `uint64_t` whatever the target.  Read by the sink; the coverage functions ignore it.
    */
   uint64_t max_union_pieces;
+  /**
+   * The most work units shape-geometry's operations may spend on one call (its `GSHGEOM_Limits.max_work`, which this is handed to): the
+   * work a stroke's expansion (a point of an arc, a vertex hulled and rounded, a piece of a curve), a hatch's lines (the region's
+   * points read by each, the steps of each dash walk) and a measured path's refinement cost beyond what the number of elements pays for.
+   * A unit is nominally a tenth of a microsecond, so the default (0: 2^22 units) is a third to a half of a second of work for one
+   * stroke or one hatch fill, whatever the damage: the expansion of a stroke is a function of the stroke, its map, its tolerance and
+   * the limits alone, so an item it refuses is refused for every damage, cache and caller memory.  A stroke or a hatch fill that would
+   * spend more is refused as ::GSHSCENE_REASON_RESOURCE_LIMIT (a stroke of a long path of rounded joins, a hatch of tiny dots or wide
+   * round caps); raise it for a legitimate scene of that size.  `UINT64_MAX` is no cap.  A `uint64_t` whatever the target.  Read by the
+   * sink; the coverage functions ignore it.
+   */
+  uint64_t max_work;
 } GSHCPU_Limits;
 
 /** ::GSHCPU_Limits.fill_coverage: the exact area of a fill (the default). */
