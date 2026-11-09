@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -702,6 +703,126 @@ TEST(RenderAntialias, TheCrispItemsOfATileAreCoveredInTheirOwnCellsOnly) {
   }
 }
 
+// AC4: under a turn the cell is a quadrilateral inside a larger box, so the box does not hold a copy to its cell.  An item that spills over
+// one side of the cell only (a rectangle, a line, and the inside of a ring) is covered in the cell it is of and nowhere else: a pixel is
+// covered exactly when its center, taken back into the pattern's plane, lies in the item's own place in its cell.  (Two copies that cover a
+// pixel are summed and saturate, so a spill that falls where the next copy has its own item shows nothing; this one falls where it has none.)
+TEST(RenderAntialias, TheCrispItemsOfATurnedTileAreCoveredInTheirOwnCellsOnly) {
+  const double degrees = 30.0;
+  const double c = std::cos(degrees * 3.14159265358979323846 / 180.0);
+  const double s = std::sin(degrees * 3.14159265358979323846 / 180.0);
+  for (const Config & config : kConfigs) {
+    RF_Ctx ctx;
+    rf_begin(&ctx);
+    const GSHSCENE_Resource * region = rf_rect(&ctx, 2.0, 2.0, 30.0, 30.0);
+    GSHGEOM_Map turn;
+    ASSERT_EQ(gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, degrees, &turn), GSHGEOM_OK);
+    for (int which = 0; which < 4; which++) {
+      GSHSCENE_List * t = rf_open(&ctx);
+      auto box = [](double lu, double lv, double a, double b, double c2, double d) { return lu >= a && lu < c2 && lv >= b && lv < d; };
+      std::function<bool(double, double)> place; // the item's own place, in the plane of a cell of 6 by 6, whose reach passes it on the right
+      if (which == 0) {
+        place = [&](double lu, double lv) { return box(lu, lv, 4.0, 1.0, 6.0, 5.0); };
+        rf_fill_crisp(&ctx, t, rf_rect(&ctx, 4.0, 1.0, 14.0, 5.0), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0, 0, 0, 0.5), 0, 0.0);
+      } else if (which == 1) {
+        place = [&](double lu, double lv) { return box(lu, lv, 4.0, 2.0, 6.0, 4.0); };
+        static const double line[] = {4.0, 3.0, 14.0, 3.0};
+        rf_stroke_crisp(&ctx, t, rf_polyline(&ctx, line, 2, 0), rf_pen(&ctx, 2.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), nullptr,
+            rf_solid(0, 0, 0, 0.5));
+      } else {
+        // a ring whose band of width 2 lies inside it (which 2) or outside it (which 3): the aligned part of the stroke
+        const bool inside = which == 2;
+        static const double inner[] = {3.0, 1.0, 15.0, 1.0, 15.0, 6.0, 3.0, 6.0};
+        static const double outer[] = {4.0, 2.0, 8.0, 2.0, 8.0, 4.0, 4.0, 4.0};
+        place = inside ? std::function<bool(double, double)>([&](double lu, double lv) { return box(lu, lv, 3.0, 1.0, 15.0, 6.0) && !box(lu, lv, 5.0, 3.0, 13.0, 4.0); })
+                       : std::function<bool(double, double)>([&](double lu, double lv) { return box(lu, lv, 2.0, 0.0, 10.0, 6.0) && !box(lu, lv, 4.0, 2.0, 8.0, 4.0); });
+        rf_stroke_crisp(&ctx, t, rf_polyline(&ctx, inside ? inner : outer, 4, 1),
+            rf_style(&ctx, 2.0, GSHSCENE_STROKE_WIDTH_LOCAL, GSHSCENE_STROKE_JOIN_MITER, 4.0, GSHSCENE_STROKE_CAP_BUTT,
+                GSHSCENE_STROKE_DEGENERATE_DRAW, nullptr, 0, 0.0, GSHSCENE_STROKE_DASH_PER_SUBPATH,
+                inside ? GSHSCENE_STROKE_ALIGN_INSIDE : GSHSCENE_STROKE_ALIGN_OUTSIDE, GSHGEOM_FILL_NONZERO),
+            nullptr, rf_solid(0, 0, 0, 0.5));
+      }
+      rf_close(&ctx, t);
+      const GSHSCENE_Resource * pat = rf_pattern(&ctx, rf_picture_of(&ctx, t), 0, 0, 6, 6, 6, 6, 1, 1, turn, nullptr);
+      GSHSCENE_List * l = rf_open(&ctx);
+      rf_fill_crisp(&ctx, l, region, nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+      rf_close(&ctx, l);
+      const std::vector<uint8_t> got = draw32(l, config);
+      size_t covered = 0, wrong = 0, skipped = 0;
+      for (int y = 0; y < 32; y++) {
+        for (int x = 0; x < 32; x++) {
+          const double px = x + 0.5, py = y + 0.5;
+          const double u = c * px + s * py, v = -s * px + c * py; // the pixel's center in the pattern's plane
+          auto at = [&](double du, double dv) {
+            const double a = u + du, b = v + dv;
+            return place(a - 6.0 * std::floor(a / 6.0), b - 6.0 * std::floor(b / 6.0));
+          };
+          const double e = 0.03; // a center this close to an edge is decided by the rounding of the outline to 1/64 (and of the map), not by the rule
+          const bool in = at(0, 0);
+          if (at(e, 0) != in || at(-e, 0) != in || at(0, e) != in || at(0, -e) != in || at(e, e) != in || at(-e, -e) != in || at(e, -e) != in ||
+              at(-e, e) != in) {
+            skipped++;
+            continue;
+          }
+          const int want = in && x >= 2 && x < 30 && y >= 2 && y < 30 ? 128 : 0;
+          wrong += (int)got[(size_t)y * 32 + (size_t)x] != want;
+          covered += got[(size_t)y * 32 + (size_t)x] != 0;
+        }
+      }
+      EXPECT_GT(covered, 20u) << config.name << " item " << which;
+      EXPECT_LT(skipped, 40u) << config.name << " item " << which << ": the reference must decide nearly every pixel";
+      EXPECT_EQ(wrong, 0u) << config.name << " item " << which;
+    }
+    rf_release(&ctx);
+  }
+}
+
+// AC4: a crisp item of a tile is not cut to its cell (a cut point is rounded to 1/64, which moves a slanted edge a little, and a center that
+// lies exactly on the edge, a tie, would change sides).  The tile's pixels are those of the item drawn alone: a triangle whose slanted edges
+// pass exactly through centers, and cross the cell's sides at points that are not multiples of 1/64, so a cut would decide every one of
+// those centers anew.
+TEST(RenderAntialias, ACrispItemOfATileWhoseEdgeCrossesTheCellIsDecidedAsIfItWereNotCut) {
+  struct Tri {
+    double p[6];
+  };
+  // slope 1/3 through (0.5, 0.5) and (3.5, 1.5); its mirror; and slope 3 (steep) through the same centers swapped
+  const Tri tris[] = {
+      {{0.5, 0.5, 12.5, 4.5, 0.5, 12.5}},
+      {{12.5, 0.5, 0.5, 4.5, 12.5, 12.5}},
+      {{0.5, 0.5, 4.5, 12.5, 12.5, 0.5}},
+      {{0.5, 12.5, 4.5, 0.5, 12.5, 12.5}},
+  };
+  for (const Config & config : kConfigs) {
+    for (size_t k = 0; k < sizeof tris / sizeof tris[0]; k++) {
+      RF_Ctx ctx;
+      rf_begin(&ctx);
+      const GSHSCENE_Resource * tri = rf_polyline(&ctx, tris[k].p, 3, 1);
+      GSHSCENE_List * alone = rf_open(&ctx);
+      rf_fill_crisp(&ctx, alone, tri, nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0, 0, 0, 0.5), 0, 0.0);
+      rf_close(&ctx, alone);
+      const std::vector<uint8_t> want = draw32(alone, config);
+      GSHSCENE_List * tile = rf_open(&ctx);
+      rf_fill_crisp(&ctx, tile, tri, nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0, 0, 0, 0.5), 0, 0.0);
+      rf_close(&ctx, tile);
+      const GSHSCENE_Resource * pat = rf_pattern(&ctx, rf_picture_of(&ctx, tile), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.0, 0.0), nullptr);
+      GSHSCENE_List * l = rf_open(&ctx);
+      rf_fill_crisp(&ctx, l, rf_rect(&ctx, 0.0, 0.0, 6.0, 6.0), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+      rf_close(&ctx, l);
+      const std::vector<uint8_t> got = draw32(l, config);
+      size_t covered = 0, wrong = 0;
+      for (int y = 0; y < 6; y++) {
+        for (int x = 0; x < 6; x++) {
+          wrong += got[(size_t)y * 32 + (size_t)x] != want[(size_t)y * 32 + (size_t)x];
+          covered += want[(size_t)y * 32 + (size_t)x] != 0;
+        }
+      }
+      EXPECT_GT(covered, 6u) << config.name << " triangle " << k;
+      EXPECT_EQ(wrong, 0u) << config.name << " triangle " << k;
+      rf_release(&ctx);
+    }
+  }
+}
+
 // FT-2 and the lean sweeps assume an accumulator they left clean: a crisp fill between two antialiased ones must leave it so.
 TEST(RenderAntialias, ACrispFillBetweenTwoAntialiasedOnesLeavesTheAccumulatorTheNextOneNeeds) {
   for (const Config & config : kConfigs) {
@@ -731,6 +852,36 @@ TEST(RenderAntialias, ACrispFillBetweenTwoAntialiasedOnesLeavesTheAccumulatorThe
       }
     }
     EXPECT_GT(partial, 4u);
+    rf_release(&ctx);
+  }
+}
+
+// The same, where the next fill lies on the cells the crisp one wrote: its leftover (a crisp fill's accumulator is not zero when it is done,
+// and a fast sweep that finds the first bytes zero does not clear them) would be read as area.  The crisp fill is invisible, so that the
+// picture is that of the other two alone.
+TEST(RenderAntialias, ACrispFillLeavesTheAccumulatorToTheNextFillOnTheSameCells) {
+  for (const Config & config : kConfigs) {
+    RF_Ctx ctx;
+    rf_begin(&ctx);
+    const GSHSCENE_Resource * big = rf_star(&ctx, 8.0, 8.0, 7.0);
+    const GSHSCENE_Resource * same = rf_star(&ctx, 8.0, 20.0, 7.0);
+    auto draw = [&](bool with_crisp) {
+      GSHSCENE_List * l = rf_open(&ctx);
+      rf_fill(&ctx, l, big, nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0, 0, 0, 1), 0, 0.0);
+      if (with_crisp) {
+        rf_fill_crisp(&ctx, l, same, nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0, 0, 0, 0), 0, 0.0);
+      }
+      rf_fill(&ctx, l, same, nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0, 0, 0, 1), 0, 0.0);
+      rf_close(&ctx, l);
+      return draw32(l, config);
+    };
+    const std::vector<uint8_t> without = draw(false);
+    size_t partial = 0;
+    for (uint8_t v : without) {
+      partial += v != 0 && v != 255;
+    }
+    EXPECT_GT(partial, 8u) << config.name;
+    EXPECT_EQ(draw(true), without) << config.name;
     rf_release(&ctx);
   }
 }

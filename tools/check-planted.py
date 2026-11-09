@@ -2758,14 +2758,6 @@ SURVIVORS = {
         "and read by nothing (the sum of UC4 weights it 64 - 64, and no slab starts at 64), so the memset only keeps an uninitialised flag from being read, "
         "which a sanitizer sees and the plant harness does not run; the witness is TheStepsAtTheBottomOfTheLeftSideOfACellNeverChangeALaterCell: a cell "
         "whose piece ends at (0, 64), made with a scratch, leaves a later cell the area it has with a scratch of its own",
-    "aa-pat-fill-mask": "OPEN (2026-11-08, not seen by any test): the cell's quadrilateral as a mask of a crisp tile item's centers; without it the "
-        "pictures of TheCrispItemsOfATileAreCoveredInTheirOwnCellsOnly (a bar that spills over the cell, 128 once and never 192) are unchanged, so "
-        "something after the coverage already holds a copy's paint to its cell; the next step is to find that and either show the mask redundant "
-        "(and remove it) or find the case that needs it",
-    "aa-pat-fill-clipped-anyway": "OPEN (2026-11-08, not seen): cutting a crisp tile item to the cell by CK1, as an antialiased one is, instead of leaving it whole and "
-        "masking; no test places a center within the cut's rounding of an item's edge in a tile, which is the case this plant is the difference for",
-    "aa-stroke-mask-on-aligned": "OPEN (2026-11-08, not seen): the cell's mask on the aligned part of a crisp stroke in a tile; same witness and same observation as "
-        "aa-pat-fill-mask",
     "rv-670-lt": "not seen by a plain build: `p <= n` reads one part past the three that both callers pass (an array on the stack), "
         "which a sanitizer sees and the plant harness does not run",
     "rv-741-lt": "not seen by a plain build: `p <= n` reads one part past the three that the caller passes (an array on the stack); seen by "
