@@ -56,6 +56,10 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   groups, clips, strokes and patterns inside a tile are drawn; `GSHCPU_Limits.max_pattern_cells` bounds the copies of a use, counted from
   the lattice before any is drawn. A lattice whose steps are whole pixels (a hatch, a checkerboard, a pixel-snapped texture) is drawn
   from one period of its picture, read by integer arithmetic and kept in the cache, bit for bit the picture the general path draws.
+  Hatches: a fill painted with a hatch (a CAD hatch's pattern-definition lines) is drawn as the stroke of its trimmed, dashed lines,
+  by the stroke's own machinery, so a hatch has the antialiasing of the stroke and every join, cap and alignment of one.
+  An item that asks for no antialiasing (`GSHSCENE_ANTIALIAS_NONE`) is covered whole or not at all by the centers of its pixels,
+  in every coverage tier and inside a tile or a mask's picture, and the sink claims the capability that says so.
   Union clips: a clip of several shapes (an SVG `clipPath`, a text clip) is the exact union of their regions, quantized once, never a mask and never
   a sum of 8-bit coverages. Members whose boxes are disjoint are summed in a 16-bit plane; members that overlap are made exact in the pixels they share
   by the same integer step that unites a stroke's pieces, each member under its own fill rule (`GSHCPU_Limits.max_union_tests` and `max_union_pieces`
@@ -80,6 +84,17 @@ Determinism is a requirement, not a hope: every `double` stage builds with
 `-ffp-contract=off` and no x87, and elementary functions come from `math`, not
 libm. `make check-gates` shows each of those rules failing on a planted
 violation.
+
+## Not implemented
+
+- An `AREA` image filter under a repeating edge mode sums the periods one row at a time, so a draw whose pixel would visit more than
+  `max_area_pixel_work` texels and cells (2^20 by default; a tile minified a thousand times or more) is refused with a reason
+  in the report and draws nothing; the whole periods are not summed in one step.
+- A pattern's tile is clipped to its cell; a tile that draws outside it is not drawn there.
+- A stroke's width profile is not drawn; the waist reserves it.
+- There is no GPU target and no seam-free flag; both are refused.
+- The fast fill and stroke coverage tiers (`GSHCPU_FILL_COVERAGE_FAST`, `GSHCPU_STROKE_COVERAGE_FAST`) are approximations that trade
+  exactness for speed; the default, and every example, is the exact coverage whose render hash is the reference.
 
 A path resource's primitive tag (a rect, rounded rect or ellipse; shape-scene's `primitive.h`) never changes what is drawn: the sink draws
 a tagged path by its path, `make check-tag-ignored` fails if a source of the renderer reads the tag, and a test renders a tagged path and its
