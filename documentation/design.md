@@ -219,12 +219,20 @@ thread. The bound is of the algorithm's visits: a row of cells at a time, the ce
 a run (past a padded window as a count of the edge texel, a repeating axis's whole periods as that many sums of the window's row)
 and only the cells its boundary crosses clipped. A row that holds one of the parallelogram's vertices is clipped across, because
 the cross-section of the parallelogram is no longer a trapezoid there: a run found by the cross-sections at the strip's two edges
-would count a cell that the vertex cuts as covered (a defect the second engine found first). The rows themselves are visited
-one by one, so a preimage that spans millions of rows costs millions of steps and is refused by the bound; the story's whole-period
-sums over the other axis (a tile fully inside the parallelogram counted by the window's mean) are not built, and the bound
-says what is.
+would count a cell that the vertex cuts as covered (a defect the second engine found first).
 
-**A second engine.** The row-and-run algorithm is checked against one that clips every cell of the bounding box, on the oracle's
+The rows of a parallelogram with edges along the axes are not visited
+one by one: its sum is a product of its extent in x and its extent in y, so the rows it covers across are, in a repeating axis, as many sums of
+the window's rows as it has whole periods (twice as many in a reflecting one, where every row is met going and coming), in a padded one a
+count of the edge row above the window and of the one below it, and in a bare one nothing, and only the rows at its two ends it covers in part
+and a period's rest are visited; its bound is the window's own size, however far the image is minified, and a render that was refused for it
+now draws (a window of 6 by 6 texels under a footprint a billion cells across has a bound under 2000).  A preimage that is turned or sheared has no such shortcut that is exact:
+every row has its own cells at the two edges of the parallelogram, so the work is at least its rows, one step each (the row's run is a
+sum, kept for the rows that follow), and the bound refuses what passes `max_area_pixel_work`, which is what the bound says it does.
+
+**A second engine.** A footprint with edges along the axes is also checked against the closed form of its product, written out in
+`long double` with its own mapping of each edge mode and no code of the sampler, on footprints of a few thousand to a billion cells across
+in every pair of edge modes, and against the bound (under 2000 however far). The row-and-run algorithm is checked against one that clips every cell of the bounding box, on the oracle's
 352 regions and on 3000 random parallelograms (60000 once, to see the bound hold) across every edge mode on each axis, windows
 and formats. The bound is asserted to be a bound (its visits never pass it) on the same random cases.
 

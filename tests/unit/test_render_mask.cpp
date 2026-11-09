@@ -1222,8 +1222,10 @@ TEST(RenderMask, AListWithNoMaskedGroupHasTheWorkspaceAndTheWorkItHadBeforeMasks
     {"image-filters", 98095, 1964, 11, 11, 11, 96863},
     {"image-edges", 98095, 1964, 17, 17, 17, 96863},
     {"image-formats", 98095, 1964, 17, 17, 17, 96863},
-    {"image-spaces", 159791, 2092, 10, 10, 10, 158559},
-    {"image-compose", 2947567, 883124, 12, 12, 12, 2919743},
+    // image-spaces and image-compose: the work of an AREA fill with axis-aligned edges counts the rows its pixels cover across once per
+    // period or once, not once each (the minified tile that took 883124 takes 3107), and no pixel of either render is different.
+    {"image-spaces", 159791, 1964, 10, 10, 10, 158559},
+    {"image-compose", 2947567, 3107, 12, 12, 12, 2919743},
     {"image-nothing", 98095, 1964, 5, 5, 5, 96863},
   };
   size_t checked = 0;

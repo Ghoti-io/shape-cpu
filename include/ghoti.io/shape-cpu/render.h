@@ -599,7 +599,10 @@
  *   window as a count of the edge texel, the whole periods of a repeating axis as that many sums of the window's row, the rest one
  *   by one), and only the cells its boundary crosses are clipped (the area of the intersection of two convex polygons, by
  *   Sutherland-Hodgman, in a fixed order).  A parallelogram with axis-aligned edges takes a cell's weight as the product of its
- *   overlap in x and its overlap in y, and a run of cells it crosses entirely by its row's overlap once.  Sums are compensated
+ *   overlap in x and its overlap in y, and a run of cells it crosses entirely by its row's overlap once; and because that sum is
+ *   separable, the rows it covers across are not visited one by one however many there are: of a repeating axis the whole periods are as
+ *   many sums of the window's rows (twice as many in a reflecting axis), of a padded axis the rows past the window are a count of its
+ *   edge row, of a bare axis they are nothing.  Sums are compensated
  *   (Neumaier) and in a fixed order, the row of the window is summed pairwise over blocks of 1024 texels, and the mean is divided
  *   by the exact area of the parallelogram once, at the end; so the mean is within `2^-40` relative of the exact mean and the same
  *   on every target.  A constant image gives that constant within the tolerance; a unit-aligned unit square gives the texel exactly.
@@ -615,7 +618,10 @@
  *   about which items are refused.  With `cx` and `cy` the columns and rows of cells a preimage can touch (`ceil` of its extent in
  *   each axis, plus two), `n` the window's width and `run = min(cx, 3 n)`, a pixel visits at most
  *   `cy run + 4 (cx + cy) + 8 cx + 2 cy + 8` (the rows' runs, the cells the boundary crosses, the rows that hold a vertex, and
- *   the rows' own steps); the item's bound is that times the pixels of its whole-render rectangle.  A preimage wider than `2^33`
+ *   the rows' own steps); the item's bound is that times the pixels of its whole-render rectangle.  A preimage with axis-aligned edges
+ *   visits at most `rows (run + 3) + 8`, where `rows` is the lesser of `cy` and what IC7 leaves to visit: with `m` the window's height,
+ *   `3 m + 2` for a repeating or reflecting axis and `m + 4` for a padded or bare one, so that its bound does not grow with the
+ *   minification.  A preimage wider than `2^33`
  *   texels is past the domain.  Past a bound, past the sampling domain (the whole-render rectangle maps outside `[-2^32, 2^32]`
  *   texels on an axis) or under a map whose inverse fails, the item is refused while drawing: `RESOURCE_LIMIT`, its block skipped,
  *   strict stopping with the finished prefix.  `NEAREST`, `LINEAR` and `CUBIC` take at most sixteen taps a pixel and need no limit.

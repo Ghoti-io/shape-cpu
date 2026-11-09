@@ -87,9 +87,10 @@ violation.
 
 ## Not implemented
 
-- An `AREA` image filter under a repeating edge mode sums the periods one row at a time, so a draw whose pixel would visit more than
-  `max_area_pixel_work` texels and cells (2^20 by default; a tile minified a thousand times or more) is refused with a reason
-  in the report and draws nothing; the whole periods are not summed in one step.
+- An `AREA` image filter under a turned or sheared map visits the rows its pixel covers one by one, so a draw whose pixel would visit
+  more than `max_area_pixel_work` texels and cells (2^20 by default) is refused with a reason in the report and draws nothing.  A
+  map with edges along the axes (a scale, a translation, a quarter turn) sums the whole periods of a repeating image in one step, and its
+  work is the window's own however far the image is minified.
 - A pattern's tile is clipped to its cell; a tile that draws outside it is not drawn there.
 - A stroke's width profile is not drawn; the waist reserves it.
 - There is no GPU target and no seam-free flag; both are refused.

@@ -611,6 +611,196 @@ TEST(RenderImageArea, WholePeriodsAreSummedNotVisited) {
 
 namespace {
 
+typedef long double LD;
+
+LD floor_div_ld(long long a, long long b) { // b > 0
+  long long q = a / b;
+  if ((a % b != 0) && (a < 0)) {
+    q--;
+  }
+  return (LD)q;
+}
+
+long long mod_ll(long long a, long long b) {
+  long long r = a % b;
+  return r < 0 ? r + b : r;
+}
+
+/**
+ * The weight of each texel of a window of @p n texels from @p w0 over the interval [@p lo, @p hi] of the extended axis (the length
+ * of the interval its cells cover, over every cell that holds the texel), by the arithmetic of whole cells and two partial ones, with
+ * the edge mode's own mapping written out here and nothing taken from the library.
+ */
+std::vector<LD> axis_weights(double lo, double hi, long long w0, long long n, uint32_t mode) {
+  std::vector<LD> w((size_t)n, 0.0L);
+  const long long kmin = (long long)std::ceil(lo);
+  const long long kmax = (long long)std::floor(hi);
+  auto texel_of = [&](long long k) -> long long { // the window texel a cell holds, or -1
+    const long long r = k - w0;
+    switch (mode) {
+      case GSHSCENE_IMAGE_EXTEND_REPEAT:
+        return mod_ll(r, n);
+      case GSHSCENE_IMAGE_EXTEND_REFLECT: {
+        const long long m = mod_ll(r, 2 * n);
+        return m < n ? m : 2 * n - 1 - m;
+      }
+      case GSHSCENE_IMAGE_EXTEND_PAD:
+        return r < 0 ? 0 : (r >= n ? n - 1 : r);
+      default:
+        return (r < 0 || r >= n) ? -1 : r;
+    }
+  };
+  auto overlap = [&](long long k) -> LD { // of the cell [k, k + 1] with [lo, hi]
+    const LD a = std::fmax((LD)lo, (LD)k);
+    const LD b = std::fmin((LD)hi, (LD)(k + 1));
+    return b > a ? b - a : 0.0L;
+  };
+  // the whole cells [kmin, kmax - 1], by the count of those at each residue
+  if (kmax > kmin) {
+    const long long A = kmin, B = kmax - 1;
+    if (mode == GSHSCENE_IMAGE_EXTEND_REPEAT || mode == GSHSCENE_IMAGE_EXTEND_REFLECT) {
+      const long long P = mode == GSHSCENE_IMAGE_EXTEND_REPEAT ? n : 2 * n;
+      for (long long t = 0; t < n; t++) {
+        long long residues[2] = {t, 2 * n - 1 - t};
+        for (int which = 0; which < (mode == GSHSCENE_IMAGE_EXTEND_REPEAT ? 1 : 2); which++) {
+          const long long r = residues[which];
+          // k - w0 = r (mod P): the count of k in [A, B]
+          const LD count = floor_div_ld(B - w0 - r, P) - floor_div_ld(A - 1 - w0 - r, P);
+          w[(size_t)t] += count;
+        }
+      }
+    } else {
+      // pad and none: the cells inside the window one by one, and for pad the rest as two counts
+      for (long long k = std::max(A, w0); k <= std::min(B, w0 + n - 1); k++) {
+        w[(size_t)(k - w0)] += 1.0L;
+      }
+      if (mode == GSHSCENE_IMAGE_EXTEND_PAD) {
+        if (A < w0) {
+          w[0] += (LD)(std::min(B, w0 - 1) - A + 1);
+        }
+        if (B > w0 + n - 1) {
+          w[(size_t)(n - 1)] += (LD)(B - std::max(A, w0 + n) + 1);
+        }
+      }
+    }
+  }
+  // the partial cells at the ends
+  if (kmax >= kmin) {
+    if (lo < (double)kmin) {
+      const long long t = texel_of(kmin - 1);
+      if (t >= 0) {
+        w[(size_t)t] += overlap(kmin - 1);
+      }
+    }
+    if (hi > (double)kmax) {
+      const long long t = texel_of(kmax);
+      if (t >= 0) {
+        w[(size_t)t] += overlap(kmax);
+      }
+    }
+  } else {
+    // the interval lies inside one cell
+    const long long t = texel_of((long long)std::floor(lo));
+    if (t >= 0) {
+      w[(size_t)t] += (LD)hi - (LD)lo;
+    }
+  }
+  return w;
+}
+
+} // namespace
+
+// IC7, IC9: an AREA footprint with edges along the axes is a product of its extent in x and its extent in y, so the rows (and the
+// columns) it covers across are summed by period, by count or not at all, however far the image is minified: the work of a pixel
+// is the window's own, and the mean is the one a closed form gives, written out here in long double for every pair of edge modes and
+// footprints of a few thousand to a few billion texels, turned a quarter or not.
+TEST(RenderImageArea, AnAxisAlignedFootprintIsSummedByPeriodHoweverFarItIsMinified) {
+  Lcg rng{777};
+  const ih::Fmt formats[] = {ih::fmt(1, false, 8, GIMG_ALPHA_NONE, true), ih::fmt(4, false, 8, GIMG_ALPHA_STRAIGHT)};
+  size_t compared = 0;
+  uint64_t worst_visits = 0;
+  for (int trial = 0; trial < 400; trial++) {
+    Store s;
+    const ih::Fmt & f = formats[trial % 2];
+    const uint32_t w = 1 + rng.next() % 6;
+    const uint32_t h = 1 + rng.next() % 6;
+    std::vector<uint32_t> samples((size_t)w * h * f.channels);
+    for (uint32_t & v : samples) {
+      v = rng.next() & 255u;
+    }
+    const GSHSCENE_Resource * image = ih::intern_image(s.store, w, h, f, samples);
+    ASSERT_NE(image, nullptr);
+    s.held.push_back(image);
+    uint32_t window[4] = {0, 0, 0, 0};
+    if (trial % 3 == 0 && (w > 1 || h > 1)) {
+      window[0] = rng.next() % w;
+      window[1] = rng.next() % h;
+      window[2] = window[0] + 1 + rng.next() % (w - window[0]);
+      window[3] = window[1] + 1 + rng.next() % (h - window[1]);
+    }
+    const uint32_t ex = rng.next() % 4;
+    const uint32_t ey = rng.next() % 4;
+    const GSHSCENE_Color_Space own{};
+    GSHSCENE_Color_Space layer = srgb();
+    GSHCPU_Image im;
+    ASSERT_EQ(gshcpu_render_image_open(&im, image, window, ex, ey, GSHSCENE_IMAGE_FILTER_AREA, &own, &layer, &layer), GSHCPU_OK);
+    static const double scales[] = {3.0, 250.0, 9000.5, 3e6 + 0.25, 1e9 + 0.125};
+    const double sx = scales[rng.next() % 5] * (1.0 + (double)(rng.next() % 1000) / 1000.0);
+    const double sy = scales[rng.next() % 5] * (1.0 + (double)(rng.next() % 1000) / 1000.0);
+    const double ox = rng.between(-1e6, 1e6), oy = rng.between(-1e6, 1e6);
+    const bool turned = rng.next() % 2;
+    double ea[2] = {turned ? 0.0 : sx, turned ? sy : 0.0};
+    double eb[2] = {turned ? sx : 0.0, turned ? 0.0 : sy};
+    const double origin[2] = {ox, oy};
+    im.inv[0] = ea[0];
+    im.inv[2] = ea[1];
+    im.inv[1] = eb[0];
+    im.inv[3] = eb[1];
+    uint64_t bound = 0;
+    ASSERT_EQ(gshcpu_render_image_area_bound(&im, &bound), 1);
+    im.visits = 0;
+    double got[4];
+    gshcpu_render_image_region(&im, origin, ea, eb, got);
+    ASSERT_LE(im.visits, bound) << "trial " << trial << ": the bound is no bound";
+    // the window's own size, not the footprint's: a 6 by 6 window and a billion cells across visit a few hundred
+    ASSERT_LT(bound, 2000u) << "trial " << trial << ": the bound grows with the minification";
+    worst_visits = std::max(worst_visits, im.visits);
+    // the footprint's extent on each image axis
+    const double xlo = std::fmin(std::fmin(origin[0], origin[0] + ea[0]), std::fmin(origin[0] + eb[0], origin[0] + ea[0] + eb[0]));
+    const double xhi = std::fmax(std::fmax(origin[0], origin[0] + ea[0]), std::fmax(origin[0] + eb[0], origin[0] + ea[0] + eb[0]));
+    const double ylo = std::fmin(std::fmin(origin[1], origin[1] + ea[1]), std::fmin(origin[1] + eb[1], origin[1] + ea[1] + eb[1]));
+    const double yhi = std::fmax(std::fmax(origin[1], origin[1] + ea[1]), std::fmax(origin[1] + eb[1], origin[1] + ea[1] + eb[1]));
+    const std::vector<LD> wx = axis_weights(xlo, xhi, (long long)im.x0, (long long)(im.x1 - im.x0), ex);
+    const std::vector<LD> wy = axis_weights(ylo, yhi, (long long)im.y0, (long long)(im.y1 - im.y0), ey);
+    LD sum[4] = {0, 0, 0, 0};
+    for (long long r = 0; r < (long long)(im.y1 - im.y0); r++) {
+      for (long long c = 0; c < (long long)(im.x1 - im.x0); c++) {
+        double t[4];
+        gshcpu_render_image_tap(&im, (long long)im.x0 + c, (long long)im.y0 + r, t);
+        for (int k = 0; k < 4; k++) {
+          sum[k] += wx[(size_t)c] * wy[(size_t)r] * (LD)t[k];
+        }
+      }
+    }
+    const LD area = (LD)(xhi - xlo) * (LD)(yhi - ylo);
+    double want[4];
+    for (int k = 0; k < 4; k++) {
+      want[k] = (double)(sum[k] / area);
+    }
+    if (im.convert_out) {
+      gshcpu_render_convert_premultiplied(&im.out, want, want);
+    }
+    ASSERT_TRUE(close(got, want, 1e-9)) << "trial " << trial << " extend " << ex << "," << ey << " window " << window[0] << ","
+                                        << window[1] << "," << window[2] << "," << window[3] << " x " << xlo << ".." << xhi << " y "
+                                        << ylo << ".." << yhi << " got " << got[0] << " want " << want[0];
+    compared++;
+  }
+  EXPECT_EQ(compared, 400u);
+  EXPECT_LT(worst_visits, 2000u);
+}
+
+namespace {
+
 struct Limited {
   uint32_t refused = 0;
   uint32_t reason = 0;
@@ -722,6 +912,58 @@ TEST(RenderImageLimits, EachBoundPassesExactlyAndOneMoreIsRefused) {
   gshcpu_limits_default(&limits);
   limits.max_area_pixel_work = pixel - 1;
   EXPECT_EQ(render_limited(limits, l, W, H, nullptr, GSHSCENE_RENDER_STRICT).result, GSHSCENE_ERR_REFUSED);
+}
+
+// IC7, IC9: a tile minified a million times under a map with edges along the axes is drawn (it is the image's mean, whatever the
+// phase), where the same minification under a turn is refused with a reason, the bound of a pixel being that many rows.
+TEST(RenderImageLimits, AMinifiedTileUnderAScaleIsDrawnAndUnderATurnIsRefused) {
+  Store s;
+  const ih::Fmt f = ih::fmt(1, false, 8, GIMG_ALPHA_NONE);
+  std::vector<uint32_t> samples;
+  double total = 0.0;
+  for (uint32_t i = 0; i < 15u; i++) {
+    samples.push_back((i * 37u + 11u) % 256u);
+    total += (double)samples.back();
+  }
+  const double mean = total / 15.0;
+  const GSHSCENE_Resource * image = ih::intern_image(s.store, 5, 3, f, samples);
+  ASSERT_NE(image, nullptr);
+  s.held.push_back(image);
+  const GSHSCENE_Image_Extend modes[] = {GSHSCENE_IMAGE_EXTEND_REPEAT, GSHSCENE_IMAGE_EXTEND_REFLECT};
+  for (GSHSCENE_Image_Extend mode : modes) {
+    for (int turned = 0; turned < 2; turned++) {
+      SCOPED_TRACE(std::string(mode == GSHSCENE_IMAGE_EXTEND_REPEAT ? "repeat" : "reflect") + (turned ? ", turned" : ", scaled"));
+      GSHSCENE_Image_Paint ip;
+      gshscene_image_paint_init(&ip);
+      ip.image = image;
+      ip.extend_x = (uint32_t)mode;
+      ip.extend_y = (uint32_t)mode;
+      ip.map = turned ? matrix(0.866e-6, 0.5e-6, -0.5e-6, 0.866e-6, 0.3, 0.2) : matrix(1e-6, 0.0, 0.0, 1e-6, 0.3, 0.2);
+      ip.magnify = GSHSCENE_IMAGE_FILTER_AREA;
+      ip.minify = GSHSCENE_IMAGE_FILTER_AREA;
+      const GSHSCENE_Resource * paint = nullptr;
+      ASSERT_EQ(gshscene_store_intern_image_paint(s.store, &ip, &paint), GSHSCENE_OK);
+      s.held.push_back(paint);
+      GSHSCENE_List * l = s.open();
+      GSHSCENE_Paint p = image_paint_of(paint, 1.0);
+      ASSERT_EQ(gshscene_list_fill(l, s.rect(0, 0, 6, 4), nullptr, GSHGEOM_FILL_NONZERO, &p, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+      GSHCPU_Limits limits;
+      gshcpu_limits_default(&limits);
+      Limited out = render_limited(limits, l, 6, 4, nullptr);
+      if (turned) {
+        EXPECT_EQ(out.refused, 1u) << "a turned footprint a million texels across visits its rows";
+        EXPECT_EQ(out.reason, (uint32_t)GSHSCENE_REASON_RESOURCE_LIMIT);
+      } else {
+        EXPECT_EQ(out.refused, 0u);
+        ASSERT_EQ(out.bytes.size(), 6u * 4u * 4u);
+        for (size_t px = 0; px < 24; px++) {
+          EXPECT_NEAR((double)(unsigned char)out.bytes[px * 4], mean, 1.0) << "pixel " << px;
+          EXPECT_EQ((unsigned char)out.bytes[px * 4 + 3], 255u);
+        }
+      }
+    }
+  }
 }
 
 // IC10: each tier is the general tier's pixels, and is taken: every fill of a corpus of maps, filters, edge modes and formats

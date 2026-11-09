@@ -321,51 +321,155 @@ static double dmax(double a, double b) {
   return a > b ? a : b;
 }
 
+/** What one row of the window contributes to an axis-aligned footprint, as the footprint's columns weigh it (the cells at the two ends by
+ * their overlap in x, the run between them whole), before the row's own weight in y; @p out is in the row's own compensated sum. */
+typedef struct Rect_Cols {
+  double xl, xr;       /* the footprint's extent in x */
+  int64_t ci0, ci1;    /* the cells it touches: [ci0, ci1) */
+  int64_t fa, fb;      /* the cells it covers entirely: [fa, fb) */
+  int have_run;
+} Rect_Cols;
+
+/** The row @p ty of the window under the columns @p c, weighed by @p wy, added to @p acc (the same operations whatever the row). */
+static void rect_row(GSHCPU_Image * im, const Rect_Cols * c, double wy, int64_t ty, Sum * acc) {
+  for (int64_t i = c->ci0; i < c->ci1; i++) {
+    if (c->have_run && i >= c->fa && i < c->fb) {
+      // The run of whole cells: weighed by the row's overlap once.
+      if (ty >= 0) {
+        Sum run = {{0.0, 0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 0.0}};
+        add_run(im, &run, c->fa, c->fb, ty);
+        double r[4];
+        sum_value(&run, r);
+        sum_add_scaled(acc, wy, r);
+      }
+      i = c->fb - 1;
+      continue;
+    }
+    const double wx = dmin(gshcpu_render_i64_to_double(i + 1), c->xr) - dmax(gshcpu_render_i64_to_double(i), c->xl);
+    if (!(wx > 0.0)) {
+      continue;
+    }
+    const double w = wx * wy;
+    if (ty >= 0) {
+      add_cell(im, acc, w, i, ty);
+    }
+  }
+}
+
+/** The rows `[ja, jb)` of the extended image, every one covered across (weight 1), one by one. */
+static void rect_rows(GSHCPU_Image * im, const Rect_Cols * c, int64_t ja, int64_t jb, Sum * acc) {
+  for (int64_t j = ja; j < jb; j++) {
+    const int64_t ty = gshcpu_render_image_edge(j, (int64_t)im->y0, (int64_t)im->y1, im->extend_y);
+    im->visits++;
+    rect_row(im, c, 1.0, ty, acc);
+  }
+}
+
+/** The sum of the window's rows `[ya, yb)` (each as @p rect_row weighs it), as a value of four channels. */
+static void rect_window_rows(GSHCPU_Image * im, const Rect_Cols * c, int64_t ya, int64_t yb, double out[4]) {
+  Sum total = {{0.0, 0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 0.0}};
+  for (int64_t ty = ya; ty < yb; ty++) {
+    Sum row = {{0.0, 0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 0.0}};
+    im->visits++;
+    rect_row(im, c, 1.0, ty, &row);
+    double v[4];
+    sum_value(&row, v);
+    sum_add(&total, v);
+  }
+  sum_value(&total, out);
+}
+
 /**
  * A parallelogram with edges along the axes: a cell's weight is the product of its overlap in x and in y, formed from the
  * same operands wherever the cell lies; a run of cells the parallelogram covers across is weighed by its row's overlap once.
+ * The sum is separable, so the rows covered across (weight 1 in y) need not be visited one by one however many there are: of a
+ * repeating axis the whole periods are as many sums of the window's rows (twice, in a reflecting one, where every row is met
+ * once going and once coming), of a padded one the rows past the window are a count of its edge row, and of a bare one they are
+ * nothing.  At most a period's rest and the window's rows are visited, so the work of a pixel is bounded by the window's own size
+ * however far the image is minified.
  */
 static void rectangle(GSHCPU_Image * im, const double * vx, const double * vy, Sum * acc) {
-  const double xl = dmin(dmin(vx[0], vx[1]), dmin(vx[2], vx[3]));
-  const double xr = dmax(dmax(vx[0], vx[1]), dmax(vx[2], vx[3]));
+  Rect_Cols c;
+  c.xl = dmin(dmin(vx[0], vx[1]), dmin(vx[2], vx[3]));
+  c.xr = dmax(dmax(vx[0], vx[1]), dmax(vx[2], vx[3]));
   const double yl = dmin(dmin(vy[0], vy[1]), dmin(vy[2], vy[3]));
   const double yr = dmax(dmax(vy[0], vy[1]), dmax(vy[2], vy[3]));
-  const int64_t ci0 = gshcpu_render_trunc_i64(gmath_floor(xl));
-  const int64_t ci1 = gshcpu_render_trunc_i64(gmath_floor(xr)) + (xr > gmath_floor(xr) ? 1 : 0); /* one past the last */
-  const int64_t fa = gshcpu_render_trunc_i64(-gmath_floor(-xl));
-  const int64_t fb = gshcpu_render_trunc_i64(gmath_floor(xr));
-  const int have_run = fb > fa;
+  c.ci0 = gshcpu_render_trunc_i64(gmath_floor(c.xl));
+  c.ci1 = gshcpu_render_trunc_i64(gmath_floor(c.xr)) + (c.xr > gmath_floor(c.xr) ? 1 : 0); /* one past the last */
+  c.fa = gshcpu_render_trunc_i64(-gmath_floor(-c.xl));
+  c.fb = gshcpu_render_trunc_i64(gmath_floor(c.xr));
+  c.have_run = c.fb > c.fa;
   const int64_t rj0 = gshcpu_render_trunc_i64(gmath_floor(yl));
   const int64_t rj1 = gshcpu_render_trunc_i64(gmath_floor(yr)) + (yr > gmath_floor(yr) ? 1 : 0);
-  for (int64_t j = rj0; j < rj1; j++) {
+  const int64_t ya = gshcpu_render_trunc_i64(-gmath_floor(-yl)); /* the rows covered across: [ya, yb) */
+  const int64_t yb = gshcpu_render_trunc_i64(gmath_floor(yr));
+  /* the rows at the top the footprint covers in part, one by one */
+  for (int64_t j = rj0; j < rj1 && (yb <= ya || j < ya); j++) {
     const double wy = dmin(gshcpu_render_i64_to_double(j + 1), yr) - dmax(gshcpu_render_i64_to_double(j), yl);
     if (!(wy > 0.0)) {
       continue;
     }
     const int64_t ty = gshcpu_render_image_edge(j, (int64_t)im->y0, (int64_t)im->y1, im->extend_y);
     im->visits++;
-    for (int64_t i = ci0; i < ci1; i++) {
-      if (have_run && i >= fa && i < fb) {
-        // The run of whole cells: weighed by the row's overlap once.
-        if (ty >= 0) {
-          Sum run = {{0.0, 0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 0.0}};
-          add_run(im, &run, fa, fb, ty);
-          double r[4];
-          sum_value(&run, r);
-          sum_add_scaled(acc, wy, r);
+    rect_row(im, &c, wy, ty, acc);
+  }
+  if (yb > ya) {
+    const int64_t y0 = (int64_t)im->y0;
+    const int64_t y1 = (int64_t)im->y1;
+    const int64_t n = y1 - y0;
+    switch (im->extend_y) {
+      case GSHSCENE_IMAGE_EXTEND_PAD: {
+        // above the window: every row is its first row; below it, its last; in it, one by one
+        const int64_t above = (yb < y0 ? yb : y0) - ya;
+        if (above > 0) {
+          double v[4];
+          Sum row = {{0.0, 0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 0.0}};
+          im->visits++;
+          rect_row(im, &c, 1.0, y0, &row);
+          sum_value(&row, v);
+          sum_add_scaled(acc, gshcpu_render_i64_to_double(above), v);
         }
-        i = fb - 1;
-        continue;
+        rect_rows(im, &c, ya > y0 ? ya : y0, yb < y1 ? yb : y1, acc);
+        const int64_t below = yb - (ya > y1 ? ya : y1);
+        if (below > 0) {
+          double v[4];
+          Sum row = {{0.0, 0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 0.0}};
+          im->visits++;
+          rect_row(im, &c, 1.0, y1 - 1, &row);
+          sum_value(&row, v);
+          sum_add_scaled(acc, gshcpu_render_i64_to_double(below), v);
+        }
+        break;
       }
-      const double wx = dmin(gshcpu_render_i64_to_double(i + 1), xr) - dmax(gshcpu_render_i64_to_double(i), xl);
-      if (!(wx > 0.0)) {
-        continue;
-      }
-      const double w = wx * wy;
-      if (ty >= 0) {
-        add_cell(im, acc, w, i, ty);
+      case GSHSCENE_IMAGE_EXTEND_NONE:
+        // the rows outside the window draw nothing
+        rect_rows(im, &c, ya > y0 ? ya : y0, yb < y1 ? yb : y1, acc);
+        break;
+      default: {
+        const int reflect = im->extend_y == GSHSCENE_IMAGE_EXTEND_REFLECT;
+        const int64_t period = reflect ? 2 * n : n;
+        const int64_t whole = (yb - ya) / period;
+        int64_t from = ya;
+        if (whole > 0) {
+          double v[4];
+          rect_window_rows(im, &c, y0, y1, v);
+          sum_add_scaled(acc, gshcpu_render_i64_to_double(whole) * (reflect ? 2.0 : 1.0), v);
+          from = ya + whole * period;
+        }
+        rect_rows(im, &c, from, yb, acc);
+        break;
       }
     }
+  }
+  /* the rows at the bottom the footprint covers in part, one by one */
+  for (int64_t j = (yb > ya ? yb : rj1); j < rj1; j++) {
+    const double wy = dmin(gshcpu_render_i64_to_double(j + 1), yr) - dmax(gshcpu_render_i64_to_double(j), yl);
+    if (!(wy > 0.0)) {
+      continue;
+    }
+    const int64_t ty = gshcpu_render_image_edge(j, (int64_t)im->y0, (int64_t)im->y1, im->extend_y);
+    im->visits++;
+    rect_row(im, &c, wy, ty, acc);
   }
 }
 
@@ -466,9 +570,25 @@ int gshcpu_render_image_area_bound(const GSHCPU_Image * im, uint64_t * out) {
     return 0; /* past the domain: the preimage of one pixel is wider than the domain is */
   }
   const uint64_t cx = (uint64_t)gshcpu_render_trunc_i64(gmath_ceil(ex)) + 2u; /* the columns of cells the preimage touches, at most */
-  const uint64_t cy = (uint64_t)gshcpu_render_trunc_i64(gmath_ceil(ey)) + 2u;
+  uint64_t cy = (uint64_t)gshcpu_render_trunc_i64(gmath_ceil(ey)) + 2u;
+  const int rectangular = (im->inv[1] == 0.0 && im->inv[2] == 0.0) || (im->inv[0] == 0.0 && im->inv[3] == 0.0);
+  if (rectangular) {
+    /* A footprint with edges along the axes: the rows it covers across are summed by period, by count or not at all (rectangle()), so
+     * the rows visited are the two it covers in part and at most the window's own: a repeating axis's rest of a period (twice the
+     * window's rows when it reflects) and one pass over the window's rows for the sum of a period; a padded axis's rows in the window
+     * and its edge rows above and below; a bare axis's rows in the window. */
+    const uint64_t ny = (uint64_t)(im->y1 - im->y0);
+    const int repeats = im->extend_y == (uint32_t)GSHSCENE_IMAGE_EXTEND_REPEAT || im->extend_y == (uint32_t)GSHSCENE_IMAGE_EXTEND_REFLECT;
+    const uint64_t rows = repeats ? sat_add(sat_mul(3u, ny), 2u) : sat_add(ny, 4u);
+    cy = cy < rows ? cy : rows;
+  }
   const uint64_t n = (uint64_t)(im->x1 - im->x0);
   const uint64_t run = cx < sat_mul(3u, n) ? cx : sat_mul(3u, n); /* a row's run: the window's cells, a whole period's sum, a period's rest */
+  if (rectangular) {
+    /* Each row visited is its run, the two cells at the ends of it and its own visit; the two rows covered in part are among the rows. */
+    *out = sat_add(sat_mul(cy, sat_add(run, 3u)), 8u);
+    return 1;
+  }
   uint64_t b = sat_mul(cy, run);
   /* A cell clipped is counted once for the clip and once for the texel it is weighed with. */
   b = sat_add(b, sat_mul(4u, sat_add(cx, cy))); /* the cells the boundary crosses */
