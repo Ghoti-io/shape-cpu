@@ -1342,6 +1342,12 @@ static GSHCPU_Result measure_one(const Cpu_Sink * cs, const GSHSCENE_Target * ta
   return GSHCPU_OK;
 }
 
+/** What the pass takes of the arena for one copy of a unit whose geometry takes @p geometry bytes: eight times it and a page (measure_tile). */
+static size_t copy_bound(size_t geometry) {
+  size_t scaled;
+  return sat_add(gcu_safe_mul_size(geometry, 8u, &scaled) ? scaled : SIZE_MAX, 4096u);
+}
+
 static GSHCPU_Result measure_tile(const Cpu_Sink * cs, const GSHSCENE_Target * target, unsigned char * area, const Mask_Layout * M,
     const GSHSCENE_Item * use, GSHGEOM_Map * maps, size_t n, GSHCPU_Arena * arena, size_t * peak, size_t used, size_t base);
 
@@ -1435,23 +1441,21 @@ static GSHCPU_Result measure_tile(const Cpu_Sink * cs, const GSHSCENE_Target * t
       size_t local = 0;
       r = measure_mask(cs, &inner, area, M, item, tmaps, m_count, arena, &local, used + bytes, 1);
       if (r == GSHCPU_OK && local > 0) {
-        size_t scaled;
-        local = gcu_safe_mul_size(local, 8u, &scaled) ? scaled : SIZE_MAX;
-        local = sat_add(sat_add(local, 4096u), base);
-        *peak = local > *peak ? local : *peak;
+        const size_t unit = copy_bound(local);
+        *peak = sat_add(unit, base) > *peak ? sat_add(unit, base) : *peak;
       }
     } else {
       size_t local = 0;
       r = measure_one(cs, &inner, item, tmaps, m_count, arena, &local, 1);
+      const size_t unit = local > 0 ? copy_bound(local) : 0u;
       if (r == GSHCPU_OK && local > 0) {
-        size_t scaled;
-        local = gcu_safe_mul_size(local, 8u, &scaled) ? scaled : SIZE_MAX;
-        local = sat_add(sat_add(local, 4096u), base);
-        *peak = local > *peak ? local : *peak;
+        *peak = sat_add(unit, base) > *peak ? sat_add(unit, base) : *peak;
       }
       if (r == GSHCPU_OK && (item->kind == GSHSCENE_ITEM_FILL || item->kind == GSHSCENE_ITEM_STROKE) &&
           item->paint.kind == GSHSCENE_PAINT_PATTERN) {
-        r = measure_tile(cs, &inner, area, M, item, tmaps, m_count, arena, peak, used + bytes, sat_add(base, local));
+        /* The nested pass runs while this unit's copy is live, so it stands on this level's base and this unit's bound once: the
+         * bound of the unit, not the figure above that already holds the base, which would count the base twice at every level. */
+        r = measure_tile(cs, &inner, area, M, item, tmaps, m_count, arena, peak, used + bytes, sat_add(base, unit));
       }
     }
     if (r != GSHCPU_OK) {
