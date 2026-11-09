@@ -97,9 +97,11 @@ size_t need_of(GSHSCENE_List * l, bool caller_memory) {
 } // namespace
 
 TEST(RenderPatternNesting, TheWorkspaceDoesNotDoubleWithEachLevelOfTheNest) {
-  // The fixed block holds a term in the depth squared (a pass level for each level, each with the chain's maps) and, with clips, one in
-  // their product with the depth (the fourth power at most), so the need is a polynomial in the depth and no straight line; what it must never be is a doubling: a
-  // level that adds more than a few percent of everything before it is the base counted twice.
+  // The need is a polynomial in the depth and no straight line: a pass level for each level, each with the chain's maps (the square), and
+  // with clips one block per pass level that holds each clip's chain of maps (clips x chain x pass levels x a map: the cube, 67 MB for
+  // 72 clips in 24 levels).  That term is real, not an over-count of a different order: a level holds the clips and chains of its own depth,
+  // so the true sum is a third of the bound at most.  What it must never be is a doubling: a level that adds more than a few percent of
+  // everything before it is the base counted twice.
   for (int clips : {0, 3}) {
     std::vector<size_t> need;
     for (int depth = 1; depth <= 24; depth++) {
