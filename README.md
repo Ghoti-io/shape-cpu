@@ -91,7 +91,7 @@ violation.
   more than `max_area_pixel_work` texels and cells (2^20 by default) is refused with a reason in the report and draws nothing.  A
   map with edges along the axes (a scale, a translation, a quarter turn) sums the whole periods of a repeating image in one step, and its
   work is the window's own however far the image is minified.
-- A pattern's tile is clipped to its cell; a tile that draws outside it is not drawn there.
+- A pattern's tile is clipped to its cell unless the pattern says `overflow` (SVG 2's `overflow="visible"`), when it is drawn unclipped at every copy, later copies over earlier ones; a tile whose extent is not known (a stroke with a device width, a hatch) is clipped as before and reported.
 - A stroke's width profile is not drawn; the waist reserves it.
 - There is no GPU target and no seam-free flag; both are refused.
 - The fast fill and stroke coverage tiers (`GSHCPU_FILL_COVERAGE_FAST`, `GSHCPU_STROKE_COVERAGE_FAST`) are approximations that trade

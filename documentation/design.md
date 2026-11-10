@@ -422,6 +422,15 @@ time in lattice order, each with all its units onto the lattice layer (source-ov
 holds a blend mode is drawn the same way, as one non-isolated, non-knockout group over the lattice layer). The cells' coverage is not
 multiplied in again: the outlines were cut to the cell by the clip, and multiplying would square the coverage at a cell's edge.
 
+**A tile that draws past its cell (PC6a, shape-scene PT15).** SVG 2's `overflow="visible"` on a pattern is a lattice whose clip is wider than its
+cell. The sink does not clip the copies to the cell: it gives the lattice the pattern's extent, the cell widened to the box of everything the tile
+paints (found once when the pattern is interned, conservative, clips and masks ignored), so a copy is cut to its extent, the copies that reach a
+pixel are those whose extent meets it, and the overlap form above applies whenever the extent is wider than a step: the copies in lattice
+order, later over earlier. Nothing else changed, so the fast tiers, the period window, the cache key (a pattern with the flag is another
+resource) and the limits work as they did. No browser, resvg or Inkscape draws the attribute (they clip), so the references are hand-derived: a
+pixel under `k` copies of a constant alpha `a` has `1 - (1 - a)^k`, and a turned lattice is checked against the copies a pixel's center falls in.
+A tile whose extent is not known is drawn clipped and reported.
+
 **Strokes in a tile (PC5)** are cut to the cell exactly. The expansion of the stroke (the cached one, which is a function of the
 centerline, the style, the linear part and the fraction) has up to three parts, the body, the aligned part and the clip path; the body and
 the aligned part are cut to the cell's quadrilateral by `shape-geometry`'s winding-preserving convex clip (in this copy's stroke only; the

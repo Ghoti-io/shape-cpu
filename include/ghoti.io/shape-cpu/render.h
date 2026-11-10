@@ -830,6 +830,12 @@
  *   pictures allow (R1's PT2).
  * - **PC6 Overlapping cells.**  Where a step is smaller than the cell on an axis that repeats, the copies are drawn one at a time in lattice order,
  *   all of a copy's units onto the lattice layer before the next copy's, each cut to its cell by the geometric clip and by nothing else.
+ * - **PC6a A tile that draws past its cell (shape-scene PT15).**  For a pattern whose `overflow` is 1 the lattice's cell is the pattern's extent
+ *   (`gshscene_pattern_extent`: the cell widened to the box of what the tile paints), so a copy is cut to its extent and not to its cell, the copies a
+ *   pixel is looked for in are those whose extent meets it, and the copies are drawn one at a time in lattice order (PC6) whenever the extent is wider
+ *   than a step, so a later copy is over an earlier one where they spill into each other.  The sink has `GSHSCENE_CAP_PATTERN_OVERFLOW`.  A tile whose
+ *   extent is not known (a stroke with a device width, a hatch) is clipped to its cell as before, and the planning pass has reported it
+ *   `APPROXIMATED`, `PATTERN_OVERFLOW`.  A pattern whose `overflow` is 0 is drawn exactly as it was.
  * - **PC7 Colored, uncolored, alpha.**  The tint is resolved and converted once; the lattice layer is drawn with the tile's own colors and only its
  *   alpha is read.
  * - **PC8 Limits.**  `GSHCPU_Limits.max_pattern_cells`: the copies of a use, counted by `gshgeom_lattice_each` (a cell that only touches the

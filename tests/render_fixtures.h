@@ -80,6 +80,7 @@
  * | blend-out-of-range | blend modes on sources out of range (negative, above 1, the recorded bound 2^16), dodge and burn past their poles, ClipColor with both steps, in a gamma-0.1 parent, nested blending groups, and a blend over the backdrop's transparent pixels |
  * | pattern-lattices | (masks-images-patterns story R2) cells that abut at a fraction, gapped under a skew (CSS `space`), scaled, and rotated |
  * | pattern-overlap | cells that overlap in x, in y and in both, one repeating on one axis only, and a tile whose content spills past its cell |
+ * | pattern-overflow | (shape-scene PT15) tiles that draw past their cells: discs that overlap their neighbours, a skewed lattice of them, a stroked ring, a gap bridged by the spill, a tile that stays in its cell, and a pattern inside a spilling tile |
  * | pattern-content | a tile of a gradient, an image and the foreground across a cell edge, groups and a clip block, an uncolored pattern under a tint |
  * | pattern-strokes | strokes in a tile crossing the cell's edge, a stroke painted with a pattern, and a pattern inside a tile |
  * | pattern-integer | an axis-aligned lattice of whole-pixel steps |
@@ -2657,10 +2658,11 @@ static inline GSHSCENE_List * rf_group_masked(RF_Ctx * c) {
 /* --- patterns (masks-images-patterns story R2) -------------------------------------------------------------- */
 
 /** Intern a pattern of @p tile over the cell (@p x, @p y, @p w, @p h) at steps (@p sx, @p sy), repeating where @p rx and @p ry say, under @p map. */
-static inline const GSHSCENE_Resource * rf_pattern(RF_Ctx * c, const GSHSCENE_Resource * tile, double x, double y, double w, double h,
-    double sx, double sy, uint32_t rx, uint32_t ry, GSHGEOM_Map map, const GSHSCENE_Paint * tint) {
+static inline const GSHSCENE_Resource * rf_pattern_ex(RF_Ctx * c, const GSHSCENE_Resource * tile, double x, double y, double w, double h,
+    double sx, double sy, uint32_t rx, uint32_t ry, GSHGEOM_Map map, const GSHSCENE_Paint * tint, uint32_t overflow) {
   GSHSCENE_Pattern p;
   gshscene_pattern_init(&p);
+  p.overflow = overflow;
   p.tile = tile;
   p.x = x;
   p.y = y;
@@ -2678,6 +2680,11 @@ static inline const GSHSCENE_Resource * rf_pattern(RF_Ctx * c, const GSHSCENE_Re
   const GSHSCENE_Resource * r = NULL;
   rf_check(c, gshscene_store_intern_pattern(c->store, &p, &r) == GSHSCENE_OK);
   return rf_hold(c, r);
+}
+
+static inline const GSHSCENE_Resource * rf_pattern(RF_Ctx * c, const GSHSCENE_Resource * tile, double x, double y, double w, double h,
+    double sx, double sy, uint32_t rx, uint32_t ry, GSHGEOM_Map map, const GSHSCENE_Paint * tint) {
+  return rf_pattern_ex(c, tile, x, y, w, h, sx, sy, rx, ry, map, tint, 0);
 }
 
 static inline GSHSCENE_Paint rf_pattern_paint(const GSHSCENE_Resource * pattern, double alpha) {
@@ -2746,6 +2753,35 @@ static inline GSHSCENE_List * rf_pattern_overlap(RF_Ctx * c) {
   rf_fill(c, spill, rf_circle(c, 5.0), &big, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.6, 0.3, 0.7), 0, 0.0);
   const GSHSCENE_Resource * sp = rf_pattern(c, rf_picture_of(c, spill), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.0, 0.0), NULL);
   rf_fill(c, l, rf_rect(c, 25, 21, 47, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(sp, 1.0), 0, 0.0);
+  rf_close(c, l);
+  return l;
+}
+
+/** (shape-scene PT15) Tiles that draw past their cells: discs that overlap their neighbours, a skewed lattice of them, a stroked ring, a gap bridged by the
+ *  spill, a tile that stays in its cell (drawn as it is without the flag), and a pattern inside a spilling tile. */
+static inline GSHSCENE_List * rf_pattern_overflow(RF_Ctx * c) {
+  GSHSCENE_List * l = rf_open(c);
+  rf_fill(c, l, rf_rect(c, 0, 0, 48, 40), NULL, GSHGEOM_FILL_NONZERO, rf_solid(1.0, 1.0, 1.0, 1.0), 0, 0.0);
+  GSHSCENE_List * spill = rf_open(c);
+  GSHGEOM_Map big = rf_move(3.0, 3.0);
+  rf_fill(c, spill, rf_circle(c, 5.0), &big, GSHGEOM_FILL_NONZERO, rf_solid(0.2, 0.6, 0.3, 0.6), 0, 0.0);
+  const GSHSCENE_Resource * disc = rf_picture_of(c, spill);
+  const GSHSCENE_Resource * plain = rf_pattern_ex(c, disc, 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.0, 0.0), NULL, 1);
+  rf_fill(c, l, rf_rect(c, 1, 1, 23, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(plain, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * skew = rf_pattern_ex(c, disc, 0, 0, 6, 6, 7, 6.5, 1, 1, rf_affine(c, 1.0, 0.0, 0.35, 1.0, 0.3, 0.2), NULL, 1);
+  rf_fill(c, l, rf_rect(c, 25, 1, 47, 19), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(skew, 0.9), 0, 0.0);
+  GSHSCENE_List * ring = rf_open(c);
+  rf_stroke(c, ring, rf_circle(c, 4.0), rf_pen(c, 2.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &big, rf_solid(0.8, 0.2, 0.1, 0.6));
+  const GSHSCENE_Resource * rings = rf_pattern_ex(c, rf_picture_of(c, ring), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.0, 0.0), NULL, 1);
+  rf_fill(c, l, rf_rect(c, 1, 21, 15, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(rings, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * gap = rf_pattern_ex(c, disc, 0, 0, 6, 6, 11, 11, 1, 1, rf_move(0.5, 0.5), NULL, 1);
+  rf_fill(c, l, rf_rect(c, 17, 21, 31, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(gap, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * inside = rf_pattern_ex(c, rf_tile_basic(c), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.0, 0.0), NULL, 1);
+  rf_fill(c, l, rf_rect(c, 33, 21, 40, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(inside, 1.0), 0, 0.0);
+  GSHSCENE_List * outer = rf_open(c);
+  rf_fill(c, outer, rf_rect(c, 0, 0, 12, 12), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(plain, 0.8), 0, 0.0);
+  const GSHSCENE_Resource * nested = rf_pattern_ex(c, rf_picture_of(c, outer), 0, 0, 12, 12, 12, 12, 1, 1, rf_move(0.0, 0.0), NULL, 1);
+  rf_fill(c, l, rf_rect(c, 41, 21, 47, 39), NULL, GSHGEOM_FILL_NONZERO, rf_pattern_paint(nested, 1.0), 0, 0.0);
   rf_close(c, l);
   return l;
 }
@@ -3548,6 +3584,7 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"group-masked", rf_group_masked},
     {"pattern-lattices", rf_pattern_lattices},
     {"pattern-overlap", rf_pattern_overlap},
+    {"pattern-overflow", rf_pattern_overflow},
     {"pattern-content", rf_pattern_content},
     {"pattern-strokes", rf_pattern_strokes},
     {"pattern-integer", rf_pattern_integer},

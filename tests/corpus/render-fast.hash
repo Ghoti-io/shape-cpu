@@ -234,6 +234,10 @@ render pattern-overlap rgba8 b97981177a56e1ca
 render pattern-overlap rgba8-premultiplied 7df4d27e48ebca01
 render pattern-overlap rgbaf32 7fb07a5b8bc8295e
 render pattern-overlap rgbaf32-premultiplied 218bc6b0ffd50a35
+render pattern-overflow rgba8 e582cdad4d0ffc90
+render pattern-overflow rgba8-premultiplied 3aaf6a1fe1879857
+render pattern-overflow rgbaf32 50522e5e798cbd3a
+render pattern-overflow rgbaf32-premultiplied 4d04dc533b44a941
 render pattern-content rgba8 d6c5b4639a6a8b76
 render pattern-content rgba8-premultiplied 2a7b99c61502ec39
 render pattern-content rgbaf32 d1c2f7e0f6887271
@@ -310,5 +314,5 @@ render antialias-strokes-top-left rgba8 d8c8f1b1ef69fd0d
 render antialias-strokes-top-left rgba8-premultiplied a6401e0217111894
 render antialias-strokes-top-left rgbaf32 2f22c8ca508885bf
 render antialias-strokes-top-left rgbaf32-premultiplied 20c4a5667833ff6e
-hash cfb4b2bc745f4988
-count 308
+hash ea56cae5aad3de0b
+count 312

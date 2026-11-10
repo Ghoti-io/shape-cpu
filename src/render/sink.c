@@ -1679,7 +1679,7 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   /* HX13: a hatch, drawn as the stroke of its trimmed lines. */
   out->flags |= GSHSCENE_CAP_HATCH;
   /* AA5: a fill or a stroke that asks for no antialiasing, covered by the centers of its pixels (list.h, AA2 and AA3), in every tier. */
-  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE | GSHSCENE_CAP_ANTIALIAS_NONE_TOP_LEFT;
+  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE | GSHSCENE_CAP_ANTIALIAS_NONE_TOP_LEFT | GSHSCENE_CAP_PATTERN_OVERFLOW;
   /* CU22: a union clip whose members the predicate shows disjoint, the fast tier FT-U1; and (CG10) any union, the general tier, which
    * is a union with the capability of the disjoint ones (CU12). */
   if (cs->tiers & (GSHCPU_RENDER_TIER_UNION | GSHCPU_RENDER_TIER_UNION_GENERAL)) {
@@ -5277,6 +5277,18 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
   L->lat.y = pt.y;
   L->lat.w = pt.w;
   L->lat.h = pt.h;
+  if (pt.overflow) {
+    /* PT15: the tile is drawn unclipped, so a copy's clip is the cell widened to what the tile paints (its extent), and the copies a pixel
+     * is looked for in are those whose extent meets it.  An extent that is not known is the cell: the tile is clipped, as the planning
+     * pass has reported. */
+    double ext[4];
+    if (gshscene_pattern_extent(item->paint.resource, ext) == GSHSCENE_OK) {
+      L->lat.x = ext[0];
+      L->lat.y = ext[1];
+      L->lat.w = ext[2] - ext[0];
+      L->lat.h = ext[3] - ext[1];
+    }
+  }
   L->lat.x_step = pt.x_step;
   L->lat.y_step = pt.y_step;
   L->lat.repeat_x = pt.repeat_x;
@@ -5323,7 +5335,8 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
   L->arena_mark = run->item_alloc == &run->arena.self ? run->arena.used : 0;
   L->urect.x0 = L->urect.x1 = rect.x0;
   L->urect.y0 = L->urect.y1 = rect.y0;
-  const int overlaps = (pt.repeat_x && pt.x_step < pt.w) || (pt.repeat_y && pt.y_step < pt.h);
+  /* PT7 and PT15: the copies overlap when the clip of a copy, its cell or its extent, is wider than a step. */
+  const int overlaps = (pt.repeat_x && pt.x_step < L->lat.w) || (pt.repeat_y && pt.y_step < L->lat.h);
   /* PC9: the period tier's window, when the pass is eligible: the pass then draws the window and not the use's rectangle. */
   const GSHSCENE_List * tile = gshscene_resource_picture(pt.tile);
   Tile_Facts facts;

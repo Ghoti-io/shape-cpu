@@ -2433,7 +2433,7 @@ PLANTS += [
     ('aa-stroke-mode-ignored', 'src', RS, 'run->cov_result, center, '+TL+', NULL};', 'run->cov_result, center, 0, NULL};', AAC),
     ('aa-pat-stroke-mode-ignored', 'src', RS, 'run->cov_result, center, '+TL+', cell};', 'run->cov_result, center, 0, cell};', AAC + ["testRender_pattern"]),
     ('aa-stroke-part-mode-ignored', 'src', RSK, 'p == GSHCPU_STROKE_CLIP ? NULL : buffers->mask, buffers->top_left,', 'p == GSHCPU_STROKE_CLIP ? NULL : buffers->mask, 1,', AAC),
-    ('aa-cap-top-left', 'src', RS, '  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE | GSHSCENE_CAP_ANTIALIAS_NONE_TOP_LEFT;', '  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE;', AAC + ["testRender"]),
+    ('aa-cap-top-left', 'src', RS, '  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE | GSHSCENE_CAP_ANTIALIAS_NONE_TOP_LEFT | GSHSCENE_CAP_PATTERN_OVERFLOW;', '  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE | GSHSCENE_CAP_PATTERN_OVERFLOW;', AAC + ["testRender"]),
     ('aa-center-row-line', 'src', RV, '  const int64_t t = r * ONE_PIXEL + 32 - p.y;', '  const int64_t t = r * ONE_PIXEL - p.y;', AAC),
     ('aa-center-tie-inside', 'src', RV, '  const int64_t n = floor_div(rest == 0 && b->top_left ? m - 1 : m, 64);', '  const int64_t n = floor_div(m + 0 * rest, 64);', AAC),
     ('aa-center-tie-reversed', 'src', RV, '  const int64_t n = floor_div(rest == 0 && b->top_left ? m - 1 : m, 64);', '  const int64_t n = floor_div(rest == 0 && b->top_left ? m : m - 1, 64);', AAC),
@@ -2479,6 +2479,24 @@ PLANTS += [
     ('aa-hatch-mode', 'src', RS, '  *out = *item;\n  out->kind = GSHSCENE_ITEM_STROKE;\n  out->style = item->paint.resource;', '  *out = *item;\n  out->antialias = 0;\n  out->kind = GSHSCENE_ITEM_STROKE;\n  out->style = item->paint.resource;', AAC),
     ('aa-cap', 'src', RS, '  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE | GSHSCENE_CAP_ANTIALIAS_NONE_TOP_LEFT;', '', AAC + ["testRender"]),
 ]
+
+# A pattern whose tile draws past its cell (shape-scene PT15): the lattice's cell widened to the pattern's extent, the overlap form it makes,
+# and the capability.  Run alone with PLANT_ONLY='^pov-'.
+POV = ["testRender_pattern_overflow"]
+PLANTS_POV = [
+    ('pov-extent-ignored', 'src', RS, '  if (pt.overflow) {\n    /* PT15: the tile is drawn unclipped', '  if (0) {\n    /* PT15: the tile is drawn unclipped', POV),
+    ('pov-extent-x', 'src', RS, '      L->lat.x = ext[0];\n', '', POV),
+    ('pov-extent-y', 'src', RS, '      L->lat.y = ext[1];\n', '', POV),
+    ('pov-extent-w', 'src', RS, '      L->lat.w = ext[2] - ext[0];\n', '', POV),
+    ('pov-extent-h', 'src', RS, '      L->lat.h = ext[3] - ext[1];\n', '', POV),
+    ('pov-extent-w-cell', 'src', RS, '      L->lat.w = ext[2] - ext[0];\n', '      L->lat.w = pt.w;\n', POV),
+    ('pov-extent-unknown-drawn', 'src', RS, 'if (gshscene_pattern_extent(item->paint.resource, ext) == GSHSCENE_OK) {', 'if (gshscene_pattern_extent(item->paint.resource, ext) != GSHSCENE_OK || 1) {', POV),
+    ('pov-overlaps-x-cell', 'src', RS, '(pt.repeat_x && pt.x_step < L->lat.w)', '(pt.repeat_x && pt.x_step < pt.w)', POV),
+    ('pov-overlaps-y-cell', 'src', RS, '(pt.repeat_y && pt.y_step < L->lat.h)', '(pt.repeat_y && pt.y_step < pt.h)', POV),
+    ('pov-overlaps-never', 'src', RS, '(pt.repeat_x && pt.x_step < L->lat.w) || (pt.repeat_y && pt.y_step < L->lat.h);', '0;', POV),
+    ('pov-cap', 'src', RS, '  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE | GSHSCENE_CAP_ANTIALIAS_NONE_TOP_LEFT | GSHSCENE_CAP_PATTERN_OVERFLOW;', '  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE | GSHSCENE_CAP_ANTIALIAS_NONE_TOP_LEFT;', POV + ["testRender"]),
+]
+PLANTS += PLANTS_POV
 
 
 # The hand-written plants no test is seen to catch, with why.  The gate prints each as "known" and does not fail on it; it fails
