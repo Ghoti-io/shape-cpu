@@ -5007,9 +5007,12 @@ static GSHSCENE_Result pat_stroke_copy(Run * run, Pat_Level * L, int64_t i, int6
     return scene_result(r);
   }
   gshcpu_stroke_cache_count(cs->cache, offsetof(GSHCPU_Render_Counters, strokes));
-  result = pat_paint_copy(run, L, u, &c, rect, whole, cov, NULL); /* S4: the paint is made ready over the whole render's part, drawn or not */
+  /* The stroke and the cell are given back before the paint is made ready: a union clip folded in there rewinds the arena to the level's
+   * mark (pat_cover_union), which is below the memory they hold when the render takes its memory from the caller.  The coverage bytes
+   * are the run's own, and the paint needs nothing else of the stroke. */
   gshgeom_flat_path_destroy(cell);
   gshcpu_render_stroke_close(cache, &s);
+  result = pat_paint_copy(run, L, u, &c, rect, whole, cov, NULL); /* S4: the paint is made ready over the whole render's part, drawn or not */
   return result;
 }
 

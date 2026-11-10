@@ -587,6 +587,10 @@ def scripted():
     out["regression-strict-dual-refusal.bin"] = base64.b64decode(
         "PAEAAD8CBQICAAAAAAAJAgAAAAABCQkAAAAABAIJAAAAAAEAAAAAAAAFAwIJAAAAAAAAAAkACQkEAAAAAAAABQIMAAIAAAAAAA//AgAAAAABAQ"
         "ICAgIJAwkLAAACAQICAgIJAwkCAAACAgAAAMhkMv8CBgUMQAABAMhkMv8CBg==")
+    # A stroked pattern copy with a union clip, in caller memory: the clip's fold rewound the arena to the level's mark under the
+    # copy's stroke, and the stroke was then destroyed with its members overwritten (a read of a wild pointer).
+    out["regression-pattern-stroke-union-clip-arena.bin"] = base64.b64decode(
+        "PAoAAAACBQICAAAAAAAJAgAAAAABCQkAAAAAAQIJAAAAAAEAAAAAAAAFAwIJAAAAAAAAAAkACQkEAAAAAAAABQIMAAIAAAAAAA//AgAAAAABAQICAgIJAwkCAAACAQICAgIJAwkCAAACAwAAAMhkMv8CAAAA/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8AMhkMv8C8AADDAABAAEAyGQy/wIA")
     out["regression-cells-damage-differs.bin"] = base64.b64decode(
         "9BgAWsyop3vto1FSswDDWgVM3Wc837Z/Bhr8trLLWZ+T+zR4Kv4uM8LbHINihtt8J+Yff5kQmyh+3NASYQKDo4hSD1YkaL2jnZauWqEjRcW5S+MV"
         "TYEs5O3+VcU8cwKp97YVqjP+tkKYlPe40dOONqAWqnu2fwYa/Layy1mfk/s0eCr+LjPCg2KG23wn5h9/mb/Zk6LFN3COUCe4RAEAAAAAAAAzLrJp"
