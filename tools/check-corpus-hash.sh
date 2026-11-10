@@ -20,7 +20,7 @@ renders="${3:-}"
 dense="${4:-}"
 fast="${5:-}"
 
-got="$("$probe")" || { printf 'check-corpus-hash: the probe failed\n' >&2; exit 1; }
+got="$("$probe" ${PROBE_ARGS:-})" || { printf 'check-corpus-hash: the probe failed\n' >&2; exit 1; }
 got_hash=$(printf '%s\n' "$got" | awk '$1=="shape-cpu.hash"{print $2}')
 got_count=$(printf '%s\n' "$got" | awk '$1=="shape-cpu.count"{print $2}')
 want_hash=$(awk '$1=="hash"{print $2}' "$file" 2>/dev/null)

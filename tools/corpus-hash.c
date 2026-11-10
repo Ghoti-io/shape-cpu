@@ -132,7 +132,11 @@ static void polygon(GSHGEOM_Device_Path * p, int n, int32_t lo, int32_t hi,
   }
 }
 
-int main(void) {
+int main(int argc, char ** argv) {
+  /* `scalar` turns the vector kernels off: the hashes must be the same bytes the vector kernels make (AD-17). */
+  if (argc > 1 && strcmp(argv[1], "scalar") == 0) {
+    gshcpu_direct8_vector(0);
+  }
   gshgeom_hash_init(&total);
 
   /* 1. Random polygons, both rules, the rectangle found and trimmed. */
