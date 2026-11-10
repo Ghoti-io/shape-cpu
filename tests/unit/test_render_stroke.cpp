@@ -168,6 +168,25 @@ TEST(RenderStroke, ADifferentFractionOrLinearPartIsACacheMissAndAWholePixelShift
   EXPECT_EQ(sink.counters.cache_hits, 3u);
 }
 
+TEST(RenderStroke, TwoStoresThroughOneSinkNeverServeEachOthersCachedOutline) {
+  // Each store counts its resources from 1, so the first path and the first style of two stores look alike by position; the cache is keyed
+  // by the resource id, which is never issued twice in the process (resource.h), so a stroke of the second store's path is its own
+  // expansion and not the first store's.  The same sink draws both; a fresh sink draws the second alone, and the two must agree.
+  Params p = params();
+  const GSHGEOM_Map m = translation(2.25, 3.5);
+  Store a;
+  Store b;
+  Sink shared;
+  Drawn first = render_list(shared.sink, one_stroke(a, kClosed, p.get(), m), 48, 48);
+  Drawn second = render_list(shared.sink, one_stroke(b, kStar, p.get(), m), 48, 48);
+  EXPECT_EQ(shared.counters.cache_hits, 0u) << "a different store's path is a miss";
+  Store c;
+  Sink alone;
+  Drawn want = render_list(alone.sink, one_stroke(c, kStar, p.get(), m), 48, 48);
+  EXPECT_EQ(second.hash, want.hash);
+  EXPECT_NE(first.hash, second.hash) << "the two paths draw differently, so the comparison can fail";
+}
+
 /* --- SC10: the test sink's outline= is the very outline that is drawn --------------------------------------------- */
 
 TEST(RenderStroke, TheTestSinksOutlineHashIsTheOutlineTheSinkDraws) {
