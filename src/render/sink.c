@@ -1679,7 +1679,7 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   /* HX13: a hatch, drawn as the stroke of its trimmed lines. */
   out->flags |= GSHSCENE_CAP_HATCH;
   /* AA5: a fill or a stroke that asks for no antialiasing, covered by the centers of its pixels (list.h, AA2 and AA3), in every tier. */
-  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE;
+  out->flags |= GSHSCENE_CAP_ANTIALIAS_NONE | GSHSCENE_CAP_ANTIALIAS_NONE_TOP_LEFT;
   /* CU22: a union clip whose members the predicate shows disjoint, the fast tier FT-U1; and (CG10) any union, the general tier, which
    * is a union with the capability of the disjoint ones (CU12). */
   if (cs->tiers & (GSHCPU_RENDER_TIER_UNION | GSHCPU_RENDER_TIER_UNION_GENERAL)) {
@@ -2556,10 +2556,10 @@ static GSHSCENE_Result shape(Run * run, const GSHSCENE_Item * item, const size_t
           gshcpu_render_cells_bound(paths, g.count, walk, run->cs->max_deposits) <= run->cs->max_deposits) {
         walk = *rect;
       }
-      if (item->kind == GSHSCENE_ITEM_FILL && item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE) {
+      if (item->kind == GSHSCENE_ITEM_FILL && item->antialias != (uint32_t)GSHSCENE_ANTIALIAS_AREA) {
         /* AA2: whole or nothing by the pixel's center, whichever tier the fill would take: the lean sweep and the exact cover are both
          * areas, and a center is decided exactly, so there is one coverage and it is this. */
-        r = gshcpu_render_cover_center(paths, g.count, item->fill_rule, NULL, *rect, walk, out, run->acc, run->cs->max_deposits, &cells);
+        r = gshcpu_render_cover_center(paths, g.count, item->fill_rule, NULL, item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE_TOP_LEFT, *rect, walk, out, run->acc, run->cs->max_deposits, &cells);
         run->acc_zero = 0;
         run->work += cells + (uint64_t)(rect->x1 - rect->x0) * (uint64_t)(rect->y1 - rect->y0);
       } else if (run->cs->fast_fill && (run->cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && !gshcpu_render_rect_empty(*rect) &&
@@ -2826,7 +2826,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
   GSHCPU_Exact * exact = cs->tiers & GSHCPU_RENDER_TIER_EXACT ? run->exact : NULL; /* UC1 to UC11 (off only as a gate's control) */
   int solid = item->paint.kind != GSHSCENE_PAINT_GRADIENT && item->paint.kind != GSHSCENE_PAINT_IMAGE && item->paint.kind != GSHSCENE_PAINT_PATTERN;
   /* AA2: a stroke that asks for no antialiasing is covered by the centers of its pixels whichever tier it would take (the sweeps are areas). */
-  const int center = item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE;
+  const int center = item->antialias != (uint32_t)GSHSCENE_ANTIALIAS_AREA;
   if (solid && !center && cs->fast && (cs->tiers & GSHCPU_RENDER_TIER_SPARSE) && gshcpu_render_stroke_sparse_ok(&s, cs->max_deposits, NULL)) {
     /* The fast stroke coverage: the lean cover, the pixels of its runs composed like the sparse sweep's. */
     double src[4];
@@ -2954,7 +2954,7 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
     gshcpu_render_stroke_close(cache, &s);
     return r == GSHCPU_OK ? GSHSCENE_OK : r == GSHCPU_ERR_LIMIT ? refuse(run, item, chain, count) : scene_result(r);
   }
-  GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result, center, NULL};
+  GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result, center, item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE_TOP_LEFT, NULL};
   r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_deposits, run->acc,
       2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS, exact, (cs->tiers & GSHCPU_RENDER_TIER_JOINT) != 0, &buffers, &cov, &rect, &whole, &cells);
   run->acc_zero = 0;
@@ -4569,7 +4569,7 @@ static GSHSCENE_Result pat_cover(Run * run, Pat_Level * L, const GSHSCENE_Item *
   GSHSCENE_Result result = GSHSCENE_OK;
   GSHCPU_Rect box = c->qbox;
   /* AA2: an item that asks for no antialiasing is covered by the centers of the pixels (the plane's quadrilateral is the cell itself). */
-  const int center = item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE;
+  const int center = item->antialias != (uint32_t)GSHSCENE_ANTIALIAS_AREA;
   const GSHGEOM_Flat_Path * mask = NULL;
   if (gshscene_resource_kind(item->resource) == GSHSCENE_RESOURCE_PLANE) {
     result = quad_path(run, c, &plane);
@@ -4647,7 +4647,7 @@ static GSHSCENE_Result pat_cover(Run * run, Pat_Level * L, const GSHSCENE_Item *
       }
       GSHCPU_Result r;
       if (center) {
-        r = gshcpu_render_cover_center(paths, n, item->fill_rule, mask, rect, *wc, out, run->acc, cs->max_deposits, &cells);
+        r = gshcpu_render_cover_center(paths, n, item->fill_rule, mask, item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE_TOP_LEFT, rect, *wc, out, run->acc, cs->max_deposits, &cells);
         if (r == GSHCPU_OK && rem && !gshcpu_render_rect_empty(rect)) {
           /* The area a byte leaves out (PC4): none for a pixel nothing covers; 32 of 8192 for a whole one (255 * 32 + 32). */
           const size_t pixels = (size_t)(rect.x1 - rect.x0) * (size_t)(rect.y1 - rect.y0);
@@ -4974,7 +4974,7 @@ static GSHSCENE_Result pat_stroke_copy(Run * run, Pat_Level * L, int64_t i, int6
    * already), so that the coverage of the two sides of a cell edge adds to the whole where a stroke ends at it. */
   /* AA2: a stroke covered by the centers of its pixels is not cut (a cut point is rounded, and a center near the edge it moved could change
    * sides): the cell is a mask the centers are also tested against, so the copies of a lattice cover every center once. */
-  const int center = item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE;
+  const int center = item->antialias != (uint32_t)GSHSCENE_ANTIALIAS_AREA;
   GSHGEOM_Flat_Path * cell = NULL;
   const GSHCPU_Result cut = center ? gshcpu_render_stroke_cell(&s, c.quad, run->item_alloc, &cs->geometry, &cell)
                                    : gshcpu_render_stroke_cut(&s, c.quad, run->item_alloc, &cs->geometry);
@@ -4995,7 +4995,7 @@ static GSHSCENE_Result pat_stroke_copy(Run * run, Pat_Level * L, int64_t i, int6
   uint64_t cells = 0;
   uint8_t * cov = run->coverage;
   GSHCPU_Exact * exact = cs->tiers & GSHCPU_RENDER_TIER_EXACT ? run->exact : NULL;
-  GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result, center, cell};
+  GSHCPU_Stroke_Buffers buffers = {run->coverage, run->cov_aligned, run->cov_clip, run->cov_result, center, item->antialias == (uint32_t)GSHSCENE_ANTIALIAS_NONE_TOP_LEFT, cell};
   GSHCPU_Result r = gshcpu_render_stroke_cover(&s, reach, wreach, cs->max_deposits, run->acc,
       2u * ((size_t)run->layout.width + 1u) * GSHCPU_RENDER_BAND_ROWS, exact, (cs->tiers & GSHCPU_RENDER_TIER_JOINT) != 0, &buffers, &cov,
       &rect, &whole, &cells);

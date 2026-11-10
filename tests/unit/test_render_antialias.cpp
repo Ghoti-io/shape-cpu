@@ -145,7 +145,7 @@ GSHGEOM_Map map_of(const center_vectors::Map & m) {
 struct FillCase {
   Store store;
   GSHSCENE_List * list;
-  explicit FillCase(const center_vectors::Case & c) {
+  FillCase(const center_vectors::Case & c, GSHSCENE_Antialias mode) {
     GSHGEOM_Path * p = polygon_path(c.contours, c.counts, c.model);
     const GSHSCENE_Resource * r = nullptr;
     EXPECT_EQ(gshscene_store_intern_path(store.store, p, &r), GSHSCENE_OK);
@@ -154,8 +154,7 @@ struct FillCase {
     list = store.open();
     const GSHGEOM_Map map = map_of(center_vectors::kMaps[c.map]);
     GSHSCENE_Paint paint = black();
-    EXPECT_EQ(gshscene_list_fill_antialias(list, r, &map, c.rule ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint,
-                  GSHSCENE_ANTIALIAS_NONE, 0, 0.0),
+    EXPECT_EQ(gshscene_list_fill_antialias(list, r, &map, c.rule ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint, mode, 0, 0.0),
         GSHSCENE_OK);
     EXPECT_EQ(gshscene_list_close(list), GSHSCENE_OK);
   }
@@ -190,11 +189,14 @@ TEST(RenderAntialias, TheSinkClaimsTheCapabilityAndReportsNothingForAnItemThatAs
 TEST(RenderAntialias, EveryFillOfTheReferenceCoversTheCentersItSaysUnderEveryTier) {
   for (int i = 0; i < center_vectors::kCaseCount; i++) {
     const center_vectors::Case & c = center_vectors::kCases[i];
-    FillCase fc(c);
-    for (const Config & config : kConfigs) {
-      const std::string got = as_text(draw(fc.list, config));
-      EXPECT_EQ(got, std::string(c.covered)) << c.name << " (" << config.name << ", " << center_vectors::kMaps[c.map].name << ")\n"
-                                              << picture(got) << "want\n" << picture(c.covered);
+    for (const bool top_left : {true, false}) {
+      FillCase fc(c, top_left ? GSHSCENE_ANTIALIAS_NONE_TOP_LEFT : GSHSCENE_ANTIALIAS_NONE);
+      const char * want = top_left ? c.covered : c.covered_bottom_right;
+      for (const Config & config : kConfigs) {
+        const std::string got = as_text(draw(fc.list, config));
+        EXPECT_EQ(got, std::string(want)) << c.name << " (" << (top_left ? "top-left, " : "bottom-right, ") << config.name << ", "
+                                          << center_vectors::kMaps[c.map].name << ")\n" << picture(got) << "want\n" << picture(want);
+      }
     }
   }
 }
@@ -230,36 +232,50 @@ TEST(RenderAntialias, EveryStrokeOfTheReferenceCoversTheCentersItSaysUnderEveryT
     const GSHSCENE_Resource * style = nullptr;
     ASSERT_EQ(gshscene_store_intern_stroke_style(store.store, &st, &style), GSHSCENE_OK);
     store.held.push_back(style);
-    GSHSCENE_List * l = store.open();
-    GSHSCENE_Paint paint = black();
-    ASSERT_EQ(gshscene_list_stroke_antialias(l, path, style, nullptr, &paint, GSHSCENE_ANTIALIAS_NONE, 0, 0.0), GSHSCENE_OK);
-    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
-    for (const Config & config : kConfigs) {
-      const std::string got = as_text(draw(l, config));
-      EXPECT_EQ(got, std::string(s.covered)) << s.name << " (" << config.name << ")\n" << picture(got) << "want\n" << picture(s.covered);
+    for (const bool top_left : {true, false}) {
+      GSHSCENE_List * l = store.open();
+      GSHSCENE_Paint paint = black();
+      ASSERT_EQ(gshscene_list_stroke_antialias(l, path, style, nullptr, &paint,
+                    top_left ? GSHSCENE_ANTIALIAS_NONE_TOP_LEFT : GSHSCENE_ANTIALIAS_NONE, 0, 0.0),
+          GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+      const char * want = top_left ? s.covered : s.covered_bottom_right;
+      for (const Config & config : kConfigs) {
+        const std::string got = as_text(draw(l, config));
+        EXPECT_EQ(got, std::string(want)) << s.name << " (" << (top_left ? "top-left, " : "bottom-right, ") << config.name << ")\n"
+                                          << picture(got) << "want\n" << picture(want);
+      }
     }
   }
 }
 
 // AA3: a rectangle with whole-pixel corners covers exactly its pixels, and one with corners on centers covers the pixels whose centers
-// are inside it by the half-open rule: the left and the top edge in, the right and the bottom edge out.
+// are inside it by the half-open rule: under the top-left rule the left and the top edge in, the right and the bottom edge out, and under
+// the bottom-right rule the other way.
+namespace {
+/** Whether pixel @p v is inside the half-open interval of the pixels whose centers lie on @p lo and @p hi (`[lo, hi)` top-left, `(lo, hi]` bottom-right). */
+bool half_open(int v, int lo, int hi, bool top_left) { return top_left ? v >= lo && v < hi : v > lo && v <= hi; }
+} // namespace
+
 TEST(RenderAntialias, ARectangleCoversTheCentersInsideItHalfOpen) {
-  for (const Config & config : kConfigs) {
-    Store s;
-    GSHSCENE_List * l = s.open();
-    GSHSCENE_Paint paint = black();
-    ASSERT_EQ(gshscene_list_fill_antialias(l, s.rect(2, 3, 7, 6), nullptr, GSHGEOM_FILL_NONZERO, &paint, GSHSCENE_ANTIALIAS_NONE, 0, 0.0),
-        GSHSCENE_OK);
-    ASSERT_EQ(gshscene_list_fill_antialias(l, s.rect(9.5, 3.5, 12.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, &paint, GSHSCENE_ANTIALIAS_NONE,
-                  0, 0.0),
-        GSHSCENE_OK);
-    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
-    const std::vector<uint8_t> a = draw(l, config);
-    for (int y = 0; y < 16; y++) {
-      for (int x = 0; x < 16; x++) {
-        const bool first = x >= 2 && x < 7 && y >= 3 && y < 6;
-        const bool second = x >= 9 && x < 12 && y >= 3 && y < 6; // centers 9.5 .. 11.5 in, 12.5 out; 3.5 .. 5.5 in, 6.5 out
-        EXPECT_EQ(a[(size_t)y * 16 + (size_t)x], first || second ? 255 : 0) << config.name << " " << x << "," << y;
+  for (const bool top_left : {true, false}) {
+    const GSHSCENE_Antialias mode = top_left ? GSHSCENE_ANTIALIAS_NONE_TOP_LEFT : GSHSCENE_ANTIALIAS_NONE;
+    for (const Config & config : kConfigs) {
+      Store s;
+      GSHSCENE_List * l = s.open();
+      GSHSCENE_Paint paint = black();
+      ASSERT_EQ(gshscene_list_fill_antialias(l, s.rect(2, 3, 7, 6), nullptr, GSHGEOM_FILL_NONZERO, &paint, mode, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_fill_antialias(l, s.rect(9.5, 3.5, 12.5, 6.5), nullptr, GSHGEOM_FILL_NONZERO, &paint, mode, 0, 0.0),
+          GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+      const std::vector<uint8_t> a = draw(l, config);
+      for (int y = 0; y < 16; y++) {
+        for (int x = 0; x < 16; x++) {
+          const bool first = x >= 2 && x < 7 && y >= 3 && y < 6; // whole-pixel corners: the same under either rule
+          // the centers 9.5 and 12.5 (3.5 and 6.5) are on the edges
+          const bool second = half_open(x, 9, 12, top_left) && half_open(y, 3, 6, top_left);
+          EXPECT_EQ(a[(size_t)y * 16 + (size_t)x], first || second ? 255 : 0) << config.name << (top_left ? " top-left " : " bottom-right ") << x << "," << y;
+        }
       }
     }
   }
@@ -268,22 +284,22 @@ TEST(RenderAntialias, ARectangleCoversTheCentersInsideItHalfOpen) {
 // AA3: two shapes that share an edge on the centers of a column neither overlap nor leave a gap: translucent, no pixel is darker than
 // either shape alone, and the union is the whole rectangle.
 TEST(RenderAntialias, ShapesThatShareAnEdgeNeitherOverlapNorLeaveAGap) {
-  for (const Config & config : kConfigs) {
-    Store s;
-    GSHSCENE_List * l = s.open();
-    GSHSCENE_Paint half = black_with(0.5);
-    ASSERT_EQ(gshscene_list_fill_antialias(l, s.rect(2.5, 2.5, 7.5, 9.5), nullptr, GSHGEOM_FILL_NONZERO, &half, GSHSCENE_ANTIALIAS_NONE, 0,
-                  0.0),
-        GSHSCENE_OK);
-    ASSERT_EQ(gshscene_list_fill_antialias(l, s.rect(7.5, 2.5, 12.5, 9.5), nullptr, GSHGEOM_FILL_NONZERO, &half, GSHSCENE_ANTIALIAS_NONE,
-                  0, 0.0),
-        GSHSCENE_OK);
-    ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
-    const std::vector<uint8_t> a = draw(l, config);
-    for (int y = 0; y < 16; y++) {
-      for (int x = 0; x < 16; x++) {
-        const bool in = x >= 2 && x < 12 && y >= 2 && y < 9;
-        EXPECT_EQ(a[(size_t)y * 16 + (size_t)x], in ? 128 : 0) << config.name << " " << x << "," << y << " (one coverage, once)";
+  for (const bool top_left : {true, false}) {
+    const GSHSCENE_Antialias mode = top_left ? GSHSCENE_ANTIALIAS_NONE_TOP_LEFT : GSHSCENE_ANTIALIAS_NONE;
+    for (const Config & config : kConfigs) {
+      Store s;
+      GSHSCENE_List * l = s.open();
+      GSHSCENE_Paint half = black_with(0.5);
+      ASSERT_EQ(gshscene_list_fill_antialias(l, s.rect(2.5, 2.5, 7.5, 9.5), nullptr, GSHGEOM_FILL_NONZERO, &half, mode, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_fill_antialias(l, s.rect(7.5, 2.5, 12.5, 9.5), nullptr, GSHGEOM_FILL_NONZERO, &half, mode, 0, 0.0), GSHSCENE_OK);
+      ASSERT_EQ(gshscene_list_close(l), GSHSCENE_OK);
+      const std::vector<uint8_t> a = draw(l, config);
+      for (int y = 0; y < 16; y++) {
+        for (int x = 0; x < 16; x++) {
+          const bool in = half_open(x, 2, 12, top_left) && half_open(y, 2, 9, top_left);
+          EXPECT_EQ(a[(size_t)y * 16 + (size_t)x], in ? 128 : 0)
+              << config.name << (top_left ? " top-left " : " bottom-right ") << x << "," << y << " (one coverage, once)";
+        }
       }
     }
   }
@@ -301,13 +317,13 @@ TEST(RenderAntialias, TheCoverageGoesWhereAnyCoverageGoesAndADefaultItemBesideIt
     std::memset(&g, 0, sizeof g);
     g.opacity = 0.5;
     ASSERT_EQ(gshscene_list_group_push(l, &g, 0, 0.0), GSHSCENE_OK);
-    ASSERT_EQ(gshscene_list_fill_antialias(l, s.rect(1.5, 1.5, 5.5, 5.5), nullptr, GSHGEOM_FILL_NONZERO, &paint, GSHSCENE_ANTIALIAS_NONE, 0,
+    ASSERT_EQ(gshscene_list_fill_antialias(l, s.rect(1.5, 1.5, 5.5, 5.5), nullptr, GSHGEOM_FILL_NONZERO, &paint, GSHSCENE_ANTIALIAS_NONE_TOP_LEFT, 0,
                   0.0),
         GSHSCENE_OK);
     ASSERT_EQ(gshscene_list_group_pop(l), GSHSCENE_OK);
     // a crisp fill clipped by a crisp-edged rectangle: the clip's edge is its own (antialiased) and sits on whole pixels here
     ASSERT_EQ(gshscene_list_clip_push(l, s.rect(8, 0, 16, 16), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0), GSHSCENE_OK);
-    ASSERT_EQ(gshscene_list_fill_antialias(l, s.rect(6.5, 8.5, 13.5, 12.5), nullptr, GSHGEOM_FILL_NONZERO, &half, GSHSCENE_ANTIALIAS_NONE,
+    ASSERT_EQ(gshscene_list_fill_antialias(l, s.rect(6.5, 8.5, 13.5, 12.5), nullptr, GSHGEOM_FILL_NONZERO, &half, GSHSCENE_ANTIALIAS_NONE_TOP_LEFT,
                   0, 0.0),
         GSHSCENE_OK);
     ASSERT_EQ(gshscene_list_clip_pop(l), GSHSCENE_OK);
@@ -643,6 +659,8 @@ TEST(RenderAntialias, TheWorkOfACrispFillIsItsPointsItsCrossingsAndItsPixels) {
 // translucent crisp rectangle three times the cell's reach is 128 everywhere and never a sum, and crisp strokes (a line, and the three
 // alignments of a ring) the same.
 TEST(RenderAntialias, TheCrispItemsOfATileAreCoveredInTheirOwnCellsOnly) {
+  for (const bool top_left : {true, false}) {
+  rf_crisp_mode = top_left ? GSHSCENE_ANTIALIAS_NONE_TOP_LEFT : GSHSCENE_ANTIALIAS_NONE;
   for (const Config & config : kConfigs) {
     RF_Ctx ctx;
     rf_begin(&ctx);
@@ -662,7 +680,7 @@ TEST(RenderAntialias, TheCrispItemsOfATileAreCoveredInTheirOwnCellsOnly) {
     for (int y = 0; y < 32; y++) {
       for (int x = 0; x < 32; x++) {
         // the region's centers, 3.5 .. 27.5 in x and 3.5 .. 26.5 in y, and the rows whose centers (at .5 + 6 k) lie in [1.7, 5.2): 2, 3 and 4
-        const bool in = x >= 3 && x < 28 && y >= 3 && y < 27 && (y % 6 == 2 || y % 6 == 3 || y % 6 == 4);
+        const bool in = x >= 3 && x < 28 && y >= 3 && y < (top_left ? 27 : 28) && (y % 6 == 2 || y % 6 == 3 || y % 6 == 4);
         EXPECT_EQ((int)a[(size_t)y * 32 + (size_t)x], in ? 128 : 0) << config.name << " " << x << "," << y;
       }
     }
@@ -675,7 +693,7 @@ TEST(RenderAntialias, TheCrispItemsOfATileAreCoveredInTheirOwnCellsOnly) {
     const std::vector<uint8_t> b = render_tile(t2);
     for (int y = 0; y < 32; y++) {
       for (int x = 0; x < 32; x++) {
-        const bool in = x >= 3 && x < 28 && y >= 3 && y < 27 && (y % 6 == 2 || y % 6 == 3); // the line repeats every cell row
+        const bool in = x >= 3 && x < 28 && y >= 3 && y < (top_left ? 27 : 28) && (y % 6 == 2 || y % 6 == 3); // the line repeats every cell row
         EXPECT_EQ((int)b[(size_t)y * 32 + (size_t)x], in ? 128 : 0) << config.name << " line " << x << "," << y;
       }
     }
@@ -701,6 +719,104 @@ TEST(RenderAntialias, TheCrispItemsOfATileAreCoveredInTheirOwnCellsOnly) {
     }
     rf_release(&ctx);
   }
+  }
+  rf_crisp_mode = GSHSCENE_ANTIALIAS_NONE;
+}
+
+// AC5 under each tie rule: a zigzag whose points are on center lines at one end (y = 0.5) and between them at the other (y = 16), so each of
+// its 120 edges straddles 16 center lines under the top-left rule (the centers of rows 0 to 15) and 15 under the bottom-right rule (rows 1
+// to 15): the cap is exact for each, and the rule that counts is the item's.
+TEST(RenderAntialias, TheDepositCapIsExactUnderEachTieRule) {
+  for (const bool top_left : {true, false}) {
+    rf_crisp_mode = top_left ? GSHSCENE_ANTIALIAS_NONE_TOP_LEFT : GSHSCENE_ANTIALIAS_NONE;
+    const size_t deposits = top_left ? 1920 : 1800;
+    RF_Ctx ctx;
+    rf_begin(&ctx);
+    GSHGEOM_Path * p = rf_path(&ctx);
+    gshgeom_path_move_to(p, rf_pt(1.0, 0.5));
+    for (int i = 1; i <= 120; i++) {
+      gshgeom_path_line_to(p, rf_pt(1.0 + 14.0 * (double)i / 120.0, i % 2 ? 16.0 : 0.5));
+    }
+    gshgeom_path_close(p);
+    const GSHSCENE_Resource * zig = rf_intern(&ctx, p);
+    GSHSCENE_List * l = rf_open(&ctx);
+    rf_fill_crisp(&ctx, l, zig, nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0, 0, 0, 1), 0, 0.0);
+    rf_close(&ctx, l);
+    for (const Config & config : kConfigs) {
+      GSHSCENE_Report_Summary sum{};
+      size_t entries = 0;
+      draw32(l, config, nullptr, &sum, deposits, &entries);
+      EXPECT_EQ(entries, 0u) << (top_left ? "top-left " : "bottom-right ") << deposits << " deposits at a cap of " << deposits << ": " << config.name;
+      draw32(l, config, nullptr, &sum, deposits - 1, &entries);
+      EXPECT_EQ(entries, 1u) << (top_left ? "top-left " : "bottom-right ") << deposits << " deposits at a cap of " << deposits - 1 << ": " << config.name;
+    }
+    rf_release(&ctx);
+  }
+  rf_crisp_mode = GSHSCENE_ANTIALIAS_NONE;
+}
+
+// AC4 on a lattice whose cell edges are on the centers of the pixels: each copy is held to its cell by the same rule as the item, so every
+// center is covered once, by the copy it belongs to.  A translucent crisp square that is the cell itself is 128 everywhere in the region
+// (neither a gap on the edges the rule leaves out nor a sum on the ones it takes), and a crisp line across the cell edges is the rows the
+// rule gives, under each tie rule, whichever the rule of the cell.
+TEST(RenderAntialias, TheCrispItemsOfATileOnCenterEdgesAreCoveredOncePerCenterUnderEachTieRule) {
+  for (const bool top_left : {true, false}) {
+    rf_crisp_mode = top_left ? GSHSCENE_ANTIALIAS_NONE_TOP_LEFT : GSHSCENE_ANTIALIAS_NONE;
+    for (const Config & config : kConfigs) {
+      RF_Ctx ctx;
+      rf_begin(&ctx);
+      const GSHSCENE_Resource * region = rf_rect(&ctx, 3.0, 3.0, 28.0, 27.0);
+      auto render_tile = [&](GSHSCENE_List * tile) {
+        rf_close(&ctx, tile);
+        const GSHSCENE_Resource * pat = rf_pattern(&ctx, rf_picture_of(&ctx, tile), 0, 0, 6, 6, 6, 6, 1, 1, rf_move(0.5, 0.5), nullptr);
+        GSHSCENE_List * l = rf_open(&ctx);
+        rf_fill_crisp(&ctx, l, region, nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+        rf_close(&ctx, l);
+        return draw32(l, config);
+      };
+      GSHSCENE_List * t1 = rf_open(&ctx);
+      rf_fill_crisp(&ctx, t1, rf_rect(&ctx, 0, 0, 6, 6), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0, 0, 0, 0.5), 0, 0.0);
+      const std::vector<uint8_t> a = render_tile(t1);
+      for (int y = 0; y < 32; y++) {
+        for (int x = 0; x < 32; x++) {
+          const bool in = x >= 3 && x < 28 && y >= 3 && y < 27;
+          EXPECT_EQ((int)a[(size_t)y * 32 + (size_t)x], in ? 128 : 0)
+              << config.name << (top_left ? " top-left " : " bottom-right ") << "square " << x << "," << y;
+        }
+      }
+      // a line across the cell edges, width 2 at y = 3 in the cell: its edges are at 2 and 4, so at 2.5 and 4.5 in the picture (centers)
+      GSHSCENE_List * t2 = rf_open(&ctx);
+      static const double line[] = {-6.0, 3.0, 12.0, 3.0};
+      rf_stroke_crisp(&ctx, t2, rf_polyline(&ctx, line, 2, 0), rf_pen(&ctx, 2.0, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), nullptr,
+          rf_solid(0, 0, 0, 0.5));
+      const std::vector<uint8_t> b = render_tile(t2);
+      for (int y = 0; y < 32; y++) {
+        for (int x = 0; x < 32; x++) {
+          // rows 2 and 3 of each cell (centers 2.5 and 3.5) under the top-left rule, 3 and 4 (3.5 and 4.5) under the bottom-right one
+          const int r = (y + 6 - 0) % 6;
+          const bool row = top_left ? (r == 2 || r == 3) : (r == 3 || r == 4);
+          const bool in = x >= 3 && x < 28 && y >= 3 && y < 27 && row;
+          EXPECT_EQ((int)b[(size_t)y * 32 + (size_t)x], in ? 128 : 0)
+              << config.name << (top_left ? " top-left " : " bottom-right ") << "line " << x << "," << y;
+        }
+      }
+      // a bar across the cell edges drawn as a fill: the same rows, so that a fill's tie rule is the item's and not the cell's
+      GSHSCENE_List * t3 = rf_open(&ctx);
+      rf_fill_crisp(&ctx, t3, rf_rect(&ctx, -6, 2, 12, 4), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0, 0, 0, 0.5), 0, 0.0);
+      const std::vector<uint8_t> c3 = render_tile(t3);
+      for (int y = 0; y < 32; y++) {
+        for (int x = 0; x < 32; x++) {
+          const int r = y % 6;
+          const bool row = top_left ? (r == 2 || r == 3) : (r == 3 || r == 4);
+          const bool in = x >= 3 && x < 28 && y >= 3 && y < 27 && row;
+          EXPECT_EQ((int)c3[(size_t)y * 32 + (size_t)x], in ? 128 : 0)
+              << config.name << (top_left ? " top-left " : " bottom-right ") << "bar " << x << "," << y;
+        }
+      }
+      rf_release(&ctx);
+    }
+  }
+  rf_crisp_mode = GSHSCENE_ANTIALIAS_NONE;
 }
 
 // AC4: under a turn the cell is a quadrilateral inside a larger box, so the box does not hold a copy to its cell.  An item that spills over

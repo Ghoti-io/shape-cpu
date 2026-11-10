@@ -733,7 +733,7 @@ GSHCPU_Result gshcpu_render_stroke_cover(const GSHCPU_Stroke * s, GSHCPU_Rect re
     /* AA2: a pattern cell's quadrilateral meets the body and the aligned part and not the clip, which only selects within the aligned
      * part (its complement is the aligned part's own, and met with the cell it would let the cell's outside in). */
     GSHCPU_Result r = center
-        ? gshcpu_render_cover_center(&part->cover, 1, rule, p == GSHCPU_STROKE_CLIP ? NULL : buffers->mask,
+        ? gshcpu_render_cover_center(&part->cover, 1, rule, p == GSHCPU_STROKE_CLIP ? NULL : buffers->mask, buffers->top_left,
               moved(part->rect, s->shift_x, s->shift_y), moved(walks[p], s->shift_x, s->shift_y), out, acc, max_deposits - total, &used)
         : gshcpu_render_cover_exact(&part->cover, 1, rule, moved(part->rect, s->shift_x, s->shift_y),
               moved(walks[p], s->shift_x, s->shift_y), out, acc, max_deposits - total, &used, p == GSHCPU_STROKE_CLIP ? NULL : ex);

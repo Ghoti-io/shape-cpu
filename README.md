@@ -58,8 +58,8 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   from one period of its picture, read by integer arithmetic and kept in the cache, bit for bit the picture the general path draws.
   Hatches: a fill painted with a hatch (a CAD hatch's pattern-definition lines) is drawn as the stroke of its trimmed, dashed lines,
   by the stroke's own machinery, so a hatch has the antialiasing of the stroke and every join, cap and alignment of one.
-  An item that asks for no antialiasing (`GSHSCENE_ANTIALIAS_NONE`) is covered whole or not at all by the centers of its pixels,
-  in every coverage tier and inside a tile or a mask's picture, and the sink claims the capability that says so.
+  An item that asks for no antialiasing (`GSHSCENE_ANTIALIAS_NONE`, or `GSHSCENE_ANTIALIAS_NONE_TOP_LEFT`, which differs only in which side a center on an edge goes to) is
+  covered whole or not at all by the centers of its pixels, in every coverage tier and inside a tile or a mask's picture, and the sink claims the capabilities that say so.
   Union clips: a clip of several shapes (an SVG `clipPath`, a text clip) is the exact union of their regions, quantized once, never a mask and never
   a sum of 8-bit coverages. Members whose boxes are disjoint are summed in a 16-bit plane; members that overlap are made exact in the pixels they share
   by the same integer step that unites a stroke's pieces, each member under its own fill rule (`GSHCPU_Limits.max_union_tests` and `max_union_pieces`

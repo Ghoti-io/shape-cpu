@@ -532,7 +532,7 @@ check-vectors: ## Fail if tests/known_answers.h, tests/render_vectors.h, tests/m
 	@python3 tools/gen-dense-cells.py --check
 	@python3 tools/gen-center-vectors.py --check
 	@python3 tools/gen-center-vectors.py --selftest
-	@for plant in top-left-reversed tie-inside centre-y-tie even-odd-as-nonzero edge-direction-ignored closing-edge-dropped winding-clamped half-open-swapped; do \
+	@for plant in top-left-reversed tie-inside centre-y-tie even-odd-as-nonzero edge-direction-ignored closing-edge-dropped winding-clamped half-open-swapped bottom-right-as-top-left bottom-right-x-tie-excluded bottom-right-y-tie-excluded bottom-right-half-open-swapped; do \
 		if python3 tools/gen-center-vectors.py --selftest --plant $$plant > /dev/null 2>&1; then \
 			echo "check-vectors: the center reference did not catch its planted defect $$plant"; exit 1; fi; done
 

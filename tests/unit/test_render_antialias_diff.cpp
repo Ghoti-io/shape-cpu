@@ -48,10 +48,11 @@ const Config kConfigs[] = {
 };
 
 /**
- * AA2 literally, with one cross product for each edge and center: whether the center @p (cx, cy) is inside the contours of @p paths
+ * AA2 literally, with AA3's tie of the mode (top-left: an edge straddles when `p.y <= c.y` differs from `q.y <= c.y` and counts when
+ * `x_e > c.x`; bottom-right: `p.y < c.y` against `q.y < c.y`, and `x_e >= c.x`), with one cross product for each edge and center: whether the center @p (cx, cy) is inside the contours of @p paths
  * (every point shifted by (-sx, -sy) pixels first), by the rule.  The numbers are small (a point is under 2^20 units), so `int64` holds them.
  */
-bool inside(const std::vector<const GSHGEOM_Flat_Path *> & paths, int64_t cx, int64_t cy, GSHGEOM_Fill_Rule rule) {
+bool inside(const std::vector<const GSHGEOM_Flat_Path *> & paths, int64_t cx, int64_t cy, GSHGEOM_Fill_Rule rule, bool top_left) {
   int64_t winding = 0;
   for (const GSHGEOM_Flat_Path * path : paths) {
     const GSHGEOM_Device_Point * pts = gshgeom_flat_path_points(path);
@@ -61,8 +62,8 @@ bool inside(const std::vector<const GSHGEOM_Flat_Path *> & paths, int64_t cx, in
       for (size_t k = 0; k < sub.count; k++) {
         const GSHGEOM_Device_Point a = pts[sub.first + (k ? k - 1 : sub.count - 1)];
         const GSHGEOM_Device_Point b = pts[sub.first + k];
-        const bool below_a = (int64_t)a.y <= cy;
-        const bool below_b = (int64_t)b.y <= cy;
+        const bool below_a = top_left ? (int64_t)a.y <= cy : (int64_t)a.y < cy;
+        const bool below_b = top_left ? (int64_t)b.y <= cy : (int64_t)b.y < cy;
         if (below_a == below_b) {
           continue;
         }
@@ -70,7 +71,7 @@ bool inside(const std::vector<const GSHGEOM_Flat_Path *> & paths, int64_t cx, in
         const int64_t dy = (int64_t)b.y - a.y;
         const int64_t lhs = (int64_t)a.x * dy + (cy - a.y) * ((int64_t)b.x - a.x);
         const int64_t rhs = cx * dy;
-        const bool counts = dy > 0 ? lhs > rhs : lhs < rhs;
+        const bool counts = top_left ? (dy > 0 ? lhs > rhs : lhs < rhs) : (dy > 0 ? lhs >= rhs : lhs <= rhs);
         if (counts) {
           winding += dy > 0 ? 1 : -1;
         }
@@ -159,7 +160,7 @@ GSHGEOM_Map random_map(Rng & r, int kind) {
 }  // namespace
 
 // Every pixel of a random fill is the rule's answer, in the two tiers; the fills are of several paths (a run), several contours, both rules.
-TEST(RenderAntialiasDiff, RandomFillsCoverTheCentersTheRuleSaysUnderEveryTier) {
+static void random_fills(bool top_left) {
   Rng r(0xA11A5ED);
   size_t covered = 0;
   size_t cases = 0;
@@ -191,7 +192,9 @@ TEST(RenderAntialiasDiff, RandomFillsCoverTheCentersTheRuleSaysUnderEveryTier) {
       resource = rf_intern(&ctx, random_path(r, 3, true));
     }
     GSHSCENE_Paint paint = rf_solid(0, 0, 0, 1);
-    ASSERT_EQ(gshscene_list_fill_antialias(list, resource, &map, rule, &paint, GSHSCENE_ANTIALIAS_NONE, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_fill_antialias(list, resource, &map, rule, &paint,
+                  top_left ? GSHSCENE_ANTIALIAS_NONE_TOP_LEFT : GSHSCENE_ANTIALIAS_NONE, 0, 0.0),
+        GSHSCENE_OK);
     rf_close(&ctx, list);
     // the reference: the sink's own device outline of the item
     const GSHSCENE_Item * item = nullptr;
@@ -213,7 +216,7 @@ TEST(RenderAntialiasDiff, RandomFillsCoverTheCentersTheRuleSaysUnderEveryTier) {
     std::vector<uint8_t> want;
     for (int y = 0; y < kSize; y++) {
       for (int x = 0; x < kSize; x++) {
-        want.push_back(inside(paths, 64 * x + 32, 64 * y + 32, rule) ? 255 : 0);
+        want.push_back(inside(paths, 64 * x + 32, 64 * y + 32, rule, top_left) ? 255 : 0);
       }
     }
     gshcpu_render_geometry_release(&g, gshgeom_allocator_default());
@@ -223,7 +226,7 @@ TEST(RenderAntialiasDiff, RandomFillsCoverTheCentersTheRuleSaysUnderEveryTier) {
       for (size_t k = 0; k < got.size(); k++) {
         differ += got[k] != want[k];
       }
-      EXPECT_EQ(differ, 0u) << "fill " << i << (run ? " (a run)" : "") << " rule " << (int)rule << " fill coverage " << config.fill;
+      EXPECT_EQ(differ, 0u) << (top_left ? "top-left " : "bottom-right ") << "fill " << i << (run ? " (a run)" : "") << " rule " << (int)rule << " fill coverage " << config.fill;
     }
     for (uint8_t v : want) {
       covered += v != 0;
@@ -234,8 +237,13 @@ TEST(RenderAntialiasDiff, RandomFillsCoverTheCentersTheRuleSaysUnderEveryTier) {
   EXPECT_GT(covered, cases * 20) << "the cases cover something: the comparison is not between two empty pictures";
 }
 
+TEST(RenderAntialiasDiff, RandomFillsCoverTheCentersTheRuleSaysUnderEveryTier) {
+  random_fills(true);
+  random_fills(false);
+}
+
 // The same for strokes: the pixels of the stroke's outline (a centered one: its one part) whose centers the nonzero rule puts inside.
-TEST(RenderAntialiasDiff, RandomStrokesCoverTheCentersTheRuleSaysUnderEveryTier) {
+static void random_strokes(bool top_left) {
   Rng r(0x57A0CE5);
   size_t covered = 0;
   size_t drawn = 0;
@@ -254,7 +262,9 @@ TEST(RenderAntialiasDiff, RandomStrokesCoverTheCentersTheRuleSaysUnderEveryTier)
         r.range(0.0, 3.0), GSHSCENE_STROKE_DASH_PER_SUBPATH, GSHSCENE_STROKE_ALIGN_CENTER, GSHGEOM_FILL_NONZERO);
     const GSHGEOM_Map map = random_map(r, r.below(3));
     GSHSCENE_Paint paint = rf_solid(0, 0, 0, 1);
-    ASSERT_EQ(gshscene_list_stroke_antialias(list, path, style, &map, &paint, GSHSCENE_ANTIALIAS_NONE, 0, 0.0), GSHSCENE_OK);
+    ASSERT_EQ(gshscene_list_stroke_antialias(list, path, style, &map, &paint,
+                  top_left ? GSHSCENE_ANTIALIAS_NONE_TOP_LEFT : GSHSCENE_ANTIALIAS_NONE, 0, 0.0),
+        GSHSCENE_OK);
     rf_close(&ctx, list);
     const GSHSCENE_Item * item = nullptr;
     ASSERT_EQ(gshscene_list_item(list, 0, &item), GSHSCENE_OK);
@@ -274,7 +284,7 @@ TEST(RenderAntialiasDiff, RandomStrokesCoverTheCentersTheRuleSaysUnderEveryTier)
         for (int x = 0; x < kSize; x++) {
           // the outline is in the canonical frame: the device's moved back by the whole pixels of the shift
           want[(size_t)y * kSize + (size_t)x] =
-              inside(paths, 64 * (x - s.shift_x) + 32, 64 * (y - s.shift_y) + 32, GSHGEOM_FILL_NONZERO) ? 255 : 0;
+              inside(paths, 64 * (x - s.shift_x) + 32, 64 * (y - s.shift_y) + 32, GSHGEOM_FILL_NONZERO, top_left) ? 255 : 0;
         }
       }
       drawn++;
@@ -286,7 +296,7 @@ TEST(RenderAntialiasDiff, RandomStrokesCoverTheCentersTheRuleSaysUnderEveryTier)
       for (size_t k = 0; k < got.size(); k++) {
         differ += got[k] != want[k];
       }
-      EXPECT_EQ(differ, 0u) << "stroke " << i << " stroke coverage " << config.stroke;
+      EXPECT_EQ(differ, 0u) << (top_left ? "top-left " : "bottom-right ") << "stroke " << i << " stroke coverage " << config.stroke;
     }
     for (uint8_t v : want) {
       covered += v != 0;
@@ -295,6 +305,11 @@ TEST(RenderAntialiasDiff, RandomStrokesCoverTheCentersTheRuleSaysUnderEveryTier)
   }
   EXPECT_GT(drawn, 100u);
   EXPECT_GT(covered, 160u * 10u);
+}
+
+TEST(RenderAntialiasDiff, RandomStrokesCoverTheCentersTheRuleSaysUnderEveryTier) {
+  random_strokes(true);
+  random_strokes(false);
 }
 
 int main(int argc, char ** argv) {

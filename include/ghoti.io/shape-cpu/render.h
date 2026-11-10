@@ -878,16 +878,18 @@
  *
  * ### Coverage by the centers of the pixels (AC1 to AC6; shape-scene's AA1 to AA6)
  *
- * A fill or a stroke whose `antialias` is `GSHSCENE_ANTIALIAS_NONE` has, in the pixel `(x, y)`, the coverage 255 when the point
+ * A fill or a stroke whose `antialias` is `GSHSCENE_ANTIALIAS_NONE` or `GSHSCENE_ANTIALIAS_NONE_TOP_LEFT` has, in the pixel `(x, y)`, the coverage 255 when the point
  * `(64 x + 32, 64 y + 32)` (the pixel's center in 1/64 pixel) is inside the item's shape and 0 when it is not, and everything after it (the
  * clips, the paint, the opacity, the operator, the layer of a group) is as for any coverage.  The sink claims
- * `GSHSCENE_CAP_ANTIALIAS_NONE`.
+ * `GSHSCENE_CAP_ANTIALIAS_NONE` and `GSHSCENE_CAP_ANTIALIAS_NONE_TOP_LEFT`; the two differ only in the tie (AC1).
  *
  * - **AC1 The rule.**  Inside is the winding of the flattened device outline at the center, by the item's fill rule (a stroke's, the nonzero
- *   rule), with a center on an edge or a vertex decided by the top-left rule: the winding of the point moved by an infinitely small
- *   `(e, e^2)`, which is computed exactly in integers.  An edge from `p` to `q` straddles the center `c` when exactly one of `p.y <= c.y`
- *   and `q.y <= c.y` holds, meets the line `y = c.y` at `x_e`, and counts, with the sign of `q.y - p.y`, when `x_e > c.x`; the sum is the
- *   winding.  The point of the rule is exactness: the same winding is found whichever way a contour goes, with no tolerance, and a center
+ *   rule), with a center on an edge or a vertex decided by the item's tie rule (shape-scene's AA3): for `GSHSCENE_ANTIALIAS_NONE_TOP_LEFT`
+ *   the winding of the point moved by an infinitely small `(e, e^2)`, for `GSHSCENE_ANTIALIAS_NONE` (the bottom-right rule) the winding of
+ *   the point moved by `-(e, e^2)`, each computed exactly in integers.  Under the top-left rule an edge from `p` to `q` straddles the center
+ *   `c` when exactly one of `p.y <= c.y` and `q.y <= c.y` holds, meets the line `y = c.y` at `x_e`, and counts, with the sign of
+ *   `q.y - p.y`, when `x_e > c.x`; under the bottom-right rule it straddles when exactly one of `p.y < c.y` and `q.y < c.y` holds and
+ *   counts when `x_e >= c.x`; the sum is the winding.  The point of the rule is exactness: the same winding is found whichever way a contour goes, with no tolerance, and a center
  *   on an edge belongs to the shape on its right or below it, so that shapes sharing an edge neither overlap nor leave a gap.  The glyphs
  *   of a run and the contours of a path add their windings, as their areas add.  `list.h` (shape-scene) states it in full.
  * - **AC2 One coverage, every tier.**  The fast fill coverage (`GSHCPU_FILL_COVERAGE_FAST`), the fast stroke coverage and the sparse

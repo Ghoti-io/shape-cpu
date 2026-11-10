@@ -294,13 +294,21 @@ render pattern-union rgba8 2773cb90feae79e6
 render pattern-union rgba8-premultiplied 2969875a82e07b8d
 render pattern-union rgbaf32 a1d4df1537ecec00
 render pattern-union rgbaf32-premultiplied 23e87477e6df448b
-render antialias-fills rgba8 955fdbdb74907bf3
-render antialias-fills rgba8-premultiplied 6429853a922318c2
-render antialias-fills rgbaf32 4aecd38fd99e9f69
-render antialias-fills rgbaf32-premultiplied 05d9eb49af05aa8a
-render antialias-strokes rgba8 d8c8f1b1ef69fd0d
-render antialias-strokes rgba8-premultiplied a6401e0217111894
-render antialias-strokes rgbaf32 2f22c8ca508885bf
-render antialias-strokes rgbaf32-premultiplied 20c4a5667833ff6e
-hash 6e2da2943bc3698d
-count 300
+render antialias-fills rgba8 73c7dc9b7c2e251b
+render antialias-fills rgba8-premultiplied 07338f0bd694f08a
+render antialias-fills rgbaf32 29a90194fe8d000d
+render antialias-fills rgbaf32-premultiplied d1e28d6e60b81dc2
+render antialias-strokes rgba8 955ff73b25a8096e
+render antialias-strokes rgba8-premultiplied 446f6f38774d8737
+render antialias-strokes rgbaf32 7e53cc3e62753118
+render antialias-strokes rgbaf32-premultiplied a1029d38c66bea3a
+render antialias-fills-top-left rgba8 955fdbdb74907bf3
+render antialias-fills-top-left rgba8-premultiplied 6429853a922318c2
+render antialias-fills-top-left rgbaf32 4aecd38fd99e9f69
+render antialias-fills-top-left rgbaf32-premultiplied 05d9eb49af05aa8a
+render antialias-strokes-top-left rgba8 d8c8f1b1ef69fd0d
+render antialias-strokes-top-left rgba8-premultiplied a6401e0217111894
+render antialias-strokes-top-left rgbaf32 2f22c8ca508885bf
+render antialias-strokes-top-left rgbaf32-premultiplied 20c4a5667833ff6e
+hash cfb4b2bc745f4988
+count 308

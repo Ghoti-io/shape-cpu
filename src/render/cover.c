@@ -1825,17 +1825,19 @@ GSHCPU_Result gshcpu_render_cover_aligned(const GSHCPU_Aligned_Input in[3], GSHC
 
 /**
  * The rows `r` in `[lo, hi)` whose center line `y = 64 r + 32` the edge @p p to @p q straddles: `p.y <= c < q.y` or the reverse
- * (list.h, AA2).  A flat edge straddles none.  @return 1 and the first and last of them, or 0.
+ * (list.h, AA2) under the top-left rule, `p.y < c <= q.y` or the reverse under the bottom-right one (AA3).  A flat edge straddles
+ * none.  @return 1 and the first and last of them, or 0.
  */
-static int center_rows(Point p, Point q, int64_t lo, int64_t hi, int64_t * first, int64_t * last) {
+static int center_rows(Point p, Point q, int64_t lo, int64_t hi, int top_left, int64_t * first, int64_t * last) {
   const int64_t ylo = p.y < q.y ? p.y : q.y;
   const int64_t yhi = p.y < q.y ? q.y : p.y;
   if (ylo == yhi) {
     return 0;
   }
-  /* 64 r + 32 >= ylo: r >= ceil((ylo - 32) / 64); 64 r + 32 < yhi: r <= ceil((yhi - 32) / 64) - 1. */
-  int64_t a = -floor_div(-(ylo - 32), 64);
-  int64_t b = -floor_div(-(yhi - 32), 64) - 1;
+  /* Top-left: 64 r + 32 >= ylo: r >= ceil((ylo - 32) / 64); 64 r + 32 < yhi: r <= ceil((yhi - 32) / 64) - 1.
+   * Bottom-right: 64 r + 32 > ylo: r >= floor((ylo - 32) / 64) + 1; 64 r + 32 <= yhi: r <= floor((yhi - 32) / 64). */
+  int64_t a = top_left ? -floor_div(-(ylo - 32), 64) : floor_div(ylo - 32, 64) + 1;
+  int64_t b = top_left ? -floor_div(-(yhi - 32), 64) - 1 : floor_div(yhi - 32, 64);
   a = a < lo ? lo : a;
   b = b > hi - 1 ? hi - 1 : b;
   if (a > b) {
@@ -1849,7 +1851,7 @@ static int center_rows(Point p, Point q, int64_t lo, int64_t hi, int64_t * first
 typedef void (*Center_Edge_Fn)(void * ctx, Point p, Point q, int64_t first, int64_t last);
 
 /** Every edge of @p path that straddles the center line of a row of `[lo, hi)`, the closing line of each subpath included. */
-static void center_edges(const GSHGEOM_Flat_Path * path, int64_t lo, int64_t hi, Center_Edge_Fn fn, void * ctx) {
+static void center_edges(const GSHGEOM_Flat_Path * path, int64_t lo, int64_t hi, int top_left, Center_Edge_Fn fn, void * ctx) {
   const GSHGEOM_Device_Point * points = gshgeom_flat_path_points(path);
   const size_t subpaths = gshgeom_flat_path_subpath_count(path);
   for (size_t s = 0; s < subpaths; s++) {
@@ -1861,7 +1863,7 @@ static void center_edges(const GSHGEOM_Flat_Path * path, int64_t lo, int64_t hi,
       const Point p = point_of(points[sub.first + (k ? k - 1 : sub.count - 1)]);
       const Point q = point_of(points[sub.first + k]);
       int64_t first, last;
-      if (center_rows(p, q, lo, hi, &first, &last)) {
+      if (center_rows(p, q, lo, hi, top_left, &first, &last)) {
         fn(ctx, p, q, first, last);
       }
     }
@@ -1890,12 +1892,14 @@ typedef struct Center_Band {
   int64_t stride;
   int64_t band;
   int64_t * delta;
+  int top_left; /* the tie rule (AA3): 1 top-left, 0 bottom-right */
 } Center_Band;
 
 /**
  * One straddled row of an edge (AA2): the edge meets the center line at `x_e = p.x + t dx / dy` (`p` the upper end, `t = c.y - p.y`
  * in `[0, dy)`), and it counts for the pixels whose center `64 px + 32` is left of `x_e`, which are those up to `n`, the floor of
- * `(x_e - 32) / 64` less one when `x_e` is a whole number of units (a center on the edge is not left of it: the top-left rule).  The
+ * `(x_e - 32) / 64` less one when `x_e` is a whole number of units (a center on the edge is not left of it: the top-left rule; under the
+ * bottom-right rule a center on the edge is counted, so that correction is left out).  The
  * pixels past `n` are the ones it stops counting for, so its sign is taken out of the difference array at `n + 1`.  `t dx` is under
  * 2^62 (the caller keeps every point within ::GSHCPU_RENDER_COORD_LIMIT), so nothing here is wider than `int64`.
  */
@@ -1913,7 +1917,7 @@ static void center_deposit_row(Center_Band * b, Point p, Point q, int64_t r) {
   const int64_t whole = floor_div(numerator, dy);
   const int64_t rest = numerator - whole * dy;
   const int64_t m = p.x + whole - 32;
-  const int64_t n = floor_div(rest == 0 ? m - 1 : m, 64);
+  const int64_t n = floor_div(rest == 0 && b->top_left ? m - 1 : m, 64);
   int64_t j = n + 1 - b->x0;
   j = j < 0 ? 0 : j;
   if (j < b->width) {
@@ -1929,17 +1933,17 @@ static void center_deposit_edge(void * ctx, Point p, Point q, int64_t first, int
 }
 
 GSHCPU_Result gshcpu_render_cover_center(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
-    const GSHGEOM_Flat_Path * mask, GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits,
-    uint64_t * cells) {
+    const GSHGEOM_Flat_Path * mask, int top_left, GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc,
+    uint64_t max_deposits, uint64_t * cells) {
   Center_Count counted = {0};
   if (!gshcpu_render_rect_empty(walk)) {
     for (size_t i = 0; i < count; i++) {
       if (paths[i]) {
-        center_edges(paths[i], walk.y0, walk.y1, center_count_edge, &counted);
+        center_edges(paths[i], walk.y0, walk.y1, top_left, center_count_edge, &counted);
       }
     }
     if (mask) {
-      center_edges(mask, walk.y0, walk.y1, center_count_edge, &counted);
+      center_edges(mask, walk.y0, walk.y1, top_left, center_count_edge, &counted);
     }
   }
   *cells = counted.total;
@@ -1953,6 +1957,7 @@ GSHCPU_Result gshcpu_render_cover_center(const GSHGEOM_Flat_Path * const * paths
   const int64_t stride = width + 1;
   Center_Band shape;
   Center_Band cut;
+  shape.top_left = cut.top_left = top_left;
   shape.x0 = cut.x0 = rect.x0;
   shape.width = cut.width = width;
   shape.stride = cut.stride = stride;
@@ -1965,11 +1970,11 @@ GSHCPU_Result gshcpu_render_cover_center(const GSHGEOM_Flat_Path * const * paths
     memset(acc, 0, 2 * n * sizeof *acc);
     for (size_t i = 0; i < count; i++) {
       if (paths[i]) {
-        center_edges(paths[i], band, band + rows, center_deposit_edge, &shape);
+        center_edges(paths[i], band, band + rows, top_left, center_deposit_edge, &shape);
       }
     }
     if (mask) {
-      center_edges(mask, band, band + rows, center_deposit_edge, &cut);
+      center_edges(mask, band, band + rows, top_left, center_deposit_edge, &cut);
     }
     for (int64_t r = 0; r < rows; r++) {
       const int64_t * ds = shape.delta + r * stride;

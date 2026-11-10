@@ -488,9 +488,15 @@ tier; at the default limits that is no stroke a render draws today. Found by mut
 
 ### Coverage by the centers of the pixels (AC1 to AC6)
 
-A fill or a stroke whose `antialias` is `GSHSCENE_ANTIALIAS_NONE` (SVG's `crispEdges` and `optimizeSpeed`) has the coverage 255 where the center
+A fill or a stroke whose `antialias` is `GSHSCENE_ANTIALIAS_NONE` or `GSHSCENE_ANTIALIAS_NONE_TOP_LEFT` (SVG's `crispEdges` and `optimizeSpeed`) has the coverage 255 where the center
 of the pixel is inside its shape and 0 elsewhere; `render.h` states the rule, shape-scene's `list.h` (AA2, AA3) states it as the family's. This
 section says how it is computed and why that way.
+
+**Two ties.** The two modes differ only in which side a center exactly on an edge goes to (shape-scene's AA3). The text below is the top-left rule
+(`NONE_TOP_LEFT`). The bottom-right rule (`NONE`, the default) is the same computation with the half-open interval of rows and of pixels turned
+around: an edge straddles the row's center line when `ylo < y <= yhi` (the rows from `floor((ylo - 32) / 64) + 1` to `floor((yhi - 32) / 64)`), and
+it counts for the pixels whose center is left of or on `x_e` (the floor without the `[rest = 0]` correction). It is one parameter of
+`gshcpu_render_cover_center`, so every crisp path (fill, stroke parts, a pattern's cells) follows it.
 
 **One function, every tier.** The fast fill coverage, the fast stroke coverage and the sparse composite of a stroke are sums of areas, rounded;
 a center is decided exactly. There is no sense in which the lean sweep could "also" decide a center, so an item with the mode takes none of them

@@ -270,8 +270,8 @@ GSHCPU_Result gshcpu_render_cover_split(const GSHGEOM_Flat_Path * const * paths,
 /**
  * AA2, AA3 (shape-scene's list.h): the whole-or-nothing coverage of the union of @p count flattened paths (their windings add) inside
  * @p rect, by @p rule: each pixel of @p out is 255 when its center `(64 x + 32, 64 y + 32)` is inside by the exact winding of the edges,
- * a center on an edge or a vertex decided by the top-left rule (the winding of the point moved by an infinitely small `(e, e^2)`), and 0
- * otherwise.  With @p mask (one flattened path, the nonzero rule: a pattern cell's quadrilateral) a pixel is 255 only where its center is
+ * a center on an edge or a vertex decided by the rule @p top_left picks (AA3): nonzero, the top-left rule, the winding of the point moved
+ * by an infinitely small `(e, e^2)`; zero, the bottom-right rule, the winding of the point moved by `-(e, e^2)`; and 0 otherwise.  With @p mask (one flattened path, the nonzero rule: a pattern cell's quadrilateral) a pixel is 255 only where its center is
  * inside the mask too, by the same rule, so that the cells of a lattice meet at their edges without overlap or gap.  The arithmetic is
  * in `int64` and needs every point within ::GSHCPU_RENDER_COORD_LIMIT of the origin.
  *
@@ -282,8 +282,8 @@ GSHCPU_Result gshcpu_render_cover_split(const GSHGEOM_Flat_Path * const * paths,
  * @param cells The deposits counted, up to a count past the cap.
  */
 GSHCPU_Result gshcpu_render_cover_center(const GSHGEOM_Flat_Path * const * paths, size_t count, GSHGEOM_Fill_Rule rule,
-    const GSHGEOM_Flat_Path * mask, GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc, uint64_t max_deposits,
-    uint64_t * cells);
+    const GSHGEOM_Flat_Path * mask, int top_left, GSHCPU_Rect rect, GSHCPU_Rect walk, uint8_t * out, int64_t * acc,
+    uint64_t max_deposits, uint64_t * cells);
 
 /** The memory and settings of the exact step (below). */
 typedef struct GSHCPU_Exact GSHCPU_Exact;
@@ -1334,6 +1334,8 @@ typedef struct GSHCPU_Stroke_Buffers {
   uint8_t * result;
   /** AA2: the parts are covered by the centers of the pixels (::gshcpu_render_cover_center) and the exact step is not used. */
   int center;
+  /** With @p center: the tie rule of the item's mode (AA3), nonzero for top-left, zero for bottom-right. */
+  int top_left;
   /** With @p center: a pattern cell's quadrilateral (one flattened path) that the body and the aligned part are met with, or NULL. */
   const GSHGEOM_Flat_Path * mask;
 } GSHCPU_Stroke_Buffers;

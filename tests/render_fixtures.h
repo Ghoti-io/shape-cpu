@@ -96,6 +96,7 @@
  * | union-abutting | rectangles that share edges at quarter pixels and a corner, a union of triangles that share a diagonal, and the same members as a union beside an overlapping one |
  * | antialias-fills | (shape-scene AA1 to AA6) fills that ask for no antialiasing beside ones that do not: a star under both rules, rectangles on whole pixels and on centers, two that share an edge in translucent paint, a blob in a clip and in an opacity group, a glyph, and a gradient, a pattern and a hatch drawn through the coverage |
  * | antialias-strokes | strokes that ask for no antialiasing: joins and caps, dashes, a hairline, a device width, an elliptical pen, a closed square in each alignment, a gradient, and a stroke of a glyph's outlines, beside one that does not |
+ * | antialias-fills-top-left, antialias-strokes-top-left | the two scenes above with their crisp items asking for the top-left tie rule, which the two above do not (they ask for the bottom-right one) |
  * | pattern-union | (shape-exact-primitives story CU21) union clips in a pattern's tile: members that cross the cell edges on an abutting lattice at a fraction, three members (a star under even-odd, a blob and a turned bar) on cells that overlap, a union inside a clip under a gapped skew, and a gradient under a union on a lattice of whole-pixel steps |
  */
 
@@ -3364,15 +3365,18 @@ typedef struct RF_Fixture {
 /* --- coverage by the centers of the pixels (shape-scene's list.h, AA1 to AA6) ------------------------------------------------------ */
 
 /** A fill that asks for no antialiasing. */
+/** The mode the crisp helpers below ask for: the default, `NONE` (a tie goes to the bottom and right); a test that depends on a tie sets it. */
+static GSHSCENE_Antialias rf_crisp_mode = GSHSCENE_ANTIALIAS_NONE;
+
 static inline void rf_fill_crisp(RF_Ctx * c, GSHSCENE_List * l, const GSHSCENE_Resource * r, const GSHGEOM_Map * map,
     GSHGEOM_Fill_Rule rule, GSHSCENE_Paint paint, int32_t layer, double depth) {
-  rf_check(c, gshscene_list_fill_antialias(l, r, map, rule, &paint, GSHSCENE_ANTIALIAS_NONE, layer, depth) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_fill_antialias(l, r, map, rule, &paint, rf_crisp_mode, layer, depth) == GSHSCENE_OK);
 }
 
 /** A stroke that asks for no antialiasing. */
 static inline void rf_stroke_crisp(RF_Ctx * c, GSHSCENE_List * l, const GSHSCENE_Resource * path, const GSHSCENE_Resource * style,
     const GSHGEOM_Map * map, GSHSCENE_Paint paint) {
-  rf_check(c, gshscene_list_stroke_antialias(l, path, style, map, &paint, GSHSCENE_ANTIALIAS_NONE, 0, 0.0) == GSHSCENE_OK);
+  rf_check(c, gshscene_list_stroke_antialias(l, path, style, map, &paint, rf_crisp_mode, 0, 0.0) == GSHSCENE_OK);
 }
 
 /**
@@ -3470,6 +3474,21 @@ static inline GSHSCENE_List * rf_antialias_strokes(RF_Ctx * c) {
   return l;
 }
 
+/** The two scenes above with the tie decided the other way: the item mode is `NONE_TOP_LEFT` (shape-scene's AA3), so that the corpus holds both rules. */
+static inline GSHSCENE_List * rf_antialias_fills_top_left(RF_Ctx * c) {
+  rf_crisp_mode = GSHSCENE_ANTIALIAS_NONE_TOP_LEFT;
+  GSHSCENE_List * l = rf_antialias_fills(c);
+  rf_crisp_mode = GSHSCENE_ANTIALIAS_NONE;
+  return l;
+}
+
+static inline GSHSCENE_List * rf_antialias_strokes_top_left(RF_Ctx * c) {
+  rf_crisp_mode = GSHSCENE_ANTIALIAS_NONE_TOP_LEFT;
+  GSHSCENE_List * l = rf_antialias_strokes(c);
+  rf_crisp_mode = GSHSCENE_ANTIALIAS_NONE;
+  return l;
+}
+
 static const RF_Fixture RF_FIXTURES[] = {
     {"fill-rules", rf_fill_rules},
     {"clip-leaf", rf_clip_leaf},
@@ -3546,6 +3565,8 @@ static const RF_Fixture RF_FIXTURES[] = {
     {"pattern-union", rf_pattern_union},
     {"antialias-fills", rf_antialias_fills},
     {"antialias-strokes", rf_antialias_strokes},
+    {"antialias-fills-top-left", rf_antialias_fills_top_left},
+    {"antialias-strokes-top-left", rf_antialias_strokes_top_left},
 };
 
 #define RF_FIXTURE_COUNT (sizeof RF_FIXTURES / sizeof RF_FIXTURES[0])
