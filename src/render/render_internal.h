@@ -943,6 +943,9 @@ static inline double gshcpu_render_i64_to_double(int64_t v) {
  * sampling domain is 2^33 texels).
  */
 static inline int64_t gshcpu_render_trunc_i64(double w) {
+  if (w > -2147483648.0 && w < 2147483648.0) {
+    return (int32_t)w; /* the common case: a 32-bit conversion truncates toward zero, and is the value the split below forms */
+  }
   const double limit = 0x1p40;
   if (!(w > -limit && w < limit)) {
     return w > 0.0 ? (int64_t)1 << 40 : (w < 0.0 ? -((int64_t)1 << 40) : 0);
@@ -953,6 +956,18 @@ static inline int64_t gshcpu_render_trunc_i64(double w) {
   const double lo = m - hi * 0x1p20;
   const int64_t v = ((int64_t)(int32_t)hi << 20) + (int64_t)(int32_t)lo;
   return neg ? -v : v;
+}
+
+/**
+ * `trunc_i64(gmath_floor(c))`, without the two calls: for a magnitude below 2^31 the 32-bit conversion truncates and one compare
+ * steps a negative non-integer down to its floor.  Outside it (and for a NaN) the long form is taken.
+ */
+static inline int64_t gshcpu_render_floor_i64(double c) {
+  if (c > -2147483648.0 && c < 2147483648.0) {
+    const int32_t n = (int32_t)c;
+    return n - ((double)n > c ? 1 : 0);
+  }
+  return gshcpu_render_trunc_i64(gmath_floor(c));
 }
 
 /** IC9: whether every point of the device rectangle @p r maps inside the sampling domain. */

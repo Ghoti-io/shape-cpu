@@ -35,6 +35,13 @@
 
 #include <string.h>
 
+/** A function the per-pixel path is made of: the compiler leaves them out of line at -O2, and each call costs more than the body of the nearest case. */
+#if defined(__GNUC__)
+#define IM_INLINE static inline __attribute__((always_inline))
+#else
+#define IM_INLINE static inline
+#endif
+
 /** The half-width of the sampling domain in texels (IP12). */
 #define DOMAIN 4294967296.0
 
@@ -47,14 +54,22 @@ static inline int64_t modulo(int64_t a, int64_t n) {
 }
 
 /** The texel index tap @p k reads along the window `[lo, hi)`, or -1 for the transparent texel of `NONE`. */
-static inline int64_t edge(int64_t k, int64_t lo, int64_t hi, uint32_t mode) {
+IM_INLINE int64_t edge(int64_t k, int64_t lo, int64_t hi, uint32_t mode) {
   const int64_t n = hi - lo;
   switch (mode) {
     case GSHSCENE_IMAGE_EXTEND_PAD:
       return k < lo ? lo : k > hi - 1 ? hi - 1 : k;
-    case GSHSCENE_IMAGE_EXTEND_REPEAT:
-      return lo + modulo(k - lo, n);
+    case GSHSCENE_IMAGE_EXTEND_REPEAT: {
+      const int64_t r = k - lo;
+      if (r >= 0 && r < n) {
+        return k; /* inside the window, where almost every tap is: no division */
+      }
+      return lo + modulo(r, n);
+    }
     case GSHSCENE_IMAGE_EXTEND_REFLECT: {
+      if (k >= lo && k < hi) {
+        return k; /* the first period reads forward: m = k - lo < n */
+      }
       const int64_t m = modulo(k - lo, 2 * n);
       return m < n ? lo + m : lo + 2 * n - 1 - m;
     }
@@ -83,11 +98,27 @@ static inline double sample(const GSHCPU_Image * im, const unsigned char * row, 
 }
 
 /** IP4: the premultiplied value of texel (@p x, @p y) in the image's own space. */
-static inline void decode(const GSHCPU_Image * im, uint32_t x, uint32_t y, double out[4]) {
+IM_INLINE void decode(const GSHCPU_Image * im, uint32_t x, uint32_t y, double out[4]) {
   const unsigned char * row = im->rows + (size_t)y * im->stride;
   if (im->alpha_only) {
     out[0] = out[1] = out[2] = 0.0;
     out[3] = sample(im, row, x, 0);
+    return;
+  }
+  if (im->lut && !im->is_float && im->bits <= 8u && im->layout == (uint32_t)GSHSCENE_IMAGE_RGBA) {
+    /* The table's case (FT-3) for the layout that is nearly every image: sample()'s reads of one byte each, without its tests per channel. */
+    const unsigned char * q = row + (size_t)x * 4u;
+    const double a = im->lut[q[3]];
+    if (im->straight) {
+      out[0] = a * im->lut[q[0]];
+      out[1] = a * im->lut[q[1]];
+      out[2] = a * im->lut[q[2]];
+    } else {
+      out[0] = im->lut[q[0]];
+      out[1] = im->lut[q[1]];
+      out[2] = im->lut[q[2]];
+    }
+    out[3] = a;
     return;
   }
   double c[3];
@@ -121,7 +152,7 @@ void gshcpu_render_image_window_texel(const GSHCPU_Image * im, uint32_t ix, uint
 }
 
 /** The value of the texel tap (@p tx, @p ty) reads, premultiplied in the filter space (IP5, IC4). */
-static inline void texel(const GSHCPU_Image * im, int64_t tx, int64_t ty, double out[4]) {
+IM_INLINE void texel(const GSHCPU_Image * im, int64_t tx, int64_t ty, double out[4]) {
   const int64_t ix = edge(tx, (int64_t)im->x0, (int64_t)im->x1, im->extend_x);
   const int64_t iy = edge(ty, (int64_t)im->y0, (int64_t)im->y1, im->extend_y);
   if (ix < 0 || iy < 0) {
@@ -246,15 +277,17 @@ static inline double kernel(double d) {
 }
 
 /** The taps of one coordinate (@p c, in texels) for @p filter: the first texel's index and the weights (IC6). */
-static inline void taps_of(uint32_t filter, double c, GSHCPU_Image_Taps * t) {
+IM_INLINE void taps_of(uint32_t filter, double c, GSHCPU_Image_Taps * t) {
   if (filter == (uint32_t)GSHSCENE_IMAGE_FILTER_NEAREST) {
-    t->i = gshcpu_render_trunc_i64(gmath_floor(c));
+    t->i = gshcpu_render_floor_i64(c);
     return;
   }
   const double s = c - 0.5;
-  const double fl = gmath_floor(s);
+  /* The floor as an integer, and as a double when it is in the range where that is exact (a zero keeps its sign, as gmath_floor's). */
+  const int64_t fi = gshcpu_render_floor_i64(s);
+  const double fl = (s > -2147483648.0 && s < 2147483648.0) ? (s == 0.0 ? s : (double)fi) : gmath_floor(s);
   const double f = s - fl;
-  t->i = gshcpu_render_trunc_i64(fl);
+  t->i = fi;
   if (filter == (uint32_t)GSHSCENE_IMAGE_FILTER_LINEAR) {
     t->w[0] = 1.0 - f;
     t->w[1] = f;
@@ -266,11 +299,11 @@ static inline void taps_of(uint32_t filter, double c, GSHCPU_Image_Taps * t) {
   t->w[3] = kernel(2.0 - f);
 }
 
-static void nearest(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4]) {
+IM_INLINE void nearest(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4]) {
   texel(im, x->i, y->i, out);
 }
 
-static void linear(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4]) {
+IM_INLINE void linear(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4]) {
   const int64_t i = x->i;
   const int64_t j = y->i;
   const double wx0 = x->w[0];
@@ -331,7 +364,7 @@ static void cubic(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GS
 }
 
 /** The filtered value from the taps of u and of v, premultiplied in the layer's space. */
-static void filter_taps(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4]) {
+IM_INLINE void filter_taps(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4]) {
   double f[4];
   switch (im->filter) {
     case GSHSCENE_IMAGE_FILTER_NEAREST:

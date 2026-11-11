@@ -16,6 +16,7 @@
 #include <cmath>
 #include <limits>
 #include <random>
+#include <vector>
 
 using namespace rh;
 
@@ -586,6 +587,42 @@ TEST(RenderArithmetic, TheEightBitStoreRoundsHalfUpAndClamps) {
   EXPECT_EQ(gshcpu_render_store_float(-2.5), -2.5f);
   EXPECT_EQ(gshcpu_render_store_float(1.0 + 0x1p-24), 1.0f) << "halfway: to even";
   EXPECT_EQ(gshcpu_render_store_float(1.0 + 0x1p-24 + 0x1p-40), std::nextafter(1.0f, 2.0f));
+}
+
+// The pixel store forms four bytes at once; each must be the byte the scalar store8 gives that channel (premultiplied target), and for a
+// straight target the byte of the unpremultiplied channel, which for an opaque pixel is the channel itself saturated.
+TEST(RenderArithmetic, TheFourLaneStoreIsTheScalarStoreOfEachChannel) {
+  const double inf = std::numeric_limits<double>::infinity();
+  std::vector<double> values = {0.0, -0.0, 1.0, 0.5, 1.5, -1.0, -1e-300, 1e-300, 0.5 / 255.0, 127.5 / 255.0, 254.5 / 255.0, 254.4999 / 255.0,
+      254.5 / 255.0 + 1e-17, 1.0 + 1e-16, inf, -inf, std::nan(""), 0x1p64, -0x1p64, 0x1p70, 1e300, 2.0, 255.0, 0x1p-40};
+  for (int q = 0; q <= 255; q++) {
+    const double b = (q + 0.5) / 255.0;
+    values.push_back((double)q / 255.0);
+    values.push_back(b);
+    values.push_back(std::nextafter(b, 0.0));
+    values.push_back(std::nextafter(b, 2.0));
+  }
+  std::mt19937_64 rng(2026);
+  std::uniform_real_distribution<double> unit(-0.25, 1.25);
+  for (int i = 0; i < 20000; i++) {
+    values.push_back(unit(rng));
+  }
+  const size_t n = values.size();
+  for (size_t i = 0; i < n; i++) {
+    double v[4] = {values[i], values[(i * 7 + 1) % n], values[(i * 13 + 5) % n], values[(i * 31 + 11) % n]};
+    unsigned char got[4];
+    gshcpu_render_store(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, got, 0, v);
+    for (int k = 0; k < 4; k++) {
+      ASSERT_EQ(got[k], gshcpu_render_store8(v[k])) << i << " channel " << k << " value " << v[k];
+    }
+    // Straight, alpha exactly 1: the quotient is not formed, and the result is the saturated channel's byte.
+    double o[4] = {v[0], v[1], v[2], 1.0};
+    gshcpu_render_store(GSHCPU_FORMAT_RGBA8_STRAIGHT, got, 0, o);
+    for (int k = 0; k < 3; k++) {
+      ASSERT_EQ(got[k], gshcpu_render_store8(gshcpu_render_unpremultiply(o[k], 1.0))) << i << " channel " << k << " value " << o[k];
+    }
+    ASSERT_EQ(got[3], 255);
+  }
 }
 
 TEST(RenderArithmetic, LoadsAndStoresOfEachFormat) {

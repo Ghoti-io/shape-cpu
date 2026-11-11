@@ -37,6 +37,10 @@
 
 #include <string.h>
 
+#if defined(__SSE2__)
+#include <emmintrin.h>
+#endif
+
 /* --- N1: the saturation ------------------------------------------------------------- */
 
 double gshcpu_render_saturate(double x) {
@@ -744,15 +748,44 @@ void gshcpu_render_store(GSHCPU_Format format, unsigned char * row, size_t x, co
   double w[4];
   memcpy(w, v, sizeof w);
   if (!premultiplied(format)) {
-    for (int i = 0; i < 3; i++) {
-      w[i] = w[3] == 0.0 ? 0.0 : gshcpu_render_unpremultiply(w[i], w[3]); /* N1 */
+    if (w[3] == 1.0) {
+      /* An opaque pixel (the usual one): c / 1 is c, so the quotient is not formed; only the saturation of unpremultiply stays. */
+      for (int i = 0; i < 3; i++) {
+        const double mc = w[i] < 0.0 ? -w[i] : w[i];
+        if (mc >= GSHSCENE_COLOR_SATURATION) {
+          w[i] = w[i] < 0.0 ? -GSHSCENE_COLOR_SATURATION : GSHSCENE_COLOR_SATURATION;
+        }
+      }
+    } else {
+      for (int i = 0; i < 3; i++) {
+        w[i] = w[3] == 0.0 ? 0.0 : gshcpu_render_unpremultiply(w[i], w[3]); /* N1 */
+      }
     }
   }
   if (gshcpu_render_pixel_bytes(format) == 4u) {
     unsigned char * p = row + x * 4u;
+#if defined(__SSE2__)
+    /* gshcpu_render_store8's arithmetic on four lanes: v * 255, a NaN or a value below zero to 0 and one past 255 to 255 (max and min
+     * return their second operand for a NaN, which is the zero), the 32-bit truncation, and one more where the fraction is at least
+     * a half.  Every step is the scalar's, so the byte is the same one. */
+    const __m128d k = _mm_set1_pd(255.0);
+    const __m128d zero = _mm_setzero_pd();
+    const __m128d half = _mm_set1_pd(0.5);
+    __m128d t01 = _mm_min_pd(_mm_max_pd(_mm_mul_pd(_mm_loadu_pd(&w[0]), k), zero), k);
+    __m128d t23 = _mm_min_pd(_mm_max_pd(_mm_mul_pd(_mm_loadu_pd(&w[2]), k), zero), k);
+    const __m128i n = _mm_unpacklo_epi64(_mm_cvttpd_epi32(t01), _mm_cvttpd_epi32(t23));
+    const __m128d ge01 = _mm_cmpge_pd(_mm_sub_pd(t01, _mm_cvtepi32_pd(_mm_cvttpd_epi32(t01))), half);
+    const __m128d ge23 = _mm_cmpge_pd(_mm_sub_pd(t23, _mm_cvtepi32_pd(_mm_cvttpd_epi32(t23))), half);
+    const __m128i up = _mm_castps_si128(_mm_shuffle_ps(_mm_castpd_ps(ge01), _mm_castpd_ps(ge23), _MM_SHUFFLE(2, 0, 2, 0)));
+    const __m128i r = _mm_sub_epi32(n, up); /* a mask is -1 */
+    const __m128i b16 = _mm_packs_epi32(r, r);
+    const uint32_t out = (uint32_t)_mm_cvtsi128_si32(_mm_packus_epi16(b16, b16));
+    memcpy(p, &out, 4);
+#else
     for (int i = 0; i < 4; i++) {
       p[i] = gshcpu_render_store8(w[i]);
     }
+#endif
   } else {
     float f[4];
     for (int i = 0; i < 4; i++) {

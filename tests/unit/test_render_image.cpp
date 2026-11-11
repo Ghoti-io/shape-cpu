@@ -176,6 +176,47 @@ TEST(RenderImageTruncate, ItIsTheCastTowardZeroBelowTheBoundAndAClampBeyond) {
   EXPECT_EQ(gshcpu_render_trunc_i64(NAN), 0);
 }
 
+/* floor_i64 replaces `trunc_i64(gmath_floor(c))` in the taps: the same integer for every double, below 2^31 by the short form and
+ * beyond it by the long one. */
+TEST(RenderImageTruncate, TheFloorAsAnIntegerIsTheFloorThenTheTruncation) {
+  const double fixed[] = {0.0, -0.0, 0.25, -0.25, 0.5, -0.5, 1.0, -1.0, -1.5, 2147483647.0, 2147483647.5, 2147483647.999, 2147483648.0,
+      -2147483647.0, -2147483647.5, -2147483648.0, -2147483648.5, -2147483649.0, 4294967296.5, -4294967296.5, 1e300, -1e300, INFINITY,
+      -INFINITY, NAN, 0.9999999999999999, -0.9999999999999999, -1e-300};
+  for (double c : fixed) {
+    EXPECT_EQ(gshcpu_render_floor_i64(c), gshcpu_render_trunc_i64(gmath_floor(c))) << c;
+  }
+  uint64_t state = 0x1b873593cc9e2d51ull;
+  for (int i = 0; i < 400000; i++) {
+    state = state * 6364136223846793005ull + 1442695040888963407ull;
+    const int shift = (int)((state >> 58) % 38u) - 3;
+    double c = (double)(state >> 11) * 0x1p-53 * std::ldexp(1.0, shift);
+    if ((state >> 7) & 1u) {
+      c = -c;
+    }
+    if ((state >> 20) & 1u) {
+      c = std::floor(c) + 0.5; /* the values the half-pixel steps make */
+    }
+    ASSERT_EQ(gshcpu_render_floor_i64(c), gshcpu_render_trunc_i64(gmath_floor(c))) << c;
+  }
+}
+
+/* The edge maps: the early return inside the window must be what the modulo gives, and a tap far outside must still wrap. */
+TEST(RenderImageEdge, TheShortCutsAreTheModulo) {
+  for (int64_t lo : {0, 3}) {
+    for (int64_t n : {1, 2, 5, 256}) {
+      const int64_t hi = lo + n;
+      for (int64_t k = lo - 3 * n - 7; k < hi + 3 * n + 7; k++) {
+        const int64_t r = ((k - lo) % n + n) % n;
+        EXPECT_EQ(gshcpu_render_image_edge(k, lo, hi, GSHSCENE_IMAGE_EXTEND_REPEAT), lo + r) << k << " " << lo << " " << n;
+        const int64_t m = ((k - lo) % (2 * n) + 2 * n) % (2 * n);
+        EXPECT_EQ(gshcpu_render_image_edge(k, lo, hi, GSHSCENE_IMAGE_EXTEND_REFLECT), m < n ? lo + m : lo + 2 * n - 1 - m)
+            << k << " " << lo << " " << n;
+        EXPECT_EQ(gshcpu_render_image_edge(k, lo, hi, GSHSCENE_IMAGE_EXTEND_PAD), k < lo ? lo : k > hi - 1 ? hi - 1 : k);
+      }
+    }
+  }
+}
+
 /* The conversion the other way (the cast is an x87 `fild` on i686): the value itself below 2^51, a clamp beyond. */
 TEST(RenderImageTruncate, TheIntegerAsADoubleIsTheCastBelowTheBoundAndAClampBeyond) {
   const int64_t fixed[] = {0, 1, -1, 2, -2, 1048575, 1048576, -1048575, -1048576, -1048577, 4294967295ll, 4294967296ll,
