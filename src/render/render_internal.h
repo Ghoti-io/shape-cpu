@@ -848,6 +848,14 @@ int gshcpu_render_map_invert(const GSHGEOM_Map * f, double inv[6]);
 /** `a b - c d`, the exact value rounded once (an exact sum of exact products): zero exactly when the value is. */
 double gshcpu_render_det2(double a, double b, double c, double d);
 
+/** The texels the last bilinear or bicubic pixel read, with the index of the first one: a magnified image reads the same block for several pixels in a row. */
+typedef struct GSHCPU_Image_Block {
+  int valid;
+  int64_t i, j;
+  double t[4][4][4]; /* [row][column][channel] of the texels (i - 1 + a, j - 1 + b) for cubic, (i + a, j + b) for linear */
+  double lo[4], hi[4]; /* cubic: the channelwise extremes of the sixteen */
+} GSHCPU_Image_Block;
+
 /** The decode of an 8-bit sample the general tier computes, tabulated (FT-3). */
 #define GSHCPU_IMAGE_LUT 256u
 
@@ -900,6 +908,7 @@ typedef struct GSHCPU_Image {
   GSHCPU_Image_Taps hoisted;   /* FT-2: the taps of the coordinate that depends on the row */
   double hoisted_key;          /* ... for the row whose center is this */
   int hoisted_valid;
+  GSHCPU_Image_Block block;    /* the last block of texels a LINEAR or CUBIC pixel read (valid until the image is opened or its tier chosen again) */
   uint64_t visits;             /* texels read and cells clipped by `AREA`, counted whether or not a sum was kept (IC9) */
   GSHCPU_Image_Row_Sum row_sums[GSHCPU_IMAGE_ROW_SUMS];
 } GSHCPU_Image;
