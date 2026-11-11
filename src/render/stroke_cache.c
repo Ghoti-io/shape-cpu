@@ -58,6 +58,7 @@ typedef struct Entry {
   GSHCPU_Stroke_Key key;
   GSHCPU_Period_Key pkey;
   double * raster;
+  uint64_t weight;              /* a period raster: the weight of the tile's strokes (PC8) the pass that made it charged for each copy */
   GSHGEOM_Stroke_Outline * outline;
   GSHCPU_Stroke_Meta meta;
   GSHCPU_Run_Note * notes;      /* a run's glyph notes (ST8), the entry's own copy, which meta.notes names */
@@ -375,6 +376,12 @@ static void touch(GSHCPU_Stroke_Cache * c, Entry * e) {
 }
 
 int gshcpu_period_cache_acquire(GSHCPU_Stroke_Cache * c, const GSHCPU_Period_Key * key, void ** entry, const double ** raster) {
+  uint64_t weight;
+  return gshcpu_period_cache_acquire_weighted(c, key, entry, raster, &weight);
+}
+
+int gshcpu_period_cache_acquire_weighted(GSHCPU_Stroke_Cache * c, const GSHCPU_Period_Key * key, void ** entry, const double ** raster,
+    uint64_t * weight) {
   int found = 0;
   GCU_MUTEX_LOCK(c->lock);
   for (Entry * e = c->buckets[bucket_of_period(key)]; e; e = e->chain) {
@@ -383,6 +390,7 @@ int gshcpu_period_cache_acquire(GSHCPU_Stroke_Cache * c, const GSHCPU_Period_Key
       touch(c, e);
       *entry = e;
       *raster = e->raster;
+      *weight = e->weight;
       if (c->counters) {
         c->counters->period_hits++;
       }
@@ -412,6 +420,11 @@ void gshcpu_period_cache_free(GSHCPU_Stroke_Cache * c, double * raster) {
 }
 
 int gshcpu_period_cache_store(GSHCPU_Stroke_Cache * c, const GSHCPU_Period_Key * key, double * raster, size_t pixels, void ** entry) {
+  return gshcpu_period_cache_store_weighted(c, key, raster, pixels, entry, 0);
+}
+
+int gshcpu_period_cache_store_weighted(GSHCPU_Stroke_Cache * c, const GSHCPU_Period_Key * key, double * raster, size_t pixels, void ** entry,
+    uint64_t weight) {
   const uint64_t need = period_need(pixels);
   Entry * fresh = need <= c->bound ? c->alloc.malloc_fn(c->alloc.ctx, sizeof *fresh) : NULL;
   if (need <= c->bound && !fresh) {
@@ -452,6 +465,7 @@ int gshcpu_period_cache_store(GSHCPU_Stroke_Cache * c, const GSHCPU_Period_Key *
       fresh->kind = 1;
       fresh->pkey = *key;
       fresh->raster = raster;
+      fresh->weight = weight;
       fresh->meta.bytes = (size_t)need;
       fresh->refs = 1;
       fresh->listed = 1;

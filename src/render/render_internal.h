@@ -1281,6 +1281,10 @@ int gshcpu_stroke_cache_store(GSHCPU_Stroke_Cache * cache, const GSHCPU_Stroke_K
  */
 int gshcpu_period_cache_acquire(GSHCPU_Stroke_Cache * cache, const GSHCPU_Period_Key * key, void ** entry, const double ** raster);
 
+/** ::gshcpu_period_cache_acquire, and @p weight is set to the weight (PC8) the pass that made the raster kept with it. */
+int gshcpu_period_cache_acquire_weighted(GSHCPU_Stroke_Cache * cache, const GSHCPU_Period_Key * key, void ** entry, const double ** raster,
+    uint64_t * weight);
+
 /** PC10: whether a raster of @p pixels pixels could be kept (the bound), so that a render that cannot keep it does not copy it out. */
 int gshcpu_period_cache_fits(GSHCPU_Stroke_Cache * cache, size_t pixels);
 
@@ -1297,6 +1301,13 @@ void gshcpu_period_cache_free(GSHCPU_Stroke_Cache * cache, double * raster);
  * allocated (out of memory).
  */
 int gshcpu_period_cache_store(GSHCPU_Stroke_Cache * cache, const GSHCPU_Period_Key * key, double * raster, size_t pixels, void ** entry);
+
+/**
+ * ::gshcpu_period_cache_store with the weight (PC8) of the tile's strokes for each copy of the pass that made the raster, kept with it so that a
+ * hit charges the use what drawing the window would have: the raster is the same for every use of the key and the copies are not.
+ */
+int gshcpu_period_cache_store_weighted(GSHCPU_Stroke_Cache * cache, const GSHCPU_Period_Key * key, double * raster, size_t pixels, void ** entry,
+    uint64_t weight);
 
 /** Unpin an entry; the last release of one that was dropped frees it. */
 void gshcpu_stroke_cache_release(GSHCPU_Stroke_Cache * cache, void * entry);

@@ -346,6 +346,9 @@ struct Pat_Level {
   uint8_t * saved_clip;
   uint8_t * saved_result;
   uint64_t copies;           /* copies drawn by the pass (the counter) */
+  uint64_t n_copies;         /* PC8: the copies the lattice enumeration counted for the pass, over what the whole render draws of the use */
+  uint64_t weight;           /* PC8: the points of the tile's strokes' outlines, over PAT_POINTS_PER_COPY, summed over its units (the pass's first walk) */
+  uint64_t total0;           /* PC8: the use's count when the pass began (what the period tier restores when it is given up) */
   size_t arena_mark;         /* CALLER_MEMORY: the arena's use when the pass began: the item painted with the pattern keeps what is below it */
   /* PC9: the period tier.  The lattice layer holds one window of the lattice picture, [wx, wx + p) x [wy, wy + s) of the pass's frame, and
    * a pixel q of the frame has the value of the window pixel congruent to it modulo the lattice of whole-pixel steps. */
@@ -4934,6 +4937,69 @@ static GSHSCENE_Result pat_clip_push(Run * run, const GSHSCENE_Item * item, cons
   return GSHSCENE_OK;
 }
 
+/**
+ * PC8: the points of a stroke's outline that count as one copy of a pattern (the count `max_pattern_cells` bounds is of copies, and the
+ * work of a copy of a stroke is its outline's points: the stroke is cut to the cell and covered there).  A stroke of fewer than this
+ * many points is one copy and no more.
+ */
+#define PAT_POINTS_PER_COPY 16u
+
+/** PC8: the most a use may count: `max_pattern_cells`, held to what a lattice count can hold (no cap is the most that count can hold). */
+static uint64_t pat_cap(const Cpu_Sink * cs) {
+  uint64_t cap = cs->max_pattern_cells;
+  cap = cap == UINT64_MAX ? (uint64_t)GSHGEOM_LATTICE_INDEX_MAX : cap;
+  return cap > (uint64_t)GSHGEOM_LATTICE_INDEX_MAX ? (uint64_t)GSHGEOM_LATTICE_INDEX_MAX : cap;
+}
+
+/** PC8: add @p each for every one of the pass's @p L->n_copies copies to the use's count; one more than the cap is a refusal of the use. */
+static GSHSCENE_Result pat_charge(Run * run, const Pat_Level * L, uint64_t each) {
+  if (each == 0) {
+    return GSHSCENE_OK;
+  }
+  const uint64_t cap = pat_cap(run->cs);
+  const uint64_t room = pr(run)->pat_total >= cap ? 0 : cap - pr(run)->pat_total;
+  if (L->n_copies > room / each) {
+    return GSHSCENE_ERR_LIMIT; /* n * each is more than the room (this form cannot overflow) */
+  }
+  pr(run)->pat_total += L->n_copies * each;
+  return GSHSCENE_OK;
+}
+
+/**
+ * PC8: a stroke of the tile counts for every copy of the pass by its outline's points: one more copy for each PAT_POINTS_PER_COPY of them.  It
+ * is charged once for the use, in the pass's first walk, before the copies are drawn: the points are those of the stroke under the pass's linear
+ * part and no translation, which is a function of the list and the target alone, so the same whichever tier draws, whatever the cache holds
+ * and whatever the damage (the period tier charges it too, in its window pass, and a raster it kept carries the weight to charge on a hit).
+ */
+static GSHSCENE_Result pat_stroke_weigh(Run * run, Pat_Level * L, const Pat_Unit * u) {
+  Cpu_Sink * cs = run->cs;
+  GSHGEOM_Map composed;
+  run->maps[u->count - 1] = u->item->map;
+  if (gshgeom_map_compose_chain(run->maps, u->count, &L->base0, &composed) != GSHGEOM_OK) {
+    return GSHSCENE_ERR_LIMIT;
+  }
+  if (run->item_alloc == &run->arena.self) {
+    gshcpu_render_arena_rewind(&run->arena, L->arena_mark);
+  }
+  GSHCPU_Stroke_Cache * cache = !run->caller && (cs->tiers & GSHCPU_RENDER_TIER_CACHE) ? cs->cache : NULL;
+  GSHCPU_Stroke s;
+  const GSHCPU_Result opened =
+      gshcpu_render_stroke_open_lines(cache, run->item_alloc, &cs->geometry, cs->max_hatch_lines, u->item, &composed, &s);
+  if (opened != GSHCPU_OK) {
+    return opened == GSHCPU_ERR_LIMIT ? GSHSCENE_ERR_LIMIT : scene_result(opened);
+  }
+  uint64_t points = 0;
+  if (s.drawn) {
+    for (int p = GSHCPU_STROKE_BODY; p <= GSHCPU_STROKE_ALIGNED; p++) {
+      points += s.meta.present[p] ? s.meta.points[p] : 0u;
+    }
+  }
+  gshcpu_render_stroke_close(cache, &s);
+  const uint64_t each = points / PAT_POINTS_PER_COPY;
+  L->weight += each;
+  return pat_charge(run, L, each);
+}
+
 static GSHSCENE_Result pat_stroke_copy(Run * run, Pat_Level * L, int64_t i, int64_t j, void * ctx) {
   const Pat_Unit * u = ctx;
   const GSHSCENE_Item * item = u->item;
@@ -5030,6 +5096,13 @@ static GSHSCENE_Result pat_stroke(Run * run, const GSHSCENE_Item * item, const s
   }
   L->urect.x1 = L->urect.x0;
   L->urect.y1 = L->urect.y0;
+  if (L->walks <= 1) {
+    /* PC8: what the stroke costs for every copy, in the pass's first walk and before a copy is drawn. */
+    const GSHSCENE_Result weighed = pat_stroke_weigh(run, L, &u);
+    if (weighed != GSHSCENE_OK) {
+      return weighed;
+    }
+  }
   /* S4: the copies of the whole render, not only the ones the damage draws, so that a limit met inside a copy (a cell cap, a gradient
    * or an image past G14's domain, a coordinate past the range) refuses the use whatever the damage; a copy the damage does not reach
    * is covered and tested over the whole render's part of it and draws nothing. */
@@ -5310,9 +5383,7 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
   if (pr(run)->pat_depth == 0) {
     pr(run)->pat_total = 0;
   }
-  uint64_t remaining = cs->max_pattern_cells;
-  remaining = remaining == UINT64_MAX ? (uint64_t)GSHGEOM_LATTICE_INDEX_MAX : remaining;
-  remaining = remaining > (uint64_t)GSHGEOM_LATTICE_INDEX_MAX ? (uint64_t)GSHGEOM_LATTICE_INDEX_MAX : remaining;
+  uint64_t remaining = pat_cap(cs);
   remaining = pr(run)->pat_total >= remaining ? 0 : remaining - pr(run)->pat_total;
   const int64_t cr[4] = {whole.x0, whole.y0, whole.x1, whole.y1};
   uint64_t n = 0;
@@ -5321,6 +5392,9 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
     return refuse(run, item, chain, count);
   }
   pr(run)->pat_total += n;
+  L->n_copies = n;
+  L->weight = 0;
+  L->total0 = pr(run)->pat_total;
   if (n == 0) {
     p->refused = 1;
     return GSHSCENE_OK;
@@ -5427,9 +5501,14 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
     void * entry = NULL;
     const double * raster = NULL;
     period_key(run, L, item->paint.resource, frame, &facts, &pkey);
-    if (gshcpu_period_cache_acquire(pcache, &pkey, &entry, &raster)) {
-      widen(run, f, prect);
-      period_copy(run, L, f, (double *)(void *)raster, 0);
+    uint64_t kept_weight = 0;
+    if (gshcpu_period_cache_acquire_weighted(pcache, &pkey, &entry, &raster, &kept_weight)) {
+      /* PC8: the strokes of the tile count for the copies of this use as they did for the pass that made the raster. */
+      result = pat_charge(run, L, kept_weight);
+      if (result == GSHSCENE_OK) {
+        widen(run, f, prect);
+        period_copy(run, L, f, (double *)(void *)raster, 0);
+      }
       gshcpu_stroke_cache_release(pcache, entry);
       served = 1;
     }
@@ -5447,6 +5526,9 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
       L->period = 0;
       L->abort_tier = 0;
       L->copies = 0;
+      L->walks = 0;
+      L->weight = 0;
+      pr(run)->pat_total = L->total0; /* PC8: the general tier charges the strokes again */
       ms->window = rect;
       run->top = L->frame;
       run->clip_count = f->clip_base;
@@ -5469,7 +5551,7 @@ static GSHSCENE_Result pattern_begin(Painter * p, Run * run, const GSHSCENE_Item
           result = GSHSCENE_ERR_OOM;
         } else {
           period_copy(run, L, f, raster, 1);
-          const int kept = gshcpu_period_cache_store(pcache, &pkey, raster, (size_t)(L->per.p * L->per.s), &entry);
+          const int kept = gshcpu_period_cache_store_weighted(pcache, &pkey, raster, (size_t)(L->per.p * L->per.s), &entry, L->weight);
           if (kept == 1 || kept == 2) {
             gshcpu_stroke_cache_release(pcache, entry);
           }

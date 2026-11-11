@@ -443,7 +443,14 @@ cut is bounded as the clip is (the seam area at most `c (sqrt(2)/2) D` for `c` c
 
 **Limits (PC8).** The copies of a use are counted by `gshgeom_lattice_each` over what the whole render draws of the use, at every level of
 nesting, summed, and one more than `GSHCPU_Limits.max_pattern_cells` is `RESOURCE_LIMIT` for the fill or stroke painted with the
-pattern: a function of the list and the target, so the same under a damage, with the caller's memory and under any tier. A limit met inside a
+pattern: a function of the list and the target, so the same under a damage, with the caller's memory and under any tier. **A stroke in the tile
+counts for its cost.** A copy of a stroke is cut to the copy's cell and covered there, so what it costs is the points of its outline, and a count of
+copies alone lets 2^22 copies of a 3,000-point stroke run for about an hour (a 206-byte fuzz input did not finish in five minutes). Each stroke
+unit of a tile (a hatch fill and a stroked glyph run are strokes here) therefore adds, for every copy of its pass, one more copy for each 16 points
+of its outline, charged once in the pass's first walk before a copy is drawn. The points are those of the stroke under the pass's linear part and no
+translation, so the charge is the same whichever tier draws: the period tier charges in its window pass, a raster the cache holds carries the weight
+and charges it on a hit, and a window given up for the general tier takes its charge back. A stroke of fewer than 16 points counts for nothing
+more, so a hatch of short lines is counted as it was. A fill's or a clip's path is not charged this way (its copy is not cut). A limit met inside a
 tile (a copy's points, its cells, a gradient or an image past G14's domain, a shifted coordinate past the range) refuses the use, not the unit; the
 lattice layer is a group layer and meets the limits a group's does. **A damage changes none of this (S4).** The units of a tile are covered and tested
 for every copy that meets what the whole render draws of the unit (`pat_each` over the unit's whole-render reach), not only for the copies that meet the

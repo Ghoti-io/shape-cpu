@@ -591,6 +591,9 @@ def scripted():
     # copy's stroke, and the stroke was then destroyed with its members overwritten (a read of a wild pointer).
     out["regression-pattern-stroke-union-clip-arena.bin"] = base64.b64decode(
         "PAoAAAACBQICAAAAAAAJAgAAAAABCQkAAAAAAQIJAAAAAAEAAAAAAAAFAwIJAAAAAAAAAAkACQkEAAAAAAAABQIMAAIAAAAAAA//AgAAAAABAQICAgIJAwkCAAACAQICAgIJAwkCAAACAwAAAMhkMv8CAAAA/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8/Pz8AMhkMv8C8AADDAABAAEAyGQy/wIA")
+    # A stroke of about 3,000 outline points in a nested pattern tile: a copy of it costs its points, and the count of copies alone let 2^22 of them
+    # run (not finished in five minutes); the cost is counted now (PC8) and the use refused.
+    out["regression-pattern-stroke-cost.bin"] = base64.b64decode("PAgAAAABBQICAAAAAAAJGgAA0EnpTp3Be2vUeqeVyuL0W/Unw0024c+f9SdAsjbhz5+4ZAd3vwDQSenw1ifttQYR8/mWAM10nr4O4JKiqcUetT2kPIiRIAABBwIEABoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGgAAyJQpQbj52ayXNKqstiP8lYUm1E4398vCuAAAAAAAAP//EgILMFV6n8TpDjNYfaLH7BE2W4ClS8rvFDleg6jN8hc8YYar0PUaAAAABUBAAAA=")
     out["regression-cells-damage-differs.bin"] = base64.b64decode(
         "9BgAWsyop3vto1FSswDDWgVM3Wc837Z/Bhr8trLLWZ+T+zR4Kv4uM8LbHINihtt8J+Yff5kQmyh+3NASYQKDo4hSD1YkaL2jnZauWqEjRcW5S+MV"
         "TYEs5O3+VcU8cwKp97YVqjP+tkKYlPe40dOONqAWqnu2fwYa/Layy1mfk/s0eCr+LjPCg2KG23wn5h9/mb/Zk6LFN3COUCe4RAEAAAAAAAAzLrJp"
