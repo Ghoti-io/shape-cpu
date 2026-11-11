@@ -54,7 +54,7 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   covers every seam once), each copy at a whole-pixel shift of the tile drawn at the translation's fraction, so that a pattern moved by whole
   pixels moves the same bits and a copy a million cells out has no drift. Gaps, overlaps, one-axis repeats, tints, gradients, images,
   groups, clips, strokes and patterns inside a tile are drawn; `GSHCPU_Limits.max_pattern_cells` bounds the copies of a use, counted from
-  the lattice before any is drawn, a stroke in the tile counting for its outline's points as well (one more copy for every 16). A lattice whose steps are whole pixels (a hatch, a checkerboard, a pixel-snapped texture) is drawn
+  the lattice before any is drawn, a stroke, fill or clip in the tile counting for its points as well (one more copy for every 16). A lattice whose steps are whole pixels (a hatch, a checkerboard, a pixel-snapped texture) is drawn
   from one period of its picture, read by integer arithmetic and kept in the cache, bit for bit the picture the general path draws.
   Hatches: a fill painted with a hatch (a CAD hatch's pattern-definition lines) is drawn as the stroke of its trimmed, dashed lines,
   by the stroke's own machinery, so a hatch has the antialiasing of the stroke and every join, cap and alignment of one.

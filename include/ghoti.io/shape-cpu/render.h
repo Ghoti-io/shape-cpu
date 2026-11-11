@@ -841,9 +841,10 @@
  * - **PC8 Limits.**  `GSHCPU_Limits.max_pattern_cells`: the copies of a use, counted by `gshgeom_lattice_each` (a cell that only touches the
  *   rectangle counts) over what the whole render draws of it, at every level of nesting and summed, are at most it; one more is
  *   `RESOURCE_LIMIT` for the use, strict stopping with the finished prefix.  The count is of the list and the target and does not depend
- *   on the damage or the caller's memory.  A stroke in a tile counts for what a copy of it costs: for every copy of its pass one more copy
- *   for each 16 points of its outline (under the pass's linear part), charged once before a copy is drawn, so that 2^22 copies of a stroke of
- *   thousands of points are refused, not drawn; a stroke of fewer than 16 points counts for nothing more.  A limit met inside a tile (a copy's points or cells, a coordinate past the range, a map the
+ *   on the damage or the caller's memory.  A stroke, a fill or a clip push in a tile counts for what a copy of it costs: for every copy of its
+ *   pass one more copy for each 16 points of its outline or path (under the pass's linear part), charged once before a copy is drawn, and a unit
+ *   under clips counts each clip's again, so that 2^22 copies of a path of thousands of points are refused, not drawn; a path of fewer than
+ *   16 points counts for nothing more.  A limit met inside a tile (a copy's points or cells, a coordinate past the range, a map the
  *   geometry refuses) refuses the use.  The nested count is taken over the outer copies that are drawn.
  * - **PC9 The period tier.**  Where the step vectors `a` and `b` are integer vectors (every component an exact integer below `2^31`, both axes
  *   repeating, `|D|` of their determinant nonzero and at most `2^31`) the lattice picture is the same at `q` and at every `q + i a + j b`, so the

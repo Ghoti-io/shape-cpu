@@ -374,7 +374,7 @@ TEST(RenderPatternPeriod, ATileWithNoStrokeCountsTheCopiesOfTheLatticeAndNoMoreU
 }
 
 TEST(RenderPatternPeriod, AStrokeOfTheTileCountsForEveryCopyByItsPointsAndTheRefusalIsTheSameUnderEveryTierAndCache) {
-  // PC8: a copy of a stroke costs its outline's points, so the use counts one more copy for each 16 of them, for every copy of the pass.  The
+  // PC8: a copy of a stroke costs its outline's points (and a fill's or a clip's its path's), so the use counts one more copy for each 16 of them, for every copy of the pass.  The
   // count is a function of the list and the target: the period tier (which draws a window), a raster served from the cache (which draws
   // none) and the general tier refuse at the same limit, and the least limit that draws is past the copies the lattice counts.
   Scene s(0, 24, 24, 24, 24, 1, 0, 0, 1, 0.3, 0.45, 1, 1, 1.0, 72, 56);
@@ -411,7 +411,7 @@ TEST(RenderPatternPeriod, AStrokeOfTheTileCountsForEveryCopyByItsPointsAndTheRef
     }
   }
   const uint64_t least = lo;
-  EXPECT_GT(least, n) << "the strokes of the tile have more than 16 points between them: more than the copies are counted";
+  EXPECT_GT(least, n) << "the strokes, fills and clips of the tile have more than 16 points between them: more than the copies are counted";
   EXPECT_GE(least, n + n) << "and the count is of every copy";
   for (uint64_t limit : {least - 1, least, least + 1}) {
     Out general, period, again, no_cache;
@@ -437,32 +437,43 @@ TEST(RenderPatternPeriod, AStrokeOfTheTileCountsForEveryCopyByItsPointsAndTheRef
   EXPECT_GE(kept.counters.period_hits, 1u) << "the second render is served from the cache";
 }
 
-TEST(RenderPatternPeriod, AStrokeOfManyPointsInASmallTileIsRefusedForWhatItCostsAndNotDrawnForEveryCopy) {
-  // PC8: a tile of one stroke of about 3,000 outline points over a lattice of 60,000 copies is 11 million copies by its cost, past the default
-  // cap of 4 Mi: refused before a copy is drawn.  (Drawn, it is 60,000 cuts of a 3,000-point outline to a cell: a fuzzer found a list of this
-  // shape, nested, that did not finish in five minutes.)
-  RF_Ctx ctx;
-  rf_begin(&ctx);
-  GSHSCENE_List * t = rf_open(&ctx);
-  std::vector<double> zig;
-  for (int i = 0; i < 1500; i++) {
-    zig.push_back(0.02 + 0.96 * i / 1499.0);
-    zig.push_back(i % 2 ? 0.1 : 0.9);
+TEST(RenderPatternPeriod, APathOfManyPointsInASmallTileIsRefusedForWhatItCostsAndNotDrawnForEveryCopy) {
+  // PC8: a tile of one stroke, one fill or one clip of a path of 1,500 vertices over a lattice of 60,000 copies is millions of copies by its cost, past the
+  // default cap of 4 Mi: refused before a copy is drawn.  (Drawn, each is 60,000 copies of flattening, cutting and covering 1,500 points: 16, 9 and 18
+  // seconds; a fuzzer found a list of the stroke's shape, nested, that did not finish in five minutes.)
+  const char * const names[3] = {"a stroke", "a fill", "a clip and a fill under it"};
+  for (int kind = 0; kind < 3; kind++) {
+    RF_Ctx ctx;
+    rf_begin(&ctx);
+    GSHSCENE_List * t = rf_open(&ctx);
+    std::vector<double> zig;
+    for (int i = 0; i < 1500; i++) {
+      zig.push_back(0.02 + 0.96 * i / 1499.0);
+      zig.push_back(i % 2 ? 0.1 : 0.9);
+    }
+    if (kind == 0) {
+      rf_stroke(&ctx, t, rf_polyline(&ctx, zig.data(), 1500, 0), rf_pen(&ctx, 0.05, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), nullptr,
+          rf_solid(0.1, 0.1, 0.4, 1.0));
+    } else if (kind == 1) {
+      rf_fill(&ctx, t, rf_polyline(&ctx, zig.data(), 1500, 1), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.1, 0.4, 1.0), 0, 0.0);
+    } else {
+      rf_check(&ctx, gshscene_list_clip_push(t, rf_polyline(&ctx, zig.data(), 1500, 1), nullptr, GSHGEOM_FILL_NONZERO, 0, 0.0) == GSHSCENE_OK);
+      rf_fill(&ctx, t, rf_rect(&ctx, 0, 0, 1, 1), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.1, 0.4, 1.0), 0, 0.0);
+      rf_check(&ctx, gshscene_list_clip_pop(t) == GSHSCENE_OK);
+    }
+    const GSHSCENE_Resource * tile = rf_picture_of(&ctx, t);
+    const GSHSCENE_Resource * pattern = rf_pattern(&ctx, tile, 0, 0, 1, 1, 0.25, 0.25, 1, 1, rf_affine(&ctx, 1, 0, 0, 1, 0.0, 0.0), nullptr);
+    GSHSCENE_List * l = rf_open(&ctx);
+    rf_fill(&ctx, l, rf_rect(&ctx, 0, 0, 72, 56), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pattern, 1.0), 0, 0.0);
+    rf_close(&ctx, l);
+    TSink sink(kAll);
+    Out o = draw(sink.sink, l, 72, 56);
+    EXPECT_EQ(o.result, GSHSCENE_OK) << names[kind];
+    ASSERT_EQ(o.entries.size(), 1u) << names[kind];
+    EXPECT_EQ(o.entries[0].entry_class, GSHSCENE_ENTRY_REFUSED) << names[kind];
+    EXPECT_EQ(o.entries[0].reason, GSHSCENE_REASON_RESOURCE_LIMIT) << names[kind];
+    rf_release(&ctx);
   }
-  rf_stroke(&ctx, t, rf_polyline(&ctx, zig.data(), 1500, 0), rf_pen(&ctx, 0.05, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), nullptr,
-      rf_solid(0.1, 0.1, 0.4, 1.0));
-  const GSHSCENE_Resource * tile = rf_picture_of(&ctx, t);
-  const GSHSCENE_Resource * pattern = rf_pattern(&ctx, tile, 0, 0, 1, 1, 0.25, 0.25, 1, 1, rf_affine(&ctx, 1, 0, 0, 1, 0.0, 0.0), nullptr);
-  GSHSCENE_List * l = rf_open(&ctx);
-  rf_fill(&ctx, l, rf_rect(&ctx, 0, 0, 72, 56), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pattern, 1.0), 0, 0.0);
-  rf_close(&ctx, l);
-  TSink sink(kAll);
-  Out o = draw(sink.sink, l, 72, 56);
-  EXPECT_EQ(o.result, GSHSCENE_OK);
-  ASSERT_EQ(o.entries.size(), 1u);
-  EXPECT_EQ(o.entries[0].entry_class, GSHSCENE_ENTRY_REFUSED);
-  EXPECT_EQ(o.entries[0].reason, GSHSCENE_REASON_RESOURCE_LIMIT);
-  rf_release(&ctx);
 }
 
 TEST(RenderPatternPeriod, ALimitOfACopyIsMetUnderBothTiersAndTheTierGivesTheWindowUpWhereItCannotVouch) {

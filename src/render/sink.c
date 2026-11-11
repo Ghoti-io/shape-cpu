@@ -317,6 +317,7 @@ typedef struct Pat_Clip {
   const GSHSCENE_Item * item;
   size_t count;              /* the chain length of the item */
   GSHGEOM_Map * maps;        /* the enclosing instances' maps at the push, and room for two more */
+  uint64_t weight;           /* PC8: the points of its path over PAT_POINTS_PER_COPY, under the pass's linear part (every unit it clips is charged them) */
 } Pat_Clip;
 
 struct Pat_Level {
@@ -4816,6 +4817,70 @@ static GSHSCENE_Result pat_paint_copy(Run * run, Pat_Level * L, const Pat_Unit *
   return GSHSCENE_OK;
 }
 
+/**
+ * PC8: the points of a stroke's outline that count as one copy of a pattern (the count `max_pattern_cells` bounds is of copies, and the
+ * work of a copy of a stroke is its outline's points: the stroke is cut to the cell and covered there).  A stroke of fewer than this
+ * many points is one copy and no more.
+ */
+#define PAT_POINTS_PER_COPY 16u
+
+/** PC8: the most a use may count: `max_pattern_cells`, held to what a lattice count can hold (no cap is the most that count can hold). */
+static uint64_t pat_cap(const Cpu_Sink * cs) {
+  uint64_t cap = cs->max_pattern_cells;
+  cap = cap == UINT64_MAX ? (uint64_t)GSHGEOM_LATTICE_INDEX_MAX : cap;
+  return cap > (uint64_t)GSHGEOM_LATTICE_INDEX_MAX ? (uint64_t)GSHGEOM_LATTICE_INDEX_MAX : cap;
+}
+
+/** PC8: add @p each for every one of the pass's @p L->n_copies copies to the use's count; one more than the cap is a refusal of the use. */
+static GSHSCENE_Result pat_charge(Run * run, const Pat_Level * L, uint64_t each) {
+  if (each == 0) {
+    return GSHSCENE_OK;
+  }
+  const uint64_t cap = pat_cap(run->cs);
+  const uint64_t room = pr(run)->pat_total >= cap ? 0 : cap - pr(run)->pat_total;
+  if (L->n_copies > room / each) {
+    return GSHSCENE_ERR_LIMIT; /* n * each is more than the room (this form cannot overflow) */
+  }
+  pr(run)->pat_total += L->n_copies * each;
+  return GSHSCENE_OK;
+}
+
+/**
+ * PC8: the points of @p item's flattened paths under the pass's linear part and no translation, over PAT_POINTS_PER_COPY: what a copy of a fill
+ * or a clip costs (it is flattened, cut to the cell and covered there), as a copy of a stroke costs its outline's points.  @p maps and @p count
+ * are the chain of the item (the enclosing instances').  A plane (it fills the cell) and a union clip (its own limits, CU21) weigh nothing.
+ */
+static GSHSCENE_Result pat_geometry_weight(Run * run, Pat_Level * L, const GSHSCENE_Item * item, GSHGEOM_Map * maps, size_t count, uint64_t * each) {
+  *each = 0;
+  const GSHSCENE_Resource_Kind kind = gshscene_resource_kind(item->resource);
+  if (kind == GSHSCENE_RESOURCE_PLANE || kind == GSHSCENE_RESOURCE_CLIP_UNION) {
+    return GSHSCENE_OK;
+  }
+  if (run->item_alloc == &run->arena.self) {
+    gshcpu_render_arena_rewind(&run->arena, L->arena_mark);
+  }
+  GSHCPU_Item_Geometry g;
+  memset(&g, 0, sizeof g);
+  const GSHCPU_Result r = gshcpu_render_geometry(item, maps, count - 1, &L->base0, run->item_alloc, &run->cs->geometry, &g);
+  const uint64_t points = g.points;
+  gshcpu_render_geometry_release(&g, run->item_alloc);
+  if (r != GSHCPU_OK) {
+    return r == GSHCPU_ERR_LIMIT ? GSHSCENE_ERR_LIMIT : scene_result(r);
+  }
+  *each = points / PAT_POINTS_PER_COPY;
+  return GSHSCENE_OK;
+}
+
+/** PC8: charge the unit in the frame @p frame for each clip in force over it, which every copy of it is folded with (pat_fold_clips). */
+static GSHSCENE_Result pat_clips_weigh(Run * run, Pat_Level * L, const Frame * frame) {
+  uint64_t each = 0;
+  for (size_t k = frame->clip_base; k < run->clip_count; k++) {
+    each = L->pclips[k].weight > UINT64_MAX - each ? UINT64_MAX : each + L->pclips[k].weight;
+  }
+  L->weight = each > UINT64_MAX - L->weight ? UINT64_MAX : L->weight + each;
+  return pat_charge(run, L, each);
+}
+
 static GSHSCENE_Result pat_fill_copy(Run * run, Pat_Level * L, int64_t i, int64_t j, void * ctx) {
   const Pat_Unit * u = ctx;
   Pat_Copy c;
@@ -4843,6 +4908,21 @@ static GSHSCENE_Result pat_fill(Run * run, const GSHSCENE_Item * item, const siz
   }
   L->urect.x1 = L->urect.x0;
   L->urect.y1 = L->urect.y0;
+  if (L->walks <= 1) {
+    /* PC8: what the fill and the clips over it cost for every copy, in the pass's first walk and before a copy is drawn. */
+    uint64_t each = 0;
+    GSHSCENE_Result weighed = pat_geometry_weight(run, L, item, run->maps, count, &each);
+    if (weighed == GSHSCENE_OK) {
+      L->weight = each > UINT64_MAX - L->weight ? UINT64_MAX : L->weight + each;
+      weighed = pat_charge(run, L, each);
+    }
+    if (weighed == GSHSCENE_OK) {
+      weighed = pat_clips_weigh(run, L, frame);
+    }
+    if (weighed != GSHSCENE_OK) {
+      return weighed;
+    }
+  }
   /* S4: the copies of the whole render, not only the ones the damage draws, so that a limit met inside a copy (a cell cap, a gradient
    * or an image past G14's domain, a coordinate past the range) refuses the use whatever the damage; a copy the damage does not reach
    * is covered and tested over the whole render's part of it and draws nothing. */
@@ -4904,6 +4984,17 @@ static GSHSCENE_Result pat_clip_push(Run * run, const GSHSCENE_Item * item, cons
     pc->count = count;
     pc->maps = L->pmaps + run->clip_count * (run->layout.levels + 2u);
     memcpy(pc->maps, run->maps, count * sizeof *pc->maps);
+    if (L->walks <= 1) {
+      /* PC8: what a copy of the clip costs, charged for every copy now (its coverage in each) and again for each unit it clips. */
+      GSHSCENE_Result weighed = pat_geometry_weight(run, L, item, run->maps, count, &pc->weight);
+      if (weighed == GSHSCENE_OK) {
+        L->weight = pc->weight > UINT64_MAX - L->weight ? UINT64_MAX : L->weight + pc->weight;
+        weighed = pat_charge(run, L, pc->weight);
+      }
+      if (weighed != GSHSCENE_OK) {
+        return weighed;
+      }
+    }
   }
   const int drawn = !gshcpu_render_rect_empty(clip->rect);
   if (!drawn) {
@@ -4934,34 +5025,6 @@ static GSHSCENE_Result pat_clip_push(Run * run, const GSHSCENE_Item * item, cons
     }
   }
   run->clip_count++;
-  return GSHSCENE_OK;
-}
-
-/**
- * PC8: the points of a stroke's outline that count as one copy of a pattern (the count `max_pattern_cells` bounds is of copies, and the
- * work of a copy of a stroke is its outline's points: the stroke is cut to the cell and covered there).  A stroke of fewer than this
- * many points is one copy and no more.
- */
-#define PAT_POINTS_PER_COPY 16u
-
-/** PC8: the most a use may count: `max_pattern_cells`, held to what a lattice count can hold (no cap is the most that count can hold). */
-static uint64_t pat_cap(const Cpu_Sink * cs) {
-  uint64_t cap = cs->max_pattern_cells;
-  cap = cap == UINT64_MAX ? (uint64_t)GSHGEOM_LATTICE_INDEX_MAX : cap;
-  return cap > (uint64_t)GSHGEOM_LATTICE_INDEX_MAX ? (uint64_t)GSHGEOM_LATTICE_INDEX_MAX : cap;
-}
-
-/** PC8: add @p each for every one of the pass's @p L->n_copies copies to the use's count; one more than the cap is a refusal of the use. */
-static GSHSCENE_Result pat_charge(Run * run, const Pat_Level * L, uint64_t each) {
-  if (each == 0) {
-    return GSHSCENE_OK;
-  }
-  const uint64_t cap = pat_cap(run->cs);
-  const uint64_t room = pr(run)->pat_total >= cap ? 0 : cap - pr(run)->pat_total;
-  if (L->n_copies > room / each) {
-    return GSHSCENE_ERR_LIMIT; /* n * each is more than the room (this form cannot overflow) */
-  }
-  pr(run)->pat_total += L->n_copies * each;
   return GSHSCENE_OK;
 }
 
@@ -5098,7 +5161,10 @@ static GSHSCENE_Result pat_stroke(Run * run, const GSHSCENE_Item * item, const s
   L->urect.y1 = L->urect.y0;
   if (L->walks <= 1) {
     /* PC8: what the stroke costs for every copy, in the pass's first walk and before a copy is drawn. */
-    const GSHSCENE_Result weighed = pat_stroke_weigh(run, L, &u);
+    GSHSCENE_Result weighed = pat_stroke_weigh(run, L, &u);
+    if (weighed == GSHSCENE_OK) {
+      weighed = pat_clips_weigh(run, L, frame);
+    }
     if (weighed != GSHSCENE_OK) {
       return weighed;
     }
