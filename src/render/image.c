@@ -314,7 +314,7 @@ IM_INLINE void taps_of(uint32_t filter, double c, GSHCPU_Image_Taps * t) {
   const double s = c - 0.5;
   /* The floor as an integer, and as a double when it is in the range where that is exact (a zero keeps its sign, as gmath_floor's). */
   const int64_t fi = gshcpu_render_floor_i64(s);
-  const double fl = (s > -2147483648.0 && s < 2147483648.0) ? (s == 0.0 ? s : (double)fi) : gmath_floor(s);
+  const double fl = (s > -2147483648.0 && s < 2147483648.0) ? (s == 0.0 ? s : (double)(int32_t)fi) : gmath_floor(s);
   const double f = s - fl;
   t->i = fi;
   if (filter == (uint32_t)GSHSCENE_IMAGE_FILTER_LINEAR) {
