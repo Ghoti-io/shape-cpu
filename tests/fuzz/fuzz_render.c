@@ -1962,7 +1962,11 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
            * (see the call's comment) is left to the exact references of the unit tests. */
           GSHCPU_Limits lim = limits;
           GSHSCENE_Sink * dual = NULL;
-          GIMG_Raster * twin_out = copy_of(backdrop, format);
+          /* The earlier step is the slow engine (a cell with many pieces costs it far more than the library's own step: two inputs a
+           * fuzzer found took 80 s under ASan, 83% and 95% of it in the earlier step), and what it draws is compared only where the
+           * bounds below hold; a render past them is not drawn a second time for nothing. */
+          const int dual_comparable = counters.exact_pieces_max <= 512 && counters.exact_winding_max <= 255;
+          GIMG_Raster * twin_out = dual_comparable ? copy_of(backdrop, format) : NULL;
           if (twin_out && gshcpu_render_sink_create_tiered(NULL, NULL, &lim, GSHCPU_RENDER_TIERS_ALL, NULL, NULL, NULL, &dual) == GSHCPU_OK) {
             target.surface = twin_out;
             gshcpu_exact_hook = gshcpu_s4b_exact_cell;
@@ -1975,8 +1979,7 @@ int LLVMFuzzerTestOneInput(const uint8_t * data, size_t size) {
              * 255 (the library's own cells are then the exact area, the earlier step's within a unit of it). */
             /* The earlier step has no crossings budget (the hook replaces the step that counts them), so where the budget
              * refused an item it drew what the render left out; the engines are compared where nothing was refused. */
-            if (r5 == GSHSCENE_OK && counters.exact_pieces_max <= 512 && counters.exact_winding_max <= 255 &&
-                ((limit_byte & 7) < 6 || limit_refused == 0)) {
+            if (r5 == GSHSCENE_OK && ((limit_byte & 7) < 6 || limit_refused == 0)) {
               CHECK(near_samples(raster, twin_out, bpp, 2));
               if (getenv("GSHCPU_FUZZ_STRICT_DUAL")) {
                 CHECK(same_bytes(raster, twin_out)); /* the committed seeds draw the same bytes with either engine */
