@@ -39,6 +39,10 @@
 
 #include <string.h>
 
+#if defined(__SSE2__)
+#include <emmintrin.h>
+#endif
+
 /** The largest side of a preimage in texels that is drawn at all: the sampling domain's width, `2^33`. */
 #define WIDEST 8589934592.0
 
@@ -50,6 +54,22 @@ typedef struct Sum {
 } Sum;
 
 static void sum_add(Sum * a, const double v[4]) {
+#if defined(__SSE2__)
+  /* The same two branches without a branch: both operands are chosen by the comparison of their magnitudes, then the same three
+   * operations run in the same order, so each lane is the double the scalar form gives (a NaN compares false and takes the second
+   * form, as it does there). */
+  const __m128d mask = _mm_castsi128_pd(_mm_set1_epi64x(0x7fffffffffffffffll));
+  for (int k = 0; k < 4; k += 2) {
+    const __m128d s = _mm_loadu_pd(&a->s[k]);
+    const __m128d x = _mm_loadu_pd(&v[k]);
+    const __m128d t = _mm_add_pd(s, x);
+    const __m128d big_is_s = _mm_cmpge_pd(_mm_and_pd(s, mask), _mm_and_pd(x, mask));
+    const __m128d hi = _mm_or_pd(_mm_and_pd(big_is_s, s), _mm_andnot_pd(big_is_s, x));
+    const __m128d lo = _mm_or_pd(_mm_and_pd(big_is_s, x), _mm_andnot_pd(big_is_s, s));
+    _mm_storeu_pd(&a->c[k], _mm_add_pd(_mm_loadu_pd(&a->c[k]), _mm_add_pd(_mm_sub_pd(hi, t), lo)));
+    _mm_storeu_pd(&a->s[k], t);
+  }
+#else
   for (int k = 0; k < 4; k++) {
     const double t = a->s[k] + v[k];
     const double big = a->s[k] < 0.0 ? -a->s[k] : a->s[k];
@@ -61,6 +81,7 @@ static void sum_add(Sum * a, const double v[4]) {
     }
     a->s[k] = t;
   }
+#endif
 }
 
 /** @p v scaled by @p w, added. */
@@ -394,15 +415,15 @@ static void rectangle(GSHCPU_Image * im, const double * vx, const double * vy, S
   c.xr = dmax(dmax(vx[0], vx[1]), dmax(vx[2], vx[3]));
   const double yl = dmin(dmin(vy[0], vy[1]), dmin(vy[2], vy[3]));
   const double yr = dmax(dmax(vy[0], vy[1]), dmax(vy[2], vy[3]));
-  c.ci0 = gshcpu_render_trunc_i64(gmath_floor(c.xl));
-  c.ci1 = gshcpu_render_trunc_i64(gmath_floor(c.xr)) + (c.xr > gmath_floor(c.xr) ? 1 : 0); /* one past the last */
-  c.fa = gshcpu_render_trunc_i64(-gmath_floor(-c.xl));
-  c.fb = gshcpu_render_trunc_i64(gmath_floor(c.xr));
+  c.ci0 = gshcpu_render_floor_i64(c.xl);
+  c.ci1 = gshcpu_render_floor_up_i64(c.xr); /* one past the last */
+  c.fa = gshcpu_render_ceil_i64(c.xl);
+  c.fb = gshcpu_render_floor_i64(c.xr);
   c.have_run = c.fb > c.fa;
-  const int64_t rj0 = gshcpu_render_trunc_i64(gmath_floor(yl));
-  const int64_t rj1 = gshcpu_render_trunc_i64(gmath_floor(yr)) + (yr > gmath_floor(yr) ? 1 : 0);
-  const int64_t ya = gshcpu_render_trunc_i64(-gmath_floor(-yl)); /* the rows covered across: [ya, yb) */
-  const int64_t yb = gshcpu_render_trunc_i64(gmath_floor(yr));
+  const int64_t rj0 = gshcpu_render_floor_i64(yl);
+  const int64_t rj1 = gshcpu_render_floor_up_i64(yr);
+  const int64_t ya = gshcpu_render_ceil_i64(yl); /* the rows covered across: [ya, yb) */
+  const int64_t yb = gshcpu_render_floor_i64(yr);
   /* the rows at the top the footprint covers in part, one by one */
   for (int64_t j = rj0; j < rj1 && (yb <= ya || j < ya); j++) {
     const double wy = dmin(gshcpu_render_i64_to_double(j + 1), yr) - dmax(gshcpu_render_i64_to_double(j), yl);
@@ -477,8 +498,8 @@ static void rectangle(GSHCPU_Image * im, const double * vx, const double * vy, S
 static void general(GSHCPU_Image * im, const double * vx, const double * vy, Sum * acc) {
   const double ymin = dmin(dmin(vy[0], vy[1]), dmin(vy[2], vy[3]));
   const double ymax = dmax(dmax(vy[0], vy[1]), dmax(vy[2], vy[3]));
-  const int64_t j0 = gshcpu_render_trunc_i64(gmath_floor(ymin));
-  const int64_t j1 = gshcpu_render_trunc_i64(gmath_floor(ymax)) + (ymax > gmath_floor(ymax) ? 1 : 0);
+  const int64_t j0 = gshcpu_render_floor_i64(ymin);
+  const int64_t j1 = gshcpu_render_floor_up_i64(ymax);
   for (int64_t j = j0; j < j1; j++) {
     const int64_t ty = gshcpu_render_image_edge(j, (int64_t)im->y0, (int64_t)im->y1, im->extend_y);
     double xmin;
@@ -500,13 +521,13 @@ static void general(GSHCPU_Image * im, const double * vx, const double * vy, Sum
       cross_section(vx, vy, gshcpu_render_i64_to_double(j + 1), &l1, &r1);
       xmin = dmin(l0, l1);
       xmax = dmax(r0, r1);
-      ra = gshcpu_render_trunc_i64(-gmath_floor(-dmax(l0, l1)));
-      rb = gshcpu_render_trunc_i64(gmath_floor(dmin(r0, r1)));
+      ra = gshcpu_render_ceil_i64(dmax(l0, l1));
+      rb = gshcpu_render_floor_i64(dmin(r0, r1));
     } else {
       strip_extent(vx, vy, j, &xmin, &xmax);
     }
-    const int64_t i0 = gshcpu_render_trunc_i64(gmath_floor(xmin));
-    const int64_t i1 = gshcpu_render_trunc_i64(gmath_floor(xmax)) + (xmax > gmath_floor(xmax) ? 1 : 0);
+    const int64_t i0 = gshcpu_render_floor_i64(xmin);
+    const int64_t i1 = gshcpu_render_floor_up_i64(xmax);
     const int have_run = rb > ra;
     for (int64_t i = i0; i < i1; i++) {
       if (have_run && i >= ra && i < rb) {

@@ -184,6 +184,8 @@ TEST(RenderImageTruncate, TheFloorAsAnIntegerIsTheFloorThenTheTruncation) {
       -INFINITY, NAN, 0.9999999999999999, -0.9999999999999999, -1e-300};
   for (double c : fixed) {
     EXPECT_EQ(gshcpu_render_floor_i64(c), gshcpu_render_trunc_i64(gmath_floor(c))) << c;
+    EXPECT_EQ(gshcpu_render_ceil_i64(c), gshcpu_render_trunc_i64(-gmath_floor(-c))) << c;
+    EXPECT_EQ(gshcpu_render_floor_up_i64(c), gshcpu_render_trunc_i64(gmath_floor(c)) + (c > gmath_floor(c) ? 1 : 0)) << c;
   }
   uint64_t state = 0x1b873593cc9e2d51ull;
   for (int i = 0; i < 400000; i++) {
@@ -197,6 +199,8 @@ TEST(RenderImageTruncate, TheFloorAsAnIntegerIsTheFloorThenTheTruncation) {
       c = std::floor(c) + 0.5; /* the values the half-pixel steps make */
     }
     ASSERT_EQ(gshcpu_render_floor_i64(c), gshcpu_render_trunc_i64(gmath_floor(c))) << c;
+    ASSERT_EQ(gshcpu_render_ceil_i64(c), gshcpu_render_trunc_i64(-gmath_floor(-c))) << c;
+    ASSERT_EQ(gshcpu_render_floor_up_i64(c), gshcpu_render_trunc_i64(gmath_floor(c)) + (c > gmath_floor(c) ? 1 : 0)) << c;
   }
 }
 

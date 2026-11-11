@@ -965,9 +965,33 @@ static inline int64_t gshcpu_render_trunc_i64(double w) {
 static inline int64_t gshcpu_render_floor_i64(double c) {
   if (c > -2147483648.0 && c < 2147483648.0) {
     const int32_t n = (int32_t)c;
-    return n - ((double)n > c ? 1 : 0);
+    return (int64_t)n - ((double)n > c ? 1 : 0);
   }
   return gshcpu_render_trunc_i64(gmath_floor(c));
+}
+
+/**
+ * `trunc_i64(-gmath_floor(-c))`: the ceiling as an integer.  Below 2^31 it is the truncation stepped up for a positive non-integer;
+ * beyond it (and for a NaN) the long form is taken, which clamps where the short one does not apply.
+ */
+static inline int64_t gshcpu_render_ceil_i64(double c) {
+  if (c > -2147483648.0 && c < 2147483648.0) {
+    const int32_t n = (int32_t)c;
+    return (int64_t)n + ((double)n < c ? 1 : 0); /* in 64 bits: 2^31 - 1 plus one */
+  }
+  return gshcpu_render_trunc_i64(-gmath_floor(-c));
+}
+
+/**
+ * `trunc_i64(gmath_floor(c)) + (c > gmath_floor(c) ? 1 : 0)`: one past the last integer a span ending at @p c covers.  Below 2^31 that is
+ * the ceiling; beyond it the long form is taken (a clamp of the floor, then a one that the clamp does not remove).
+ */
+static inline int64_t gshcpu_render_floor_up_i64(double c) {
+  if (c > -2147483648.0 && c < 2147483648.0) {
+    const int32_t n = (int32_t)c;
+    return (int64_t)n + ((double)n < c ? 1 : 0); /* in 64 bits: 2^31 - 1 plus one */
+  }
+  return gshcpu_render_trunc_i64(gmath_floor(c)) + (c > gmath_floor(c) ? 1 : 0);
 }
 
 /** IC9: whether every point of the device rectangle @p r maps inside the sampling domain. */
