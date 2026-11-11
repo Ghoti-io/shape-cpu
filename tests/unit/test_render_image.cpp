@@ -1043,6 +1043,8 @@ TEST(RenderImageTiers, EachTierIsBitEqualToTheGeneralTierAndIsTaken) {
   GSHCPU_Render_Counters off_counts{};
   size_t renders = 0;
   for (const ih::Fmt & f : formats) {
+    for (int native = 0; native < 2; native++) {
+    /* native: the image in the target's own space and the filter space the image's, so no conversion lies between the table decode and the filter (the pixel's fast specialization) */
     for (const Shape & shape : shapes) {
       for (uint32_t filter = 0; filter < GSHSCENE_IMAGE_FILTER_COUNT; filter++) {
         for (uint32_t extend : {0u, 1u, 2u, 3u}) {
@@ -1056,7 +1058,7 @@ TEST(RenderImageTiers, EachTierIsBitEqualToTheGeneralTierAndIsTaken) {
           GSHSCENE_Color_Space p3{};
           p3.primaries = GCOL_PRIMARIES_DISPLAY_P3;
           p3.transfer = GCOL_TRANSFER_SRGB;
-          const GSHSCENE_Resource * image = ih::intern_image(s.store, w, h, f, samples, f.alpha_only ? GSHSCENE_Color_Space{} : p3);
+          const GSHSCENE_Resource * image = ih::intern_image(s.store, w, h, f, samples, (f.alpha_only || native) ? GSHSCENE_Color_Space{} : p3);
           ASSERT_NE(image, nullptr);
           s.held.push_back(image);
           GSHSCENE_Paint tint{};
@@ -1075,7 +1077,7 @@ TEST(RenderImageTiers, EachTierIsBitEqualToTheGeneralTierAndIsTaken) {
           ip.minify = filter;
           if (f.alpha_only) {
             ip.tint = &tint;
-          } else if (filter % 2) {
+          } else if (filter % 2 && !native) {
             ip.filter_space = linear_srgb();
           }
           const GSHSCENE_Resource * paint = nullptr;
@@ -1110,9 +1112,10 @@ TEST(RenderImageTiers, EachTierIsBitEqualToTheGeneralTierAndIsTaken) {
             }
           }
           renders++;
-          ASSERT_EQ(bytes[0], bytes[1]) << shape.name << " filter " << filter << " extend " << extend << " bits " << f.bits;
+          ASSERT_EQ(bytes[0], bytes[1]) << shape.name << " filter " << filter << " extend " << extend << " bits " << f.bits << " native " << native;
         }
       }
+    }
     }
   }
   EXPECT_GT(renders, 500u);

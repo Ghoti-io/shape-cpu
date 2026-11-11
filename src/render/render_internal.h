@@ -874,6 +874,10 @@ typedef struct GSHCPU_Image_Row_Sum {
 } GSHCPU_Image_Row_Sum;
 
 /** An image paint prepared for one fill (IC1 to IC8): the image read in place, the edge modes, the filter chosen, the conversions and the inverse map. */
+struct GSHCPU_Image;
+/** The pixel function of a placed image: IC8's source of the pixel whose center is (qx, qy). */
+typedef void (*GSHCPU_Image_Pixel_Fn)(struct GSHCPU_Image * im, double qx, double qy, double src[4]);
+
 typedef struct GSHCPU_Image {
   const unsigned char * rows;  /* the first row; a row is stride bytes after the last */
   size_t stride;
@@ -888,6 +892,7 @@ typedef struct GSHCPU_Image {
   double mult;                 /* the paint's alpha multiplier m */
   double tint[3];              /* an alpha-only image's tint, straight, in the layer's space */
   double tint_alpha;
+  GSHCPU_Image_Pixel_Fn pixel; /* the specialization of gshcpu_render_image_at for this placement (set by gshcpu_render_image_tiers), or NULL */
   const double * lut;          /* FT-3: the decode of an 8-bit sample, or NULL */
   unsigned tiers;              /* GSHCPU_RENDER_TIER_*: the image tiers in force */
   int mode;                    /* GSHCPU_IMAGE_GENERAL, _COPY, _DIAGONAL or _ANTI */

@@ -2380,7 +2380,11 @@ static void painter_span(void * ctx, int64_t y, int64_t x, size_t n, const uint8
         continue;
       }
       double s[4];
-      gshcpu_render_image_at(&p->im, (double)(int32_t)px + 0.5, (double)(int32_t)y + 0.5, s);
+      if (p->im.pixel) {
+        p->im.pixel(&p->im, (double)(int32_t)px + 0.5, (double)(int32_t)y + 0.5, s);
+      } else {
+        gshcpu_render_image_at(&p->im, (double)(int32_t)px + 0.5, (double)(int32_t)y + 0.5, s);
+      }
       painter_pixel(run, frame, px, y, m, s);
     }
     run->work += p->im.visits - before; /* the texels and cells AREA visited (IC9) */

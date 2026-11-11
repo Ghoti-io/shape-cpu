@@ -55,6 +55,9 @@ static inline int64_t modulo(int64_t a, int64_t n) {
 
 /** The texel index tap @p k reads along the window `[lo, hi)`, or -1 for the transparent texel of `NONE`. */
 IM_INLINE int64_t edge(int64_t k, int64_t lo, int64_t hi, uint32_t mode) {
+  if (k >= lo && k < hi) {
+    return k; /* inside the window every mode reads the texel itself, and nearly every tap is */
+  }
   const int64_t n = hi - lo;
   switch (mode) {
     case GSHSCENE_IMAGE_EXTEND_PAD:
@@ -151,18 +154,42 @@ void gshcpu_render_image_window_texel(const GSHCPU_Image * im, uint32_t ix, uint
   }
 }
 
-/** The value of the texel tap (@p tx, @p ty) reads, premultiplied in the filter space (IP5, IC4). */
-IM_INLINE void texel(const GSHCPU_Image * im, int64_t tx, int64_t ty, double out[4]) {
+/** The RGBA8 texel through the table (the fast tier's case: no conversion, not alpha-only), the arithmetic of decode()'s own table branch. */
+IM_INLINE void decode_rgba8(const GSHCPU_Image * im, uint32_t x, uint32_t y, double out[4]) {
+  const unsigned char * q = im->rows + (size_t)y * im->stride + (size_t)x * 4u;
+  const double a = im->lut[q[3]];
+  if (im->straight) {
+    out[0] = a * im->lut[q[0]];
+    out[1] = a * im->lut[q[1]];
+    out[2] = a * im->lut[q[2]];
+  } else {
+    out[0] = im->lut[q[0]];
+    out[1] = im->lut[q[1]];
+    out[2] = im->lut[q[2]];
+  }
+  out[3] = a;
+}
+
+/** The value of the texel tap (@p tx, @p ty) reads, premultiplied in the filter space (IP5, IC4); @p fast is the pixel's fast configuration (see ::fast_config). */
+IM_INLINE void texel_k(const GSHCPU_Image * im, int64_t tx, int64_t ty, double out[4], int fast) {
   const int64_t ix = edge(tx, (int64_t)im->x0, (int64_t)im->x1, im->extend_x);
   const int64_t iy = edge(ty, (int64_t)im->y0, (int64_t)im->y1, im->extend_y);
   if (ix < 0 || iy < 0) {
     out[0] = out[1] = out[2] = out[3] = 0.0;
     return;
   }
+  if (fast) {
+    decode_rgba8(im, (uint32_t)ix, (uint32_t)iy, out);
+    return;
+  }
   decode(im, (uint32_t)ix, (uint32_t)iy, out);
   if (im->convert_in) {
     gshcpu_render_convert_premultiplied(&im->in, out, out);
   }
+}
+
+IM_INLINE void texel(const GSHCPU_Image * im, int64_t tx, int64_t ty, double out[4]) {
+  texel_k(im, tx, ty, out, 0);
 }
 
 int64_t gshcpu_render_image_edge(int64_t k, int64_t lo, int64_t hi, uint32_t mode) {
@@ -205,6 +232,7 @@ GSHCPU_Result gshcpu_render_image_open(GSHCPU_Image * im, const GSHSCENE_Resourc
   im->extend_y = extend_y;
   im->filter = filter;
   im->lut = NULL;
+  im->pixel = NULL;
   im->tiers = 0;
   im->mode = GSHCPU_IMAGE_GENERAL;
   im->hoisted_valid = 0;
@@ -299,11 +327,11 @@ IM_INLINE void taps_of(uint32_t filter, double c, GSHCPU_Image_Taps * t) {
   t->w[3] = kernel(2.0 - f);
 }
 
-IM_INLINE void nearest(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4]) {
-  texel(im, x->i, y->i, out);
+IM_INLINE void nearest(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4], int fast) {
+  texel_k(im, x->i, y->i, out, fast);
 }
 
-IM_INLINE void linear(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4]) {
+IM_INLINE void linear(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4], int fast) {
   const int64_t i = x->i;
   const int64_t j = y->i;
   const double wx0 = x->w[0];
@@ -314,8 +342,8 @@ IM_INLINE void linear(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, cons
   for (int b = 0; b < 2; b++) {
     double t0[4];
     double t1[4];
-    texel(im, i, j + b, t0);
-    texel(im, i + 1, j + b, t1);
+    texel_k(im, i, j + b, t0, fast);
+    texel_k(im, i + 1, j + b, t1, fast);
     for (int k = 0; k < 4; k++) {
       r[b][k] = wx0 * t0[k] + wx1 * t1[k];
     }
@@ -363,24 +391,28 @@ static void cubic(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GS
   }
 }
 
-/** The filtered value from the taps of u and of v, premultiplied in the layer's space. */
-IM_INLINE void filter_taps(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4]) {
+/** The filtered value from the taps of u and of v, premultiplied in the layer's space; @p filter and @p fast are the image's own, or constants a specialization has folded. */
+IM_INLINE void filter_taps_k(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4], uint32_t filter, int fast) {
   double f[4];
-  switch (im->filter) {
+  switch (filter) {
     case GSHSCENE_IMAGE_FILTER_NEAREST:
-      nearest(im, x, y, f);
+      nearest(im, x, y, f, fast);
       break;
     case GSHSCENE_IMAGE_FILTER_LINEAR:
-      linear(im, x, y, f);
+      linear(im, x, y, f, fast);
       break;
     default:
       cubic(im, x, y, f);
       break;
   }
-  if (im->convert_out) {
+  if (!fast && im->convert_out) {
     gshcpu_render_convert_premultiplied(&im->out, f, f);
   }
   memcpy(out, f, sizeof f);
+}
+
+IM_INLINE void filter_taps(const GSHCPU_Image * im, const GSHCPU_Image_Taps * x, const GSHCPU_Image_Taps * y, double out[4]) {
+  filter_taps_k(im, x, y, out, im->filter, 0);
 }
 
 void gshcpu_render_image_point(const GSHCPU_Image * im, double u, double v, double out[4]) {
@@ -393,51 +425,49 @@ void gshcpu_render_image_point(const GSHCPU_Image * im, double u, double v, doub
 
 /* --- the pixel (IC8) ------------------------------------------------------------------------------------------ */
 
-void gshcpu_render_image_at(GSHCPU_Image * im, double qx, double qy, double src[4]) {
+/**
+ * IC8's pixel for the point-filter and copy modes, with the mode, the filter and the fast configuration as parameters: the generic function passes the
+ * image's own, and each specialization (::PIXEL_FN) passes constants, so the tests of state that cannot change between two pixels are folded away.
+ * Every arm is the arithmetic of the generic function in the same order, which is what keeps the tiers bit-equal (SC8).
+ */
+IM_INLINE void pixel_core(GSHCPU_Image * im, double qx, double qy, double src[4], int mode, uint32_t filter, int fast) {
   double f[4];
-  if (im->mode == GSHCPU_IMAGE_COPY) {
+  if (mode == GSHCPU_IMAGE_COPY) {
     /* FT-1: the weights are exactly 1 and 0 (or the pixel's preimage is one cell), so the value is the texel under the pixel. */
-    double t[4];
-    texel(im, gshcpu_render_trunc_i64(qx - 0.5) - im->copy_dx, gshcpu_render_trunc_i64(qy - 0.5) - im->copy_dy, t);
-    if (im->convert_out) {
-      gshcpu_render_convert_premultiplied(&im->out, t, f);
-    } else {
-      memcpy(f, t, sizeof f);
+    texel_k(im, gshcpu_render_trunc_i64(qx - 0.5) - im->copy_dx, gshcpu_render_trunc_i64(qy - 0.5) - im->copy_dy, f, fast);
+    if (!fast && im->convert_out) {
+      gshcpu_render_convert_premultiplied(&im->out, f, f);
     }
-  } else if (im->filter == (uint32_t)GSHSCENE_IMAGE_FILTER_AREA) {
-    /* IC2: the pixel square [qx - 1/2, qx + 1/2] x [qy - 1/2, qy + 1/2], its preimage a parallelogram of the same shape for every pixel. */
-    const double u = (qx - 0.5) - im->inv[4];
-    const double v = (qy - 0.5) - im->inv[5];
-    const double origin[2] = {im->inv[0] * u + im->inv[1] * v, im->inv[2] * u + im->inv[3] * v};
-    const double ea[2] = {im->inv[0], im->inv[2]};
-    const double eb[2] = {im->inv[1], im->inv[3]};
-    gshcpu_render_image_region(im, origin, ea, eb, f);
   } else {
     const double u = qx - im->inv[4];
     const double v = qy - im->inv[5];
-    if (im->mode == GSHCPU_IMAGE_DIAGONAL || im->mode == GSHCPU_IMAGE_ANTI) {
+    if (mode == GSHCPU_IMAGE_DIAGONAL || mode == GSHCPU_IMAGE_ANTI) {
       /* FT-2: one coordinate depends on the row alone; its taps are found once for the row and kept (IC10). */
-      const int diagonal = im->mode == GSHCPU_IMAGE_DIAGONAL;
+      const int diagonal = mode == GSHCPU_IMAGE_DIAGONAL;
       GSHCPU_Image_Taps x;
       GSHCPU_Image_Taps y;
       if (!im->hoisted_valid || im->hoisted_key != qy) {
-        taps_of(im->filter, diagonal ? im->inv[3] * v : im->inv[1] * v, &im->hoisted);
+        taps_of(filter, diagonal ? im->inv[3] * v : im->inv[1] * v, &im->hoisted);
         im->hoisted_key = qy;
         im->hoisted_valid = 1;
       }
       if (diagonal) {
-        taps_of(im->filter, im->inv[0] * u, &x);
+        taps_of(filter, im->inv[0] * u, &x);
         y = im->hoisted;
       } else {
-        taps_of(im->filter, im->inv[2] * u, &y);
+        taps_of(filter, im->inv[2] * u, &y);
         x = im->hoisted;
       }
-      filter_taps(im, &x, &y, f);
+      filter_taps_k(im, &x, &y, f, filter, fast);
     } else {
-      gshcpu_render_image_point(im, im->inv[0] * u + im->inv[1] * v, im->inv[2] * u + im->inv[3] * v, f);
+      GSHCPU_Image_Taps x;
+      GSHCPU_Image_Taps y;
+      taps_of(filter, im->inv[0] * u + im->inv[1] * v, &x);
+      taps_of(filter, im->inv[2] * u + im->inv[3] * v, &y);
+      filter_taps_k(im, &x, &y, f, filter, fast);
     }
   }
-  if (im->alpha_only) {
+  if (!fast && im->alpha_only) {
     const double k = (im->mult * im->tint_alpha) * f[3];
     src[0] = im->tint[0] * k;
     src[1] = im->tint[1] * k;
@@ -450,12 +480,83 @@ void gshcpu_render_image_at(GSHCPU_Image * im, double qx, double qy, double src[
   }
 }
 
+void gshcpu_render_image_at(GSHCPU_Image * im, double qx, double qy, double src[4]) {
+  if (im->mode != GSHCPU_IMAGE_COPY && im->filter == (uint32_t)GSHSCENE_IMAGE_FILTER_AREA) {
+    /* IC2: the pixel square [qx - 1/2, qx + 1/2] x [qy - 1/2, qy + 1/2], its preimage a parallelogram of the same shape for every pixel. */
+    double f[4];
+    const double u = (qx - 0.5) - im->inv[4];
+    const double v = (qy - 0.5) - im->inv[5];
+    const double origin[2] = {im->inv[0] * u + im->inv[1] * v, im->inv[2] * u + im->inv[3] * v};
+    const double ea[2] = {im->inv[0], im->inv[2]};
+    const double eb[2] = {im->inv[1], im->inv[3]};
+    gshcpu_render_image_region(im, origin, ea, eb, f);
+    if (im->alpha_only) {
+      const double k = (im->mult * im->tint_alpha) * f[3];
+      src[0] = im->tint[0] * k;
+      src[1] = im->tint[1] * k;
+      src[2] = im->tint[2] * k;
+      src[3] = k;
+      return;
+    }
+    for (int k = 0; k < 4; k++) {
+      src[k] = f[k] * im->mult;
+    }
+    return;
+  }
+  pixel_core(im, qx, qy, src, im->mode, im->filter, 0);
+}
+
+/** One specialization of the pixel: mode, filter and the fast configuration are constants. */
+#define PIXEL_FN(name, mode, filter, fast) \
+  static void name(GSHCPU_Image * im, double qx, double qy, double src[4]) { pixel_core(im, qx, qy, src, mode, filter, fast); }
+
+#define PIXEL_FAMILY(suffix, fast) \
+  PIXEL_FN(px_copy_n_##suffix, GSHCPU_IMAGE_COPY, GSHSCENE_IMAGE_FILTER_NEAREST, fast) \
+  PIXEL_FN(px_copy_l_##suffix, GSHCPU_IMAGE_COPY, GSHSCENE_IMAGE_FILTER_LINEAR, fast) \
+  PIXEL_FN(px_diag_n_##suffix, GSHCPU_IMAGE_DIAGONAL, GSHSCENE_IMAGE_FILTER_NEAREST, fast) \
+  PIXEL_FN(px_diag_l_##suffix, GSHCPU_IMAGE_DIAGONAL, GSHSCENE_IMAGE_FILTER_LINEAR, fast) \
+  PIXEL_FN(px_anti_n_##suffix, GSHCPU_IMAGE_ANTI, GSHSCENE_IMAGE_FILTER_NEAREST, fast) \
+  PIXEL_FN(px_anti_l_##suffix, GSHCPU_IMAGE_ANTI, GSHSCENE_IMAGE_FILTER_LINEAR, fast) \
+  PIXEL_FN(px_gen_n_##suffix, GSHCPU_IMAGE_GENERAL, GSHSCENE_IMAGE_FILTER_NEAREST, fast) \
+  PIXEL_FN(px_gen_l_##suffix, GSHCPU_IMAGE_GENERAL, GSHSCENE_IMAGE_FILTER_LINEAR, fast)
+
+PIXEL_FAMILY(slow, 0)
+PIXEL_FAMILY(fast, 1)
+
+/** The fast configuration: the 8-bit RGBA table decode with nothing between the texel and the filter and nothing after it (no conversions, not alpha-only). */
+static int fast_config(const GSHCPU_Image * im) {
+  return im->lut && !im->is_float && im->bits <= 8u && im->layout == (uint32_t)GSHSCENE_IMAGE_RGBA && !im->alpha_only && !im->convert_in &&
+      !im->convert_out;
+}
+
+/** The specialization for the placed image's mode, filter and configuration, or NULL where the generic function is the one (AREA, CUBIC). */
+static GSHCPU_Image_Pixel_Fn pixel_fn_of(const GSHCPU_Image * im) {
+  const int fast = fast_config(im);
+  const int linear = im->filter == (uint32_t)GSHSCENE_IMAGE_FILTER_LINEAR;
+  if (!linear && im->filter != (uint32_t)GSHSCENE_IMAGE_FILTER_NEAREST) {
+    return NULL;
+  }
+#define PICK(m) (fast ? (linear ? px_##m##_l_fast : px_##m##_n_fast) : (linear ? px_##m##_l_slow : px_##m##_n_slow))
+  switch (im->mode) {
+    case GSHCPU_IMAGE_COPY:
+      return PICK(copy);
+    case GSHCPU_IMAGE_DIAGONAL:
+      return PICK(diag);
+    case GSHCPU_IMAGE_ANTI:
+      return PICK(anti);
+    default:
+      return PICK(gen);
+  }
+#undef PICK
+}
+
 unsigned gshcpu_render_image_tiers(GSHCPU_Image * im, unsigned tiers, double lut[GSHCPU_IMAGE_LUT]) {
   unsigned taken = 0;
   const double * a = im->inv;
   im->mode = GSHCPU_IMAGE_GENERAL;
   im->hoisted_valid = 0;
   im->lut = NULL;
+  im->pixel = NULL;
   im->tiers = tiers;
   const int integral = a[4] == gmath_floor(a[4]) && a[5] == gmath_floor(a[5]) && a[4] > -2147483648.0 && a[4] < 2147483648.0 &&
       a[5] > -2147483648.0 && a[5] < 2147483648.0;
@@ -482,5 +583,6 @@ unsigned gshcpu_render_image_tiers(GSHCPU_Image * im, unsigned tiers, double lut
     im->lut = lut;
     taken |= GSHCPU_RENDER_TIER_IMAGE_TABLE;
   }
+  im->pixel = pixel_fn_of(im);
   return taken;
 }
