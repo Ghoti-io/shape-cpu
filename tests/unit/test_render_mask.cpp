@@ -1170,7 +1170,10 @@ TEST(RenderMask, EachMaskTierIsBitEqualToTheGeneralTierAndTakenOnTheCorpus) {
 /* --- MC9: a list with no masked group pays nothing --------------------------------------------------------------------- */
 
 // The memory a render needs, the work between two checks, the units and the frame bytes of every fixture from before masks, measured on the
-// tree before the story: unchanged.  (The numbers are those of a 64-bit target: they are made of its pointers.)
+// tree before the story: unchanged.  (The numbers are those of a 64-bit target: they are made of its pointers.)  The workspace of the twelve
+// fixtures whose geometry reduces a stroke's seams (shape-geometry's cancel_seams) grew by a fraction of a percent when that step sorted its
+// edges in room from the allocator, 12 bytes an edge more: the C library's qsort it replaced took its own buffer with malloc, outside the
+// caller's memory.
 TEST(RenderMask, AListWithNoMaskedGroupHasTheWorkspaceAndTheWorkItHadBeforeMasks) {
   if (sizeof(void *) != 8) {
     GTEST_SKIP() << "the committed sizes are those of a 64-bit target";
@@ -1205,27 +1208,27 @@ TEST(RenderMask, AListWithNoMaskedGroupHasTheWorkspaceAndTheWorkItHadBeforeMasks
     {"blend-separable", 162831, 1920, 66, 66, 66, 160559},
     {"blend-non-separable", 224527, 1920, 80, 80, 80, 222255},
     {"blend-out-of-range", 286223, 1920, 75, 75, 75, 283951},
-    {"strokes-joins", 2890575, 2894, 7, 7, 7, 2855935},
-    {"strokes-caps", 2973343, 3957, 12, 12, 12, 2855935},
-    {"strokes-widths", 2879503, 2192, 6, 6, 6, 2855935},
+    {"strokes-joins", 2893503, 2894, 7, 7, 7, 2855935},
+    {"strokes-caps", 2977743, 3957, 12, 12, 12, 2855935},
+    {"strokes-widths", 2880015, 2192, 6, 6, 6, 2855935},
     {"strokes-align", 8469231, 12883, 9, 9, 9, 8408831},
-    {"strokes-paints", 2948511, 3054, 7, 7, 7, 2922223},
-    {"strokes-groups", 2988287, 7521, 16, 16, 16, 2919631},
-    {"strokes-sparse", 2875199, 2299, 6, 6, 6, 2855935},
+    {"strokes-paints", 2949759, 3054, 7, 7, 7, 2922223},
+    {"strokes-groups", 2991439, 7521, 16, 16, 16, 2919631},
+    {"strokes-sparse", 2875375, 2299, 6, 6, 6, 2855935},
     {"strokes-nothing", 2923039, 1790, 6, 6, 6, 2921807},
-    {"strokes-dash-overlap", 3006831, 15949, 9, 9, 9, 2855935},
-    {"strokes-tight-joins", 2884447, 4584, 7, 7, 7, 2855935},
-    {"strokes-rings", 2993775, 4962, 8, 8, 8, 2855935},
+    {"strokes-dash-overlap", 3014447, 15949, 9, 9, 9, 2855935},
+    {"strokes-tight-joins", 2885903, 4584, 7, 7, 7, 2855935},
+    {"strokes-rings", 3000671, 4962, 8, 8, 8, 2855935},
     {"strokes-thin-aligned", 8466495, 9531, 11, 11, 11, 8408831},
-    {"strokes-text", 9066031, 29759, 11, 11, 11, 8474591},
-    {"strokes-text-outlines", 8720063, 23508, 5, 5, 5, 8408831},
+    {"strokes-text", 9094623, 29759, 11, 11, 11, 8474591},
+    {"strokes-text-outlines", 8735487, 23508, 5, 5, 5, 8408831},
     {"image-filters", 98095, 1964, 11, 11, 11, 96863},
     {"image-edges", 98095, 1964, 17, 17, 17, 96863},
     {"image-formats", 98095, 1964, 17, 17, 17, 96863},
     // image-spaces and image-compose: the work of an AREA fill with axis-aligned edges counts the rows its pixels cover across once per
     // period or once, not once each (the minified tile that took 883124 takes 3107), and no pixel of either render is different.
     {"image-spaces", 159791, 1964, 10, 10, 10, 158559},
-    {"image-compose", 2947567, 3107, 12, 12, 12, 2919743},
+    {"image-compose", 2948815, 3107, 12, 12, 12, 2919743},
     {"image-nothing", 98095, 1964, 5, 5, 5, 96863},
   };
   size_t checked = 0;
