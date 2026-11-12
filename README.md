@@ -93,10 +93,12 @@ violation.
   work is the window's own however far the image is minified.
 - A pattern's tile is clipped to its cell unless the pattern says `overflow` (SVG 2's `overflow="visible"`), when it is drawn unclipped at every copy, later copies over earlier ones; a tile whose extent is not known (a stroke with a device width, a hatch) is clipped as before and reported.
 - A stroke's width profile is not drawn; the waist reserves it.
-- The stroke cache holds `max_cache_bytes` (16 MiB by default) of expansions across renders, and an expansion that does not fit, or that the
-  entries before it push out, is made again for every frame.  A hatch over a large region, or a dashed hatch with round caps, makes an
-  outline of several megabytes: twelve of them on a 1920 by 1080 frame ran 3.5 times slower with the default bound than with 256 MiB, with the
-  same pixels.  An application that redraws such a scene each frame should raise `max_cache_bytes` to hold the frame's expansions.
+- The stroke cache holds `max_cache_bytes` (16 MiB by default) of expansions across renders, and an expansion that does not fit is made
+  again for every frame.  A render does not push out the entries it has used to keep a later one, so a frame larger than the bound keeps
+  what it used first and hits for that.  A hatch over a large region, or a dashed hatch with round caps, makes an outline of several
+  megabytes: twelve dashed ones on a 1920 by 1080 frame take 270 ms a frame with the default bound and 165 ms with 24 MiB, which holds
+  them all, with the same pixels.  An application that redraws such a scene each frame should raise `max_cache_bytes` to hold the frame's
+  expansions.
 - There is no GPU target and no seam-free flag; both are refused.
 - The fast fill and stroke coverage tiers (`GSHCPU_FILL_COVERAGE_FAST`, `GSHCPU_STROKE_COVERAGE_FAST`) are approximations that trade
   exactness for speed; the default, and every example, is the exact coverage whose render hash is the reference.

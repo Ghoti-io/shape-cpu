@@ -35,8 +35,18 @@
  *
  * The bound is on the bytes the table accounts for (the sum of `bytes` of the listed entries, each the points and
  * subpaths of its parts and a fixed overhead): least recently used first, an entry larger than the bound is not
- * kept, and an entry that cannot be made room for (everything older is pinned) is not kept either.  So the memory
- * held never passes the bound by more than the entries a render has pinned and the cache dropped.
+ * kept, and an entry that cannot be made room for is not kept either.  So the memory held never passes the bound by
+ * more than the entries a render has pinned and the cache dropped.
+ *
+ * Room is made only from entries that no render has pinned and that the current render has not used (an epoch, moved
+ * on as each render begins, stamped on an entry when it is found or kept), and only when it can be made in full: an
+ * entry that cannot be kept evicts nothing.  Without the second rule a frame that uses more than the bound holds, in
+ * the same order each time, misses every time: each entry kept pushes out the oldest, which is the next one the frame
+ * asks for (a 1080p frame of twelve dashed hatches over 16 MiB redid every expansion, 4 times the time of a frame
+ * that hits).  With it the entries the frame used first stay and the rest are used for their item and not kept, so
+ * such a frame hits for what fits.  A pattern's period raster may still push out the strokes its render used (it is drawn
+ * from its tile's strokes, and serves every copy without them).  Which entries are kept is all it changes: a hit is the
+ * miss bit for bit.
  */
 
 #include <ghoti.io/shape-cpu/macros.h>
@@ -63,6 +73,7 @@ typedef struct Entry {
   GSHCPU_Stroke_Meta meta;
   GSHCPU_Run_Note * notes;      /* a run's glyph notes (ST8), the entry's own copy, which meta.notes names */
   size_t refs;                  /* renders that pinned it */
+  uint64_t epoch;               /* the render that last found or kept it (the cache's epoch then) */
   int listed;                   /* in the table and the list: false once dropped */
 } Entry;
 
@@ -73,6 +84,7 @@ struct GSHCPU_Stroke_Cache {
   uint64_t held;                /* bytes of the listed entries */
   Entry * head;                 /* most recently used */
   Entry * tail;                 /* least recently used */
+  uint64_t epoch;               /* moved on as each render begins */
   Entry * buckets[BUCKETS];
   GSHCPU_Render_Counters * counters;
 };
@@ -168,6 +180,56 @@ static void free_entry(GSHCPU_Stroke_Cache * c, Entry * e) {
   c->alloc.free_fn(c->alloc.ctx, e);
 }
 
+/**
+ * Whether @p e may be evicted to make room: no render has pinned it, and the current render has not used it, unless it is a
+ * stroke's outline and the room is for a period raster (@p for_raster).  A raster serves every copy of its pattern from one
+ * hit and is drawn from its tile's strokes, which a hit on it does not need again: keeping the strokes the render used
+ * before it in its place would have it drawn again every frame.
+ */
+static int evictable(const GSHCPU_Stroke_Cache * c, const Entry * e, int for_raster) {
+  return e->refs == 0 && (e->epoch != c->epoch || (for_raster && !e->kind));
+}
+
+/**
+ * Make room for @p need bytes (at most the bound) by evicting, least recently used first, entries that are evictable, onto
+ * @p doomed, and say whether it was made (the lock held).  When it cannot be made in full nothing is evicted: an entry
+ * that is not kept has no reason to cost another its place.
+ */
+static int make_room(GSHCPU_Stroke_Cache * c, uint64_t need, int for_raster, Entry ** doomed) {
+  const uint64_t room = c->bound - need;
+  uint64_t held = c->held;
+  Entry * e = c->tail;
+  while (held > room && e) {
+    if (evictable(c, e, for_raster)) {
+      held -= e->meta.bytes;
+    }
+    e = e->newer;
+  }
+  if (held > room) {
+    return 0;
+  }
+  e = c->tail;
+  while (c->held > room && e) {
+    Entry * newer = e->newer;
+    if (evictable(c, e, for_raster)) {
+      unlink_entry(c, e);
+      if (c->counters) {
+        c->counters->cache_evictions++;
+      }
+      e->chain = *doomed;
+      *doomed = e;
+    }
+    e = newer;
+  }
+  return 1;
+}
+
+void gshcpu_stroke_cache_begin_render(GSHCPU_Stroke_Cache * c) {
+  GCU_MUTEX_LOCK(c->lock);
+  c->epoch++;
+  GCU_MUTEX_UNLOCK(c->lock);
+}
+
 void gshcpu_stroke_cache_destroy(GSHCPU_Stroke_Cache * c) {
   if (!c) {
     return;
@@ -245,6 +307,7 @@ int gshcpu_stroke_cache_acquire(GSHCPU_Stroke_Cache * c, const GSHCPU_Stroke_Key
         c->head->newer = e;
         c->head = e;
       }
+      e->epoch = c->epoch;
       *entry = e;
       *outline = e->outline;
       *meta = e->meta;
@@ -287,6 +350,7 @@ int gshcpu_stroke_cache_store(GSHCPU_Stroke_Cache * c, const GSHCPU_Stroke_Key *
   for (Entry * e = c->buckets[bucket_of(key)]; e; e = e->chain) {
     if (!e->kind && key_equal(&e->key, key)) {
       e->refs++;
+      e->epoch = c->epoch;
       *entry = e;
       *held = e->outline;
       result = 2;
@@ -294,22 +358,7 @@ int gshcpu_stroke_cache_store(GSHCPU_Stroke_Cache * c, const GSHCPU_Stroke_Key *
     }
   }
   if (result == 0 && fresh) {
-    /* Make room, least recently used first, never an entry in use. */
-    uint64_t room = c->bound - need;
-    Entry * e = c->tail;
-    while (c->held > room && e) {
-      Entry * newer = e->newer;
-      if (e->refs == 0) {
-        unlink_entry(c, e);
-        if (c->counters) {
-          c->counters->cache_evictions++;
-        }
-        e->chain = doomed;
-        doomed = e;
-      }
-      e = newer;
-    }
-    if (c->held <= room) {
+    if (make_room(c, need, 0, &doomed)) {
       memset(fresh, 0, sizeof *fresh);
       fresh->key = *key;
       fresh->outline = outline;
@@ -319,6 +368,7 @@ int gshcpu_stroke_cache_store(GSHCPU_Stroke_Cache * c, const GSHCPU_Stroke_Key *
       fresh->meta.notes = notes;
       notes = NULL;
       fresh->refs = 1;
+      fresh->epoch = c->epoch;
       fresh->listed = 1;
       size_t b = bucket_of(key);
       fresh->chain = c->buckets[b];
@@ -387,6 +437,7 @@ int gshcpu_period_cache_acquire_weighted(GSHCPU_Stroke_Cache * c, const GSHCPU_P
   for (Entry * e = c->buckets[bucket_of_period(key)]; e; e = e->chain) {
     if (e->kind && period_key_equal(&e->pkey, key)) {
       e->refs++;
+      e->epoch = c->epoch;
       touch(c, e);
       *entry = e;
       *raster = e->raster;
@@ -439,28 +490,14 @@ int gshcpu_period_cache_store_weighted(GSHCPU_Stroke_Cache * c, const GSHCPU_Per
   for (Entry * e = c->buckets[bucket_of_period(key)]; e; e = e->chain) {
     if (e->kind && period_key_equal(&e->pkey, key)) {
       e->refs++;
+      e->epoch = c->epoch;
       *entry = e;
       result = 2;
       break;
     }
   }
   if (result == 0 && fresh) {
-    /* Make room, least recently used first, never an entry in use. */
-    const uint64_t room = c->bound - need;
-    Entry * e = c->tail;
-    while (c->held > room && e) {
-      Entry * newer = e->newer;
-      if (e->refs == 0) {
-        unlink_entry(c, e);
-        if (c->counters) {
-          c->counters->cache_evictions++;
-        }
-        e->chain = doomed;
-        doomed = e;
-      }
-      e = newer;
-    }
-    if (c->held <= room) {
+    if (make_room(c, need, 1, &doomed)) {
       memset(fresh, 0, sizeof *fresh);
       fresh->kind = 1;
       fresh->pkey = *key;
@@ -468,6 +505,7 @@ int gshcpu_period_cache_store_weighted(GSHCPU_Stroke_Cache * c, const GSHCPU_Per
       fresh->weight = weight;
       fresh->meta.bytes = (size_t)need;
       fresh->refs = 1;
+      fresh->epoch = c->epoch;
       fresh->listed = 1;
       const size_t b = bucket_of_period(key);
       fresh->chain = c->buckets[b];

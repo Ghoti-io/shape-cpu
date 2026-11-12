@@ -821,7 +821,15 @@ window of cells at a time. The pool, the counts and the one cell's scratch are i
 **The cache (SC7)** is keyed by resource ids, never by the resources' addresses or contents, because ids are never reused
 (a stale entry costs memory and nothing else). The value is the immutable outline. The bound is on the bytes the table
 accounts for (an entry's points and subpaths and a fixed overhead for its parts), and the order of eviction is least
-recently used first among the entries no render has pinned. A pinned entry that is evicted is unlinked and freed by the
+recently used first among the entries no render has pinned and the latest render has not used (an epoch the cache moves on
+as each render begins, stamped on an entry when it is found or kept). Room is made only when it can be made in full: an
+entry that is not kept evicts nothing. The second rule is for a frame that uses more than the bound holds, in the same
+order each time, which least recently used alone serves with no hits at all, since each entry kept pushes out the oldest
+and the oldest is the next the frame asks for: a 1080p frame of twelve dashed hatches over the default 16 MiB redid every
+expansion, at four times the time of a frame that hits. With it the entries the frame used first stay, and the frame hits
+for what fits. A pattern's period raster (PC10) may still push out the stroke outlines its own render used: it is drawn
+from its tile's strokes and serves every copy of the pattern without them, and keeping them in its place would draw the
+raster again every frame. A pinned entry that is evicted is unlinked and freed by the
 last render to release it. The lock is held for the lookup, the insert and the eviction, never across an expansion, so
 two renders that miss the same key both expand and the second to insert drops its copy. A hit checks the entry's parts
 against the current `max_points`, so a hit refuses exactly what a miss would. `CALLER_MEMORY` is the one mode that does

@@ -5860,6 +5860,9 @@ static GSHSCENE_Result op_begin(void * impl, GSHSCENE_Job * job) {
   Cpu_Sink * cs = impl;
   const GSHSCENE_Render_Request * request = gshscene_job_request(job);
   const GSHSCENE_Target * target = request->target;
+  if ((request->flags & GSHSCENE_RENDER_CALLER_MEMORY) == 0) {
+    gshcpu_stroke_cache_begin_render(cs->cache); /* what this render keeps is not evicted for what it keeps later (SC7) */
+  }
   Layout L;
   Mask_Layout M;
   Gen_Layout G;

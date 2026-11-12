@@ -1251,6 +1251,12 @@ GSHCPU_Result gshcpu_stroke_cache_create(const GSHGEOM_Allocator * alloc, uint64
 /** Free every entry (no render is in flight) and the cache. */
 void gshcpu_stroke_cache_destroy(GSHCPU_Stroke_Cache * cache);
 
+/**
+ * A render begins: the entries it finds or keeps from now on are not evicted to make room for another while it is the
+ * latest render begun (stroke_cache.c).  Which entries are kept is all it changes.
+ */
+void gshcpu_stroke_cache_begin_render(GSHCPU_Stroke_Cache * cache);
+
 /** The bytes held by the entries in the table (static_bytes, S9). */
 uint64_t gshcpu_stroke_cache_bytes(GSHCPU_Stroke_Cache * cache);
 

@@ -794,6 +794,7 @@ TEST(RenderStrokeCache, AnEntryInUseIsNotEvictedForRoomAndOneDroppedWhileHeldIsF
   void * pinned = acquire(c, 1); // a render holds the oldest entry
   ASSERT_NE(pinned, nullptr);
   gshcpu_stroke_cache_release(c, store(c, 2));
+  gshcpu_stroke_cache_begin_render(c); // a later render, for which the entries above are not its own
   gshcpu_stroke_cache_release(c, store(c, 3)); // no room: the oldest is held, so the next oldest goes
   EXPECT_EQ(counters.cache_evictions, 1u);
   void * again = acquire(c, 1);
@@ -812,6 +813,126 @@ TEST(RenderStrokeCache, AnEntryInUseIsNotEvictedForRoomAndOneDroppedWhileHeldIsF
   gshcpu_stroke_cache_destroy(c);
   EXPECT_TRUE(t.live.empty());
   EXPECT_FALSE(t.failed);
+}
+
+// SC7, driven below the sink: room is made from entries the current render has not used, and only when it can be made in full.
+// Within one render a store that would push out that render's own entries keeps nothing and evicts nothing; the next render
+// evicts least recently used first again.
+TEST(RenderStrokeCache, ARenderDoesNotEvictItsOwnEntriesAndAStoreThatCannotBeKeptEvictsNothing) {
+  tracker::Tracker t;
+  GSHGEOM_Allocator alloc = tracker::allocator_for(&t);
+  GSHCPU_Render_Counters counters;
+  std::memset(&counters, 0, sizeof counters);
+  GSHCPU_Stroke_Meta meta;
+  std::memset(&meta, 0, sizeof meta);
+  meta.bytes = 1000;
+  auto key_of = [](uint64_t path) {
+    GSHCPU_Stroke_Key k;
+    std::memset(&k, 0, sizeof k);
+    k.path_id = path;
+    return k;
+  };
+  auto store = [&](GSHCPU_Stroke_Cache * c, uint64_t path) {
+    GSHCPU_Stroke_Key k = key_of(path);
+    void * entry = nullptr;
+    GSHGEOM_Stroke_Outline * held = nullptr;
+    const int kept = gshcpu_stroke_cache_store(c, &k, nullptr, &meta, &entry, &held);
+    if (kept == 1) {
+      gshcpu_stroke_cache_release(c, entry);
+    }
+    return kept;
+  };
+  auto has = [&](GSHCPU_Stroke_Cache * c, uint64_t path) {
+    GSHCPU_Stroke_Key k = key_of(path);
+    void * entry = nullptr;
+    GSHGEOM_Stroke_Outline * outline = nullptr;
+    GSHCPU_Stroke_Meta got;
+    if (!gshcpu_stroke_cache_acquire(c, &k, &entry, &outline, &got)) {
+      return false;
+    }
+    gshcpu_stroke_cache_release(c, entry);
+    return true;
+  };
+  uint64_t need = 0;
+  {
+    GSHCPU_Stroke_Cache * probe = nullptr;
+    ASSERT_EQ(gshcpu_stroke_cache_create(&alloc, 1u << 20, nullptr, &probe), GSHCPU_OK);
+    ASSERT_EQ(store(probe, 1), 1);
+    need = gshcpu_stroke_cache_bytes(probe);
+    gshcpu_stroke_cache_destroy(probe);
+  }
+  GSHCPU_Stroke_Cache * c = nullptr;
+  ASSERT_EQ(gshcpu_stroke_cache_create(&alloc, 2 * need + need / 2, &counters, &c), GSHCPU_OK); // room for two
+  gshcpu_stroke_cache_begin_render(c);
+  EXPECT_EQ(store(c, 1), 1);
+  EXPECT_EQ(store(c, 2), 1);
+  EXPECT_EQ(store(c, 3), 0) << "the render's own two are not pushed out for its third";
+  EXPECT_EQ(counters.cache_evictions, 0u) << "and an entry not kept evicts nothing";
+  EXPECT_TRUE(has(c, 1));
+  EXPECT_TRUE(has(c, 2));
+  EXPECT_EQ(gshcpu_stroke_cache_bytes(c), 2 * need);
+  // The next render uses 2 and then asks for 3: 1 is the least recently used and not its own, so 1 goes.
+  gshcpu_stroke_cache_begin_render(c);
+  EXPECT_TRUE(has(c, 2));
+  EXPECT_EQ(store(c, 3), 1);
+  EXPECT_EQ(counters.cache_evictions, 1u);
+  EXPECT_FALSE(has(c, 1));
+  EXPECT_TRUE(has(c, 2));
+  EXPECT_TRUE(has(c, 3));
+  // A render that can make room only by evicting its own and an older one together keeps nothing and evicts nothing.
+  gshcpu_stroke_cache_begin_render(c);
+  EXPECT_TRUE(has(c, 3));
+  meta.bytes = 1000 + need; // needs both places
+  EXPECT_EQ(store(c, 4), 0);
+  EXPECT_EQ(counters.cache_evictions, 1u);
+  EXPECT_TRUE(has(c, 2)) << "the older one was not evicted for an entry that could not be kept";
+  gshcpu_stroke_cache_destroy(c);
+  EXPECT_TRUE(t.live.empty());
+  EXPECT_FALSE(t.failed);
+}
+
+// SC7 at the sink: a frame of more distinct strokes than the bound holds, drawn again, hits for the entries that fit.  Least
+// recently used alone hit nothing here: each entry kept pushed out the oldest, which was the next the frame asked for.  The
+// pixels are the uncached render's.
+TEST(RenderStrokeCache, AFrameLargerThanTheBoundHitsForWhatFitsWhenDrawnAgain) {
+  Params p = params(2.0, GSHGEOM_STROKE_JOIN_ROUND, GSHGEOM_STROKE_CAP_ROUND);
+  Store s;
+  const GSHSCENE_Resource * style = intern_style(s, p.get());
+  GSHSCENE_Paint white = solid(1, 1, 1, 1);
+  const GSHSCENE_Resource * path = s.path(stroke_gate::build(kClosed));
+  GSHSCENE_List * one_list = s.open();
+  ASSERT_EQ(gshscene_list_stroke(one_list, path, style, nullptr, &white, 0, 0.0), GSHSCENE_OK);
+  ASSERT_EQ(gshscene_list_close(one_list), GSHSCENE_OK);
+  GSHSCENE_List * frame = s.open();
+  for (int i = 0; i < 12; i++) {
+    GSHGEOM_Map m = translation(1.0 + i * 0.0625, 1.5); // a fraction each: twelve entries of the same size
+    ASSERT_EQ(gshscene_list_stroke(frame, path, style, &m, &white, 0, 0.0), GSHSCENE_OK);
+  }
+  ASSERT_EQ(gshscene_list_close(frame), GSHSCENE_OK);
+  Sink unbounded;
+  render_list(unbounded.sink, one_list, 28, 28);
+  uint64_t one = 0;
+  gshscene_sink_static_bytes(unbounded.sink, &one);
+  ASSERT_GT(one, 0u);
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  limits.max_cache_bytes = one * 3 + one / 2; // room for three
+  Sink bounded(GSHCPU_RENDER_TIERS_ALL, &limits);
+  limits.max_cache_bytes = GSHCPU_LIMITS_CACHE_OFF;
+  Sink off(GSHCPU_RENDER_TIERS_ALL, &limits);
+  const Drawn first = render_list(bounded.sink, frame, 28, 28);
+  EXPECT_EQ(bounded.counters.cache_hits, 0u);
+  EXPECT_EQ(bounded.counters.cache_kept, 3u);
+  EXPECT_EQ(bounded.counters.cache_evictions, 0u);
+  const Drawn second = render_list(bounded.sink, frame, 28, 28);
+  EXPECT_EQ(bounded.counters.cache_hits, 3u) << "the three the first frame kept";
+  EXPECT_EQ(bounded.counters.cache_evictions, 0u);
+  const Drawn third = render_list(bounded.sink, frame, 28, 28);
+  EXPECT_EQ(bounded.counters.cache_hits, 6u);
+  const Drawn uncached = render_list(off.sink, frame, 28, 28);
+  EXPECT_EQ(first.alpha, uncached.alpha);
+  EXPECT_EQ(second.alpha, uncached.alpha);
+  EXPECT_EQ(third.alpha, uncached.alpha);
 }
 
 TEST(RenderStrokeCache, TheBoundHoldsLeastRecentlyUsedFirstAndAnEntryLargerThanItIsUsedButNotKept) {

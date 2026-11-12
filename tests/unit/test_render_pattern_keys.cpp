@@ -523,6 +523,7 @@ TEST(RenderPatternKeys, TheTableKeepsRastersByTheirKeysBoundAndRecencyAndNeverFr
   const double * raster = nullptr;
   ASSERT_EQ(gshcpu_period_cache_acquire(c, &ka, &en, &raster), 1);
   gshcpu_stroke_cache_release(c, en);
+  gshcpu_stroke_cache_begin_render(c); // C is stored by a later render: A and B are not its own
   double * rc = gshcpu_period_cache_make(c, 1);
   rc[0] = 6.0;
   ASSERT_EQ(gshcpu_period_cache_store(c, &kc, rc, 1, &en), 1);
@@ -530,6 +531,7 @@ TEST(RenderPatternKeys, TheTableKeepsRastersByTheirKeysBoundAndRecencyAndNeverFr
   EXPECT_EQ(gshcpu_period_cache_acquire(c, &kb, &en, &raster), 0) << "the least recently used went";
   ASSERT_EQ(gshcpu_period_cache_acquire(c, &ka, &en, &raster), 1) << "the one just read stayed";
   // A is pinned now: storing D needs room, and everything older than D that is not pinned is C only.
+  gshcpu_stroke_cache_begin_render(c); // and D by the next
   const GSHCPU_Period_Key kd = key_of(14, 1);
   double * rd = gshcpu_period_cache_make(c, 1);
   void * ed2 = nullptr;
