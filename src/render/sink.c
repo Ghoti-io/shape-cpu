@@ -317,7 +317,7 @@ typedef struct Pat_Clip {
   const GSHSCENE_Item * item;
   size_t count;              /* the chain length of the item */
   GSHGEOM_Map * maps;        /* the enclosing instances' maps at the push, and room for two more */
-  uint64_t weight;           /* PC8: the points of its path over PAT_POINTS_PER_COPY, under the pass's linear part (every unit it clips is charged them) */
+  uint64_t weight;           /* PC8: the points of its path past PAT_FREE_POINTS, under the pass's linear part (every unit it clips is charged them) */
 } Pat_Clip;
 
 struct Pat_Level {
@@ -348,7 +348,7 @@ struct Pat_Level {
   uint8_t * saved_result;
   uint64_t copies;           /* copies drawn by the pass (the counter) */
   uint64_t n_copies;         /* PC8: the copies the lattice enumeration counted for the pass, over what the whole render draws of the use */
-  uint64_t weight;           /* PC8: the points of the tile's strokes' outlines, over PAT_POINTS_PER_COPY, summed over its units (the pass's first walk) */
+  uint64_t weight;           /* PC8: the points of the tile's strokes' outlines, past PAT_FREE_POINTS, summed over its units (the pass's first walk) */
   uint64_t total0;           /* PC8: the use's count when the pass began (what the period tier restores when it is given up) */
   size_t arena_mark;         /* CALLER_MEMORY: the arena's use when the pass began: the item painted with the pattern keeps what is below it */
   /* PC9: the period tier.  The lattice layer holds one window of the lattice picture, [wx, wx + p) x [wy, wy + s) of the pass's frame, and
@@ -4818,11 +4818,17 @@ static GSHSCENE_Result pat_paint_copy(Run * run, Pat_Level * L, const Pat_Unit *
 }
 
 /**
- * PC8: the points of a stroke's outline that count as one copy of a pattern (the count `max_pattern_cells` bounds is of copies, and the
- * work of a copy of a stroke is its outline's points: the stroke is cut to the cell and covered there).  A stroke of fewer than this
- * many points is one copy and no more.
+ * PC8: what a copy of a stroke, a fill or a clip costs beyond the copy itself: one more copy for each point of its outline or path past the
+ * first PAT_FREE_POINTS.  The count `max_pattern_cells` bounds is of copies, and the work of a copy is its points (a stroke is expanded, or
+ * served from the cache, then cut to the cell and covered there; a fill is flattened, cut and covered): about a microsecond and a half a
+ * point when every copy expands its own stroke (its translation has a fraction no other copy has), which is what the bound must hold to
+ * because it is one number for every tier and cache.  A path of PAT_FREE_POINTS or fewer (a rectangle, a few lines) is one copy and no more.
  */
-#define PAT_POINTS_PER_COPY 16u
+#define PAT_FREE_POINTS 16u
+
+static uint64_t pat_points_cost(uint64_t points) {
+  return points > PAT_FREE_POINTS ? points - PAT_FREE_POINTS : 0u;
+}
 
 /** PC8: the most a use may count: `max_pattern_cells`, held to what a lattice count can hold (no cap is the most that count can hold). */
 static uint64_t pat_cap(const Cpu_Sink * cs) {
@@ -4846,7 +4852,7 @@ static GSHSCENE_Result pat_charge(Run * run, const Pat_Level * L, uint64_t each)
 }
 
 /**
- * PC8: the points of @p item's flattened paths under the pass's linear part and no translation, over PAT_POINTS_PER_COPY: what a copy of a fill
+ * PC8: the points of @p item's flattened paths under the pass's linear part and no translation, past PAT_FREE_POINTS: what a copy of a fill
  * or a clip costs (it is flattened, cut to the cell and covered there), as a copy of a stroke costs its outline's points.  @p maps and @p count
  * are the chain of the item (the enclosing instances').  A plane (it fills the cell) and a union clip (its own limits, CU21) weigh nothing.
  */
@@ -4867,7 +4873,7 @@ static GSHSCENE_Result pat_geometry_weight(Run * run, Pat_Level * L, const GSHSC
   if (r != GSHCPU_OK) {
     return r == GSHCPU_ERR_LIMIT ? GSHSCENE_ERR_LIMIT : scene_result(r);
   }
-  *each = points / PAT_POINTS_PER_COPY;
+  *each = pat_points_cost(points);
   return GSHSCENE_OK;
 }
 
@@ -5029,7 +5035,7 @@ static GSHSCENE_Result pat_clip_push(Run * run, const GSHSCENE_Item * item, cons
 }
 
 /**
- * PC8: a stroke of the tile counts for every copy of the pass by its outline's points: one more copy for each PAT_POINTS_PER_COPY of them.  It
+ * PC8: a stroke of the tile counts for every copy of the pass by its outline's points: one more copy for each of them past PAT_FREE_POINTS.  It
  * is charged once for the use, in the pass's first walk, before the copies are drawn: the points are those of the stroke under the pass's linear
  * part and no translation, which is a function of the list and the target alone, so the same whichever tier draws, whatever the cache holds
  * and whatever the damage (the period tier charges it too, in its window pass, and a raster it kept carries the weight to charge on a hit).
@@ -5058,7 +5064,7 @@ static GSHSCENE_Result pat_stroke_weigh(Run * run, Pat_Level * L, const Pat_Unit
     }
   }
   gshcpu_render_stroke_close(cache, &s);
-  const uint64_t each = points / PAT_POINTS_PER_COPY;
+  const uint64_t each = pat_points_cost(points);
   L->weight += each;
   return pat_charge(run, L, each);
 }

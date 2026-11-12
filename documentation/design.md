@@ -448,10 +448,10 @@ is counted.** A copy of a stroke is cut to the copy's cell and covered there, a 
 what each costs is the points of its path, and a count of copies alone lets 2^22 copies of a 3,000-point stroke run for about an hour (a 206-byte
 fuzz input did not finish in five minutes; a 1,500-vertex fill over 60,000 copies took 9 seconds and a clip of it 18). Each stroke unit of a tile (a
 hatch fill and a stroked glyph run are strokes here), each fill and each clip push therefore adds, for every copy of its pass, one more copy for
-each 16 points of its path, and a unit under clips adds each clip's again (the clips are folded into the unit's coverage in every copy), all charged
+each point of its path past the first 16, and a unit under clips adds each clip's again (the clips are folded into the unit's coverage in every copy), all charged
 once in the pass's first walk before a copy is drawn. The points are those of the item flattened or expanded under the pass's linear part and no
 translation, so the charge is the same whichever tier draws: the period tier charges in its window pass, a raster the cache holds carries the weight
-and charges it on a hit, and a window given up for the general tier takes its charge back. A path of fewer than 16 points counts for nothing
+and charges it on a hit, and a window given up for the general tier takes its charge back. A path of 16 points or fewer counts for nothing
 more, so a hatch of short lines and a tile of rectangles are counted as they were; a plane (it fills the cell) and a union clip (CU21's own limits)
 weigh nothing. A limit met inside a
 tile (a copy's points, its cells, a gradient or an image past G14's domain, a shifted coordinate past the range) refuses the use, not the unit; the

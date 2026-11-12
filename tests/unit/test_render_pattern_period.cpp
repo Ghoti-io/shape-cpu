@@ -374,7 +374,7 @@ TEST(RenderPatternPeriod, ATileWithNoStrokeCountsTheCopiesOfTheLatticeAndNoMoreU
 }
 
 TEST(RenderPatternPeriod, AStrokeOfTheTileCountsForEveryCopyByItsPointsAndTheRefusalIsTheSameUnderEveryTierAndCache) {
-  // PC8: a copy of a stroke costs its outline's points (and a fill's or a clip's its path's), so the use counts one more copy for each 16 of them, for every copy of the pass.  The
+  // PC8: a copy of a stroke costs its outline's points (and a fill's or a clip's its path's), so the use counts one more copy for each of them past the first 16, for every copy of the pass.  The
   // count is a function of the list and the target: the period tier (which draws a window), a raster served from the cache (which draws
   // none) and the general tier refuse at the same limit, and the least limit that draws is past the copies the lattice counts.
   Scene s(0, 24, 24, 24, 24, 1, 0, 0, 1, 0.3, 0.45, 1, 1, 1.0, 72, 56);
@@ -411,7 +411,7 @@ TEST(RenderPatternPeriod, AStrokeOfTheTileCountsForEveryCopyByItsPointsAndTheRef
     }
   }
   const uint64_t least = lo;
-  EXPECT_GT(least, n) << "the strokes, fills and clips of the tile have more than 16 points between them: more than the copies are counted";
+  EXPECT_GT(least, n) << "the strokes, fills and clips of the tile have more than 16 points each: more than the copies are counted";
   EXPECT_GE(least, n + n) << "and the count is of every copy";
   for (uint64_t limit : {least - 1, least, least + 1}) {
     Out general, period, again, no_cache;

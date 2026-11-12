@@ -248,7 +248,7 @@ typedef struct GSHCPU_Limits {
    * nesting level and summed: the copies whose cell meets what the whole render draws of the use.  The count is a function of the
    * list and the target alone, so it is the same whatever tier draws, whatever the cache holds and whatever the damage; each stroke in a
    * tile (a hatch fill and a stroked glyph run too), each fill and each clip also counts, for every copy of its pass, one more copy for each
-   * 16 points of its outline or path (and a unit under clips counts each clip's again), because a copy costs its points; one more is
+   * point of its outline or path past the first 16 (and a unit under clips counts each clip's again), because a copy costs its points; one more is
    * ::GSHSCENE_REASON_RESOURCE_LIMIT for the fill or stroke painted with the pattern.  0 is
    * ::GSHCPU_LIMITS_DEFAULT_MAX_PATTERN_CELLS (2^22), `UINT64_MAX` no cap.  A `uint64_t` whatever the target.  Read by the sink;
    * the coverage functions ignore it.
