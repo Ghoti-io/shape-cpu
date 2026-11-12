@@ -89,8 +89,8 @@ GSHCPU_API const char * gshcpu_result_string(GSHCPU_Result result);
  */
 #define GSHCPU_LIMITS_DEFAULT_MAX_DEPOSITS ((uint64_t)1 << 25)
 
-/** Default ::GSHCPU_Limits.max_cache_bytes: 16 MiB of stroke expansions held across renders. */
-#define GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES ((uint64_t)16 * 1024 * 1024)
+/** Default ::GSHCPU_Limits.max_cache_bytes: 64 MiB of stroke expansions held across renders. */
+#define GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES ((uint64_t)64 * 1024 * 1024)
 
 /**
  * Default ::GSHCPU_Limits.max_exact_fragments: 32768 pieces of one stroke part in one pixel (render.h, UC9, UC17).  The largest

@@ -825,7 +825,7 @@ recently used first among the entries no render has pinned and the latest render
 as each render begins, stamped on an entry when it is found or kept). Room is made only when it can be made in full: an
 entry that is not kept evicts nothing. The second rule is for a frame that uses more than the bound holds, in the same
 order each time, which least recently used alone serves with no hits at all, since each entry kept pushes out the oldest
-and the oldest is the next the frame asks for: a 1080p frame of twelve dashed hatches over the default 16 MiB redid every
+and the oldest is the next the frame asks for: a 1080p frame of twelve dashed hatches over a bound of 16 MiB (the default then) redid every
 expansion, at four times the time of a frame that hits. With it the entries the frame used first stay, and the frame hits
 for what fits. A pattern's period raster (PC10) may still push out the stroke outlines its own render used: it is drawn
 from its tile's strokes and serves every copy of the pattern without them, and keeping them in its place would draw the

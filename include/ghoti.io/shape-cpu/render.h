@@ -260,7 +260,7 @@
  *   depends on the cache.  `ERR_OOM` is `ERR_OOM`.
  * - **SC7 The expansion cache.**  The sink keeps expansions across renders: by the centerline's and the style's resource
  *   ids, the bit patterns of the canonical map's linear part and fraction, and the construction's revision.  A hit is
- *   the miss bit for bit.  It is bounded by ::GSHCPU_Limits `max_cache_bytes` (0 is 16 MiB, 1 keeps nothing, `UINT64_MAX`
+ *   the miss bit for bit.  It is bounded by ::GSHCPU_Limits `max_cache_bytes` (0 is 64 MiB, 1 keeps nothing, `UINT64_MAX`
  *   no cap), least recently used first among the entries no render is using and the latest render has not used (a
  *   pattern's period raster may also push out the stroke outlines that render used, PC10); an
  *   entry that cannot be made room for in full (one larger than the bound, or one a render would have to push its own

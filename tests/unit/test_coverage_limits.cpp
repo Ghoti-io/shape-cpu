@@ -78,8 +78,8 @@ TEST(CoverageLimits, TheDefaultsAreWhatTheHeaderSays) {
   EXPECT_EQ(l.max_bytes, (size_t)256 * 1024 * 1024);
   EXPECT_EQ(l.max_cells, (size_t)1 << 22);
   EXPECT_EQ(l.max_points, 0u);
-  EXPECT_EQ(l.max_cache_bytes, 0u) << "zero is the default, 16 MiB, for the sink's stroke cache";
-  EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES, (uint64_t)16 << 20);
+  EXPECT_EQ(l.max_cache_bytes, 0u) << "zero is the default, 64 MiB, for the sink's stroke cache";
+  EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_CACHE_BYTES, (uint64_t)64 << 20);
   EXPECT_EQ(GSHCPU_LIMITS_CACHE_OFF, 1u);
   EXPECT_EQ(l.max_exact_fragments, 0u) << "zero is the default, 32768, for the exact union coverage of a stroke (UC9, UC17)";
   EXPECT_EQ(GSHCPU_LIMITS_DEFAULT_MAX_EXACT_FRAGMENTS, 32768u);
