@@ -67,7 +67,7 @@ The CPU rasterizer for the shape family, bit-identical on every host. It is part
   `gshcpu_render_hash` and `gshcpu_render_dump` spell a render; the
   fixture set's renders are committed goldens, the same on every target.
   `examples/render.c` renders a list; `examples/stroke.c` strokes a path and shows the cache serve a translation;
-  `examples/image.c` draws an image with two filters and checks what each does; `examples/mask.c` draws an alpha and a luminance mask; `examples/group.c` draws a non-isolated and a knockout group; `examples/pattern.c` fills a rectangle with a gapped pattern.
+  `examples/image.c` draws an image with two filters and checks what each does; `examples/mask.c` draws an alpha and a luminance mask; `examples/group.c` draws a non-isolated and a knockout group; `examples/pattern.c` fills a rectangle with a gapped pattern; `examples/hatch.c` hatches a rectangle with a hole by a dashed and a solid family and checks a dash, a gap and the empty hole; `examples/clip_union.c` clips to a union of two shapes and shows that the pixel they share is the sum of their areas, not a mask's product; `examples/stroke-run.c` strokes a glyph run as one union and checks it against stroking the run's centerline path; `examples/damage.c` redraws only the damage rectangle of an edit to a retained scene; `examples/frames.c` is a frame loop that allocates nothing per frame, in the caller's memory; `examples/version.c` prints the build.
 
 ## Building
 
