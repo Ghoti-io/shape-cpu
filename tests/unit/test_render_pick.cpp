@@ -190,17 +190,62 @@ struct Scenario {
     EXPECT_EQ(gshscene_list_stroke_antialias(l, path, style, map, &p, GSHSCENE_ANTIALIAS_NONE, 0, 0.0), GSHSCENE_OK);
   }
 
+  /** A fill painted with a hatch of one or two families (HX13): the lines are what is drawn. */
+  void hatch_fill(GSHSCENE_List * l, const GSHSCENE_Resource * region, const GSHGEOM_Map * map = nullptr) {
+    GSHSCENE_Stroke_Style st;
+    gshscene_stroke_style_init(&st);
+    st.width = g.real(0.6, 2.0);
+    st.cap = (uint32_t)g.pick(0, 2);
+    const GSHSCENE_Resource * pen = nullptr;
+    EXPECT_EQ(gshscene_store_intern_stroke_style(s.store, &st, &pen), GSHSCENE_OK);
+    s.held.push_back(pen);
+    static const double dashes[2] = {3.0, -1.5};
+    GSHSCENE_Hatch_Family fam[2];
+    std::memset(fam, 0, sizeof fam);
+    for (int i = 0; i < 2; i++) {
+      fam[i].angle = g.real(0, 180);
+      fam[i].origin_x = g.real(0, 4);
+      fam[i].origin_y = g.real(0, 4);
+      fam[i].offset_across = g.real(2.5, 6.0);
+      fam[i].offset_along = g.real(0, 2);
+      if (g.pick(0, 2) == 0) {
+        fam[i].dash_count = 2;
+        fam[i].dashes = dashes;
+      }
+    }
+    GSHSCENE_Hatch h;
+    gshscene_hatch_init(&h);
+    h.style = pen;
+    h.family_count = (size_t)g.pick(1, 2);
+    h.families = fam;
+    h.ink = fresh();
+    const GSHSCENE_Resource * hr = nullptr;
+    EXPECT_EQ(gshscene_store_intern_hatch(s.store, &h, &hr), GSHSCENE_OK);
+    s.held.push_back(hr);
+    GSHSCENE_Paint paint;
+    std::memset(&paint, 0, sizeof paint);
+    paint.kind = GSHSCENE_PAINT_HATCH;
+    paint.resource = hr;
+    paint.rgba[3] = 1.0;
+    EXPECT_EQ(gshscene_list_fill_antialias(l, region, map, g.pick(0, 1) ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO, &paint,
+                  GSHSCENE_ANTIALIAS_NONE, 0, 0.0),
+        GSHSCENE_OK);
+  }
+
   /** A picture of one to three fills, strokes and runs, drawn under its own map. */
   const GSHSCENE_Resource * picture() {
     GSHSCENE_List * l = s.open();
     const int n = g.pick(1, 3);
     for (int i = 0; i < n; i++) {
-      switch (g.pick(0, 2)) {
+      switch (g.pick(0, 3)) {
         case 0:
           fill(l, random_path(true));
           break;
         case 1:
           stroke(l);
+          break;
+        case 2:
+          hatch_fill(l, random_path(true));
           break;
         default:
           fill(l, random_run());
@@ -244,7 +289,11 @@ struct Scenario {
       } else if (roll == 2) {
         fill(l, random_run());
       } else if (roll == 3 || roll == 4) {
-        stroke(l);
+        if (g.pick(0, 2) == 0) {
+          hatch_fill(l, random_path(true));
+        } else {
+          stroke(l);
+        }
       } else if (roll == 5 && open_clips < 3) {
         const GSHSCENE_Resource * region = g.pick(0, 2) == 0 ? grid_union() : grid_region();
         const GSHGEOM_Fill_Rule rule = g.pick(0, 1) ? GSHGEOM_FILL_EVEN_ODD : GSHGEOM_FILL_NONZERO;
@@ -275,6 +324,10 @@ int color_of(const GSHSCENE_List * top, const size_t * chain, size_t count) {
       return -1;
     }
     if (i + 1 == count) {
+      GSHSCENE_Hatch h;
+      if (item->paint.kind == GSHSCENE_PAINT_HATCH && gshscene_resource_hatch(item->paint.resource, &h) == GSHSCENE_OK) {
+        return (int)std::lround(h.ink.rgba[0] * 255.0);  // a hatch fill draws in its ink
+      }
       return (int)std::lround(item->paint.rgba[0] * 255.0);
     }
     list = gshscene_resource_picture(item->resource);
