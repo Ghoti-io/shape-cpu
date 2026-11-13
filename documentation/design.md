@@ -992,6 +992,23 @@ channels as values (a byte, or a `float`'s bit pattern as `u32`), so that a
 big-endian host hashes the same render the same. `tools/gen-render-vectors.py`
 restates it.
 
+### A union member with inner clips (story A4: CI1 to CI7)
+
+The waist's union member may carry inner clips, regions its own is intersected with (shape-scene `clip_union.h`, CI1 to CI6), which is what an SVG `clipPath` child with a
+`clip-path` of its own is. The sink draws such a union by the general tier, claiming `CLIP_UNION_INNER` with it (`render.h`, CI7); the fast tier never takes one, because it adds each member's
+own area and a clipped member's own area is not its region's. The exact step already carried a winding for every part of a cell and tested it against the part's rule, keeping per
+gap only how many parts were inside; a member that is several parts needs "some member has all its parts inside", so the step is given the member of each part (`member_of`, `member_size`) and
+keeps how many members are satisfied: in the sweep of a slab's gaps that is an update of the member's count when a fragment moves its part's winding, and at an exchange of two neighbours,
+whose gap differs from the gap beside it in one part, the member's state on either side is summed from the windings of its parts there, which the gaps do not hold, from the fragments to
+the left (`member_satisfied_at`, billed in the cell's work). With no `member_of` every part is a member and the arithmetic is the one it was, bit for bit; the plain unions' tests did not change.
+
+The rest is the sink's. A pixel of a group with a clipped member is not settled by the dense sum of the parts' areas (an intersection is not a sum), so every pixel any part has a piece in is kept
+(`min_pieces` 1) and each part's sweep also leaves a plane of the pixels it covers whole (the area it deposits, at least half a pixel, since a pixel with no piece of the part holds 0 or a whole one). The pixels
+with no piece are then read from the planes by member, and the pixels with pieces drop the members a part without a piece makes empty, take the pixel whole for a member whose parts all are, and give the
+exact step the rest. The work is the plain group's plus the parts' planes and, where a member has parts without pieces beside parts with, the sums of the exchanges; it is bounded by the same budgets
+(`max_exact_fragments`, `max_exact_crossings`, `max_union_pieces`, the work meter), and what passes one is the push's resource limit, never a union drawn with a member left out. The plan counts a
+group's regions, not its members, for the scratch, and the planes' bytes in `Union_Plan.max_clip_plane`; `measure_one` replays the sequence, with the geometry of every part.
+
 ### Union clips (shapes story A3: CU18 to CU22)
 
 A clip push may name a clip union (shape-scene `clip_union.h`). The sink claims `CLIP_UNION` while `GSHCPU_RENDER_TIER_UNION` or

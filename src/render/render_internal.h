@@ -348,6 +348,7 @@ typedef struct GSHCPU_Group_Capture {
   uint8_t * mark;
   GSHCPU_Rect rect;
   uint32_t part;   /* the member being swept */
+  uint8_t min_pieces; /* a pixel is kept when the marks count at least this many pieces: 0 is 2, a union of plain members', whose pixels with one piece the dense sum settles; 1 for a group with a member of several parts */
 } GSHCPU_Group_Capture;
 
 #define GSHCPU_GROUP_FULL 0x80u /* set by the second pass; the first pass's counts never carry into it */
@@ -492,6 +493,7 @@ typedef struct GSHCPU_Group_Scratch {
   int64_t * wind0;
   int32_t * cur;              /* per part: its winding in the gap being made */
   int32_t * jn;               /* parts_cap * 65: the steps */
+  int32_t * mcnt;             /* per member (a member has at least one part: parts_cap of them at most): the parts of it inside, in the gap being made */
 } GSHCPU_Group_Scratch;
 
 /** Bytes of ::GSHCPU_Group_Scratch's arrays for cells of up to @p max_pieces pieces in all over up to @p max_parts parts. */
@@ -510,6 +512,15 @@ typedef struct GSHCPU_Exact_Params {
   uint64_t max_crossings;     /* UC19: a cell with more meetings than this is the limit; 0 is none (the tests' own) */
   const uint8_t * rule_of;    /* GROUP: for each of `parts` parts, 1 when its rule is even-odd (the region is the odd windings) and 0 for nonzero */
   GSHCPU_Group_Scratch * gscratch; /* GROUP: the scratch the cell is made with, of which the scratch handed to the step is the base */
+  /**
+   * GROUP: the members of the union, when a member is the intersection of several parts (clip_union.h, CI1): `member_of[part]` is the
+   * member (0 to `members` - 1) a part belongs to and `member_size[m]` how many parts the cell holds of it.  The region of the union is the
+   * set where some member has every one of its parts inside, each under its own rule.  NULL (with `members` 0) makes every part a member of its
+   * own, the union of the parts, which is what the cell computed before a member could have several (the same code path is not taken).
+   */
+  const uint16_t * member_of;
+  const uint16_t * member_size;
+  size_t members;
 } GSHCPU_Exact_Params;
 
 /** One cell as the exact step sees it, per part: its pieces, the cover to its left and the dense area summed there. */

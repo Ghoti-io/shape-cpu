@@ -128,6 +128,7 @@ static size_t group_part_bytes(size_t parts) {
   bytes += 3u * (parts * sizeof(int64_t) + 16u); /* wtop, wleft, wind0 */
   bytes += parts * sizeof(int32_t) + 16u;       /* cur */
   bytes += parts * 65u * sizeof(int32_t) + 16u; /* jn */
+  bytes += parts * sizeof(int32_t) + 16u;       /* mcnt */
   return bytes;
 }
 
@@ -179,6 +180,7 @@ void gshcpu_exact_group_scratch_init(GSHCPU_Group_Scratch * gs, void * memory, u
   gs->wind0 = (void *)carve(&at, max_parts * sizeof(int64_t));
   gs->cur = (void *)carve(&at, max_parts * sizeof(int32_t));
   gs->jn = (void *)carve(&at, max_parts * 65u * sizeof(int32_t));
+  gs->mcnt = (void *)carve(&at, max_parts * sizeof(int32_t));
 }
 
 /* --- the cell's working state ------------------------------------------------------------------------------------ */
@@ -890,29 +892,114 @@ static inline void note_wmax(Ctx * c, int32_t w) {
 }
 
 /**
- * The gaps of the slab in the order of `ord`, for a group: how many parts are inside in each, and the winding there of the part of the
- * fragment on either side of it.  The windings of all the parts are carried once, from the left of the cell, and a fragment changes
- * the winding of its own part alone.
+ * The members of a union that are satisfied at a point whose parts have the windings @p w: how many members have every one of
+ * their parts inside (CI1).  With `member_of` NULL every part is a member, and this is the number of parts inside.
+ */
+static int32_t group_satisfied(Ctx * c, const int32_t * w) {
+  const GSHCPU_Exact_Params * pr = c->pr;
+  if (!pr->member_of) {
+    int32_t inside = 0;
+    for (int p = 0; p < pr->parts; p++) {
+      inside += in_rule(pr, p, w[p]);
+    }
+    return inside;
+  }
+  int32_t * mcnt = c->gs->mcnt;
+  for (size_t m = 0; m < pr->members; m++) {
+    mcnt[m] = 0;
+  }
+  for (int p = 0; p < pr->parts; p++) {
+    mcnt[pr->member_of[p]] += in_rule(pr, p, w[p]);
+  }
+  int32_t sat = 0;
+  for (size_t m = 0; m < pr->members; m++) {
+    sat += mcnt[m] == (int32_t)pr->member_size[m];
+  }
+  return sat;
+}
+
+/**
+ * Whether member @p m is satisfied in the gap that has @p pos fragments of the current order to its left: every part of it inside, each part's
+ * winding being the winding on the left side plus the steps of the fragments of that part among those @p pos (CI1).  @p swap_part
+ * is a part whose winding is moved by @p swap_step before the test (the part of a fragment that is to cross into the gap), or -1.
+ */
+static int member_satisfied_at(Ctx * c, size_t pos, uint16_t m, int swap_part, int32_t swap_step) {
+  const GSHCPU_Exact_Params * pr = c->pr;
+  const Frag * frag = c->s->frag;
+  int32_t * cur = c->gs->cur;
+  for (int p = 0; p < pr->parts; p++) {
+    if (pr->member_of[p] == m) {
+      cur[p] = (int32_t)c->wind0[p];
+    }
+  }
+  for (size_t k = 0; k < pos; k++) {
+    const Frag * f = &frag[c->ord[k]];
+    if (pr->member_of[f->part] == m) {
+      cur[f->part] += GSHCPU_RENDER_EXACT_EPS * f->s * (int32_t)f->mu;
+    }
+  }
+  if (swap_part >= 0) {
+    cur[swap_part] += swap_step;
+  }
+  int32_t inside = 0;
+  for (int p = 0; p < pr->parts; p++) {
+    if (pr->member_of[p] == m) {
+      inside += in_rule(pr, p, cur[p]);
+    }
+  }
+  c->work += (uint64_t)pos + (uint64_t)pr->parts;
+  return inside == (int32_t)pr->member_size[m];
+}
+
+/**
+ * The gaps of the slab in the order of `ord`, for a group: how many members are satisfied in each (how many parts are inside, when a member is a part),
+ * and the winding there of the part of the fragment on either side of it.  The windings of all the parts are carried once, from the left
+ * of the cell, and a fragment changes the winding of its own part alone.
  */
 static void slab_gaps_group(Ctx * c) {
   GSHCPU_Exact_Scratch * s = c->s;
   const GSHCPU_Exact_Params * pr = c->pr;
   GSHCPU_Exact_UGap * g = c->gs->ugap;
   int32_t * cur = c->gs->cur;
-  int32_t inside = 0;
+  const int by_member = pr->member_of != NULL;
+  int32_t * mcnt = c->gs->mcnt;
+  int32_t inside = 0; /* the parts inside, or with members the members satisfied */
+  if (by_member) {
+    for (size_t m = 0; m < pr->members; m++) {
+      mcnt[m] = 0;
+    }
+  }
   for (int p = 0; p < pr->parts; p++) {
     cur[p] = (int32_t)c->wind0[p];
     note_wmax(c, cur[p]);
-    inside += in_rule(pr, p, cur[p]);
+    if (by_member) {
+      mcnt[pr->member_of[p]] += in_rule(pr, p, cur[p]);
+    } else {
+      inside += in_rule(pr, p, cur[p]);
+    }
+  }
+  if (by_member) {
+    for (size_t m = 0; m < pr->members; m++) {
+      inside += mcnt[m] == (int32_t)pr->member_size[m];
+    }
   }
   for (size_t i = 0; i <= c->n; i++) {
     g[i].wl = 0;
     if (i > 0) {
       const Frag * f = &s->frag[c->ord[i - 1]];
       const int part = f->part;
-      inside -= in_rule(pr, part, cur[part]);
-      cur[part] += GSHCPU_RENDER_EXACT_EPS * f->s * (int32_t)f->mu;
-      inside += in_rule(pr, part, cur[part]);
+      if (by_member) {
+        const uint16_t m = pr->member_of[part];
+        const int32_t was = mcnt[m] == (int32_t)pr->member_size[m];
+        mcnt[m] -= in_rule(pr, part, cur[part]);
+        cur[part] += GSHCPU_RENDER_EXACT_EPS * f->s * (int32_t)f->mu;
+        mcnt[m] += in_rule(pr, part, cur[part]);
+        inside += (mcnt[m] == (int32_t)pr->member_size[m]) - was;
+      } else {
+        inside -= in_rule(pr, part, cur[part]);
+        cur[part] += GSHCPU_RENDER_EXACT_EPS * f->s * (int32_t)f->mu;
+        inside += in_rule(pr, part, cur[part]);
+      }
       note_wmax(c, cur[part]);
       g[i].wl = cur[part];
     }
@@ -930,11 +1017,12 @@ static void sweep_slab_group(Ctx * c) {
   const size_t n = c->n;
   c->work += 6u * n + 8u + (uint64_t)pr->parts;
   if (n == 0) {
-    int32_t inside = 0;
+    int32_t * cur = c->gs->cur;
     for (int p = 0; p < pr->parts; p++) {
       note_wmax(c, (int32_t)c->wind0[p]);
-      inside += in_rule(pr, p, (int32_t)c->wind0[p]);
+      cur[p] = (int32_t)c->wind0[p];
     }
+    const int32_t inside = group_satisfied(c, cur);
     c->acc += (uint64_t)((int64_t)64 * height * (inside > 0 ? 2 : 0)) << 30;
     return;
   }
@@ -977,7 +1065,16 @@ static void sweep_slab_group(Ctx * c) {
     const int32_t x = g[pos + 2].wl - dq - (mp == mq ? dp : 0);
     const int32_t lmp = g[pos].wr; /* the winding of p's part in L: L's right fragment is p */
     GSHCPU_Exact_UGap mid;
-    mid.cnt = g[pos].cnt - in_rule(pr, mq, x) + in_rule(pr, mq, x + dq);
+    if (pr->member_of) {
+      /* A member that is several parts: whether it is satisfied in L and in M' (L with q's part moved by q) depends on the windings of its other
+       * parts there, which the gaps do not carry, so they are summed from the fragments to the left (CI1).  M' differs from L in q's part alone. */
+      const uint16_t mm = pr->member_of[mq];
+      const int sat_l = member_satisfied_at(c, pos, mm, -1, 0);
+      const int sat_m = member_satisfied_at(c, pos, mm, mq, dq);
+      mid.cnt = g[pos].cnt - sat_l + sat_m;
+    } else {
+      mid.cnt = g[pos].cnt - in_rule(pr, mq, x) + in_rule(pr, mq, x + dq);
+    }
     mid.om = mid.cnt > 0 ? 2 : 0;
     mid.wl = x + dq;
     mid.wr = lmp + (mp == mq ? dq : 0);

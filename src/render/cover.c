@@ -830,7 +830,7 @@ static uint8_t * group_mark(const GSHCPU_Group_Capture * cap, int64_t px, int64_
 
 /** Whether the pixel (@p px, @p py) is one a group's sweep keeps: the marks count two or more pieces of the group in it. */
 static int group_wanted(const GSHCPU_Group_Capture * cap, int64_t px, int64_t py) {
-  return (*group_mark(cap, px, py) & GSHCPU_GROUP_COUNT) >= 2u;
+  return (*group_mark(cap, px, py) & GSHCPU_GROUP_COUNT) >= (cap->min_pieces ? cap->min_pieces : 2u);
 }
 
 /**

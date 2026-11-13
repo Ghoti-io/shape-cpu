@@ -551,6 +551,18 @@
  *   (`ERR_UNSUPPORTED` when the union is interned, CU-D8).  A union in a pattern's tile is formed in each copy by this tier, its members cut to the cell, and a
  *   limit of it refuses the use painted with the pattern (CU21: the area is the plane `union_area` forms, the byte and the remainder as a single clip's, the copies'
  *   areas add as PC4 says, the predicate is billed once for a pass, and a tile that holds one is not drawn by the period window).
+ * - **CI7 A member with inner clips (shape-scene's `clip_union.h`, CI1 to CI6).**  A member is the intersection of its own region and its inner clips', each under its
+ *   own rule, and the union is still the union of the members.  The sink claims ::GSHSCENE_CAP_CLIP_UNION_INNER with the general tier and draws such a union by it, never by
+ *   the fast tier (a clipped member is never shown disjoint).  The group of a clipped member is made exact: every part (a member's own contours and each inner clip) is swept
+ *   with `min_pieces` 1, so that every pixel any part has a piece in is kept, and each part leaves a plane of the pixels it covers whole.  A pixel with no piece is whole when
+ *   some member has all its parts whole and empty otherwise; a pixel with pieces drops the members one of whose parts without a piece is outside it, is whole when a member
+ *   has all its parts whole, and else is the floor of the exact area of the union of the members left, each the intersection of the parts that have pieces there (the rest
+ *   being whole), by the exact step with its members (`member_of`): a member is satisfied in a gap when every part of it is inside, which the step finds from the windings of
+ *   the member's parts at the gap (summed from the fragments to its left where an exchange of neighbours needs the member's other parts).  A group of one clipped member
+ *   has the floor of the exact area of its region (CI5), not AD-12's fold of its own winding area.  The planes cost one byte for each part of the group for each pixel of its
+ *   rectangle and are in the measure of the caller's memory, as are the geometry of every part and the arrays of the cell; a group whose parts-times-pixels is past `size_t` is the
+ *   limit, as the other limits of CG3 are.  Its answers are the oracle's byte for byte on the committed vectors (clip_union.h's `kClippedCases`), on the default tiers,
+ *   with the general tier forced and with the members made one group.
  * - **CG10 Tiers, caps, counters.**  `GSHCPU_RENDER_TIER_UNION` (FT-U1) and `GSHCPU_RENDER_TIER_UNION_GENERAL` are separate switches: the sink claims `CLIP_UNION`
  *   while either is on and `CLIP_UNION_GENERAL` while the second is; with the first off and the second on every union is the general tier's, the switch that
  *   forces it.  The counters are `union_general` (pushes), `union_groups` (groups of several members made exact), `union_exact` (pixels made exact) and

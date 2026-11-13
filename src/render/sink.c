@@ -983,13 +983,25 @@ typedef struct Union_Plan {
   uint16_t * root;            /* n: the least member of the member's group */
   uint16_t * next;            /* n: the next member of the group (ascending), or UNION_NONE */
   uint16_t * head;            /* n: for a root, the first member of its group (itself) */
+  uint8_t * clipped;          /* n: 1 for a member that carries inner clips (CI1), a member of several parts */
   GSHCPU_Rect clip;           /* the pixels of the union met with the clips in force: what the clip's coverage holds */
   GSHCPU_Rect wide;           /* ... and in the whole render: where the tier works (CG9) */
   size_t multi;               /* the groups of two or more members */
   size_t max_parts;           /* the most members of a group */
   size_t max_width;           /* the widest rectangle of a group of several, in pixels */
   size_t max_pixels;          /* the most pixels of one */
+  size_t max_clip_plane;      /* the most bytes of per-part planes a group with a clipped member takes: its parts times its pixels (0 with none) */
 } Union_Plan;
+
+/** Whether a member of the group named @p r carries inner clips. */
+static int union_group_has_clip(const Union_Plan * pl, uint16_t r) {
+  for (uint16_t i = pl->head[r]; i != UNION_NONE; i = pl->next[i]) {
+    if (pl->clipped[i]) {
+      return 1;
+    }
+  }
+  return 0;
+}
 
 /**
  * CU16's relation on two device boxes: the interiors meet.  A box without width or height meets nothing, and an empty box is all zeros
@@ -1037,7 +1049,7 @@ static GSHSCENE_Result union_plan(const GSHSCENE_Item * item, const GSHGEOM_Map 
   memset(pl, 0, sizeof *pl);
   *block = NULL;
   pl->n = n;
-  const size_t bytes = n * (sizeof(GSHCPU_Rect) + sizeof(GSHGEOM_Device_Box) + 3u * sizeof(uint16_t)) + 64u;
+  const size_t bytes = n * (sizeof(GSHCPU_Rect) + sizeof(GSHGEOM_Device_Box) + 3u * sizeof(uint16_t) + sizeof(uint8_t)) + 64u;
   unsigned char * mem = al->malloc_fn(al->ctx, bytes);
   if (!mem) {
     return GSHSCENE_ERR_OOM;
@@ -1048,8 +1060,14 @@ static GSHSCENE_Result union_plan(const GSHSCENE_Item * item, const GSHGEOM_Map 
   pl->root = (uint16_t *)(void *)(mem + n * (sizeof(GSHCPU_Rect) + sizeof(GSHGEOM_Device_Box)));
   pl->next = pl->root + n;
   pl->head = pl->next + n;
+  pl->clipped = (uint8_t *)(void *)(pl->head + n);
   GSHCPU_Rect bound = {0, 0, 0, 0};
   for (size_t i = 0; i < n; i++) {
+    GSHSCENE_Clip_Member info;
+    if (gshscene_resource_clip_union_member(item->resource, i, &info) != GSHSCENE_OK) {
+      return GSHSCENE_ERR_INTERNAL;
+    }
+    pl->clipped[i] = info.inner_count > 0;
     GSHSCENE_Result br = gshscene_clip_union_member_box(item, i, maps, nmaps, tmap, &pl->box[i]);
     if (br == GSHSCENE_ERR_LIMIT) {
       return GSHSCENE_ERR_LIMIT; /* an unprovable member: CU4, a missing member would draw the union wrong */
@@ -1100,12 +1118,20 @@ static GSHSCENE_Result union_plan(const GSHSCENE_Item * item, const GSHGEOM_Map 
     pl->head[pl->root[i]] = (uint16_t)i;
   }
   for (size_t r = 0; r < n; r++) {
-    if (pl->root[r] != r || pl->next[r] == UNION_NONE) {
-      continue; /* not a root, or a group of one */
+    if (pl->root[r] != r) {
+      continue; /* not a root */
     }
-    size_t parts = 0;
+    const int has_clip = union_group_has_clip(pl, (uint16_t)r);
+    if (pl->next[r] == UNION_NONE && !has_clip) {
+      continue; /* a group of one plain member */
+    }
+    size_t parts = 0; /* the regions of the group: each member's own and each of its inner clips (CI1) */
     for (uint16_t i = pl->head[r]; i != UNION_NONE; i = pl->next[i]) {
-      parts++;
+      GSHSCENE_Clip_Member info;
+      if (gshscene_resource_clip_union_member(item->resource, i, &info) != GSHSCENE_OK) {
+        return GSHSCENE_ERR_INTERNAL;
+      }
+      parts += 1u + info.inner_count;
     }
     const GSHCPU_Rect g = union_group_rect(pl, (uint16_t)r, pl->wide);
     const size_t width = (size_t)(g.x1 - g.x0);
@@ -1118,6 +1144,13 @@ static GSHSCENE_Result union_plan(const GSHSCENE_Item * item, const GSHGEOM_Map 
     pl->max_parts = parts > pl->max_parts ? parts : pl->max_parts;
     pl->max_width = width > pl->max_width ? width : pl->max_width;
     pl->max_pixels = pixels > pl->max_pixels ? pixels : pl->max_pixels;
+    if (has_clip) {
+      size_t plane;
+      if (!gcu_safe_mul_size(parts, pixels ? pixels : 1u, &plane)) {
+        return GSHSCENE_ERR_LIMIT;
+      }
+      pl->max_clip_plane = plane > pl->max_clip_plane ? plane : pl->max_clip_plane;
+    }
   }
   return GSHSCENE_OK;
 }
@@ -1142,12 +1175,24 @@ typedef struct Union_Blocks {
   int64_t * cell_dense;
   uint8_t * cell_rules;
   uint8_t * group_rules;
+  /* A group with a member of several parts (CI1), sized by the plan: the planes of which pixels each part holds whole, and what one pixel's step is handed */
+  uint8_t * bitplane;           /* max_clip_plane: for each part of the group, a byte for each of its pixels, 1 where the part (with no piece there) covers the pixel whole */
+  uint16_t * cell_mof;          /* max_parts: the member of each part of the cell's step */
+  uint16_t * cell_msize;        /* max_parts: the parts of each member of the cell's step */
+  uint16_t * part_member;       /* max_parts: the member of the group each of its parts belongs to */
+  uint16_t * part_src;          /* max_parts: the canonical index of that member in the union */
+  int32_t * part_inner;         /* max_parts: -1 for a member's own region, else the index of its inner clip */
+  uint16_t * member_first;      /* max_parts: the first part of each member of the group */
+  uint16_t * member_parts;      /* max_parts: how many parts it has */
+  uint8_t * has_rec;            /* max_parts: whether the part has a record in the pixel in hand */
+  uint32_t * rec_of;            /* max_parts: the record, when it has */
   size_t piece_cap;
 } Union_Blocks;
 
 static void union_free(const GSHGEOM_Allocator * al, Union_Blocks * b) {
-  void * all[] = {b->group_rules, b->cell_rules, b->cell_dense, b->cell_a_left, b->cell_counts, (void *)b->cell_pieces, b->pieces,
-      b->records, b->exact, b->mark, b->gplane, b->plane, b->acc};
+  void * all[] = {b->rec_of, b->has_rec, b->member_parts, b->member_first, b->part_inner, b->part_src, b->part_member, b->cell_msize,
+      b->cell_mof, b->bitplane, b->group_rules, b->cell_rules, b->cell_dense, b->cell_a_left, b->cell_counts, (void *)b->cell_pieces,
+      b->pieces, b->records, b->exact, b->mark, b->gplane, b->plane, b->acc};
   for (size_t i = 0; i < sizeof all / sizeof *all; i++) {
     if (all[i]) {
       al->free_fn(al->ctx, all[i]);
@@ -1203,6 +1248,24 @@ static GSHSCENE_Result union_alloc(const Cpu_Sink * cs, const Union_Plan * pl, c
       !b->cell_dense || !b->cell_rules || !b->group_rules) {
     union_free(al, b);
     return GSHSCENE_ERR_OOM;
+  }
+  if (pl->max_clip_plane) {
+    const size_t np = pl->max_parts;
+    b->bitplane = al->malloc_fn(al->ctx, pl->max_clip_plane);
+    b->cell_mof = al->malloc_fn(al->ctx, np * sizeof *b->cell_mof);
+    b->cell_msize = al->malloc_fn(al->ctx, np * sizeof *b->cell_msize);
+    b->part_member = al->malloc_fn(al->ctx, np * sizeof *b->part_member);
+    b->part_src = al->malloc_fn(al->ctx, np * sizeof *b->part_src);
+    b->part_inner = al->malloc_fn(al->ctx, np * sizeof *b->part_inner);
+    b->member_first = al->malloc_fn(al->ctx, np * sizeof *b->member_first);
+    b->member_parts = al->malloc_fn(al->ctx, np * sizeof *b->member_parts);
+    b->has_rec = al->malloc_fn(al->ctx, np);
+    b->rec_of = al->malloc_fn(al->ctx, np * sizeof *b->rec_of);
+    if (!b->bitplane || !b->cell_mof || !b->cell_msize || !b->part_member || !b->part_src || !b->part_inner || !b->member_first ||
+        !b->member_parts || !b->has_rec || !b->rec_of) {
+      union_free(al, b);
+      return GSHSCENE_ERR_OOM;
+    }
   }
   return GSHSCENE_OK;
 }
@@ -1287,16 +1350,24 @@ static GSHCPU_Result measure_one(const Cpu_Sink * cs, const GSHSCENE_Target * ta
       if (pr == GSHSCENE_OK) {
         const size_t mark = arena->used;
         for (size_t i = 0; i < gshscene_resource_clip_union_count(item->resource) && result == GSHCPU_OK; i++) {
-          GSHSCENE_Item member;
-          GSHCPU_Item_Geometry mg;
-          if (gshscene_clip_union_member_item(item, i, &member) != GSHSCENE_OK) {
+          GSHSCENE_Clip_Member info;
+          if (gshscene_resource_clip_union_member(item->resource, i, &info) != GSHSCENE_OK) {
             continue;
           }
-          gshcpu_render_arena_rewind(arena, mark);
-          GSHCPU_Result mr = gshcpu_render_geometry(&member, maps, count - 1, &target->map, &arena->self, &cs->geometry, &mg);
-          gshcpu_render_geometry_release(&mg, &arena->self);
-          if (mr == GSHCPU_ERR_OOM) {
-            result = mr;
+          /* The member's own region, then each of its inner clips (CI1): one part's geometry is live at a time. */
+          for (size_t k = 0; k <= info.inner_count && result == GSHCPU_OK; k++) {
+            GSHSCENE_Item part;
+            GSHCPU_Item_Geometry mg;
+            if ((k == 0 ? gshscene_clip_union_member_item(item, i, &part) : gshscene_clip_union_inner_item(item, i, k - 1u, &part)) !=
+                GSHSCENE_OK) {
+              continue;
+            }
+            gshcpu_render_arena_rewind(arena, mark);
+            GSHCPU_Result mr = gshcpu_render_geometry(&part, maps, count - 1, &target->map, &arena->self, &cs->geometry, &mg);
+            gshcpu_render_geometry_release(&mg, &arena->self);
+            if (mr == GSHCPU_ERR_OOM) {
+              result = mr;
+            }
           }
         }
         union_free(&arena->self, &blocks);
@@ -1690,7 +1761,7 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
     out->flags |= GSHSCENE_CAP_CLIP_UNION;
   }
   if (cs->tiers & GSHCPU_RENDER_TIER_UNION_GENERAL) {
-    out->flags |= GSHSCENE_CAP_CLIP_UNION_GENERAL;
+    out->flags |= GSHSCENE_CAP_CLIP_UNION_GENERAL | GSHSCENE_CAP_CLIP_UNION_INNER; /* CI5: the general tier draws a member of several parts */
   }
   out->cancel_unit = GSHSCENE_CANCEL_BETWEEN_UNITS;
   out->cancel_work_bound = work_bound(cs);
@@ -3235,13 +3306,14 @@ static void union_member_close(Run * run, Union_Member * m) {
 }
 
 /**
- * The outline of member @p index of the push, with the work it costs counted, cut to the cell when there is one.  @p m is always safe
- * to hand to ::union_member_close afterwards.
+ * The outline of member @p index of the push (@p inner -1) or of its inner clip @p inner (CI1), with the work it costs counted, cut to the
+ * cell when there is one.  @p m is always safe to hand to ::union_member_close afterwards.
  */
-static GSHCPU_Result union_member_open(Run * run, const GSHSCENE_Item * item, size_t index, size_t count, const Union_Src * src,
-    GSHSCENE_Item * member, Union_Member * m) {
+static GSHCPU_Result union_part_open(Run * run, const GSHSCENE_Item * item, size_t index, int32_t inner, size_t count,
+    const Union_Src * src, GSHSCENE_Item * member, Union_Member * m) {
   memset(m, 0, sizeof *m);
-  if (gshscene_clip_union_member_item(item, index, member) != GSHSCENE_OK) {
+  if ((inner < 0 ? gshscene_clip_union_member_item(item, index, member) : gshscene_clip_union_inner_item(item, index, (size_t)inner, member)) !=
+      GSHSCENE_OK) {
     return GSHCPU_ERR_INTERNAL;
   }
   GSHCPU_Result r = gshcpu_render_geometry(member, src->maps, count - 1, src->tmap, run->item_alloc, &run->cs->geometry, &m->g);
@@ -3275,6 +3347,12 @@ static GSHCPU_Result union_member_open(Run * run, const GSHSCENE_Item * item, si
   }
   m->count = m->cut_n;
   return GSHCPU_OK;
+}
+
+/** The outline of member @p index of the push (its own region, not an inner clip of it): see ::union_part_open. */
+static GSHCPU_Result union_member_open(Run * run, const GSHSCENE_Item * item, size_t index, size_t count, const Union_Src * src,
+    GSHSCENE_Item * member, Union_Member * m) {
+  return union_part_open(run, item, index, -1, count, src, member, m);
 }
 
 /**
@@ -3401,6 +3479,203 @@ static GSHSCENE_Result union_group(Run * run, const GSHSCENE_Item * item, size_t
   return GSHSCENE_OK;
 }
 
+/**
+ * CI2: a group with a member of several parts (a member and its inner clips), made exact into @p b->gplane over @p rg.  A member is the
+ * intersection of its parts' regions, the group the union of its members, so a pixel's area is no longer what the sum of the parts' own
+ * areas can settle: the sweeps keep the pieces of every pixel any part has one in (`min_pieces` 1), and each part also leaves a plane of
+ * the pixels it covers whole.  A pixel with no piece is then constant in every part, and is whole when some member has all its parts
+ * whole and empty otherwise; a pixel with pieces drops the members one of whose parts without a piece is outside it, is whole when a member has
+ * all its parts whole, and else is the exact area of the union of the members that are left, each now the intersection of the parts
+ * that have pieces there (the others being whole), by the exact step given the members (`member_of`).
+ * @p refused is set when the push is the sink's resource limit.
+ */
+static GSHSCENE_Result union_group_clipped(Run * run, const GSHSCENE_Item * item, size_t count, const Union_Src * src, const Union_Plan * pl,
+    uint16_t root, GSHCPU_Rect rg, const Union_Blocks * b, GSHCPU_Exact * ex, GSHCPU_Group_Scratch * gs, int * refused) {
+  Cpu_Sink * cs = run->cs;
+  const size_t width = (size_t)(rg.x1 - rg.x0);
+  const size_t pixels = width * (size_t)(rg.y1 - rg.y0);
+  memset(b->mark, 0, pixels);
+  GSHCPU_Group_Capture cap;
+  memset(&cap, 0, sizeof cap);
+  cap.records = b->records;
+  cap.pieces = b->pieces;
+  cap.piece_cap = b->piece_cap;
+  cap.mark = b->mark;
+  cap.rect = rg;
+  cap.min_pieces = 1u;
+  ex->max_pieces = cs->max_exact;
+  ex->max_crossings = cs->max_crossings;
+  ex->eps = GSHCPU_RENDER_EXACT_EPS;
+  /* The parts of the group: each member's own region, then its inner clips, in the members' order. */
+  size_t nparts = 0;
+  size_t nmem = 0;
+  for (uint16_t i = pl->head[root]; i != UNION_NONE; i = pl->next[i], nmem++) {
+    GSHSCENE_Clip_Member info;
+    if (gshscene_resource_clip_union_member(item->resource, i, &info) != GSHSCENE_OK) {
+      return GSHSCENE_ERR_INTERNAL;
+    }
+    b->member_first[nmem] = (uint16_t)nparts;
+    b->member_parts[nmem] = (uint16_t)(1u + info.inner_count);
+    b->part_member[nparts] = (uint16_t)nmem;
+    b->part_src[nparts] = i;
+    b->part_inner[nparts] = -1;
+    b->group_rules[nparts] = info.rule == GSHGEOM_FILL_EVEN_ODD;
+    nparts++;
+    for (size_t k = 0; k < info.inner_count; k++) {
+      b->part_member[nparts] = (uint16_t)nmem;
+      b->part_src[nparts] = i;
+      b->part_inner[nparts] = (int32_t)k;
+      b->group_rules[nparts] = info.inner[k].rule == GSHGEOM_FILL_EVEN_ODD;
+      nparts++;
+    }
+  }
+  const int in_arena = run->item_alloc == &run->arena.self;
+  const size_t mark = in_arena ? run->arena.used : 0; /* the geometry of one part is live at a time */
+  memset(b->bitplane, 0, nparts * pixels);
+  for (int pass = 0; pass < 2 && !*refused; pass++) {
+    for (size_t p = 0; p < nparts && !*refused; p++) {
+      if (in_arena) {
+        gshcpu_render_arena_rewind(&run->arena, mark);
+      }
+      GSHSCENE_Item part;
+      Union_Member g;
+      GSHCPU_Result r = union_part_open(run, item, b->part_src[p], b->part_inner[p], count, src, &part, &g);
+      if (r == GSHCPU_OK) {
+        const GSHCPU_Rect mrect = gshcpu_render_rect_meet(g.box, rg);
+        if (pass == 1) {
+          memset(b->gplane, 0, pixels * sizeof *b->gplane);
+        }
+        if (!gshcpu_render_rect_empty(mrect)) {
+          uint64_t cells = 0;
+          cap.part = (uint32_t)p;
+          if (pass == 0) {
+            r = gshcpu_render_cover_marks(g.paths, g.count, mrect, &cap, ex, cs->max_deposits, &cells);
+          } else {
+            r = gshcpu_render_cover_group(g.paths, g.count, part.fill_rule, mrect, b->gplane, rg, &cap, ex, b->acc, cs->max_deposits, &cells);
+            cs->counters->union_sweeps++;
+          }
+          run->work += cells;
+        }
+        if (pass == 1 && r == GSHCPU_OK) {
+          uint8_t * bits = b->bitplane + p * pixels;
+          for (size_t i = 0; i < pixels; i++) {
+            bits[i] = b->gplane[i] >= 4096u; /* a pixel with no piece of the part holds 0 or 8192 */
+          }
+          run->work += pixels;
+        }
+      }
+      union_member_close(run, &g);
+      if (r == GSHCPU_ERR_LIMIT) {
+        *refused = 1;
+      } else if (r != GSHCPU_OK) {
+        return scene_result(r);
+      }
+    }
+  }
+  run->work += ex->work;
+  ex->work = 0;
+  if (*refused) {
+    return GSHSCENE_OK;
+  }
+  GSHCPU_Group_Record * rec = cap.records;
+  const size_t total = cap.record_n;
+  sort_records(rec, total);
+  run->work += (uint64_t)total;
+  cs->counters->union_pieces += cap.piece_n;
+  GSHCPU_Exact_Params params;
+  memset(&params, 0, sizeof params);
+  params.mode = GSHCPU_EXACT_GROUP;
+  params.max_crossings = cs->max_crossings;
+  params.rule_of = b->cell_rules;
+  params.gscratch = gs;
+  params.member_of = b->cell_mof;
+  params.member_size = b->cell_msize;
+  memset(b->has_rec, 0, nparts);
+  size_t a = 0;
+  for (size_t idx = 0; idx < pixels && !*refused; idx++) {
+    while (a < total && rec[a].cell < idx) {
+      a++; /* a record of no pixel in hand: never, the records are of pixels of the group's rectangle in ascending order */
+    }
+    size_t e = a;
+    while (e < total && rec[e].cell == idx) {
+      b->has_rec[rec[e].part] = 1;
+      b->rec_of[rec[e].part] = (uint32_t)e;
+      e++;
+    }
+    int64_t area = 0;
+    size_t kept = 0; /* the parts handed to the step */
+    size_t alive = 0; /* the members handed to it */
+    int whole = 0;
+    for (size_t m = 0; m < nmem && !whole; m++) {
+      const size_t first = b->member_first[m];
+      const size_t n = b->member_parts[m];
+      int dead = 0;
+      size_t varying = 0;
+      for (size_t p = first; p < first + n; p++) {
+        if (b->has_rec[p]) {
+          varying++;
+        } else if (!b->bitplane[p * pixels + idx]) {
+          dead = 1; /* a part with no piece here that does not cover the pixel: the member is empty in it */
+          break;
+        }
+      }
+      if (dead) {
+        continue;
+      }
+      if (varying == 0) {
+        whole = 1; /* every part covers the pixel whole */
+        break;
+      }
+      for (size_t p = first; p < first + n; p++) {
+        if (!b->has_rec[p]) {
+          continue;
+        }
+        const GSHCPU_Group_Record * rp = &rec[b->rec_of[p]];
+        b->cell_pieces[kept] = cap.pieces + rp->first;
+        b->cell_counts[kept] = rp->count;
+        b->cell_a_left[kept] = rp->a_left;
+        b->cell_dense[kept] = rp->dense;
+        b->cell_rules[kept] = b->group_rules[p];
+        b->cell_mof[kept] = (uint16_t)alive;
+        kept++;
+      }
+      b->cell_msize[alive] = (uint16_t)varying;
+      alive++;
+    }
+    if (whole) {
+      area = 8192;
+    } else if (alive > 0) {
+      GSHCPU_Exact_Cell cell;
+      memset(&cell, 0, sizeof cell);
+      cell.gpieces = b->cell_pieces;
+      cell.gcount = b->cell_counts;
+      cell.ga_left = b->cell_a_left;
+      cell.gdense = b->cell_dense;
+      params.parts = (int)kept;
+      params.members = alive;
+      uint64_t spent = 0;
+      const int status = gshcpu_exact_cell(&params, &gs->base, &cell, &area, &spent);
+      run->work += spent;
+      if (status != GSHCPU_EXACT_OK) {
+        if (status == GSHCPU_EXACT_IDENTITY) {
+          ex->failures++;
+        }
+        *refused = 1; /* a cell past the crossings budget, or one the step cannot vouch for: the push is the resource limit */
+        break;
+      }
+      cs->counters->union_exact++;
+    } else if (e == a) {
+      /* no piece and no member whole: nothing */
+    }
+    for (size_t t = a; t < e; t++) {
+      b->has_rec[rec[t].part] = 0;
+    }
+    b->gplane[idx] = (uint16_t)area; /* 0 <= area <= 8192: the step's floor of a subset of the pixel (CG6), or the whole pixel */
+    a = e;
+  }
+  return GSHSCENE_OK;
+}
+
 /** The area of a union (CG1 to CG12) as the general tier forms it: the plan and the blocks that hold it, live until ::union_area_free. */
 typedef struct Union_Area {
   Union_Plan pl;     /* the rectangles are valid after the free; the arrays are not */
@@ -3472,8 +3747,8 @@ static GSHSCENE_Result union_area(Run * run, const GSHSCENE_Item * item, size_t 
     if (in_arena) {
       gshcpu_render_arena_rewind(&run->arena, mark);
     }
-    if (pl->next[r] == UNION_NONE) {
-      /* A group of one: its own area, as the fast tier adds it (CG3). */
+    if (pl->next[r] == UNION_NONE && !pl->clipped[r]) {
+      /* A group of one plain member: its own area, as the fast tier adds it (CG3). */
       if (gshcpu_render_rect_empty(pl->rect[r])) {
         continue;
       }
@@ -3502,7 +3777,8 @@ static GSHSCENE_Result union_area(Run * run, const GSHSCENE_Item * item, size_t 
       continue;
     }
     cs->counters->union_groups++;
-    result = union_group(run, item, count, src, pl, (uint16_t)r, rg, b, &ex, &gs, &refused);
+    result = union_group_has_clip(pl, (uint16_t)r) ? union_group_clipped(run, item, count, src, pl, (uint16_t)r, rg, b, &ex, &gs, &refused)
+                                                   : union_group(run, item, count, src, pl, (uint16_t)r, rg, b, &ex, &gs, &refused);
     if (result == GSHSCENE_OK && !refused) {
       /* The group's area, added into the plane and held at the whole pixel (CG3). */
       for (int64_t y = rg.y0; y < rg.y1; y++) {
