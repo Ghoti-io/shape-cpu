@@ -731,6 +731,8 @@ typedef struct GSHCPU_Item_Geometry {
   size_t count;
   size_t points;              /* their points */
   GSHCPU_Rect box;            /* the pixels their points touch (empty for none) */
+  int has_lattice;            /* 1 when some path has a point */
+  int64_t lattice[4];         /* x0, y0, x1, y1: the least and greatest of their points, in 26.6 (CU24: a font member's box) */
   GSHCPU_Glyph_Note * notes;  /* a run from a font: one per glyph (count of them); else NULL */
 } GSHCPU_Item_Geometry;
 

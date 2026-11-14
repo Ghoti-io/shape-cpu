@@ -1009,6 +1009,12 @@ exact step the rest. The work is the plain group's plus the parts' planes and, w
 (`max_exact_fragments`, `max_exact_crossings`, `max_union_pieces`, the work meter), and what passes one is the push's resource limit, never a union drawn with a member left out. The plan counts a
 group's regions, not its members, for the scratch, and the planes' bytes in `Union_Plan.max_clip_plane`; `measure_one` replays the sequence, with the geometry of every part.
 
+A part that is a glyph run from a font (CU24) is drawn by the same route a plain run's clip is: `gshcpu_render_geometry` forms its glyphs' device paths
+(the fast tier's from the provider or the general route's outline under the glyph map) and a note for each glyph. Its member's box, which the store cannot
+form, is the hull of the lattice points of those flattened paths (`font_member_box`, called by `union_plan` where `gshscene_clip_union_member_box` says
+`ERR_LIMIT` for a member that is a font run), so the plan, the measure and the push take the same allocations in the same order. The glyph entries are made by
+`union_report_glyphs` before the area is formed, with `gshscene_job_report_part`, and a refused glyph under strict stops the render at the push.
+
 ### Union clips (shapes story A3: CU18 to CU22)
 
 A clip push may name a clip union (shape-scene `clip_union.h`). The sink claims `CLIP_UNION` while `GSHCPU_RENDER_TIER_UNION` or

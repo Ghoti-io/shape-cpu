@@ -508,6 +508,10 @@
  *   (CU16's overlap, formed by the same `gshscene_clip_union_member_box`); a group is named by its least member.  An empty box, or one without
  *   width or height, meets nothing.  The comparisons of every pair are billed (CG11).  With `GSHCPU_RENDER_FORCE_ONE_GROUP` the members are one group (a test
  *   switch: it makes the exact step compute the union of members the predicate shows disjoint, which it must give as their sum).
+ *   **A member that is a glyph run from a font** (shape-scene's CU24) has no box in the store, so the plan forms it here: the hull of the lattice points of
+ *   its flattened glyph outlines, the geometry the sweeps use, through the run's route; it is never the fast tier's, and a part whose
+ *   box cannot be formed (a coordinate past the sink's range) refuses the push (CG9).  The entries of a font part's glyphs (an unavailable one, a hinted-in-part one) are
+ *   made once per push before the area, each naming its part by the report entry's `member`, and under strict a refused glyph stops the render there.
  * - **CG3 The area of a pixel.**  The sum over the groups, held at 8192, of the group's area.  A group of one member has its own area `a_i` (CU2's
  *   number: the member's accumulated winding area reduced by its rule, the saturating sum of AD-12 where its contours overlap themselves inside
  *   the pixel).  A group of several has the **floor** of the exact area of the union of its members' regions in the pixel, each region the points

@@ -245,6 +245,11 @@ GSHCPU_Result gshcpu_render_geometry(const GSHSCENE_Item * item, GSHGEOM_Map * c
     }
   }
   if (any) {
+    out->has_lattice = 1;
+    out->lattice[0] = x0;
+    out->lattice[1] = y0;
+    out->lattice[2] = x1;
+    out->lattice[3] = y1;
     /* Whole pixels, rounded out. */
     out->box.x0 = pixel_floor(x0);
     out->box.y0 = pixel_floor(y0);

@@ -1037,14 +1037,50 @@ static GSHCPU_Rect union_group_rect(const Union_Plan * pl, uint16_t r, GSHCPU_Re
   return g;
 }
 
+/** Whether @p resource is a glyph run from a font. */
+static int glyph_font_run(const GSHSCENE_Resource * resource) {
+  GSHSCENE_Glyph_Run run;
+  return gshscene_resource_glyph_run(resource, &run) == GSHSCENE_OK && run.source == GSHSCENE_GLYPHS_FROM_FONT;
+}
+
+/**
+ * CU24: the device box of member @p index of @p item, a glyph run from a font, as the hull of the lattice points of its flattened
+ * glyph outlines (the geometry the sweeps use, so the box bounds exactly what is swept): ::GSHSCENE_OK; ::GSHSCENE_ERR_OOM;
+ * ::GSHSCENE_ERR_LIMIT when it cannot be formed (a map or a coordinate past the bounds, the points, or a run the route refuses: the
+ * planning pass has refused its push and this is only the measure).
+ */
+static GSHSCENE_Result font_member_box(const GSHSCENE_Item * item, size_t index, GSHGEOM_Map * maps, size_t nmaps,
+    const GSHGEOM_Map * tmap, const GSHGEOM_Allocator * al, const GSHGEOM_Limits * limits, GSHGEOM_Device_Box * out) {
+  GSHSCENE_Item part;
+  GSHCPU_Item_Geometry g;
+  memset(out, 0, sizeof *out);
+  if (gshscene_clip_union_member_item(item, index, &part) != GSHSCENE_OK) {
+    return GSHSCENE_ERR_LIMIT;
+  }
+  const GSHCPU_Result r = gshcpu_render_geometry(&part, maps, nmaps, tmap, al, limits, &g);
+  GSHSCENE_Result result = r == GSHCPU_OK ? GSHSCENE_OK : r == GSHCPU_ERR_OOM ? GSHSCENE_ERR_OOM : GSHSCENE_ERR_LIMIT;
+  if (result == GSHSCENE_OK) {
+    out->empty = !g.has_lattice;
+    if (g.has_lattice) {
+      out->x0 = (int32_t)g.lattice[0];
+      out->y0 = (int32_t)g.lattice[1];
+      out->x1 = (int32_t)g.lattice[2];
+      out->y1 = (int32_t)g.lattice[3];
+    }
+  }
+  gshcpu_render_geometry_release(&g, al);
+  return result;
+}
+
 /**
  * The plan of a union push (CG2): the boxes of the members from the one function the predicate uses (CU14), their pixel rectangles, the
  * groups, and the sizes.  With @p one_group the members are one group (the test switch).  One block from @p al, in `*block`.
  * @return ::GSHSCENE_OK, ::GSHSCENE_ERR_LIMIT (a member whose box cannot be formed: the push is the sink's resource limit),
  * ::GSHSCENE_ERR_OOM or ::GSHSCENE_ERR_INTERNAL.
  */
-static GSHSCENE_Result union_plan(const GSHSCENE_Item * item, const GSHGEOM_Map * maps, size_t nmaps, const GSHGEOM_Map * tmap,
-    GSHCPU_Rect reach, GSHCPU_Rect whole, int one_group, const GSHGEOM_Allocator * al, Union_Plan * pl, void ** block) {
+static GSHSCENE_Result union_plan(const GSHSCENE_Item * item, GSHGEOM_Map * maps, size_t nmaps, const GSHGEOM_Map * tmap,
+    GSHCPU_Rect reach, GSHCPU_Rect whole, int one_group, const GSHGEOM_Allocator * al, const GSHGEOM_Limits * limits,
+    Union_Plan * pl, void ** block) {
   const size_t n = gshscene_resource_clip_union_count(item->resource);
   memset(pl, 0, sizeof *pl);
   *block = NULL;
@@ -1069,8 +1105,11 @@ static GSHSCENE_Result union_plan(const GSHSCENE_Item * item, const GSHGEOM_Map 
     }
     pl->clipped[i] = info.inner_count > 0;
     GSHSCENE_Result br = gshscene_clip_union_member_box(item, i, maps, nmaps, tmap, &pl->box[i]);
-    if (br == GSHSCENE_ERR_LIMIT) {
-      return GSHSCENE_ERR_LIMIT; /* an unprovable member: CU4, a missing member would draw the union wrong */
+    if (br == GSHSCENE_ERR_LIMIT && glyph_font_run(info.resource)) {
+      br = font_member_box(item, i, maps, nmaps, tmap, al, limits, &pl->box[i]); /* CU24: the store cannot box a font member; the sink's outlines can */
+    }
+    if (br == GSHSCENE_ERR_LIMIT || br == GSHSCENE_ERR_OOM) {
+      return br; /* an unprovable member: CU4, a missing member would draw the union wrong; or the memory of a font member's outlines */
     }
     if (br != GSHSCENE_OK) {
       return GSHSCENE_ERR_INTERNAL;
@@ -1329,7 +1368,7 @@ static GSHCPU_Result measure_one(const Cpu_Sink * cs, const GSHSCENE_Target * ta
       Union_Plan pl;
       void * block = NULL;
       GSHSCENE_Result pr = union_plan(item, maps, count - 1, &target->map, region_of(target), whole_of(target),
-          (cs->tiers & GSHCPU_RENDER_FORCE_ONE_GROUP) != 0, &arena->self, &pl, &block);
+          (cs->tiers & GSHCPU_RENDER_FORCE_ONE_GROUP) != 0, &arena->self, &cs->geometry, &pl, &block);
       if (pr == GSHSCENE_ERR_OOM) {
         return GSHCPU_ERR_OOM;
       }
@@ -3712,7 +3751,7 @@ static GSHSCENE_Result union_area(Run * run, const GSHSCENE_Item * item, size_t 
   memset(ua, 0, sizeof *ua);
   const int in_arena = run->item_alloc == &run->arena.self;
   GSHSCENE_Result result = union_plan(item, src->maps, count - 1, src->tmap, reach, whole,
-      (cs->tiers & GSHCPU_RENDER_FORCE_ONE_GROUP) != 0, run->item_alloc, &ua->pl, &ua->block);
+      (cs->tiers & GSHCPU_RENDER_FORCE_ONE_GROUP) != 0, run->item_alloc, &run->cs->geometry, &ua->pl, &ua->block);
   if (result != GSHSCENE_OK) {
     union_area_free(run, ua);
     return result;
@@ -3801,6 +3840,56 @@ static GSHSCENE_Result union_area(Run * run, const GSHSCENE_Item * item, size_t 
 }
 
 /**
+ * CU24: the entries of the glyphs of the union's parts that are runs from a font, each naming its part (`member`), as a plain run's are
+ * made by shape(): what the provider said of each glyph, and, under strict, a refused glyph stops the render at this unit.  The part's
+ * geometry is formed here once more and given back, so nothing of it is live when the area is formed.
+ * @return ::GSHSCENE_OK; ::GSHSCENE_ERR_REFUSED (strict); an error of the report; ::GSHSCENE_ERR_OOM.  A part past a limit is the area's to refuse.
+ */
+static GSHSCENE_Result union_report_glyphs(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  const size_t n = gshscene_resource_clip_union_count(item->resource);
+  for (size_t i = 0; i < n; i++) {
+    GSHSCENE_Clip_Member info;
+    if (gshscene_resource_clip_union_member(item->resource, i, &info) != GSHSCENE_OK) {
+      return GSHSCENE_ERR_INTERNAL;
+    }
+    for (size_t k = 0; k <= info.inner_count; k++) {
+      GSHSCENE_Item part;
+      if ((k == 0 ? gshscene_clip_union_member_item(item, i, &part) : gshscene_clip_union_inner_item(item, i, k - 1u, &part)) !=
+              GSHSCENE_OK ||
+          !glyph_font_run(part.resource)) {
+        continue;
+      }
+      const size_t code = k == 0 ? GSHSCENE_REPORT_MEMBER(i) : GSHSCENE_REPORT_INNER(i, k - 1u);
+      const size_t mark = run->arena.used;
+      GSHCPU_Item_Geometry g;
+      const GSHCPU_Result r = gshcpu_render_geometry(&part, run->maps, count - 1, target_map(run), run->item_alloc, &run->cs->geometry, &g);
+      GSHSCENE_Result e = r == GSHCPU_ERR_OOM ? GSHSCENE_ERR_OOM : GSHSCENE_OK;
+      for (size_t gi = 0; e == GSHSCENE_OK && g.notes && gi < g.count; gi++) {
+        if (!g.notes[gi].entry_class) {
+          continue;
+        }
+        e = gshscene_job_report_part(run->job, (GSHSCENE_Entry_Class)g.notes[gi].entry_class, (GSHSCENE_Reason)g.notes[gi].reason,
+            chain, count, gi, code);
+        if (e == GSHSCENE_OK && g.notes[gi].entry_class == GSHSCENE_ENTRY_REFUSED &&
+            (run->request->flags & GSHSCENE_RENDER_STRICT)) {
+          memcpy(run->stop, chain, count * sizeof *chain);
+          run->stop_count = count;
+          e = GSHSCENE_ERR_REFUSED;
+        }
+      }
+      gshcpu_render_geometry_release(&g, run->item_alloc);
+      if (run->item_alloc == &run->arena.self) {
+        gshcpu_render_arena_rewind(&run->arena, mark);
+      }
+      if (e != GSHSCENE_OK) {
+        return e;
+      }
+    }
+  }
+  return GSHSCENE_OK;
+}
+
+/**
  * A union clip drawn by the general tier: its area (union_area) quantized once into the clip's bytes (CU2).
  */
 static GSHSCENE_Result union_push_general(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
@@ -3813,6 +3902,12 @@ static GSHSCENE_Result union_push_general(Run * run, const GSHSCENE_Item * item,
   }
   const Union_Src src = {run->maps, target_map(run), NULL};
   Union_Area ua;
+  {
+    const GSHSCENE_Result gr = union_report_glyphs(run, item, chain, count);
+    if (gr != GSHSCENE_OK) {
+      return gr;
+    }
+  }
   GSHSCENE_Result result = union_area(run, item, count, &src, reach_of(run, frame->clip_base, run->clip_count),
       whole_reach_of(run, frame->clip_base, run->clip_count), &ua);
   if (result == GSHSCENE_ERR_LIMIT) {
