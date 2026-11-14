@@ -274,15 +274,24 @@ def transfer_pixel(ts, p):
     return premultiply(out)
 
 
-def box_blur_line(line, w, off):
+def edge_value(line, j, mode):
+    n = len(line)
+    if 0 <= j < n:
+        return line[j]
+    if mode == "duplicate":
+        return line[0] if j < 0 else line[n - 1]
+    if mode == "wrap":
+        return line[j % n]
+    return F(0)
+
+
+def box_blur_line(line, w, off, mode="none"):
     n = len(line)
     out = []
     for i in range(n):
         s = F(0)
         for t in range(w):
-            j = i - off + t
-            if 0 <= j < n:
-                s += line[j]
+            s += edge_value(line, i - off + t, mode)
         out.append(s / w)
     return out
 
@@ -295,21 +304,19 @@ def gaussian_kernel(s):
     return r, [w / total for w in weights]
 
 
-def gauss_line(line, s):
+def gauss_line(line, s, mode="none"):
     r, ker = gaussian_kernel(s)
     n = len(line)
     out = []
     for i in range(n):
         acc = F(0)
         for t in range(-r, r + 1):
-            j = i + t
-            if 0 <= j < n:
-                acc += ker[t + r] * line[j]
+            acc += ker[t + r] * edge_value(line, i + t, mode)
         out.append(acc)
     return out
 
 
-def blur_axis_line(line, s):
+def blur_axis_line(line, s, mode="none"):
     """One axis of a blur by deviation s (device pixels, a Fraction)."""
     if s == 0:
         return line
@@ -317,30 +324,118 @@ def blur_axis_line(line, s):
         d = int(math.floor(float(s) * 3 * math.sqrt(2 * math.pi) / 4 + 0.5))
         if d % 2 == 1:
             for _ in range(3):
-                line = box_blur_line(line, d, (d - 1) // 2)
+                line = box_blur_line(line, d, (d - 1) // 2, mode)
         else:
-            line = box_blur_line(line, d, d // 2)
-            line = box_blur_line(line, d, d // 2 - 1)
-            line = box_blur_line(line, d + 1, d // 2)
+            line = box_blur_line(line, d, d // 2, mode)
+            line = box_blur_line(line, d, d // 2 - 1, mode)
+            line = box_blur_line(line, d + 1, d // 2, mode)
         return line
-    return gauss_line(line, s)
+    return gauss_line(line, s, mode)
 
 
-def blur(img, sx, sy, W, H):
+def blur(img, sx, sy, W, H, mode="none", span=None):
     if sx == 0 and sy == 0:
+        return [list(p) for p in img]
+    x0, y0, x1, y1 = (0, 0, W, H) if mode == "none" or span is None else span
+    if x1 <= x0 or y1 <= y0:
         return [list(p) for p in img]
     out = [list(p) for p in img]
     for c in range(4):
         if sx != 0:
-            for j in range(H):
-                row = blur_axis_line([out[j * W + i][c] for i in range(W)], sx)
-                for i in range(W):
-                    out[j * W + i][c] = row[i]
+            for j in range(y0, y1):
+                row = blur_axis_line([out[j * W + i][c] for i in range(x0, x1)], sx, mode)
+                for i in range(x0, x1):
+                    out[j * W + i][c] = row[i - x0]
         if sy != 0:
-            for i in range(W):
-                col = blur_axis_line([out[j * W + i][c] for j in range(H)], sy)
-                for j in range(H):
-                    out[j * W + i][c] = col[j]
+            for i in range(x0, x1):
+                col = blur_axis_line([out[j * W + i][c] for j in range(y0, y1)], sy, mode)
+                for j in range(y0, y1):
+                    out[j * W + i][c] = col[j - y0]
+    return out
+
+
+def whole_px(v):
+    return int(math.floor(v + F(1, 2)))
+
+
+def morphology(img, rx, ry, dilate, W, H):
+    out = []
+    for j in range(H):
+        for i in range(W):
+            px = []
+            for c in range(4):
+                best = None
+                for dy in range(-ry, ry + 1):
+                    for dx in range(-rx, rx + 1):
+                        x, y = i + dx, j + dy
+                        v = img[y * W + x][c] if 0 <= x < W and 0 <= y < H else F(0)
+                        if best is None or (v > best if dilate else v < best):
+                            best = v
+                px.append(best)
+            out.append(px)
+    return out
+
+
+def edge_pixel(img, W, r, x, y, mode):
+    if x < r[0] or x >= r[2] or y < r[1] or y >= r[3]:
+        if mode == "duplicate":
+            x = min(max(x, r[0]), r[2] - 1)
+            y = min(max(y, r[1]), r[3] - 1)
+        elif mode == "wrap":
+            x = r[0] + (x - r[0]) % (r[2] - r[0])
+            y = r[1] + (y - r[1]) % (r[3] - r[1])
+        else:
+            return [F(0)] * 4
+    return list(img[y * W + x])
+
+
+def convolve(img, pr, W, H, r):
+    ox, oy = pr["order"]
+    tx, ty = pr["target"]
+    k = [F(v) for v in pr["kernel"]]
+    div, bias = F(pr["divisor"]), F(pr.get("bias", 0))
+    out = []
+    for j in range(H):
+        for i in range(W):
+            sm = [F(0)] * 4
+            for ky in range(oy):
+                for kx in range(ox):
+                    p = edge_pixel(img, W, r, i - tx + kx, j - ty + ky, pr["edge"])
+                    if pr["preserve"]:
+                        p = unpremultiply(p)
+                    kv = k[(oy - 1 - ky) * ox + (ox - 1 - kx)]
+                    for c in range(4):
+                        sm[c] += p[c] * kv
+            if pr["preserve"]:
+                a = img[j * W + i][3]
+                out.append(premultiply([clamp01(sm[0] / div + bias), clamp01(sm[1] / div + bias), clamp01(sm[2] / div + bias), a]))
+            else:
+                a = clamp01(sm[3] / div + bias)
+                px = [max(F(0), min(sm[c] / div + bias * a, a)) for c in range(3)]
+                out.append(px + [a])
+    return out
+
+
+def tile(img, W, H, r):
+    rw, rh = r[2] - r[0], r[3] - r[1]
+    out = []
+    for j in range(H):
+        for i in range(W):
+            if rw <= 0 or rh <= 0:
+                out.append([F(0)] * 4)
+            else:
+                out.append(list(img[(r[1] + (j - r[1]) % rh) * W + r[0] + (i - r[0]) % rw]))
+    return out
+
+
+def displace(img, mp, scale_x, scale_y, xch, ych, W, H):
+    out = []
+    for j in range(H):
+        for i in range(W):
+            u = unpremultiply(mp[j * W + i])
+            sx = whole_px(i + scale_x * (u[xch] - F(1, 2)))
+            sy = whole_px(j + scale_y * (u[ych] - F(1, 2)))
+            out.append(list(img[sy * W + sx]) if 0 <= sx < W and 0 <= sy < H else [F(0)] * 4)
     return out
 
 
@@ -349,6 +444,17 @@ def blur(img, sx, sy, W, H):
 
 def floor_half(v):
     return int(math.floor(v + F(1, 2)))
+
+
+def pixel_rect(m, u, rnd, W, H):
+    d = m.rect_to_device(u)
+    o = [d[0], d[1], d[2], d[3]]
+    out = []
+    for k in range(4):
+        v = math.floor(o[k] + F(1, 2)) if rnd else (math.floor(o[k]) if k < 2 else math.ceil(o[k]))
+        lim = W if k % 2 == 0 else H
+        out.append(int(min(max(v, 0), lim)))
+    return out
 
 
 def run_filter(case):
@@ -438,7 +544,22 @@ def run_filter(case):
             out = [transfer_pixel(ts, p) for p in ins[0][0]]
         elif kind == "blur":
             sx, sy = m.device_lengths(F(pr["sx"]), F(pr["sy"]))
-            out = blur(ins[0][0], sx, sy, W, H)
+            span = pixel_rect(m, ins[0][1], 0, W, H)
+            out = blur(ins[0][0], sx, sy, W, H, pr.get("edge", "none"), span)
+        elif kind == "morph":
+            dx, dy = m.device_lengths(F(pr["rx"]), F(pr["ry"]))
+            rx, ry = whole_px(dx), whole_px(dy)
+            if rx <= 0 and ry <= 0:
+                out = [list(p) for p in ins[0][0]]
+            else:
+                out = morphology(ins[0][0], max(rx, 0), max(ry, 0), pr["op"] == "dilate", W, H)
+        elif kind == "convolve":
+            out = convolve(ins[0][0], pr, W, H, pixel_rect(m, ins[0][1], 0, W, H))
+        elif kind == "tile":
+            out = tile(ins[0][0], W, H, pixel_rect(m, ins[0][1], 1, W, H))
+        elif kind == "displace":
+            dx, dy = m.device_lengths(F(pr["scale"]), F(pr["scale"]))
+            out = displace(ins[0][0], ins[1][0], dx, dy, pr["xch"], pr["ych"], W, H)
         elif kind == "shadow":
             sx, sy = m.device_lengths(F(pr["sx"]), F(pr["sy"]))
             alpha = [[F(0), F(0), F(0), p[3]] for p in ins[0][0]]
@@ -564,6 +685,30 @@ def cases():
     out.append(case("per-primitive-space", [
         {"kind": "matrix", "inputs": [SRC], "type": "saturate", "values": [F(1, 2)], "space": "srgb"},
         {"kind": "blend", "inputs": [res(0), SRC], "mode": 23, "space": "linear"}]))
+    out.append(case("blur-duplicate-edge", [{"kind": "blur", "inputs": [PREV], "sx": F(1), "sy": F(1), "edge": "duplicate"}],
+                    space="srgb"))
+    out.append(case("blur-wrap-edge-box", [{"kind": "blur", "inputs": [PREV], "sx": F(2), "sy": 0, "edge": "wrap"}], w=12, h=4,
+                    space="srgb"))
+    out.append(case("morphology-erode", [{"kind": "morph", "inputs": [PREV], "rx": 1, "ry": 0, "op": "erode"}], space="srgb"))
+    out.append(case("morphology-dilate", [{"kind": "morph", "inputs": [PREV], "rx": 1, "ry": 1, "op": "dilate"}], space="srgb"))
+    out.append(case("morphology-under-scale", [{"kind": "morph", "inputs": [PREV], "rx": F(1, 2), "ry": F(1, 2), "op": "dilate"}],
+                    m=Map(2, 0, 0, 2, 0, 0), w=10, h=8, space="srgb"))
+    out.append(case("morphology-tiny-radius-is-pass-through", [{"kind": "morph", "inputs": [PREV], "rx": F(1, 4), "ry": F(1, 4), "op": "erode"}]))
+    for edge in ("none", "duplicate", "wrap"):
+        out.append(case("convolve-" + edge, [{"kind": "convolve", "inputs": [PREV], "order": (3, 3), "target": (1, 1),
+                                              "kernel": [0, 1, 0, 1, -4, 1, 0, 1, 0], "divisor": 1, "bias": F(1, 4),
+                                              "edge": edge, "preserve": False}], space="srgb"))
+    out.append(case("convolve-preserve-alpha", [{"kind": "convolve", "inputs": [PREV], "order": (2, 2), "target": (0, 1),
+                                                 "kernel": [1, 2, 3, 4], "divisor": 10, "bias": F(1, 20), "edge": "duplicate",
+                                                 "preserve": True}], space="srgb"))
+    out.append(case("tile-subregion", [
+        {"kind": "offset", "inputs": [SRC], "dx": 0, "dy": 0, "sub": [1, 1, 3, 3]},
+        {"kind": "tile", "inputs": [PREV], "sub": [0, 0, 8, 6]}], space="srgb"))
+    out.append(case("displacement-map", [
+        {"kind": "flood", "inputs": [], "color": [F(3, 4), F(1, 4), 0, 1], "opacity": 1, "color_space": "srgb"},
+        {"kind": "displace", "inputs": [SRC, res(0)], "scale": 3, "xch": 0, "ych": 1}], space="srgb"))
+    out.append(case("displacement-map-from-the-source", [{"kind": "displace", "inputs": [SRC, SRC], "scale": 4, "xch": 1, "ych": 0}],
+                    space="srgb"))
     out.append(case("region-clips-the-result", [{"kind": "offset", "inputs": [PREV], "dx": 2, "dy": 0}],
                     region=(2, 1, 4, 3), space="srgb"))
     return out
@@ -571,7 +716,9 @@ def cases():
 
 # --- the header -----------------------------------------------------------------------------------------------------
 
-KINDS = {"offset": 1, "flood": 2, "merge": 3, "blend": 4, "composite": 5, "matrix": 6, "transfer": 7, "blur": 8, "shadow": 9}
+KINDS = {"offset": 1, "flood": 2, "merge": 3, "blend": 4, "composite": 5, "matrix": 6, "transfer": 7, "blur": 8, "shadow": 9,
+         "morph": 10, "convolve": 11, "tile": 12, "displace": 14}
+EDGES = {"none": 0, "duplicate": 1, "wrap": 2}
 OPS = {"over": 0, "in": 1, "out": 2, "atop": 3, "xor": 4, "arithmetic": 5}
 MTYPES = {"matrix": 0, "saturate": 1, "hue": 2, "lum": 3}
 TTYPES = {"identity": 0, "table": 1, "discrete": 2, "linear": 3, "gamma": 4}
@@ -581,6 +728,16 @@ INKINDS = {"prev": (0, 0), "src": (1, 0), "alpha": (2, 0)}
 
 def d(v):
     return repr(float(v))
+
+
+def emit_extra(p):
+    """The fields of the stage 3 primitives, after `mode`: edge, orders, target, divisor, bias, preserve, scale, channels, radii, op."""
+    k = p["kind"]
+    ox, oy = p.get("order", (0, 0))
+    tx, ty = p.get("target", (0, 0))
+    return ", %d, %d, %d, %d, %d, %s, %s, %d, %s, %d, %d, %s, %s, %d" % (
+        EDGES[p.get("edge", "none")], ox, oy, tx, ty, d(p.get("divisor", 0)), d(p.get("bias", 0)), 1 if p.get("preserve") else 0,
+        d(p.get("scale", 0)), p.get("xch", 0), p.get("ych", 0), d(p.get("rx", 0)), d(p.get("ry", 0)), 1 if p.get("op") == "dilate" else 0)
 
 
 def emit_prim(p):
@@ -619,6 +776,10 @@ def emit_prim(p):
         fields["nvals"] = len(p["values"])
         for n, v in enumerate(p["values"]):
             fields["vals"][n] = v
+    if k == "convolve":
+        fields["nvals"] = len(p["kernel"])
+        for n, v in enumerate(p["kernel"]):
+            fields["vals"][n] = v
     if k == "transfer":
         for n, t in enumerate(p["funcs"]):
             fields["ttype"][n] = TTYPES[t[0]]
@@ -634,6 +795,7 @@ def emit_prim(p):
     def arr(vs):
         return "{" + ", ".join(d(v) for v in vs) + "}"
 
+    extra = emit_extra(p)
     return ("{%d, %d, %d, {%s}, {%s}, %d, %s, %s, %s, %s, %d, %s, %s, %d, %s, {%s}, {%s}, {%s}, {%s}, %s, %s}" % (
         fields["kind"], fields["space"], fields["n_in"], ", ".join(map(str, kinds)), ", ".join(map(str, idx)),
         fields["sub_mask"], arr(fields["sub"]), d(fields["dx"]), d(fields["dy"]), arr(fields["color"]),
@@ -656,7 +818,8 @@ def header():
              "struct FPrim {", "  int kind, space, n_in;", "  int in_kind[3], in_idx[3];", "  int sub_mask;", "  double sub[4];",
              "  double dx, dy;", "  double color[4];", "  int color_space;", "  double opacity;", "  double k[4];", "  int nvals;",
              "  double vals[20];", "  int ttype[4], tcount[4];", "  double tvals[4][4];", "  double tparam[4][3];", "  double sx, sy;",
-             "  int mode;", "};", "",
+             "  int mode;", "  int edge, order_x, order_y, target_x, target_y;", "  double divisor, bias;", "  int preserve;", "  double scale;",
+             "  int xch, ych;", "  double rx, ry;", "  int dilate;", "};", "",
              "struct FCase {", "  const char * name;", "  int w, h;", "  double map[6];", "  int region_mode;  // 0 explicit, 1 auto",
              "  double region[4];", "  int space;  // the filter's: 1 linearRGB, 2 sRGB", "  int nprims;", "  const FPrim * prims;",
              "  const double * src;   // w * h * 4", "  const double * want;  // w * h * 4", "};", ""]
@@ -668,7 +831,7 @@ def header():
             lines.append("static const double kPix_%d_%s[] = {%s};" % (n, kind, ", ".join(repr(v) for v in vals)))
         lines.append("static const FPrim kPrims_%d[] = {" % n)
         for p in c["prims"]:
-            lines.append("    " + emit_prim(p).rstrip("}") + ", %d}," % mode_of(p))
+            lines.append("    " + emit_prim(p).rstrip("}") + ", %d%s}," % (mode_of(p), emit_extra(p)))
         lines.append("};")
     lines.append("")
     lines.append("static const FCase kCases[] = {")

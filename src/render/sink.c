@@ -118,14 +118,16 @@ typedef struct Clip {
 
 /**
  * The filter primitives and features this sink draws (FC1): offset, flood, merge, blend, composite, color matrix, component transfer,
- * Gaussian blur (the `NONE` edge) and drop shadow, and a region that is derived (`AUTO`).
+ * Gaussian blur and drop shadow, morphology, convolution, tile and displacement map, every edge mode, and a region that is derived (`AUTO`).
  */
 #define GSHCPU_FILTER_NATIVE                                                                                                    \
   ((UINT32_C(1) << GSHSCENE_FILTER_OFFSET) | (UINT32_C(1) << GSHSCENE_FILTER_FLOOD) | (UINT32_C(1) << GSHSCENE_FILTER_MERGE) | \
       (UINT32_C(1) << GSHSCENE_FILTER_BLEND) | (UINT32_C(1) << GSHSCENE_FILTER_COMPOSITE) |                                    \
       (UINT32_C(1) << GSHSCENE_FILTER_COLOR_MATRIX) | (UINT32_C(1) << GSHSCENE_FILTER_COMPONENT_TRANSFER) |                    \
       (UINT32_C(1) << GSHSCENE_FILTER_GAUSSIAN_BLUR) | (UINT32_C(1) << GSHSCENE_FILTER_DROP_SHADOW) |                          \
-      GSHSCENE_FILTER_NATIVE_REGION_AUTO)
+      (UINT32_C(1) << GSHSCENE_FILTER_MORPHOLOGY) | (UINT32_C(1) << GSHSCENE_FILTER_CONVOLVE_MATRIX) |                         \
+      (UINT32_C(1) << GSHSCENE_FILTER_TILE) | (UINT32_C(1) << GSHSCENE_FILTER_DISPLACEMENT_MAP) |                              \
+      GSHSCENE_FILTER_NATIVE_EDGE_DUPLICATE_WRAP | GSHSCENE_FILTER_NATIVE_REGION_AUTO)
 
 /** The points of the table of a transfer between two spaces of one gamut (fast8). */
 #define XFER_POINTS 4096u

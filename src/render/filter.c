@@ -446,31 +446,39 @@ static void prim_transfer(const GSHSCENE_Filter_Primitive * pr, const double * i
 
 /* --- blur (D-FL9) ------------------------------------------------------------------------------------------------------ */
 
-/** `out[i] = sum_{t = 0}^{w - 1} in[i - off + t] / w`, zero outside the line. */
-static void box_line(const double * in, double * out, size_t n, size_t w, size_t off) {
+/** A value of a line of @p n at index @p j, which may lie outside it: transparent black, the nearest end or the other end (D-FL9). */
+static double edge_get(const double * in, size_t n, long j, uint32_t mode) {
+  if (j >= 0 && (size_t)j < n) {
+    return in[j];
+  }
+  switch (mode) {
+    case GSHSCENE_FILTER_EDGE_DUPLICATE:
+      return j < 0 ? in[0] : in[n - 1u];
+    case GSHSCENE_FILTER_EDGE_WRAP: {
+      long m = j % (long)n;
+      return in[m < 0 ? m + (long)n : m];
+    }
+    default:
+      return 0.0;
+  }
+}
+
+/** `out[i] = sum_{t = 0}^{w - 1} in[i - off + t] / w`, the edge by @p mode. */
+static void box_line(const double * in, double * out, size_t n, size_t w, size_t off, uint32_t mode) {
   double sum = 0.0;
   for (size_t t = 0; t < w; t++) {
-    const long j = (long)t - (long)off;
-    if (j >= 0 && (size_t)j < n) {
-      sum += in[j];
-    }
+    sum += edge_get(in, n, (long)t - (long)off, mode);
   }
   out[0] = sum / (double)w;
   for (size_t i = 1; i < n; i++) {
-    const long add = (long)i - (long)off + (long)w - 1;
-    const long drop = (long)i - 1 - (long)off;
-    if (add >= 0 && (size_t)add < n) {
-      sum += in[add];
-    }
-    if (drop >= 0 && (size_t)drop < n) {
-      sum -= in[drop];
-    }
+    sum += edge_get(in, n, (long)i - (long)off + (long)w - 1, mode);
+    sum -= edge_get(in, n, (long)i - 1 - (long)off, mode);
     out[i] = sum / (double)w;
   }
 }
 
 /** The truncated Gaussian of deviation @p s (D-FL9), radius `ceil(3 s)`; @p ker has room for `2 r + 1` weights. */
-static void gauss_line(const double * in, double * out, size_t n, double s, double * ker, size_t r) {
+static void gauss_line(const double * in, double * out, size_t n, double s, double * ker, size_t r, uint32_t mode) {
   double total = 0.0;
   for (size_t k = 0; k <= 2 * r; k++) {
     const double x = (double)k - (double)r;
@@ -485,10 +493,7 @@ static void gauss_line(const double * in, double * out, size_t n, double s, doub
   for (size_t i = 0; i < n; i++) {
     double acc = 0.0;
     for (size_t k = 0; k <= 2 * r; k++) {
-      const long j = (long)i + (long)k - (long)r;
-      if (j >= 0 && (size_t)j < n) {
-        acc += ker[k] * in[j];
-      }
+      acc += ker[k] * edge_get(in, n, (long)i + (long)k - (long)r, mode);
     }
     out[i] = acc;
   }
@@ -498,52 +503,194 @@ static void gauss_line(const double * in, double * out, size_t n, double s, doub
  * One axis of a blur over a line of @p n values (@p a and @p b are two work lines of at least @p n; the result is left in @p a).
  * Gaussian weights for `s < 2` need `2 ceil(3 s) + 1 <= 13` entries, held in @p ker.
  */
-static void blur_line(double * a, double * b, size_t n, double s, double * ker) {
+static void blur_line(double * a, double * b, size_t n, double s, double * ker, uint32_t mode) {
   if (s >= 2.0) {
     const double dd = gmath_floor(s * 3.0 * gmath_sqrt(2.0 * 3.14159265358979323846) / 4.0 + 0.5);
     const size_t d = (size_t)dd;
     if (d % 2 == 1) {
-      box_line(a, b, n, d, (d - 1) / 2);
-      box_line(b, a, n, d, (d - 1) / 2);
-      box_line(a, b, n, d, (d - 1) / 2);
+      box_line(a, b, n, d, (d - 1) / 2, mode);
+      box_line(b, a, n, d, (d - 1) / 2, mode);
+      box_line(a, b, n, d, (d - 1) / 2, mode);
       memcpy(a, b, n * sizeof(double));
     } else {
-      box_line(a, b, n, d, d / 2);
-      box_line(b, a, n, d, d / 2 - 1);
-      box_line(a, b, n, d + 1, d / 2);
+      box_line(a, b, n, d, d / 2, mode);
+      box_line(b, a, n, d, d / 2 - 1, mode);
+      box_line(a, b, n, d + 1, d / 2, mode);
       memcpy(a, b, n * sizeof(double));
     }
     return;
   }
   const size_t r = (size_t)gmath_ceil(3.0 * s);
-  gauss_line(a, b, n, s, ker, r);
+  gauss_line(a, b, n, s, ker, r, mode);
   memcpy(a, b, n * sizeof(double));
 }
 
-/** Blur @p buf in place: horizontal by @p sx then vertical by @p sy, device pixels, a deviation of 0 skipping its axis. */
-static void prim_blur(double * buf, size_t w, size_t h, double sx, double sy, double * line_a, double * line_b) {
+/**
+ * Blur @p buf in place: horizontal by @p sx then vertical by @p sy, device pixels, a deviation of 0 skipping its axis.  With the edge `NONE` every
+ * line is blurred whole (the blur spreads past the input); with another edge only the pixels `[x0, x1) x [y0, y1)` (the input's subregion) are,
+ * reading beyond them by the mode (D-FL9).
+ */
+static void prim_blur(double * buf, size_t w, size_t h, double sx, double sy, uint32_t mode, const size_t span[4], double * line_a,
+    double * line_b) {
   double ker[16];
+  const size_t x0 = mode == (uint32_t)GSHSCENE_FILTER_EDGE_NONE ? 0 : span[0];
+  const size_t x1 = mode == (uint32_t)GSHSCENE_FILTER_EDGE_NONE ? w : span[2];
+  const size_t y0 = mode == (uint32_t)GSHSCENE_FILTER_EDGE_NONE ? 0 : span[1];
+  const size_t y1 = mode == (uint32_t)GSHSCENE_FILTER_EDGE_NONE ? h : span[3];
+  if (x1 <= x0 || y1 <= y0) {
+    return;
+  }
   for (size_t c = 0; c < PIX; c++) {
     if (sx != 0.0) {
-      for (size_t j = 0; j < h; j++) {
-        for (size_t i = 0; i < w; i++) {
-          line_a[i] = buf[PIX * (j * w + i) + c];
+      for (size_t j = y0; j < y1; j++) {
+        for (size_t i = x0; i < x1; i++) {
+          line_a[i - x0] = buf[PIX * (j * w + i) + c];
         }
-        blur_line(line_a, line_b, w, sx, ker);
-        for (size_t i = 0; i < w; i++) {
-          buf[PIX * (j * w + i) + c] = line_a[i];
+        blur_line(line_a, line_b, x1 - x0, sx, ker, mode);
+        for (size_t i = x0; i < x1; i++) {
+          buf[PIX * (j * w + i) + c] = line_a[i - x0];
         }
       }
     }
     if (sy != 0.0) {
-      for (size_t i = 0; i < w; i++) {
-        for (size_t j = 0; j < h; j++) {
-          line_a[j] = buf[PIX * (j * w + i) + c];
+      for (size_t i = x0; i < x1; i++) {
+        for (size_t j = y0; j < y1; j++) {
+          line_a[j - y0] = buf[PIX * (j * w + i) + c];
         }
-        blur_line(line_a, line_b, h, sy, ker);
-        for (size_t j = 0; j < h; j++) {
-          buf[PIX * (j * w + i) + c] = line_a[j];
+        blur_line(line_a, line_b, y1 - y0, sy, ker, mode);
+        for (size_t j = y0; j < y1; j++) {
+          buf[PIX * (j * w + i) + c] = line_a[j - y0];
         }
+      }
+    }
+  }
+}
+
+/* --- morphology, convolution, tile, displacement (stage 3) ------------------------------------------------------------ */
+
+/** A radius or length in device pixels as whole pixels (round half up; FL17). */
+static long whole_px(double v) {
+  return (long)gmath_floor(v + 0.5);
+}
+
+static void prim_morphology(const double * in, double * out, size_t w, size_t h, long rx, long ry, int dilate) {
+  for (size_t j = 0; j < h; j++) {
+    for (size_t i = 0; i < w; i++) {
+      for (size_t c = 0; c < PIX; c++) {
+        double best = dilate ? 0.0 : 1e308;
+        int any_outside = 0;
+        for (long dy = -ry; dy <= ry; dy++) {
+          for (long dx = -rx; dx <= rx; dx++) {
+            const long x = (long)i + dx;
+            const long y = (long)j + dy;
+            double v = 0.0;
+            if (x >= 0 && y >= 0 && (size_t)x < w && (size_t)y < h) {
+              v = in[PIX * ((size_t)y * w + (size_t)x) + c];
+            } else {
+              any_outside = 1;
+            }
+            if (dilate ? v > best : v < best) {
+              best = v;
+            }
+          }
+        }
+        (void)any_outside;
+        out[PIX * (j * w + i) + c] = best;
+      }
+    }
+  }
+}
+
+/** The pixel (@p x, @p y) of @p in under the edge mode over the rectangle @p r (`x0 y0 x1 y1`); transparent black outside it for `NONE`. */
+static void edge_pixel(const double * in, size_t w, const long r[4], long x, long y, uint32_t mode, double out[4]) {
+  if (x < r[0] || x >= r[2] || y < r[1] || y >= r[3]) {
+    if (mode == (uint32_t)GSHSCENE_FILTER_EDGE_DUPLICATE) {
+      x = x < r[0] ? r[0] : (x >= r[2] ? r[2] - 1 : x);
+      y = y < r[1] ? r[1] : (y >= r[3] ? r[3] - 1 : y);
+    } else if (mode == (uint32_t)GSHSCENE_FILTER_EDGE_WRAP) {
+      long mx = (x - r[0]) % (r[2] - r[0]);
+      long my = (y - r[1]) % (r[3] - r[1]);
+      x = r[0] + (mx < 0 ? mx + (r[2] - r[0]) : mx);
+      y = r[1] + (my < 0 ? my + (r[3] - r[1]) : my);
+    } else {
+      out[0] = out[1] = out[2] = out[3] = 0.0;
+      return;
+    }
+  }
+  memcpy(out, &in[PIX * ((size_t)y * w + (size_t)x)], PIX * sizeof(double));
+}
+
+static void prim_convolve(const GSHSCENE_Filter_Primitive * pr, const double * in, double * out, size_t w, size_t h, const long r[4]) {
+  for (size_t j = 0; j < h; j++) {
+    for (size_t i = 0; i < w; i++) {
+      double sum[4] = {0.0, 0.0, 0.0, 0.0};
+      for (uint32_t ky = 0; ky < pr->order_y; ky++) {
+        for (uint32_t kx = 0; kx < pr->order_x; kx++) {
+          double p[4];
+          edge_pixel(in, w, r, (long)i - (long)pr->target_x + (long)kx, (long)j - (long)pr->target_y + (long)ky, pr->edge_mode, p);
+          if (pr->preserve_alpha) {
+            double u[4];
+            unpremultiply4(p, u);
+            memcpy(p, u, sizeof p);
+          }
+          const double k = pr->values[(size_t)(pr->order_y - 1u - ky) * pr->order_x + (pr->order_x - 1u - kx)];
+          for (int c = 0; c < 4; c++) {
+            sum[c] += p[c] * k;
+          }
+        }
+      }
+      double * o = &out[PIX * (j * w + i)];
+      if (pr->preserve_alpha) {
+        const double a = in[PIX * (j * w + i) + 3];
+        double u[4] = {clamp01(sum[0] / pr->divisor + pr->bias), clamp01(sum[1] / pr->divisor + pr->bias),
+            clamp01(sum[2] / pr->divisor + pr->bias), a};
+        premultiply4(u, o);
+      } else {
+        const double a = clamp01(sum[3] / pr->divisor + pr->bias);
+        o[3] = a;
+        for (int c = 0; c < 3; c++) {
+          const double v = sum[c] / pr->divisor + pr->bias * a;
+          o[c] = !(v > 0.0) ? 0.0 : (v > a ? a : v);
+        }
+      }
+    }
+  }
+}
+
+static void prim_tile(const double * in, double * out, size_t w, size_t h, const long r[4]) {
+  const long rw = r[2] - r[0];
+  const long rh = r[3] - r[1];
+  for (size_t j = 0; j < h; j++) {
+    for (size_t i = 0; i < w; i++) {
+      double * o = &out[PIX * (j * w + i)];
+      if (rw <= 0 || rh <= 0) {
+        o[0] = o[1] = o[2] = o[3] = 0.0;
+        continue;
+      }
+      long mx = ((long)i - r[0]) % rw;
+      long my = ((long)j - r[1]) % rh;
+      mx = r[0] + (mx < 0 ? mx + rw : mx);
+      my = r[1] + (my < 0 ? my + rh : my);
+      memcpy(o, &in[PIX * ((size_t)my * w + (size_t)mx)], PIX * sizeof(double));
+    }
+  }
+}
+
+static void prim_displace(const GSHSCENE_Filter_Primitive * pr, const double * in, const double * map, double * out, size_t w, size_t h,
+    double scale_x, double scale_y) {
+  for (size_t j = 0; j < h; j++) {
+    for (size_t i = 0; i < w; i++) {
+      double u[4];
+      unpremultiply4(&map[PIX * (j * w + i)], u);
+      const double xs = (double)i + scale_x * (u[pr->x_channel] - 0.5);
+      const double ys = (double)j + scale_y * (u[pr->y_channel] - 0.5);
+      const long sx = whole_px(xs);
+      const long sy = whole_px(ys);
+      double * o = &out[PIX * (j * w + i)];
+      if (sx >= 0 && sy >= 0 && (size_t)sx < w && (size_t)sy < h) {
+        memcpy(o, &in[PIX * ((size_t)sy * w + (size_t)sx)], PIX * sizeof(double));
+      } else {
+        o[0] = o[1] = o[2] = o[3] = 0.0;
       }
     }
   }
@@ -646,6 +793,29 @@ static void flood_color(const Env * e, const GSHSCENE_Filter_Primitive * pr, con
   out[3] = a * pr->opacity;
 }
 
+/**
+ * A subregion (user space) as whole canvas pixels `x0 y0 x1 y1` relative to the canvas: outward (`round` 0) or to the nearest pixel edge
+ * (`round` 1, the tile's), met with the canvas.
+ */
+static void pixel_rect(const Env * e, Rect2 u, int round, long out[4]) {
+  const Rect2 d = rect_to_device(&e->m, u);
+  const double o[4] = {d.x0 - (double)e->canvas.x0, d.y0 - (double)e->canvas.y0, d.x1 - (double)e->canvas.x0, d.y1 - (double)e->canvas.y0};
+  for (int k = 0; k < 4; k++) {
+    double v = round ? gmath_floor(o[k] + 0.5) : (k < 2 ? gmath_floor(o[k]) : gmath_ceil(o[k]));
+    const double lim = (double)(k % 2 == 0 ? e->w : e->h);
+    v = v < 0.0 ? 0.0 : (v > lim ? lim : v);
+    out[k] = (long)v;
+  }
+}
+
+static void pixel_span(const Env * e, Rect2 u, size_t out[4]) {
+  long r[4];
+  pixel_rect(e, u, 0, r);
+  for (int k = 0; k < 4; k++) {
+    out[k] = (size_t)r[k];
+  }
+}
+
 static GSHCPU_Result run_primitive(Env * e, size_t i) {
   const GSHSCENE_Filter_Primitive * pr = &e->f->primitives[i];
   double * out = result_buf(e, i);
@@ -721,7 +891,40 @@ static GSHCPU_Result run_primitive(Env * e, size_t i) {
         double dx, dy;
         device_lengths(&e->m, pr->sx, pr->sy, &dx, &dy);
         memcpy(out, in0, e->pixels * PIX * sizeof(double));
-        prim_blur(out, e->w, e->h, dx, dy, e->line_a, e->line_b);
+        size_t span[4];
+        pixel_span(e, sub_in[0], span);
+        prim_blur(out, e->w, e->h, dx, dy, pr->edge_mode, span, e->line_a, e->line_b);
+        break;
+      }
+      case GSHSCENE_FILTER_MORPHOLOGY: {
+        double dx, dy;
+        device_lengths(&e->m, pr->sx, pr->sy, &dx, &dy);
+        const long rx = whole_px(dx);
+        const long ry = whole_px(dy);
+        if (rx <= 0 && ry <= 0) {
+          memcpy(out, in0, e->pixels * PIX * sizeof(double)); /* a radius that rounds to nothing disables the effect */
+        } else {
+          prim_morphology(in0, out, e->w, e->h, rx > 0 ? rx : 0, ry > 0 ? ry : 0, pr->mode == (uint32_t)GSHSCENE_FILTER_MORPHOLOGY_DILATE);
+        }
+        break;
+      }
+      case GSHSCENE_FILTER_CONVOLVE_MATRIX: {
+        long r[4];
+        pixel_rect(e, sub_in[0], 0, r);
+        prim_convolve(pr, in0, out, e->w, e->h, r);
+        break;
+      }
+      case GSHSCENE_FILTER_TILE: {
+        long r[4];
+        pixel_rect(e, sub_in[0], 1, r);
+        prim_tile(in0, out, e->w, e->h, r);
+        break;
+      }
+      case GSHSCENE_FILTER_DISPLACEMENT_MAP: {
+        /* the scale is in user units along each axis, as a length (D-FL8); the map's color is the second input's, in this space */
+        double dx, dy;
+        device_lengths(&e->m, pr->scale, pr->scale, &dx, &dy);
+        prim_displace(pr, in0, in1, out, e->w, e->h, dx, dy);
         break;
       }
       case GSHSCENE_FILTER_DROP_SHADOW: {
@@ -732,7 +935,7 @@ static GSHCPU_Result run_primitive(Env * e, size_t i) {
           shadow[PIX * p] = shadow[PIX * p + 1] = shadow[PIX * p + 2] = 0.0;
           shadow[PIX * p + 3] = in0[PIX * p + 3];
         }
-        prim_blur(shadow, e->w, e->h, dx, dy, e->line_a, e->line_b);
+        prim_blur(shadow, e->w, e->h, dx, dy, (uint32_t)GSHSCENE_FILTER_EDGE_NONE, NULL, e->line_a, e->line_b);
         /* the offset of the blurred alpha, then the color, then the source over it: composed in one pass into the output */
         const double ddx = e->m.a * pr->dx + e->m.b * pr->dy;
         const double ddy = e->m.c * pr->dx + e->m.d * pr->dy;
@@ -796,14 +999,13 @@ GSHCPU_Result gshcpu_filter_apply(const GSHSCENE_Filter * f, const GSHGEOM_Map *
       case GSHSCENE_FILTER_COMPONENT_TRANSFER:
       case GSHSCENE_FILTER_GAUSSIAN_BLUR:
       case GSHSCENE_FILTER_DROP_SHADOW:
+      case GSHSCENE_FILTER_MORPHOLOGY:
+      case GSHSCENE_FILTER_CONVOLVE_MATRIX:
+      case GSHSCENE_FILTER_TILE:
+      case GSHSCENE_FILTER_DISPLACEMENT_MAP:
         break;
       default:
         return GSHCPU_ERR_UNSUPPORTED;
-    }
-    if (f->primitives[i].kind == GSHSCENE_FILTER_GAUSSIAN_BLUR || f->primitives[i].kind == GSHSCENE_FILTER_DROP_SHADOW) {
-      if (f->primitives[i].kind == GSHSCENE_FILTER_GAUSSIAN_BLUR && f->primitives[i].edge_mode != (uint32_t)GSHSCENE_FILTER_EDGE_NONE) {
-        return GSHCPU_ERR_UNSUPPORTED;
-      }
     }
   }
   Env e;

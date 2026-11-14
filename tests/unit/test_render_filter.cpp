@@ -94,6 +94,26 @@ void build(const FCase & c, Built * b) {
     }
     p.sx = v.sx;
     p.sy = v.sy;
+    if (v.kind == GSHSCENE_FILTER_MORPHOLOGY) {
+      p.sx = v.rx;
+      p.sy = v.ry;
+      p.mode = v.dilate ? GSHSCENE_FILTER_MORPHOLOGY_DILATE : GSHSCENE_FILTER_MORPHOLOGY_ERODE;
+    }
+    p.edge_mode = (uint32_t)v.edge;
+    if (v.kind == GSHSCENE_FILTER_CONVOLVE_MATRIX) {
+      p.order_x = (uint32_t)v.order_x;
+      p.order_y = (uint32_t)v.order_y;
+      p.target_x = (uint32_t)v.target_x;
+      p.target_y = (uint32_t)v.target_y;
+      p.divisor = v.divisor;
+      p.bias = v.bias;
+      p.preserve_alpha = (uint32_t)v.preserve;
+    }
+    if (v.kind == GSHSCENE_FILTER_DISPLACEMENT_MAP) {
+      p.scale = v.scale;
+      p.x_channel = (uint32_t)v.xch;
+      p.y_channel = (uint32_t)v.ych;
+    }
     if (v.kind == GSHSCENE_FILTER_COMPONENT_TRANSFER) {
       for (int k = 0; k < 4; k++) {
         GSHSCENE_Filter_Transfer & t = p.transfer[k];
@@ -166,7 +186,7 @@ TEST(RenderFilter, EveryVectorIsTheOraclesWithinOneTrillionth) {
     }
     cases++;
   }
-  EXPECT_GE(cases, 30u);
+  EXPECT_GE(cases, 50u);
 }
 
 TEST(RenderFilter, AScratchTooSmallIsRefusedAndNothingIsWritten) {
@@ -204,7 +224,7 @@ TEST(RenderFilter, WhatThisBuildDoesNotDrawIsRefusedByName) {
   EXPECT_EQ(gshcpu_filter_apply(&b.f, &turned, &space, canvas, layer.data(), scratch.data(), scratch.size(), &dirty),
       GSHCPU_ERR_UNSUPPORTED);
   // a primitive of a later stage
-  b.prims[0].kind = GSHSCENE_FILTER_MORPHOLOGY;
+  b.prims[0].kind = GSHSCENE_FILTER_TURBULENCE;
   const GSHGEOM_Map map = map_of(c.map);
   EXPECT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), &dirty),
       GSHCPU_ERR_UNSUPPORTED);

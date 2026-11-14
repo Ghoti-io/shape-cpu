@@ -735,9 +735,9 @@
  * ### A group's filter (FC1 to FC4; shape-scene's filter.h, FL1 to FL24)
  *
  * - **FC1 What the sink claims.**  `GSHSCENE_CAP_GROUP_FILTER` and, in `filter_native`, the primitives `OFFSET`, `FLOOD`, `MERGE`, `BLEND`,
- *   `COMPOSITE`, `COLOR_MATRIX`, `COMPONENT_TRANSFER`, `GAUSSIAN_BLUR` (the `NONE` edge) and `DROP_SHADOW`, and the feature `REGION_AUTO`.  A
- *   filter that needs another primitive (`FILTER_PRIMITIVE`, the missing bits in `second`), a blur or convolution with the `DUPLICATE` or
- *   `WRAP` edge, or a group whose composed map has a rotation other than a multiple of 90 degrees or a shear (`FILTER_MAP`) is refused by
+ *   `COMPOSITE`, `COLOR_MATRIX`, `COMPONENT_TRANSFER`, `GAUSSIAN_BLUR`, `DROP_SHADOW`, `MORPHOLOGY`, `CONVOLVE_MATRIX`, `TILE` and
+ *   `DISPLACEMENT_MAP`, and the features `REGION_AUTO` and `EDGE_DUPLICATE_WRAP`.  A filter that needs another primitive
+ *   (`FILTER_PRIMITIVE`, the missing bits in `second`), or a group whose composed map has a rotation other than a multiple of 90 degrees or a shear (`FILTER_MAP`) is refused by
  *   the planning pass and its block drawn as nothing.  A list that holds a filtered group is composited in `double` layers, as a masked
  *   list is.
  * - **FC2 The region of a render.**  A filter reads the pixels around the one it makes, so a list that holds one is computed over the
@@ -749,8 +749,7 @@
  *   `double` arithmetic in the order `tools/gen-filter-vectors.py` states in exact rationals; the vectors agree to 1e-12.  Its scratch (the
  *   buffers the graph holds at once, two temporaries and the work lines of a blur) is taken from the item allocator at the pop and given
  *   back, so under `CALLER_MEMORY` it is the arena's, and the sizing (`gshscene_sink_workspace_bytes`) counts it exactly.
- * - **FC4 What it does not draw.**  The primitives of the later stages (morphology, convolution, tile, image, displacement, turbulence and
- *   lighting) and canonical space: refused by FC1, never drawn approximately.
+ * - **FC4 What it does not draw.**  `IMAGE`, `TURBULENCE`, the two lightings and canonical space: refused by FC1, never drawn approximately.
  *
  * ### Non-isolated and knockout groups (KC1 to KC11; shape-scene's T1 to T7)
  *

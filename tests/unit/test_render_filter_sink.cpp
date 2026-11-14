@@ -222,16 +222,16 @@ TEST(RenderFilterSink, ABlurSpreadsTheSourceSymmetricallyAndKeepsItsTotal) {
 
 TEST(RenderFilterSink, APrimitiveThisBuildLacksIsRefusedByNameAndNothingOfTheGroupIsDrawn) {
   rh::Store s;
-  GSHSCENE_Filter_Primitive m = prim(GSHSCENE_FILTER_MORPHOLOGY);
-  m.mode = GSHSCENE_FILTER_MORPHOLOGY_DILATE;
-  m.sx = m.sy = 1;
+  GSHSCENE_Filter_Primitive m = prim(GSHSCENE_FILTER_TURBULENCE);
+  m.input_count = 0;
+  m.inputs = nullptr;
   GSHSCENE_List * l = group_of_rect(s, intern_filter(s, {m}), 1.0, 1, 1, 3, 3);
   rh::RasterRef r(make_raster(6, 6, 0x33));
   Rendered got = render(l, r.raster);
   ASSERT_EQ(got.result, GSHSCENE_OK);
   ASSERT_EQ(got.entries.size(), 1u);
   EXPECT_EQ(got.entries[0].reason, GSHSCENE_REASON_FILTER_PRIMITIVE);
-  EXPECT_EQ(got.entries[0].second, (size_t)(1u << GSHSCENE_FILTER_MORPHOLOGY));
+  EXPECT_EQ(got.entries[0].second, (size_t)(1u << GSHSCENE_FILTER_TURBULENCE));
   EXPECT_EQ(bytes_of(r.raster), std::string(6 * 6 * 4, '\x33'));
 }
 
