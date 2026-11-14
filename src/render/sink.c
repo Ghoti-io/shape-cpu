@@ -4701,6 +4701,17 @@ static GSHSCENE_Result group_filter(Run * run, size_t count) {
   if (r != GSHCPU_OK) {
     return r == GSHCPU_ERR_UNSUPPORTED ? GSHSCENE_ERR_INTERNAL : scene_result(r); /* the planning pass lets none through */
   }
+  if (gshcpu_render_pixel_bytes(run->format) == 4u) {
+    /* The target has 8 bits to a channel: a pixel of the result whose alpha is under half a level is (0, 0, 0, 0), as the 8-bit pipelines have
+     * it, and not the color of the tail of a blur that no level of alpha shows (a straight target would keep that color at alpha 0). */
+    const size_t n = run->layout.pixels;
+    for (size_t p = 0; p < n; p++) {
+      double * v = &f->layer[4u * p];
+      if (v[3] * 255.0 < 0.5) {
+        v[0] = v[1] = v[2] = v[3] = 0.0;
+      }
+    }
+  }
   f->dirty = dirty;
   run->work += 2u * (uint64_t)run->layout.pixels * (uint64_t)fl.primitive_count;
   return GSHSCENE_OK;
