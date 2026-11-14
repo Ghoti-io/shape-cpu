@@ -103,7 +103,8 @@ struct Scenario {
     st.join = (uint32_t)g.pick(0, 2);
     st.cap = (uint32_t)g.pick(0, 2);
     if (g.pick(0, 3) == 0) {
-      /* a width profile (SW1 to SW9): round joins and caps, no dashes, centered; stops that taper, swell and jump */
+      /* a width profile (SW1 to SW14), with the join and cap picked above, and below the dashes and the alignment: stops that taper,
+       * swell and jump */
       std::vector<GSHSCENE_Width_Stop> stops;
       double pos = 0.0;
       const int n = g.pick(1, 4);
@@ -114,13 +115,7 @@ struct Scenario {
       const GSHSCENE_Resource * pr = nullptr;
       EXPECT_EQ(gshscene_store_intern_width_profile(s.store, stops.data(), stops.size(), &pr), GSHSCENE_OK);
       s.held.push_back(pr);
-      st.join = GSHSCENE_STROKE_JOIN_ROUND;
-      st.cap = GSHSCENE_STROKE_CAP_ROUND;
       st.width_profile = pr;
-      const GSHSCENE_Resource * r = nullptr;
-      EXPECT_EQ(gshscene_store_intern_stroke_style(s.store, &st, &r), GSHSCENE_OK);
-      s.held.push_back(r);
-      return r;
     }
     static const double dash_a[] = {3.0, 2.0};
     static const double dash_b[] = {5.0, 1.5, 1.0, 1.5};

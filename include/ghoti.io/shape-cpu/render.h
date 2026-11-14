@@ -219,7 +219,8 @@
  *   `STROKE_EXPAND`; `stroke_native` stays 0, so every required feature is met by expansion and no stroke is refused
  *   for its style.  `width` and `width_space`, `join`, `miter_limit`, `cap`, `degenerate` and the dash fields are
  *   honored by the expansion; `alignment` and `alignment_rule` by the expansion's three parts and then by this
- *   sink (SC5), the one place it acts on a style field; `width_profile` never reaches it (refused at intern).  Every
+ *   sink (SC5), the one place it acts on a style field; `width_profile` by the expansion too (shape-geometry's SW1 to SW14: any
+ *   join, cap, dash array and alignment goes with it), the style's profile read from its handle.  Every
  *   paint kind draws.  The caps also say `STROKE_RUNS`: a centerline that is a glyph run is drawn as the stroke of
  *   the path shape-scene's ST1 defines for it (ST8 below), on the general route and never hinted (ST3).  The
  *   entries a stroke can receive while drawing are the fill's plus `RESOURCE_LIMIT` (SC6), and for a run the notes of

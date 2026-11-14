@@ -94,7 +94,7 @@ violation.
   map with edges along the axes (a scale, a translation, a quarter turn) sums the whole periods of a repeating image in one step, and its
   work is the window's own however far the image is minified.
 - A pattern's tile is clipped to its cell unless the pattern says `overflow` (SVG 2's `overflow="visible"`), when it is drawn unclipped at every copy, later copies over earlier ones; a tile whose extent is not known (a stroke with a device width, a hatch) is clipped as before and reported.
-- A stroke's width profile is not drawn; the waist reserves it.
+- A stroke's width profile is drawn by the expansion, with any join, cap, dash array and alignment (shape-geometry's SW1 to SW14); the sink claims no native profile stroke (`stroke_native` is 0), so a style that names one is expanded.
 - The stroke cache holds `max_cache_bytes` (64 MiB by default) of expansions across renders, and an expansion that does not fit is made
   again for every frame.  A render does not push out the entries it has used to keep a later one, so a frame larger than the bound keeps
   what it used first and hits for that.  A hatch over a large region, or a dashed hatch with round caps, makes an outline of several
