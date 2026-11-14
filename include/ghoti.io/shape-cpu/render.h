@@ -732,6 +732,26 @@
  * - **MC10 State.**  A render keeps nothing about a mask after its pop: no cache, nothing held by `prepare`, `evict` and
  *   `static_bytes` unchanged; renders on distinct surfaces and threads cannot interact through masks.
  *
+ * ### A group's filter (FC1 to FC4; shape-scene's filter.h, FL1 to FL24)
+ *
+ * - **FC1 What the sink claims.**  `GSHSCENE_CAP_GROUP_FILTER` and, in `filter_native`, the primitives `OFFSET`, `FLOOD`, `MERGE`, `BLEND`,
+ *   `COMPOSITE`, `COLOR_MATRIX`, `COMPONENT_TRANSFER`, `GAUSSIAN_BLUR` (the `NONE` edge) and `DROP_SHADOW`, and the feature `REGION_AUTO`.  A
+ *   filter that needs another primitive (`FILTER_PRIMITIVE`, the missing bits in `second`), a blur or convolution with the `DUPLICATE` or
+ *   `WRAP` edge, or a group whose composed map has a rotation other than a multiple of 90 degrees or a shear (`FILTER_MAP`) is refused by
+ *   the planning pass and its block drawn as nothing.  A list that holds a filtered group is composited in `double` layers, as a masked
+ *   list is.
+ * - **FC2 The region of a render.**  A filter reads the pixels around the one it makes, so a list that holds one is computed over the
+ *   whole extent, and only the damage is written: what a damaged render writes is what the whole render writes there, and the pixels outside the
+ *   damage are not touched.  (The extent, not the damage, is what the limits and the memory are counted over for such a list.)
+ *   Content outside the extent is not drawn, so it does not reach a filter: a blur at the edge of the target sees transparent black beyond it.
+ * - **FC3 The pop.**  At the pop of a filtered group the filter runs over the group's layer (the whole region is its canvas), then the pop
+ *   composites the result as it would the group's own layer, with the clips, the soft mask and the opacity (FL20).  The filter's work is
+ *   `double` arithmetic in the order `tools/gen-filter-vectors.py` states in exact rationals; the vectors agree to 1e-12.  Its scratch (the
+ *   buffers the graph holds at once, two temporaries and the work lines of a blur) is taken from the item allocator at the pop and given
+ *   back, so under `CALLER_MEMORY` it is the arena's, and the sizing (`gshscene_sink_workspace_bytes`) counts it exactly.
+ * - **FC4 What it does not draw.**  The primitives of the later stages (morphology, convolution, tile, image, displacement, turbulence and
+ *   lighting) and canonical space: refused by FC1, never drawn approximately.
+ *
  * ### Non-isolated and knockout groups (KC1 to KC11; shape-scene's T1 to T7)
  *
  * PDF's two kinds of group are the waist's (T1 to T5, with the installed vectors); this sink composites them.  The rules below say how

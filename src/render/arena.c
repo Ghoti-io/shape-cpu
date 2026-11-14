@@ -223,6 +223,15 @@ void gshcpu_render_arena_measure(GSHCPU_Arena * arena, const GSHGEOM_Allocator *
   arena_self(arena);
 }
 
+int gshcpu_render_arena_charge(GSHCPU_Arena * arena, size_t bytes) {
+  const size_t at = take(arena, arena->used, bytes);
+  if (at == SIZE_MAX) {
+    return 0;
+  }
+  arena->used = at; /* only the peak is kept: the block is not really taken, and is given back at once */
+  return 1;
+}
+
 void gshcpu_render_arena_reset(GSHCPU_Arena * arena) {
   arena->used = 0;
   arena->last = NULL;

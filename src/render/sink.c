@@ -116,6 +116,17 @@ typedef struct Clip {
 /** The color tables kept for the fast fill coverage: the gradients most recently painted. */
 #define TABLE_SLOTS 2u
 
+/**
+ * The filter primitives and features this sink draws (FC1): offset, flood, merge, blend, composite, color matrix, component transfer,
+ * Gaussian blur (the `NONE` edge) and drop shadow, and a region that is derived (`AUTO`).
+ */
+#define GSHCPU_FILTER_NATIVE                                                                                                    \
+  ((UINT32_C(1) << GSHSCENE_FILTER_OFFSET) | (UINT32_C(1) << GSHSCENE_FILTER_FLOOD) | (UINT32_C(1) << GSHSCENE_FILTER_MERGE) | \
+      (UINT32_C(1) << GSHSCENE_FILTER_BLEND) | (UINT32_C(1) << GSHSCENE_FILTER_COMPOSITE) |                                    \
+      (UINT32_C(1) << GSHSCENE_FILTER_COLOR_MATRIX) | (UINT32_C(1) << GSHSCENE_FILTER_COMPONENT_TRANSFER) |                    \
+      (UINT32_C(1) << GSHSCENE_FILTER_GAUSSIAN_BLUR) | (UINT32_C(1) << GSHSCENE_FILTER_DROP_SHADOW) |                          \
+      GSHSCENE_FILTER_NATIVE_REGION_AUTO)
+
 /** The points of the table of a transfer between two spaces of one gamut (fast8). */
 #define XFER_POINTS 4096u
 
@@ -657,6 +668,9 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
           return 0;
         }
         *general = *general || ni || ko;
+        if (item->group.filter) {
+          *wide = 1; /* FC1: a filtered group's layer is doubles: the filter reads and writes them (and no byte layer holds its result) */
+        }
         if (ni) {
           open_ag++;
         }
@@ -791,6 +805,46 @@ static int pat_offsets(size_t pixels, int aligned, size_t clips, size_t levels, 
 }
 
 /**
+ * Whether @p list, or a picture it draws (an instance's, a mask's, a pattern's tile), holds a group with a filter (FC2).  A scan of the items
+ * with a recursion into pictures, bounded by their depth; a picture too deep to scan counts as one that holds a filter.
+ */
+static int list_holds_filter(const GSHSCENE_List * list, size_t depth) {
+  if (depth > 64u) {
+    return 1;
+  }
+  const size_t count = gshscene_list_count(list);
+  for (size_t i = 0; i < count; i++) {
+    const GSHSCENE_Item * item;
+    if (gshscene_list_item(list, i, &item) != GSHSCENE_OK) {
+      return 1;
+    }
+    if (item->kind == GSHSCENE_ITEM_GROUP_PUSH) {
+      GSHSCENE_Mask m;
+      if (item->group.filter) {
+        return 1;
+      }
+      if (item->group.soft_mask &&
+          (gshscene_resource_mask(item->group.soft_mask, &m) != GSHSCENE_OK ||
+              list_holds_filter(gshscene_resource_picture(m.picture), depth + 1u))) {
+        return 1;
+      }
+    } else if (item->kind == GSHSCENE_ITEM_INSTANCE) {
+      if (list_holds_filter(gshscene_resource_picture(item->resource), depth + 1u)) {
+        return 1;
+      }
+    } else if ((item->kind == GSHSCENE_ITEM_FILL || item->kind == GSHSCENE_ITEM_STROKE) && item->paint.kind == GSHSCENE_PAINT_PATTERN &&
+        item->paint.resource) {
+      GSHSCENE_Pattern pt;
+      if (gshscene_resource_pattern(item->paint.resource, &pt) != GSHSCENE_OK ||
+          list_holds_filter(gshscene_resource_picture(pt.tile), depth + 1u)) {
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+/**
  * Lay out a render of @p list on @p target; ::GSHCPU_ERR_LIMIT past a limit or when a size overflows.  @p M gets the mask area
  * (MC5) when a group in the list, or in a picture it draws, has a mask (MC9: none, as before masks).  Under CALLER_MEMORY the
  * count of the mask pictures takes its memo's room from @p request's workspace, where nothing else lives yet (it allocates nothing).
@@ -800,7 +854,9 @@ static GSHCPU_Result layout(const Cpu_Sink * cs, const GSHSCENE_List * list, con
   memset(L, 0, sizeof *L);
   memset(M, 0, sizeof *M);
   memset(G, 0, sizeof *G);
-  L->region = region_of(target);
+  /* FC2: a filter reads the pixels around the one it makes, so a list that holds one is computed over the whole extent and only the
+   * damage is written (write_target): what a damaged render writes is what the whole render does there. */
+  L->region = list_holds_filter(list, 0) ? whole_of(target) : region_of(target);
   L->whole = whole_of(target);
   L->width = (size_t)(L->region.x1 - L->region.x0);
   L->height = (size_t)(L->region.y1 - L->region.y0);
@@ -1602,6 +1658,23 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
       maps[count - 1] = item->map;
       continue;
     }
+    if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && item->group.filter) {
+      /* FC3: the pop of a filtered group takes its filter's scratch from the arena, whole, after a reset (group_filter). */
+      GSHSCENE_Filter fl;
+      if (gshscene_resource_filter(item->group.filter, &fl) != GSHSCENE_OK) {
+        return GSHCPU_ERR_INTERNAL;
+      }
+      const size_t need = gshcpu_filter_scratch_doubles(&fl, L->width, L->height);
+      if (need == SIZE_MAX || need > SIZE_MAX / sizeof(double)) {
+        return GSHCPU_ERR_LIMIT;
+      }
+      gshcpu_render_arena_reset(arena);
+      arena->peak = 0;
+      if (!gshcpu_render_arena_charge(arena, need * sizeof(double))) {
+        return GSHCPU_ERR_OOM;
+      }
+      *peak = arena->peak > *peak ? arena->peak : *peak;
+    }
     if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && item->group.soft_mask) {
       r = measure_mask(cs, target, memory + M->at, M, item, maps, count, arena, peak, 0, 0);
     } else {
@@ -1770,6 +1843,9 @@ static GSHSCENE_Result op_caps(void * impl, const GSHSCENE_Target * target, GSHS
   /* SC1: a stroke is never drawn as a stroke (stroke_native is 0) but by expansion, for every style, so no stroke is
    * refused for its style. */
   out->flags |= GSHSCENE_CAP_STROKE_EXPAND;
+  /* FC1: a group's filter, with the primitives of the first stages (shape-scene filter.h; `GSHCPU_FILTER_NATIVE`) */
+  out->flags |= GSHSCENE_CAP_GROUP_FILTER;
+  out->filter_native = GSHCPU_FILTER_NATIVE;
   /* ST8: a stroke whose centerline is a run is drawn too: the run's centerline is one path (ST1), expanded and united as
    * any path's is. */
   out->flags |= GSHSCENE_CAP_STROKE_RUNS;
@@ -4588,7 +4664,53 @@ static GSHSCENE_Result group_pop_plain(Run * run, const size_t * chain, size_t c
 }
 
 /** Pop the group on top of the stack, and give back the channels it held (KC3). */
+/**
+ * FC3: the filter of the group on top of the stack, run over its layer before the pop composites it (FL20: the filter comes first, then the
+ * clips, the mask and the opacity, which are the pop's).  The whole region is the filter's canvas; the pixels outside the group's dirty rectangle
+ * are made ready (zero) first, and the group's dirty rectangle becomes the filter's.  The scratch comes from the item allocator (the sink's, or
+ * the caller's arena, whose measure counts it).
+ */
+static GSHSCENE_Result group_filter(Run * run, size_t count) {
+  Frame * f = &run->frames[run->top];
+  GSHSCENE_Filter fl;
+  if (gshscene_resource_filter(f->group.filter, &fl) != GSHSCENE_OK) {
+    return GSHSCENE_ERR_INTERNAL;
+  }
+  GSHGEOM_Map composed;
+  if (gshgeom_map_compose_chain(run->maps, count - 1u, target_map(run), &composed) != GSHGEOM_OK) {
+    return GSHSCENE_ERR_LIMIT; /* the group's map cannot be formed: the sink's own limit */
+  }
+  const GSHCPU_Rect canvas = run->layout.region;
+  widen(run, f, canvas);
+  const size_t need = gshcpu_filter_scratch_doubles(&fl, run->layout.width, run->layout.height);
+  if (need == SIZE_MAX || need > SIZE_MAX / sizeof(double)) {
+    return GSHSCENE_ERR_LIMIT;
+  }
+  if (run->item_alloc == &run->arena.self) {
+    gshcpu_render_arena_reset(&run->arena);
+  }
+  double * scratch = run->item_alloc->malloc_fn(run->item_alloc->ctx, need * sizeof(double));
+  if (!scratch) {
+    return GSHSCENE_ERR_OOM;
+  }
+  GSHCPU_Rect dirty;
+  const GSHCPU_Result r = gshcpu_filter_apply(&fl, &composed, &f->space, canvas, f->layer, scratch, need, &dirty);
+  run->item_alloc->free_fn(run->item_alloc->ctx, scratch);
+  if (r != GSHCPU_OK) {
+    return r == GSHCPU_ERR_UNSUPPORTED ? GSHSCENE_ERR_INTERNAL : scene_result(r); /* the planning pass lets none through */
+  }
+  f->dirty = dirty;
+  run->work += 2u * (uint64_t)run->layout.pixels * (uint64_t)fl.primitive_count;
+  return GSHSCENE_OK;
+}
+
 static GSHSCENE_Result group_pop(Run * run, const size_t * chain, size_t count) {
+  if (run->frames[run->top].group.filter) {
+    const GSHSCENE_Result r = group_filter(run, count);
+    if (r != GSHSCENE_OK) {
+      return r;
+    }
+  }
   if (!run->general) {
     return group_pop_plain(run, chain, count);
   }
@@ -6157,7 +6279,7 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
 
 /** The one rounding (S11): every touched pixel of the root layer (all in its dirty rectangle) to the target. */
 static void write_target(Run * run) {
-  const GSHCPU_Rect d = run->frames[0].dirty;
+  const GSHCPU_Rect d = gshcpu_render_rect_meet(run->frames[0].dirty, region_of(&run->job->target)); /* FC2: only the damage is written */
   for (int64_t y = d.y0; y < d.y1; y++) {
     unsigned char * row = run->pixels + (size_t)y * run->stride;
     for (int64_t x = d.x0; x < d.x1; x++) {

@@ -39,6 +39,7 @@
 #include <ghoti.io/math/basic.h>
 #include <ghoti.io/shape-geometry/flatten.h>
 #include <ghoti.io/shape-geometry/stroke.h>
+#include <ghoti.io/shape-scene/filter.h>
 #include <ghoti.io/shape-scene/image.h>
 #include <ghoti.io/shape-scene/image_paint.h>
 #include <ghoti.io/shape-scene/list.h>
@@ -222,6 +223,27 @@ GSHCPU_Rect gshcpu_render_rect_meet(GSHCPU_Rect a, GSHCPU_Rect b);
 
 /** The union (either may be empty). */
 GSHCPU_Rect gshcpu_render_rect_join(GSHCPU_Rect a, GSHCPU_Rect b);
+
+/* --- a group's filter (filter.c; shape-scene's filter.h, FL1 to FL20) ------------------------------------------------- */
+
+/**
+ * The doubles of scratch ::gshcpu_filter_apply needs for a canvas of @p width by @p height pixels: the result buffers the graph holds at
+ * once, two temporaries, and the work lines.  `SIZE_MAX` when the size does not fit.
+ */
+size_t gshcpu_filter_scratch_doubles(const GSHSCENE_Filter * f, size_t width, size_t height);
+
+/**
+ * Run the filter @p f over @p layer: a canvas @p canvas of whole device pixels, four premultiplied `double`s each in @p layer_space,
+ * which the filtered result replaces.  @p map is the group's composed map (the user space to the device), a scale, a mirror or a quarter
+ * turn and a translation.  @p scratch holds @p scratch_doubles `double`s, at least ::gshcpu_filter_scratch_doubles of them.
+ *
+ * @param dirty The pixels the result may touch: the region met with the canvas.
+ * @return ::GSHCPU_OK; ::GSHCPU_ERR_UNSUPPORTED for a primitive, an edge mode or a map this build does not draw (the planning pass does not
+ *   let one through); ::GSHCPU_ERR_LIMIT if the scratch is too small; ::GSHCPU_ERR_INVALID for a NULL.
+ */
+GSHCPU_Result gshcpu_filter_apply(const GSHSCENE_Filter * f, const GSHGEOM_Map * map, const GSHSCENE_Color_Space * layer_space,
+    GSHCPU_Rect canvas, double * layer, double * scratch, size_t scratch_doubles, GSHCPU_Rect * dirty);
+
 
 /** The most a 26.6 coordinate of an item may be in magnitude: 2^24 pixels. */
 #define GSHCPU_RENDER_COORD_LIMIT ((int64_t)1 << 30)
@@ -713,6 +735,12 @@ void gshcpu_render_arena_measure(GSHCPU_Arena * arena, const GSHGEOM_Allocator *
 
 /** Start again from empty (the peak is kept). */
 void gshcpu_render_arena_reset(GSHCPU_Arena * arena);
+
+/**
+ * Count a block of @p bytes at the top of @p arena in its peak without taking it (the measure of a filter's scratch, which a render takes
+ * from the arena and gives back whole): the footprint a malloc of @p bytes would have.  0 where it does not fit a real arena.
+ */
+int gshcpu_render_arena_charge(GSHCPU_Arena * arena, size_t bytes);
 
 /** Release everything allocated after the arena held @p mark bytes (its `used` then): what a pass of a pattern's tile does between copies, so that the item that is painted with the pattern keeps its own memory. */
 void gshcpu_render_arena_rewind(GSHCPU_Arena * arena, size_t mark);
