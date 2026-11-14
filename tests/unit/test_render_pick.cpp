@@ -66,7 +66,7 @@ struct Scenario {
   }
 
   /** A random path: a polygon, or a few lines, quadratics and cubics, closed or not. */
-  const GSHSCENE_Resource * random_path(bool closed_only = false) {
+  const GSHSCENE_Resource * random_path(bool closed_only = false, bool * closed = nullptr) {
     GSHGEOM_Path * p = nullptr;
     gshgeom_path_create(nullptr, nullptr, 2, &p);
     auto pt = [&]() { return GSHGEOM_Point{g.real(-3, kSize + 3), g.real(-3, kSize + 3), 0}; };
@@ -85,8 +85,12 @@ struct Scenario {
           break;
       }
     }
-    if (closed_only || g.pick(0, 2) > 0) {
+    const bool close = closed_only || g.pick(0, 2) > 0;
+    if (close) {
       gshgeom_path_close(p);
+    }
+    if (closed) {
+      *closed = close;
     }
     return s.path(p);
   }
@@ -98,6 +102,26 @@ struct Scenario {
     st.width = widths[g.pick(0, 3)];
     st.join = (uint32_t)g.pick(0, 2);
     st.cap = (uint32_t)g.pick(0, 2);
+    if (g.pick(0, 3) == 0) {
+      /* a width profile (SW1 to SW9): round joins and caps, no dashes, centered; stops that taper, swell and jump */
+      std::vector<GSHSCENE_Width_Stop> stops;
+      double pos = 0.0;
+      const int n = g.pick(1, 4);
+      for (int i = 0; i < n; i++) {
+        stops.push_back({pos, g.pick(0, 5) == 0 ? 0.0 : g.real(0.2, 2.0)});
+        pos += g.pick(0, 3) == 0 ? 0.0 : g.real(1.0, 30.0);
+      }
+      const GSHSCENE_Resource * pr = nullptr;
+      EXPECT_EQ(gshscene_store_intern_width_profile(s.store, stops.data(), stops.size(), &pr), GSHSCENE_OK);
+      s.held.push_back(pr);
+      st.join = GSHSCENE_STROKE_JOIN_ROUND;
+      st.cap = GSHSCENE_STROKE_CAP_ROUND;
+      st.width_profile = pr;
+      const GSHSCENE_Resource * r = nullptr;
+      EXPECT_EQ(gshscene_store_intern_stroke_style(s.store, &st, &r), GSHSCENE_OK);
+      s.held.push_back(r);
+      return r;
+    }
     static const double dash_a[] = {3.0, 2.0};
     static const double dash_b[] = {5.0, 1.5, 1.0, 1.5};
     if (g.pick(0, 3) == 0) {
@@ -179,14 +203,11 @@ struct Scenario {
   }
 
   void stroke(GSHSCENE_List * l, const GSHGEOM_Map * map = nullptr) {
-    const GSHSCENE_Resource * path = random_path(g.pick(0, 2) == 0);
+    bool closed = false;
+    const GSHSCENE_Resource * path = random_path(g.pick(0, 2) == 0, &closed);
     GSHSCENE_Paint p = fresh();
-    const GSHGEOM_Path * geometry = gshscene_resource_path(path);
-    // An aligned stroke needs a closed centerline: the style is made for what the path is (the last element of a closed path is a close).
-    size_t n = gshgeom_path_element_count(geometry);
-    GSHGEOM_Verb verb = GSHGEOM_VERB_MOVE;
-    gshgeom_path_verb(geometry, n - 1, &verb);
-    const GSHSCENE_Resource * style = random_style(verb == GSHGEOM_VERB_CLOSE);
+    // An aligned stroke needs a closed centerline: the style is made for what the path is.
+    const GSHSCENE_Resource * style = random_style(closed);
     EXPECT_EQ(gshscene_list_stroke_antialias(l, path, style, map, &p, GSHSCENE_ANTIALIAS_NONE, 0, 0.0), GSHSCENE_OK);
   }
 
