@@ -573,29 +573,57 @@ static long whole_px(double v) {
   return (long)gmath_floor(v + 0.5);
 }
 
-static void prim_morphology(const double * in, double * out, size_t w, size_t h, long rx, long ry, int dilate) {
-  for (size_t j = 0; j < h; j++) {
-    for (size_t i = 0; i < w; i++) {
-      for (size_t c = 0; c < PIX; c++) {
-        double best = dilate ? 0.0 : 1e308;
-        int any_outside = 0;
-        for (long dy = -ry; dy <= ry; dy++) {
-          for (long dx = -rx; dx <= rx; dx++) {
-            const long x = (long)i + dx;
-            const long y = (long)j + dy;
-            double v = 0.0;
-            if (x >= 0 && y >= 0 && (size_t)x < w && (size_t)y < h) {
-              v = in[PIX * ((size_t)y * w + (size_t)x) + c];
-            } else {
-              any_outside = 1;
-            }
-            if (dilate ? v > best : v < best) {
-              best = v;
-            }
-          }
+/**
+ * The minimum or maximum of `in[j - r .. j + r]` for each `j` of a line of @p n values, a window that leaves the line reading transparent black
+ * (so an erosion is 0 there and a dilation does not see it): a sliding window by a monotone queue of indices, held in @p queue as doubles.
+ */
+static void morph_line(const double * in, double * out, size_t n, size_t r, int dilate, double * queue) {
+  size_t head = 0, tail = 0; /* queue[head .. tail) */
+  for (size_t i = 0; i < n + r; i++) {
+    if (i < n) {
+      while (tail > head) {
+        const double last = in[(size_t)queue[tail - 1u]];
+        if (dilate ? last <= in[i] : last >= in[i]) {
+          tail--;
+        } else {
+          break;
         }
-        (void)any_outside;
-        out[PIX * (j * w + i) + c] = best;
+      }
+      queue[tail++] = (double)i;
+    }
+    if (i >= r) {
+      const size_t j = i - r;
+      while ((size_t)queue[head] + r < j) {
+        head++;
+      }
+      out[j] = (!dilate && (j < r || j + r >= n)) ? 0.0 : in[(size_t)queue[head]];
+    }
+  }
+}
+
+static void prim_morphology(double * buf, size_t w, size_t h, size_t rx, size_t ry, int dilate, double * line_a, double * line_b,
+    double * queue) {
+  for (size_t c = 0; c < PIX; c++) {
+    if (rx > 0) {
+      for (size_t j = 0; j < h; j++) {
+        for (size_t i = 0; i < w; i++) {
+          line_a[i] = buf[PIX * (j * w + i) + c];
+        }
+        morph_line(line_a, line_b, w, rx, dilate, queue);
+        for (size_t i = 0; i < w; i++) {
+          buf[PIX * (j * w + i) + c] = line_b[i];
+        }
+      }
+    }
+    if (ry > 0) {
+      for (size_t i = 0; i < w; i++) {
+        for (size_t j = 0; j < h; j++) {
+          line_a[j] = buf[PIX * (j * w + i) + c];
+        }
+        morph_line(line_a, line_b, h, ry, dilate, queue);
+        for (size_t j = 0; j < h; j++) {
+          buf[PIX * (j * w + i) + c] = line_b[j];
+        }
       }
     }
   }
@@ -899,12 +927,13 @@ static GSHCPU_Result run_primitive(Env * e, size_t i) {
       case GSHSCENE_FILTER_MORPHOLOGY: {
         double dx, dy;
         device_lengths(&e->m, pr->sx, pr->sy, &dx, &dy);
-        const long rx = whole_px(dx);
-        const long ry = whole_px(dy);
-        if (rx <= 0 && ry <= 0) {
-          memcpy(out, in0, e->pixels * PIX * sizeof(double)); /* a radius that rounds to nothing disables the effect */
-        } else {
-          prim_morphology(in0, out, e->w, e->h, rx > 0 ? rx : 0, ry > 0 ? ry : 0, pr->mode == (uint32_t)GSHSCENE_FILTER_MORPHOLOGY_DILATE);
+        long rx = whole_px(dx);
+        long ry = whole_px(dy);
+        memcpy(out, in0, e->pixels * PIX * sizeof(double));
+        rx = rx < 0 ? 0 : (rx > (long)e->w ? (long)e->w : rx); /* past the canvas a window is the whole line: the result is as for the canvas' size */
+        ry = ry < 0 ? 0 : (ry > (long)e->h ? (long)e->h : ry);
+        if (rx > 0 || ry > 0) { /* a radius that rounds to nothing disables the effect */
+          prim_morphology(out, e->w, e->h, (size_t)rx, (size_t)ry, pr->mode == (uint32_t)GSHSCENE_FILTER_MORPHOLOGY_DILATE, e->line_a, e->line_b, e->wx);
         }
         break;
       }
@@ -965,7 +994,7 @@ static GSHCPU_Result run_primitive(Env * e, size_t i) {
     }
   }
   /* FL4: the subregion, the default and the primitive's own coordinates; the result is clipped to it */
-  Rect2 sub = default_subregion(sub_in, pr->kind == GSHSCENE_FILTER_FLOOD ? 0 : (n_in > 2 ? 2 : n_in), e->region_u);
+  Rect2 sub = default_subregion(sub_in, (pr->kind == GSHSCENE_FILTER_FLOOD || pr->kind == GSHSCENE_FILTER_TILE) ? 0 : (n_in > 2 ? 2 : n_in), e->region_u); /* feTile's default is the filter region (FL4) */
   if (pr->subregion_mask & 1u) {
     sub.x0 = pr->subregion[0];
   }

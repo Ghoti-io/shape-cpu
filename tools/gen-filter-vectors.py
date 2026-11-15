@@ -492,7 +492,7 @@ def run_filter(case):
                 px = [convert(p, sp, space) for p in px]
             ins.append((px, sub))
         default = region_u
-        if ins:
+        if ins and pr["kind"] != "tile":
             default = (min(s[0] for _, s in ins), min(s[1] for _, s in ins), max(s[2] for _, s in ins), max(s[3] for _, s in ins))
         sub = list(default)
         if "sub" in pr:
@@ -703,7 +703,7 @@ def cases():
                                                  "preserve": True}], space="srgb"))
     out.append(case("tile-subregion", [
         {"kind": "offset", "inputs": [SRC], "dx": 0, "dy": 0, "sub": [1, 1, 3, 3]},
-        {"kind": "tile", "inputs": [PREV], "sub": [0, 0, 8, 6]}], space="srgb"))
+        {"kind": "tile", "inputs": [PREV]}], space="srgb"))
     out.append(case("displacement-map", [
         {"kind": "flood", "inputs": [], "color": [F(3, 4), F(1, 4), 0, 1], "opacity": 1, "color_space": "srgb"},
         {"kind": "displace", "inputs": [SRC, res(0)], "scale": 3, "xch": 0, "ych": 1}], space="srgb"))
