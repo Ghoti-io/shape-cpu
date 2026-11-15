@@ -222,10 +222,10 @@ static void weights(GSHCPU_Rect canvas, Rect2 d, double * wx, double * wy) {
   const size_t w = (size_t)(canvas.x1 - canvas.x0);
   const size_t h = (size_t)(canvas.y1 - canvas.y0);
   for (size_t i = 0; i < w; i++) {
-    wx[i] = overlap((double)canvas.x0 + (double)i, d.x0, d.x1);
+    wx[i] = overlap(gshcpu_render_i2d(canvas.x0) + (double)i, d.x0, d.x1);
   }
   for (size_t j = 0; j < h; j++) {
-    wy[j] = overlap((double)canvas.y0 + (double)j, d.y0, d.y1);
+    wy[j] = overlap(gshcpu_render_i2d(canvas.y0) + (double)j, d.y0, d.y1);
   }
 }
 
@@ -882,7 +882,7 @@ static void prim_turbulence(const GSHSCENE_Filter_Primitive * pr, const Aff * m,
   for (size_t j = 0; j < h; j++) {
     for (size_t i = 0; i < w; i++) {
       double ux, uy;
-      aff_inverse_point(m, (double)canvas.x0 + (double)i, (double)canvas.y0 + (double)j, &ux, &uy);
+      aff_inverse_point(m, gshcpu_render_i2d(canvas.x0) + (double)i, gshcpu_render_i2d(canvas.y0) + (double)j, &ux, &uy);
       double c[4];
       for (int ch = 0; ch < 4; ch++) {
         double v = turbulence_sum(nz, ch, ux, uy, pr->sx, pr->sy, pr->octaves, fractal, (int)pr->stitch_tiles, tile);
@@ -1002,8 +1002,8 @@ static void prim_lighting(const GSHSCENE_Filter_Primitive * pr, const Aff * m, G
         memcpy(l, dl, sizeof l);
       } else {
         const double z = pr->surface_scale * height_at(in, w, r, x, y);
-        l[0] = lx - ((double)canvas.x0 + (double)x);
-        l[1] = ly - ((double)canvas.y0 + (double)y);
+        l[0] = lx - (gshcpu_render_i2d(canvas.x0) + (double)x);
+        l[1] = ly - (gshcpu_render_i2d(canvas.y0) + (double)y);
         l[2] = lz - z;
         const double ll = gmath_sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
         if (ll > 0.0) {
@@ -1151,7 +1151,7 @@ static void flood_color(const Env * e, const GSHSCENE_Filter_Primitive * pr, con
  */
 static void pixel_rect(const Env * e, Rect2 u, int round, long out[4]) {
   const Rect2 d = rect_to_device(&e->m, u);
-  const double o[4] = {d.x0 - (double)e->canvas.x0, d.y0 - (double)e->canvas.y0, d.x1 - (double)e->canvas.x0, d.y1 - (double)e->canvas.y0};
+  const double o[4] = {d.x0 - gshcpu_render_i2d(e->canvas.x0), d.y0 - gshcpu_render_i2d(e->canvas.y0), d.x1 - gshcpu_render_i2d(e->canvas.x0), d.y1 - gshcpu_render_i2d(e->canvas.y0)};
   for (int k = 0; k < 4; k++) {
     double v = round ? gmath_floor(o[k] + 0.5) : (k < 2 ? gmath_floor(o[k]) : gmath_ceil(o[k]));
     const double lim = (double)(k % 2 == 0 ? e->w : e->h);
@@ -1216,7 +1216,7 @@ static void prim_image(const Env * e, const GSHSCENE_Filter_Primitive * pr, cons
         continue;
       }
       double ux, uy;
-      aff_inverse_point(&e->m, (double)e->canvas.x0 + (double)i + 0.5, (double)e->canvas.y0 + (double)j + 0.5, &ux, &uy);
+      aff_inverse_point(&e->m, gshcpu_render_i2d(e->canvas.x0) + (double)i + 0.5, gshcpu_render_i2d(e->canvas.y0) + (double)j + 0.5, &ux, &uy);
       const double ix = inv.m[0][0] * ux + inv.m[0][1] * uy + inv.t[0];
       const double iy = inv.m[1][0] * ux + inv.m[1][1] * uy + inv.t[1];
       if (!(ix >= 0.0 && iy >= 0.0 && ix < (double)info.width && iy < (double)info.height)) {
@@ -1467,7 +1467,7 @@ GSHCPU_Result gshcpu_filter_apply(const GSHSCENE_Filter * f, const GSHGEOM_Map *
   e.line_a = rest + 2u * line;
   e.line_b = rest + 3u * line;
   /* the region (FL1), in user space and in the device */
-  Rect2 canvas_d = {(double)canvas.x0, (double)canvas.y0, (double)canvas.x1, (double)canvas.y1};
+  Rect2 canvas_d = {gshcpu_render_i2d(canvas.x0), gshcpu_render_i2d(canvas.y0), gshcpu_render_i2d(canvas.x1), gshcpu_render_i2d(canvas.y1)};
   if (f->region_mode == (uint32_t)GSHSCENE_FILTER_REGION_AUTO) {
     e.region_u = rect_to_user(&e.m, canvas_d);
   } else {
@@ -1503,10 +1503,10 @@ GSHCPU_Result gshcpu_filter_apply(const GSHSCENE_Filter * f, const GSHGEOM_Map *
   clip_to(&e.m, canvas, e.region_u, layer, e.wx, e.wy);
   Rect2 rd = rect_to_device(&e.m, e.region_u);
   GSHCPU_Rect d;
-  d.x0 = (int64_t)gmath_floor(rd.x0);
-  d.y0 = (int64_t)gmath_floor(rd.y0);
-  d.x1 = (int64_t)gmath_ceil(rd.x1);
-  d.y1 = (int64_t)gmath_ceil(rd.y1);
+  d.x0 = gshcpu_render_d2i(gmath_floor(rd.x0));
+  d.y0 = gshcpu_render_d2i(gmath_floor(rd.y0));
+  d.x1 = gshcpu_render_d2i(gmath_ceil(rd.x1));
+  d.y1 = gshcpu_render_d2i(gmath_ceil(rd.y1));
   *dirty = gshcpu_render_rect_meet(d, canvas);
   return GSHCPU_OK;
 }

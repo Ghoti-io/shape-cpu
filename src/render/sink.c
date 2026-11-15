@@ -4711,13 +4711,13 @@ static int canon_plan(const GSHGEOM_Map * composed, GSHCPU_Rect region, Canon * 
   k->ninv[1] = -k->n[1] / ndet;
   k->ninv[2] = -k->n[2] / ndet;
   k->ninv[3] = k->n[0] / ndet;
-  k->c[0] = ((double)region.x0 + (double)region.x1) / 2.0;
-  k->c[1] = ((double)region.y0 + (double)region.y1) / 2.0;
+  k->c[0] = (gshcpu_render_i2d(region.x0) + gshcpu_render_i2d(region.x1)) / 2.0;
+  k->c[1] = (gshcpu_render_i2d(region.y0) + gshcpu_render_i2d(region.y1)) / 2.0;
   /* the canonical canvas: the corners of the region about the center, through N^-1, outward to whole pixels and one more */
   double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
   for (int i = 0; i < 4; i++) {
-    const double dx = ((i & 1) ? (double)region.x1 : (double)region.x0) - k->c[0];
-    const double dy = ((i & 2) ? (double)region.y1 : (double)region.y0) - k->c[1];
+    const double dx = ((i & 1) ? gshcpu_render_i2d(region.x1) : gshcpu_render_i2d(region.x0)) - k->c[0];
+    const double dy = ((i & 2) ? gshcpu_render_i2d(region.y1) : gshcpu_render_i2d(region.y0)) - k->c[1];
     const double qx = k->ninv[0] * dx + k->ninv[1] * dy;
     const double qy = k->ninv[2] * dx + k->ninv[3] * dy;
     lo[0] = qx < lo[0] ? qx : lo[0];
@@ -4728,10 +4728,10 @@ static int canon_plan(const GSHGEOM_Map * composed, GSHCPU_Rect region, Canon * 
   if (!(hi[0] - lo[0] < 1e7) || !(hi[1] - lo[1] < 1e7)) {
     return 0;
   }
-  k->q.x0 = (int64_t)gmath_floor(lo[0]) - 1;
-  k->q.y0 = (int64_t)gmath_floor(lo[1]) - 1;
-  k->q.x1 = (int64_t)gmath_ceil(hi[0]) + 1;
-  k->q.y1 = (int64_t)gmath_ceil(hi[1]) + 1;
+  k->q.x0 = gshcpu_render_d2i(gmath_floor(lo[0])) - 1;
+  k->q.y0 = gshcpu_render_d2i(gmath_floor(lo[1])) - 1;
+  k->q.x1 = gshcpu_render_d2i(gmath_ceil(hi[0])) + 1;
+  k->q.y1 = gshcpu_render_d2i(gmath_ceil(hi[1])) + 1;
   /* the user space on the canvas: q = S x + q0 with q0 = N^-1 (t - c) */
   const double tx = composed->t[0] - k->c[0], ty = composed->t[1] - k->c[1];
   gshgeom_map_identity(2, &k->map);
@@ -4746,7 +4746,7 @@ static int canon_plan(const GSHGEOM_Map * composed, GSHCPU_Rect region, Canon * 
 static void bilinear(const double * src, GSHCPU_Rect r, double x, double y, double out[4]) {
   const double fx = gmath_floor(x - 0.5), fy = gmath_floor(y - 0.5);
   const double tx = (x - 0.5) - fx, ty = (y - 0.5) - fy;
-  const int64_t ix = (int64_t)fx, iy = (int64_t)fy;
+  const int64_t ix = gshcpu_render_d2i(fx), iy = gshcpu_render_d2i(fy);
   const size_t w = (size_t)(r.x1 - r.x0);
   out[0] = out[1] = out[2] = out[3] = 0.0;
   for (int j = 0; j < 2; j++) {
@@ -4827,7 +4827,7 @@ static GSHSCENE_Result group_filter(Run * run, size_t count) {
     /* the layer onto the canonical canvas */
     for (size_t j = 0; j < hq; j++) {
       for (size_t i = 0; i < wq; i++) {
-        const double qx = (double)k.q.x0 + (double)i + 0.5, qy = (double)k.q.y0 + (double)j + 0.5;
+        const double qx = gshcpu_render_i2d(k.q.x0) + (double)i + 0.5, qy = gshcpu_render_i2d(k.q.y0) + (double)j + 0.5;
         const double dx = k.n[0] * qx + k.n[1] * qy + k.c[0], dy = k.n[2] * qx + k.n[3] * qy + k.c[1];
         bilinear(f->layer, canvas, dx, dy, &layer_q[4u * (j * wq + i)]);
       }
@@ -4838,7 +4838,7 @@ static GSHSCENE_Result group_filter(Run * run, size_t count) {
       const size_t w = (size_t)(canvas.x1 - canvas.x0);
       for (int64_t y = canvas.y0; y < canvas.y1; y++) {
         for (int64_t x = canvas.x0; x < canvas.x1; x++) {
-          const double dx = (double)x + 0.5 - k.c[0], dy = (double)y + 0.5 - k.c[1];
+          const double dx = gshcpu_render_i2d(x) + 0.5 - k.c[0], dy = gshcpu_render_i2d(y) + 0.5 - k.c[1];
           const double qx = k.ninv[0] * dx + k.ninv[1] * dy, qy = k.ninv[2] * dx + k.ninv[3] * dy;
           bilinear(layer_q, k.q, qx, qy, &f->layer[4u * ((size_t)(y - canvas.y0) * w + (size_t)(x - canvas.x0))]);
         }

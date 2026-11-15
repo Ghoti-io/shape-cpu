@@ -249,6 +249,25 @@ GSHCPU_Result gshcpu_filter_apply(const GSHSCENE_Filter * f, const GSHGEOM_Map *
 #define GSHCPU_RENDER_COORD_LIMIT ((int64_t)1 << 30)
 
 /**
+ * A pixel coordinate as a double, through 32 bits: a 64-bit integer converts through the x87 on a 32-bit x86 build, which the
+ * build refuses (its results would depend on the x87's precision control), and a coordinate is within GSHCPU_RENDER_COORD_LIMIT.
+ */
+static inline double gshcpu_render_i2d(int64_t v) {
+  return (double)(int32_t)v;
+}
+
+/** A whole-valued double as a pixel coordinate, through 32 bits for the same reason; clamped to the coordinate limit, and NaN is its negative end. */
+static inline int64_t gshcpu_render_d2i(double v) {
+  const double limit = (double)GSHCPU_RENDER_COORD_LIMIT;
+  if (!(v > -limit)) {
+    v = -limit;
+  } else if (v > limit) {
+    v = limit;
+  }
+  return (int64_t)(int32_t)v;
+}
+
+/**
  * The coverage of the union of @p count flattened paths (their windings add) inside @p rect, by @p rule: what
  * gshcpu_coverage_fill gives for those pixels, wherever the paths lie.
  *
