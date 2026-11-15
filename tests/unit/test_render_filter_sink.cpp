@@ -35,6 +35,7 @@
 #include <ghoti.io/shape-geometry/shape-geometry.h>
 #include <ghoti.io/shape-scene/shape-scene.h>
 
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -235,24 +236,53 @@ TEST(RenderFilterSink, APrimitiveThisBuildLacksIsRefusedByNameAndNothingOfTheGro
   EXPECT_EQ(bytes_of(r.raster), std::string(6 * 6 * 4, '\x33'));
 }
 
-TEST(RenderFilterSink, ARotatedMapIsRefusedAsCanonicalSpace) {
+namespace {
+
+/** The centroid of the alpha of a raster (premultiplied RGBA8). */
+void centroid(const GIMG_Raster * r, double * cx, double * cy, double * mass) {
+  double sx = 0, sy = 0, m = 0;
+  for (uint32_t y = 0; y < gimg_raster_height(r); y++) {
+    for (uint32_t x = 0; x < gimg_raster_width(r); x++) {
+      const double a = (unsigned char)pixel(r, x, y)[3];
+      sx += a * (x + 0.5);
+      sy += a * (y + 0.5);
+      m += a;
+    }
+  }
+  *cx = m > 0 ? sx / m : 0;
+  *cy = m > 0 ? sy / m : 0;
+  *mass = m;
+}
+
+}  // namespace
+
+TEST(RenderFilterSink, ARotatedMapIsFilteredInCanonicalSpaceSoTheFilterFollowsTheElement) {
   rh::Store s;
-  GSHSCENE_Filter_Primitive b = prim(GSHSCENE_FILTER_GAUSSIAN_BLUR);
-  b.sx = b.sy = 1;
-  GSHSCENE_List * l = group_of_rect(s, intern_filter(s, {b}), 1.0, 1, 1, 3, 3);
-  rh::RasterRef r(make_raster(6, 6, 0x33));
+  GSHSCENE_Filter_Primitive o = prim(GSHSCENE_FILTER_OFFSET);
+  o.dx = 10;
+  GSHSCENE_List * moved = group_of_rect(s, intern_filter(s, {o}), 1.0, 4, 4, 14, 14);
+  GSHSCENE_List * plain = group_of_rect(s, nullptr, 1.0, 4, 4, 14, 14);
   GSHGEOM_Map turn;
   ASSERT_EQ(gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 30.0, &turn), GSHGEOM_OK);
-  Rendered got = render(l, r.raster, &turn);
-  ASSERT_EQ(got.result, GSHSCENE_OK);
-  ASSERT_EQ(got.entries.size(), 1u);
-  EXPECT_EQ(got.entries[0].reason, GSHSCENE_REASON_FILTER_MAP);
-  EXPECT_EQ(bytes_of(r.raster), std::string(6 * 6 * 4, '\x33'));
-  // a quarter turn is axis aligned and is drawn
+  turn.t[0] = 20;
+  turn.t[1] = 2;
+  rh::RasterRef a(make_raster(64, 64)), b(make_raster(64, 64));
+  Rendered ra = render(plain, a.raster, &turn);
+  Rendered rb = render(moved, b.raster, &turn);
+  ASSERT_EQ(ra.result, GSHSCENE_OK);
+  ASSERT_EQ(rb.result, GSHSCENE_OK);
+  EXPECT_TRUE(rb.entries.empty()) << "a rotated map is drawn, not refused";
+  double ax, ay, am, bx, by, bm;
+  centroid(a.raster, &ax, &ay, &am);
+  centroid(b.raster, &bx, &by, &bm);
+  EXPECT_NEAR(bx - ax, 10.0 * std::cos(30.0 * M_PI / 180.0), 0.5) << "the offset runs along the element's x axis";
+  EXPECT_NEAR(by - ay, 10.0 * std::sin(30.0 * M_PI / 180.0), 0.5);
+  EXPECT_NEAR(bm / am, 1.0, 0.03) << "the resampling keeps the coverage";
+  // a quarter turn is axis aligned and is drawn as before
   GSHGEOM_Map quarter;
   ASSERT_EQ(gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 90.0, &quarter), GSHGEOM_OK);
-  rh::RasterRef q(make_raster(6, 6, 0x33));
-  Rendered ok = render(l, q.raster, &quarter);
+  rh::RasterRef q(make_raster(64, 64));
+  Rendered ok = render(moved, q.raster, &quarter);
   ASSERT_EQ(ok.result, GSHSCENE_OK);
   EXPECT_TRUE(ok.entries.empty());
 }

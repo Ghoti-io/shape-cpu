@@ -127,7 +127,7 @@ typedef struct Clip {
       (UINT32_C(1) << GSHSCENE_FILTER_GAUSSIAN_BLUR) | (UINT32_C(1) << GSHSCENE_FILTER_DROP_SHADOW) |                          \
       (UINT32_C(1) << GSHSCENE_FILTER_MORPHOLOGY) | (UINT32_C(1) << GSHSCENE_FILTER_CONVOLVE_MATRIX) |                         \
       (UINT32_C(1) << GSHSCENE_FILTER_TILE) | (UINT32_C(1) << GSHSCENE_FILTER_DISPLACEMENT_MAP) |                              \
-      GSHSCENE_FILTER_NATIVE_EDGE_DUPLICATE_WRAP | GSHSCENE_FILTER_NATIVE_REGION_AUTO)
+      GSHSCENE_FILTER_NATIVE_EDGE_DUPLICATE_WRAP | GSHSCENE_FILTER_NATIVE_REGION_AUTO | GSHSCENE_FILTER_NATIVE_CANONICAL_SPACE)
 
 /** The points of the table of a transfer between two spaces of one gamut (fast8). */
 #define XFER_POINTS 4096u
@@ -1368,6 +1368,8 @@ static GSHSCENE_Result union_alloc(const Cpu_Sink * cs, const Union_Plan * pl, c
 }
 
 
+static size_t filter_scratch(const GSHSCENE_Filter * fl, const GSHGEOM_Map * composed, GSHCPU_Rect region, size_t * canon_doubles);
+
 /* --- the geometry of the items, measured (S9) --------------------------------------------------- */
 
 /**
@@ -1666,7 +1668,12 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
       if (gshscene_resource_filter(item->group.filter, &fl) != GSHSCENE_OK) {
         return GSHCPU_ERR_INTERNAL;
       }
-      const size_t need = gshcpu_filter_scratch_doubles(&fl, L->width, L->height);
+      GSHGEOM_Map composed;
+      if (gshgeom_map_compose_chain(maps, count - 1u, &target->map, &composed) != GSHGEOM_OK) {
+        return GSHCPU_ERR_LIMIT;
+      }
+      size_t canon_doubles;
+      const size_t need = filter_scratch(&fl, &composed, L->region, &canon_doubles);
       if (need == SIZE_MAX || need > SIZE_MAX / sizeof(double)) {
         return GSHCPU_ERR_LIMIT;
       }
@@ -4667,10 +4674,119 @@ static GSHSCENE_Result group_pop_plain(Run * run, const size_t * chain, size_t c
 
 /** Pop the group on top of the stack, and give back the channels it held (KC3). */
 /**
+ * Canonical space (D-FL8, FC5): a group whose composed map has a rotation (other than a multiple of 90 degrees) or a shear is filtered in
+ * the space with that taken out.  `M = N S` with `S` the scale of its two columns and `N` what is left (unit columns); the canonical
+ * canvas is the region as `N^-1` takes it about the region's center (`q = N^-1 (d - c)`), on which the user space is `S x + q0`
+ * (an axis-aligned map), and the layer is resampled onto it, filtered, and resampled back, both times bilinearly at the pixel centers.
+ */
+typedef struct Canon {
+  int on;                  /* the map is not axis aligned */
+  GSHGEOM_Map map;         /* the user space to the canonical canvas: S and q0 */
+  double n[4], ninv[4];    /* N and its inverse, row major */
+  double c[2];             /* the center the rotation is about */
+  GSHCPU_Rect q;           /* the canonical canvas */
+} Canon;
+
+static int canon_plan(const GSHGEOM_Map * composed, GSHCPU_Rect region, Canon * k) {
+  memset(k, 0, sizeof *k);
+  const double a = composed->m[0][0], b = composed->m[0][1], c = composed->m[1][0], d = composed->m[1][1];
+  if (gshscene_filter_axis_aligned(composed)) {
+    k->on = 0;
+    return 1;
+  }
+  const double sx = gmath_sqrt(a * a + c * c), sy = gmath_sqrt(b * b + d * d);
+  const double det = a * d - b * c;
+  if (!(sx > 0.0) || !(sy > 0.0) || det == 0.0) {
+    return 0;
+  }
+  k->on = 1;
+  k->n[0] = a / sx;
+  k->n[1] = b / sy;
+  k->n[2] = c / sx;
+  k->n[3] = d / sy;
+  const double ndet = k->n[0] * k->n[3] - k->n[1] * k->n[2];
+  k->ninv[0] = k->n[3] / ndet;
+  k->ninv[1] = -k->n[1] / ndet;
+  k->ninv[2] = -k->n[2] / ndet;
+  k->ninv[3] = k->n[0] / ndet;
+  k->c[0] = ((double)region.x0 + (double)region.x1) / 2.0;
+  k->c[1] = ((double)region.y0 + (double)region.y1) / 2.0;
+  /* the canonical canvas: the corners of the region about the center, through N^-1, outward to whole pixels and one more */
+  double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
+  for (int i = 0; i < 4; i++) {
+    const double dx = ((i & 1) ? (double)region.x1 : (double)region.x0) - k->c[0];
+    const double dy = ((i & 2) ? (double)region.y1 : (double)region.y0) - k->c[1];
+    const double qx = k->ninv[0] * dx + k->ninv[1] * dy;
+    const double qy = k->ninv[2] * dx + k->ninv[3] * dy;
+    lo[0] = qx < lo[0] ? qx : lo[0];
+    hi[0] = qx > hi[0] ? qx : hi[0];
+    lo[1] = qy < lo[1] ? qy : lo[1];
+    hi[1] = qy > hi[1] ? qy : hi[1];
+  }
+  if (!(hi[0] - lo[0] < 1e7) || !(hi[1] - lo[1] < 1e7)) {
+    return 0;
+  }
+  k->q.x0 = (int64_t)gmath_floor(lo[0]) - 1;
+  k->q.y0 = (int64_t)gmath_floor(lo[1]) - 1;
+  k->q.x1 = (int64_t)gmath_ceil(hi[0]) + 1;
+  k->q.y1 = (int64_t)gmath_ceil(hi[1]) + 1;
+  /* the user space on the canvas: q = S x + q0 with q0 = N^-1 (t - c) */
+  const double tx = composed->t[0] - k->c[0], ty = composed->t[1] - k->c[1];
+  gshgeom_map_identity(2, &k->map);
+  k->map.m[0][0] = sx;
+  k->map.m[1][1] = sy;
+  k->map.t[0] = k->ninv[0] * tx + k->ninv[1] * ty;
+  k->map.t[1] = k->ninv[2] * tx + k->ninv[3] * ty;
+  return 1;
+}
+
+/** @p src (a canvas @p r of premultiplied doubles) sampled bilinearly at the continuous point (@p x, @p y) of the pixel grid; zero outside. */
+static void bilinear(const double * src, GSHCPU_Rect r, double x, double y, double out[4]) {
+  const double fx = gmath_floor(x - 0.5), fy = gmath_floor(y - 0.5);
+  const double tx = (x - 0.5) - fx, ty = (y - 0.5) - fy;
+  const int64_t ix = (int64_t)fx, iy = (int64_t)fy;
+  const size_t w = (size_t)(r.x1 - r.x0);
+  out[0] = out[1] = out[2] = out[3] = 0.0;
+  for (int j = 0; j < 2; j++) {
+    for (int i = 0; i < 2; i++) {
+      const int64_t px = ix + i, py = iy + j;
+      if (px < r.x0 || px >= r.x1 || py < r.y0 || py >= r.y1) {
+        continue;
+      }
+      const double wt = (i ? tx : 1.0 - tx) * (j ? ty : 1.0 - ty);
+      const double * v = &src[4u * ((size_t)(py - r.y0) * w + (size_t)(px - r.x0))];
+      for (int c = 0; c < 4; c++) {
+        out[c] += wt * v[c];
+      }
+    }
+  }
+}
+
+/** The doubles of scratch the filter of @p composed needs over @p region: the engine's for the canvas, and the canonical layer beside it. */
+static size_t filter_scratch(const GSHSCENE_Filter * fl, const GSHGEOM_Map * composed, GSHCPU_Rect region, size_t * canon_doubles) {
+  Canon k;
+  *canon_doubles = 0;
+  if (!canon_plan(composed, region, &k)) {
+    return SIZE_MAX;
+  }
+  if (!k.on) {
+    return gshcpu_filter_scratch_doubles(fl, (size_t)(region.x1 - region.x0), (size_t)(region.y1 - region.y0));
+  }
+  const size_t wq = (size_t)(k.q.x1 - k.q.x0), hq = (size_t)(k.q.y1 - k.q.y0);
+  const size_t rw = (size_t)(region.x1 - region.x0), rh = (size_t)(region.y1 - region.y0);
+  if (wq == 0 || hq == 0 || wq > SIZE_MAX / hq || wq * hq > 16u * (rw * rh + 64u)) {
+    return SIZE_MAX; /* a skew that spreads the canvas past sixteen times the region: past the limit */
+  }
+  *canon_doubles = wq * hq * 4u;
+  const size_t engine = gshcpu_filter_scratch_doubles(fl, wq, hq);
+  return engine == SIZE_MAX || engine > SIZE_MAX - *canon_doubles ? SIZE_MAX : engine + *canon_doubles;
+}
+
+/**
  * FC3: the filter of the group on top of the stack, run over its layer before the pop composites it (FL20: the filter comes first, then the
- * clips, the mask and the opacity, which are the pop's).  The whole region is the filter's canvas; the pixels outside the group's dirty rectangle
- * are made ready (zero) first, and the group's dirty rectangle becomes the filter's.  The scratch comes from the item allocator (the sink's, or
- * the caller's arena, whose measure counts it).
+ * clips, the mask and the opacity, which are the pop's).  The whole region is the filter's canvas (or, for a rotated or skewed map, FC5's
+ * canonical canvas); the pixels outside the group's dirty rectangle are made ready (zero) first, and the group's dirty rectangle becomes the
+ * filter's.  The scratch comes from the item allocator (the sink's, or the caller's arena, whose measure counts it).
  */
 static GSHSCENE_Result group_filter(Run * run, size_t count) {
   Frame * f = &run->frames[run->top];
@@ -4684,10 +4800,13 @@ static GSHSCENE_Result group_filter(Run * run, size_t count) {
   }
   const GSHCPU_Rect canvas = run->layout.region;
   widen(run, f, canvas);
-  const size_t need = gshcpu_filter_scratch_doubles(&fl, run->layout.width, run->layout.height);
+  size_t canon_doubles;
+  const size_t need = filter_scratch(&fl, &composed, canvas, &canon_doubles);
   if (need == SIZE_MAX || need > SIZE_MAX / sizeof(double)) {
     return GSHSCENE_ERR_LIMIT;
   }
+  Canon k;
+  canon_plan(&composed, canvas, &k);
   if (run->item_alloc == &run->arena.self) {
     gshcpu_render_arena_reset(&run->arena);
   }
@@ -4696,7 +4815,35 @@ static GSHSCENE_Result group_filter(Run * run, size_t count) {
     return GSHSCENE_ERR_OOM;
   }
   GSHCPU_Rect dirty;
-  const GSHCPU_Result r = gshcpu_filter_apply(&fl, &composed, &f->space, canvas, f->layer, scratch, need, &dirty);
+  GSHCPU_Result r;
+  if (!k.on) {
+    r = gshcpu_filter_apply(&fl, &composed, &f->space, canvas, f->layer, scratch, need, &dirty);
+  } else {
+    double * layer_q = scratch;
+    double * engine = scratch + canon_doubles;
+    const size_t wq = (size_t)(k.q.x1 - k.q.x0), hq = (size_t)(k.q.y1 - k.q.y0);
+    /* the layer onto the canonical canvas */
+    for (size_t j = 0; j < hq; j++) {
+      for (size_t i = 0; i < wq; i++) {
+        const double qx = (double)k.q.x0 + (double)i + 0.5, qy = (double)k.q.y0 + (double)j + 0.5;
+        const double dx = k.n[0] * qx + k.n[1] * qy + k.c[0], dy = k.n[2] * qx + k.n[3] * qy + k.c[1];
+        bilinear(f->layer, canvas, dx, dy, &layer_q[4u * (j * wq + i)]);
+      }
+    }
+    r = gshcpu_filter_apply(&fl, &k.map, &f->space, k.q, layer_q, engine, need - canon_doubles, &dirty);
+    if (r == GSHCPU_OK) {
+      /* and back onto the device's pixels */
+      const size_t w = (size_t)(canvas.x1 - canvas.x0);
+      for (int64_t y = canvas.y0; y < canvas.y1; y++) {
+        for (int64_t x = canvas.x0; x < canvas.x1; x++) {
+          const double dx = (double)x + 0.5 - k.c[0], dy = (double)y + 0.5 - k.c[1];
+          const double qx = k.ninv[0] * dx + k.ninv[1] * dy, qy = k.ninv[2] * dx + k.ninv[3] * dy;
+          bilinear(layer_q, k.q, qx, qy, &f->layer[4u * ((size_t)(y - canvas.y0) * w + (size_t)(x - canvas.x0))]);
+        }
+      }
+      dirty = canvas;
+    }
+  }
   run->item_alloc->free_fn(run->item_alloc->ctx, scratch);
   if (r != GSHCPU_OK) {
     return r == GSHCPU_ERR_UNSUPPORTED ? GSHSCENE_ERR_INTERNAL : scene_result(r); /* the planning pass lets none through */
