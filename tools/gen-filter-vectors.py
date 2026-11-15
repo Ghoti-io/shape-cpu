@@ -439,6 +439,239 @@ def displace(img, mp, scale_x, scale_y, xch, ych, W, H):
     return out
 
 
+# --- turbulence (the standard's reference implementation, in double) and lighting -------------------------------------------
+
+RAND_M, RAND_A, RAND_Q, RAND_R = 2147483647, 16807, 127773, 2836
+BSIZE, BM, PN = 0x100, 0xff, 0x1000
+
+
+def rnd(seed):
+    r = RAND_A * (seed % RAND_Q) - RAND_R * (seed // RAND_Q)
+    return r + RAND_M if r <= 0 else r
+
+
+def noise_init(seed_value):
+    seed = int(math.floor(seed_value + 0.5)) if seed_value >= 0 else int(math.ceil(seed_value - 0.5))
+    if seed <= 0:
+        seed = -(seed % (RAND_M - 1)) + 1
+    if seed > RAND_M - 1:
+        seed = RAND_M - 1
+    lattice = [0] * (BSIZE + BSIZE + 2)
+    grad = [[[0.0, 0.0] for _ in range(BSIZE + BSIZE + 2)] for _ in range(4)]
+    for k in range(4):
+        for i in range(BSIZE):
+            lattice[i] = i
+            for j in range(2):
+                seed = rnd(seed)
+                grad[k][i][j] = float((seed % (BSIZE + BSIZE)) - BSIZE) / BSIZE
+            n = math.sqrt(grad[k][i][0] ** 2 + grad[k][i][1] ** 2)
+            if n > 0:
+                grad[k][i][0] /= n
+                grad[k][i][1] /= n
+    for i in range(BSIZE - 1, 0, -1):
+        k = lattice[i]
+        seed = rnd(seed)
+        j = seed % BSIZE
+        lattice[i] = lattice[j]
+        lattice[j] = k
+    for i in range(BSIZE + 2):
+        lattice[BSIZE + i] = lattice[i]
+        for k in range(4):
+            grad[k][BSIZE + i] = list(grad[k][i])
+    return lattice, grad
+
+
+def noise2(nz, ch, vx, vy, st):
+    lattice, grad = nz
+    t = vx + PN
+    bx0 = int(t)
+    bx1 = bx0 + 1
+    rx0 = t - int(t)
+    rx1 = rx0 - 1.0
+    t = vy + PN
+    by0 = int(t)
+    by1 = by0 + 1
+    ry0 = t - int(t)
+    ry1 = ry0 - 1.0
+    if st:
+        if bx0 >= st["wx"]:
+            bx0 -= st["w"]
+        if bx1 >= st["wx"]:
+            bx1 -= st["w"]
+        if by0 >= st["wy"]:
+            by0 -= st["h"]
+        if by1 >= st["wy"]:
+            by1 -= st["h"]
+    bx0 &= BM
+    bx1 &= BM
+    by0 &= BM
+    by1 &= BM
+    i, j = lattice[bx0], lattice[bx1]
+    b00, b10, b01, b11 = lattice[i + by0], lattice[j + by0], lattice[i + by1], lattice[j + by1]
+    sc = lambda x: x * x * (3.0 - 2.0 * x)
+    sx, sy = sc(rx0), sc(ry0)
+    g = grad[ch]
+    lerp = lambda t_, a, b: a + t_ * (b - a)
+    u = rx0 * g[b00][0] + ry0 * g[b00][1]
+    v = rx1 * g[b10][0] + ry0 * g[b10][1]
+    a = lerp(sx, u, v)
+    u = rx0 * g[b01][0] + ry1 * g[b01][1]
+    v = rx1 * g[b11][0] + ry1 * g[b11][1]
+    b = lerp(sx, u, v)
+    return lerp(sy, a, b)
+
+
+def turb_sum(nz, ch, px, py, fx, fy, octaves, fractal, stitch, tile):
+    st = None
+    tw, th = tile[2] - tile[0], tile[3] - tile[1]
+    if stitch:
+        if fx != 0:
+            lo, hi = math.floor(tw * fx) / tw, math.ceil(tw * fx) / tw
+            fx = lo if (lo > 0 and fx / lo < hi / fx) else hi
+        if fy != 0:
+            lo, hi = math.floor(th * fy) / th, math.ceil(th * fy) / th
+            fy = lo if (lo > 0 and fy / lo < hi / fy) else hi
+        w, h = int(tw * fx + 0.5), int(th * fy + 0.5)
+        st = {"w": w, "h": h, "wx": int(tile[0] * fx + PN + w), "wy": int(tile[1] * fy + PN + h)}
+    total, ratio, vx, vy = 0.0, 1.0, px * fx, py * fy
+    for _ in range(octaves):
+        nv = noise2(nz, ch, vx, vy, st)
+        total += (nv if fractal else abs(nv)) / ratio
+        vx *= 2.0
+        vy *= 2.0
+        ratio *= 2.0
+        if st:
+            st["w"] *= 2
+            st["wx"] = 2 * st["wx"] - PN
+            st["h"] *= 2
+            st["wy"] = 2 * st["wy"] - PN
+    return total
+
+
+def to_float(x):
+    return float(x)
+
+
+def turbulence_img(pr, m, W, H, tile_u):
+    nz = noise_init(float(pr["seed"]))
+    fractal = pr["noise"] == "fractal"
+    out = []
+    for j in range(H):
+        for i in range(W):
+            # the pixel's corner in user space
+            ux, uy = m.inverse_point(F(i), F(j))
+            ux, uy = float(ux), float(uy)
+            c = []
+            for ch in range(4):
+                v = turb_sum(nz, ch, ux, uy, float(pr["fx"]), float(pr["fy"]), pr["octaves"], fractal, pr.get("stitch", 0),
+                             [float(x) for x in tile_u])
+                v = (v + 1.0) / 2.0 if fractal else v
+                c.append(min(max(v, 0.0), 1.0))
+            out.append([F(c[0] * c[3]), F(c[1] * c[3]), F(c[2] * c[3]), F(c[3])])
+    return out
+
+
+def surface_normal(hgt, W, r, x, y, ss):
+    left, right, top, bottom = x == r[0], x == r[2] - 1, y == r[1], y == r[3] - 1
+    if r[2] - r[0] < 2 or r[3] - r[1] < 2:
+        return 0.0, 0.0
+    I = lambda dx, dy: hgt[(y + dy) * W + x + dx]
+    if top and left:
+        fx, fy = 2 / 3, 2 / 3
+        ax = (2 * I(1, 0) + I(1, 1)) - (2 * I(0, 0) + I(0, 1)); ay = (2 * I(0, 1) + I(1, 1)) - (2 * I(0, 0) + I(1, 0))
+    elif top and right:
+        fx, fy = 2 / 3, 2 / 3
+        ax = (2 * I(0, 0) + I(0, 1)) - (2 * I(-1, 0) + I(-1, 1)); ay = (I(-1, 1) + 2 * I(0, 1)) - (I(-1, 0) + 2 * I(0, 0))
+    elif top:
+        fx, fy = 1 / 3, 1 / 2
+        ax = (2 * I(1, 0) + I(1, 1)) - (2 * I(-1, 0) + I(-1, 1)); ay = (I(-1, 1) + 2 * I(0, 1) + I(1, 1)) - (I(-1, 0) + 2 * I(0, 0) + I(1, 0))
+    elif bottom and left:
+        fx, fy = 2 / 3, 2 / 3
+        ax = (I(1, -1) + 2 * I(1, 0)) - (I(0, -1) + 2 * I(0, 0)); ay = (2 * I(0, 0) + I(1, 0)) - (2 * I(0, -1) + I(1, -1))
+    elif bottom and right:
+        fx, fy = 2 / 3, 2 / 3
+        ax = (I(0, -1) + 2 * I(0, 0)) - (I(-1, -1) + 2 * I(-1, 0)); ay = (I(-1, 0) + 2 * I(0, 0)) - (I(-1, -1) + 2 * I(0, -1))
+    elif bottom:
+        fx, fy = 1 / 3, 1 / 2
+        ax = (I(1, -1) + 2 * I(1, 0)) - (I(-1, -1) + 2 * I(-1, 0)); ay = (I(-1, 0) + 2 * I(0, 0) + I(1, 0)) - (I(-1, -1) + 2 * I(0, -1) + I(1, -1))
+    elif left:
+        fx, fy = 1 / 2, 1 / 3
+        ax = (I(1, -1) + 2 * I(1, 0) + I(1, 1)) - (I(0, -1) + 2 * I(0, 0) + I(0, 1)); ay = (2 * I(0, 1) + I(1, 1)) - (2 * I(0, -1) + I(1, -1))
+    elif right:
+        fx, fy = 1 / 2, 1 / 3
+        ax = (I(0, -1) + 2 * I(0, 0) + I(0, 1)) - (I(-1, -1) + 2 * I(-1, 0) + I(-1, 1)); ay = (I(-1, 1) + 2 * I(0, 1)) - (I(-1, -1) + 2 * I(0, -1))
+    else:
+        fx, fy = 1 / 4, 1 / 4
+        ax = (I(1, -1) + 2 * I(1, 0) + I(1, 1)) - (I(-1, -1) + 2 * I(-1, 0) + I(-1, 1)); ay = (I(-1, 1) + 2 * I(0, 1) + I(1, 1)) - (I(-1, -1) + 2 * I(0, -1) + I(1, -1))
+    return -ss * fx * ax, -ss * fy * ay
+
+
+def lighting_img(pr, m, inp, W, H, rect, color, specular):
+    lt = pr["light"]
+    hgt = [float(p[3]) for p in inp]
+    ss = float(pr["surface"])
+    kc = float(pr["kconst"])
+    deg = math.pi / 180.0
+    lx = ly = lz = px = py = pz = 0.0
+    if lt["kind"] != "distant":
+        lx, ly = [float(v) for v in m.point(F(lt["pos"][0]), F(lt["pos"][1]))]
+        sx, sy = [float(v) for v in m.device_lengths(F(1), F(1))]
+        zs = math.sqrt(sx * sy)
+        lz = float(lt["pos"][2]) * zs
+        at = lt.get("at", [0, 0, 0])
+        px, py = [float(v) for v in m.point(F(at[0]), F(at[1]))]
+        pz = float(at[2]) * zs
+    dl = (0.0, 0.0, 1.0)
+    if lt["kind"] == "distant":
+        az, el = lt["az"] * deg, lt["el"] * deg
+        dl = (math.cos(az) * math.cos(el), math.sin(az) * math.cos(el), math.sin(el))
+    sd = [0.0, 0.0, 0.0]
+    if lt["kind"] == "spot":
+        sd = [px - lx, py - ly, pz - lz]
+        sl = math.sqrt(sum(c * c for c in sd))
+        if sl > 0:
+            sd = [c / sl for c in sd]
+    out = []
+    for j in range(H):
+        for i in range(W):
+            if i < rect[0] or i >= rect[2] or j < rect[1] or j >= rect[3]:
+                out.append([F(0)] * 4)
+                continue
+            nx, ny = surface_normal(hgt, W, rect, i, j, ss)
+            nl = math.sqrt(nx * nx + ny * ny + 1.0)
+            n = (nx / nl, ny / nl, 1.0 / nl)
+            lc = [float(c) for c in color]
+            if lt["kind"] == "distant":
+                l = dl
+            else:
+                z = ss * hgt[j * W + i]
+                l = [lx - float(i), ly - float(j), lz - z]
+                ll = math.sqrt(sum(c * c for c in l))
+                if ll > 0:
+                    l = [c / ll for c in l]
+                if lt["kind"] == "spot":
+                    sdot = -(l[0] * sd[0] + l[1] * sd[1] + l[2] * sd[2])
+                    f = 0.0
+                    if sdot > 0.0 and not (lt.get("cone") is not None and sdot < math.cos(abs(lt["cone"]) * deg)):
+                        f = sdot ** float(lt["spot_exp"])
+                    lc = [c * f for c in lc]
+            if not specular:
+                ndl = n[0] * l[0] + n[1] * l[1] + n[2] * l[2]
+                f = kc * (ndl if ndl > 0 else 0.0)
+                px_ = [min(max(f * c, 0.0), 1.0) for c in lc]
+                out.append([F(px_[0]), F(px_[1]), F(px_[2]), F(1)])
+            else:
+                hv = (l[0], l[1], l[2] + 1.0)
+                hl = math.sqrt(sum(c * c for c in hv))
+                f = 0.0
+                if hl > 0:
+                    ndh = (n[0] * hv[0] + n[1] * hv[1] + n[2] * hv[2]) / hl
+                    f = kc * (ndh ** float(pr["spec_exp"]) if ndh > 0 else 0.0)
+                px_ = [min(max(f * c, 0.0), 1.0) for c in lc]
+                out.append([F(px_[0]), F(px_[1]), F(px_[2]), F(max(px_))])
+    return out
+
+
 # --- the filter ------------------------------------------------------------------------------------------------------
 
 
@@ -455,6 +688,25 @@ def pixel_rect(m, u, rnd, W, H):
         lim = W if k % 2 == 0 else H
         out.append(int(min(max(v, 0), lim)))
     return out
+
+
+def apply_sub(pr, base):
+    """The primitive's own x y width height over a default rectangle (user space)."""
+    sub = list(base)
+    if "sub" in pr:
+        for k in range(4):
+            v = pr["sub"][k]
+            if v is None:
+                continue
+            if k == 0:
+                sub[0] = F(v)
+            elif k == 1:
+                sub[1] = F(v)
+            elif k == 2:
+                sub[2] = sub[0] + F(v)
+            else:
+                sub[3] = sub[1] + F(v)
+    return tuple(sub)
 
 
 def run_filter(case):
@@ -555,6 +807,14 @@ def run_filter(case):
                 out = morphology(ins[0][0], max(rx, 0), max(ry, 0), pr["op"] == "dilate", W, H)
         elif kind == "convolve":
             out = convolve(ins[0][0], pr, W, H, pixel_rect(m, ins[0][1], 0, W, H))
+        elif kind == "turb":
+            out = turbulence_img(pr, m, W, H, apply_sub(pr, default))
+        elif kind in ("diffuse", "specular"):
+            rect = pixel_rect(m, ins[0][1], 0, W, H)
+            lc = pr["lcolor"]
+            lcol = convert([F(lc[0]), F(lc[1]), F(lc[2]), F(1)], pr.get("color_space", "srgb"), space)
+            # a straight color converted: premultiplied with alpha 1 is the color itself
+            out = lighting_img(pr, m, ins[0][0], W, H, rect, lcol[:3], kind == "specular")
         elif kind == "tile":
             out = tile(ins[0][0], W, H, pixel_rect(m, ins[0][1], 1, W, H))
         elif kind == "displace":
@@ -709,6 +969,19 @@ def cases():
         {"kind": "displace", "inputs": [SRC, res(0)], "scale": 3, "xch": 0, "ych": 1}], space="srgb"))
     out.append(case("displacement-map-from-the-source", [{"kind": "displace", "inputs": [SRC, SRC], "scale": 4, "xch": 1, "ych": 0}],
                     space="srgb"))
+    out.append(case("turbulence", [{"kind": "turb", "inputs": [], "fx": F(1, 8), "fy": F(1, 8), "octaves": 2, "seed": 3, "noise": "turbulence"}],
+                    space="srgb", w=12, h=10))
+    out.append(case("fractal-noise", [{"kind": "turb", "inputs": [], "fx": F(1, 5), "fy": F(1, 7), "octaves": 3, "seed": 7, "noise": "fractal"}],
+                    space="linear", w=12, h=10))
+    out.append(case("turbulence-stitched-under-scale", [{"kind": "turb", "inputs": [], "fx": F(1, 4), "fy": F(1, 4), "octaves": 2, "seed": 1,
+                                                          "noise": "turbulence", "stitch": 1, "sub": [0, 0, 6, 5]}],
+                    m=Map(2, 0, 0, 2, 0, 0), space="srgb", w=12, h=10))
+    for kind in ("diffuse", "specular"):
+        for lt in ({"kind": "distant", "az": 45, "el": 60}, {"kind": "point", "pos": [4, 3, 5]},
+                   {"kind": "spot", "pos": [2, 2, 6], "at": [6, 5, 0], "spot_exp": 2, "cone": 40}):
+            out.append(case("%s-%s-light" % (kind, lt["kind"]), [{"kind": kind, "inputs": [SRC], "surface": 3, "kconst": F(3, 2),
+                                                               "spec_exp": 4, "lcolor": [F(9, 10), F(7, 10), F(1, 2)], "light": lt}],
+                            space="srgb", w=10, h=8))
     out.append(case("region-clips-the-result", [{"kind": "offset", "inputs": [PREV], "dx": 2, "dy": 0}],
                     region=(2, 1, 4, 3), space="srgb"))
     return out
@@ -716,7 +989,7 @@ def cases():
 
 # --- the header -----------------------------------------------------------------------------------------------------
 
-KINDS = {"offset": 1, "flood": 2, "merge": 3, "blend": 4, "composite": 5, "matrix": 6, "transfer": 7, "blur": 8, "shadow": 9,
+KINDS = {"turb": 15, "diffuse": 16, "specular": 17, "offset": 1, "flood": 2, "merge": 3, "blend": 4, "composite": 5, "matrix": 6, "transfer": 7, "blur": 8, "shadow": 9,
          "morph": 10, "convolve": 11, "tile": 12, "displace": 14}
 EDGES = {"none": 0, "duplicate": 1, "wrap": 2}
 OPS = {"over": 0, "in": 1, "out": 2, "atop": 3, "xor": 4, "arithmetic": 5}
@@ -728,6 +1001,17 @@ INKINDS = {"prev": (0, 0), "src": (1, 0), "alpha": (2, 0)}
 
 def d(v):
     return repr(float(v))
+
+
+def emit_extra2(p):
+    lt = p.get("light", {})
+    lk = {"distant": 0, "point": 1, "spot": 2}.get(lt.get("kind"), 0)
+    arr = [lt.get("az", 0), lt.get("el", 0)] + list(lt.get("pos", [0, 0, 0])) + list(lt.get("at", [0, 0, 0])) + [lt.get("spot_exp", 0), lt.get("cone") or 0]
+    arr = [lt.get("az", 0), lt.get("el", 0), lt.get("pos", [0, 0, 0])[0], lt.get("pos", [0, 0, 0])[1], lt.get("pos", [0, 0, 0])[2],
+           lt.get("at", [0, 0, 0])[0], lt.get("at", [0, 0, 0])[1], lt.get("at", [0, 0, 0])[2], lt.get("spot_exp", 0), lt.get("cone") or 0]
+    return ", %d, %d, %d, %s, %s, %s, %s, %d, %d, {%s}" % (
+        p.get("octaves", 0), p.get("stitch", 0), 1 if p.get("noise") == "fractal" else 0, d(p.get("seed", 0)), d(p.get("surface", 0)),
+        d(p.get("kconst", 0)), d(p.get("spec_exp", 0)), lk, 1 if lt.get("cone") is not None else 0, ", ".join(d(v) for v in arr))
 
 
 def emit_extra(p):
@@ -762,10 +1046,13 @@ def emit_prim(p):
         "sub_mask": mask, "sub": subv, "dx": p.get("dx", 0), "dy": p.get("dy", 0),
         "color": [0, 0, 0, 0], "color_space": SPACES[p.get("color_space", "srgb")] if "color" in p else 0, "opacity": p.get("opacity", 0),
         "mode": 0, "k": [0, 0, 0, 0], "nvals": 0, "vals": [0] * 20, "ttype": [0] * 4, "tcount": [0] * 4,
-        "tvals": [[0] * 4 for _ in range(4)], "tparam": [[0] * 3 for _ in range(4)], "sx": p.get("sx", 0), "sy": p.get("sy", 0),
+        "tvals": [[0] * 4 for _ in range(4)], "tparam": [[0] * 3 for _ in range(4)], "sx": p.get("sx", p.get("fx", 0)), "sy": p.get("sy", p.get("fy", 0)),
     }
     if "color" in p:
         fields["color"] = [F(v) for v in p["color"]]
+    if "lcolor" in p:
+        fields["color"] = [F(v) for v in p["lcolor"]] + [F(1)]
+        fields["color_space"] = SPACES["srgb"]
     if k == "blend":
         fields["mode"] = p["mode"]
     if k == "composite":
@@ -819,7 +1106,8 @@ def header():
              "  double dx, dy;", "  double color[4];", "  int color_space;", "  double opacity;", "  double k[4];", "  int nvals;",
              "  double vals[20];", "  int ttype[4], tcount[4];", "  double tvals[4][4];", "  double tparam[4][3];", "  double sx, sy;",
              "  int mode;", "  int edge, order_x, order_y, target_x, target_y;", "  double divisor, bias;", "  int preserve;", "  double scale;",
-             "  int xch, ych;", "  double rx, ry;", "  int dilate;", "};", "",
+             "  int xch, ych;", "  double rx, ry;", "  int dilate;", "  int octaves, stitch, noise;", "  double seed, surface, kconst, spec_exp;",
+             "  int light_kind, has_cone;", "  double light[10];", "};", "",
              "struct FCase {", "  const char * name;", "  int w, h;", "  double map[6];", "  int region_mode;  // 0 explicit, 1 auto",
              "  double region[4];", "  int space;  // the filter's: 1 linearRGB, 2 sRGB", "  int nprims;", "  const FPrim * prims;",
              "  const double * src;   // w * h * 4", "  const double * want;  // w * h * 4", "};", ""]
@@ -831,7 +1119,7 @@ def header():
             lines.append("static const double kPix_%d_%s[] = {%s};" % (n, kind, ", ".join(repr(v) for v in vals)))
         lines.append("static const FPrim kPrims_%d[] = {" % n)
         for p in c["prims"]:
-            lines.append("    " + emit_prim(p).rstrip("}") + ", %d%s}," % (mode_of(p), emit_extra(p)))
+            lines.append("    " + emit_prim(p).rstrip("}") + ", %d%s%s}," % (mode_of(p), emit_extra(p), emit_extra2(p)))
         lines.append("};")
     lines.append("")
     lines.append("static const FCase kCases[] = {")

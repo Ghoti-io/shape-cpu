@@ -221,21 +221,6 @@ TEST(RenderFilterSink, ABlurSpreadsTheSourceSymmetricallyAndKeepsItsTotal) {
   EXPECT_EQ(pixel(r.raster, 0, 0), px(0, 0, 0, 0));
 }
 
-TEST(RenderFilterSink, APrimitiveThisBuildLacksIsRefusedByNameAndNothingOfTheGroupIsDrawn) {
-  rh::Store s;
-  GSHSCENE_Filter_Primitive m = prim(GSHSCENE_FILTER_TURBULENCE);
-  m.input_count = 0;
-  m.inputs = nullptr;
-  GSHSCENE_List * l = group_of_rect(s, intern_filter(s, {m}), 1.0, 1, 1, 3, 3);
-  rh::RasterRef r(make_raster(6, 6, 0x33));
-  Rendered got = render(l, r.raster);
-  ASSERT_EQ(got.result, GSHSCENE_OK);
-  ASSERT_EQ(got.entries.size(), 1u);
-  EXPECT_EQ(got.entries[0].reason, GSHSCENE_REASON_FILTER_PRIMITIVE);
-  EXPECT_EQ(got.entries[0].second, (size_t)(1u << GSHSCENE_FILTER_TURBULENCE));
-  EXPECT_EQ(bytes_of(r.raster), std::string(6 * 6 * 4, '\x33'));
-}
-
 namespace {
 
 /** The centroid of the alpha of a raster (premultiplied RGBA8). */
@@ -255,6 +240,39 @@ void centroid(const GIMG_Raster * r, double * cx, double * cy, double * mass) {
 }
 
 }  // namespace
+
+TEST(RenderFilterSink, AnImagePrimitiveDrawsTheImageUnderItsPlacement) {
+  rh::Store s;
+  GIMG_Raster * pic = nullptr;
+  ASSERT_EQ(gimg_raster_create(2, 2, &GIMG_PIXEL_RGBA8, GIMG_RASTER_OWNED, nullptr, 0, &pic), GIMG_OK);
+  unsigned char * bytes = (unsigned char *)gimg_raster_pixels(pic);
+  const unsigned char texels[4][4] = {{255, 0, 0, 255}, {0, 255, 0, 255}, {0, 0, 255, 255}, {255, 255, 255, 255}};
+  for (int t = 0; t < 4; t++) {
+    std::memcpy(bytes + (t / 2) * gimg_raster_stride_bytes(pic) + (t % 2) * 4, texels[t], 4);
+  }
+  GSHSCENE_Image_Params params{};
+  params.space.primaries = GCOL_PRIMARIES_SRGB;
+  params.space.transfer = GCOL_TRANSFER_SRGB;
+  const GSHSCENE_Resource * image = nullptr;
+  ASSERT_EQ(gshscene_store_intern_image(s.store, pic, &params, &image), GSHSCENE_OK);
+  gimg_raster_destroy(pic);
+  s.held.push_back(image);
+  GSHSCENE_Filter_Primitive m = prim(GSHSCENE_FILTER_IMAGE);
+  m.input_count = 0;
+  m.inputs = nullptr;
+  m.image = image;
+  gshgeom_map_scale(2, 4.0, 4.0, 1.0, &m.placement); // each texel is 4 user units
+  m.placement.t[0] = 2.0;
+  m.placement.t[1] = 2.0;
+  GSHSCENE_List * l = group_of_rect(s, intern_filter(s, {m}), 1.0, 0, 0, 1, 1);
+  rh::RasterRef r(make_raster(12, 12));
+  ASSERT_EQ(render(l, r.raster).result, GSHSCENE_OK);
+  EXPECT_EQ(pixel(r.raster, 3, 3), px(255, 0, 0, 255));
+  EXPECT_EQ(pixel(r.raster, 7, 3), px(0, 255, 0, 255));
+  EXPECT_EQ(pixel(r.raster, 3, 7), px(0, 0, 255, 255));
+  EXPECT_EQ(pixel(r.raster, 7, 7), px(255, 255, 255, 255));
+  EXPECT_EQ(pixel(r.raster, 1, 1), px(0, 0, 0, 0)) << "outside the image is empty";
+}
 
 TEST(RenderFilterSink, ARotatedMapIsFilteredInCanonicalSpaceSoTheFilterFollowsTheElement) {
   rh::Store s;

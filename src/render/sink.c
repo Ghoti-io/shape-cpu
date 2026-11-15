@@ -127,6 +127,8 @@ typedef struct Clip {
       (UINT32_C(1) << GSHSCENE_FILTER_GAUSSIAN_BLUR) | (UINT32_C(1) << GSHSCENE_FILTER_DROP_SHADOW) |                          \
       (UINT32_C(1) << GSHSCENE_FILTER_MORPHOLOGY) | (UINT32_C(1) << GSHSCENE_FILTER_CONVOLVE_MATRIX) |                         \
       (UINT32_C(1) << GSHSCENE_FILTER_TILE) | (UINT32_C(1) << GSHSCENE_FILTER_DISPLACEMENT_MAP) |                              \
+      (UINT32_C(1) << GSHSCENE_FILTER_TURBULENCE) | (UINT32_C(1) << GSHSCENE_FILTER_DIFFUSE_LIGHTING) |                       \
+      (UINT32_C(1) << GSHSCENE_FILTER_SPECULAR_LIGHTING) | (UINT32_C(1) << GSHSCENE_FILTER_IMAGE) |                                                                 \
       GSHSCENE_FILTER_NATIVE_EDGE_DUPLICATE_WRAP | GSHSCENE_FILTER_NATIVE_REGION_AUTO | GSHSCENE_FILTER_NATIVE_CANONICAL_SPACE)
 
 /** The points of the table of a transfer between two spaces of one gamut (fast8). */

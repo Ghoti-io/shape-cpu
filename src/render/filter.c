@@ -724,6 +724,330 @@ static void prim_displace(const GSHSCENE_Filter_Primitive * pr, const double * i
   }
 }
 
+/* --- turbulence and lighting (stage 4) ---------------------------------------------------------------------------------- */
+
+#define NOISE_B 0x100
+#define NOISE_BM 0xff
+#define NOISE_N 0x1000
+#define RAND_M 2147483647L
+#define RAND_A 16807L
+#define RAND_Q 127773L
+#define RAND_R 2836L
+
+typedef struct Noise {
+  int lattice[NOISE_B + NOISE_B + 2];
+  double grad[4][NOISE_B + NOISE_B + 2][2];
+} Noise;
+
+typedef struct Stitch {
+  int w, h, wrap_x, wrap_y;
+} Stitch;
+
+static long noise_random(long seed) {
+  long r = RAND_A * (seed % RAND_Q) - RAND_R * (seed / RAND_Q);
+  return r <= 0 ? r + RAND_M : r;
+}
+
+/** The reference implementation of the standard's turbulence: the lattice and the gradients from the seed. */
+static void noise_init(Noise * nz, double seed_value) {
+  long seed = (long)(seed_value < 0 ? gmath_ceil(seed_value - 0.5) : gmath_floor(seed_value + 0.5)); /* the seed is rounded (FL18) */
+  if (seed <= 0) {
+    seed = -(seed % (RAND_M - 1)) + 1;
+  }
+  if (seed > RAND_M - 1) {
+    seed = RAND_M - 1;
+  }
+  for (int k = 0; k < 4; k++) {
+    for (int i = 0; i < NOISE_B; i++) {
+      nz->lattice[i] = i;
+      for (int j = 0; j < 2; j++) {
+        seed = noise_random(seed);
+        nz->grad[k][i][j] = (double)((seed % (NOISE_B + NOISE_B)) - NOISE_B) / NOISE_B;
+      }
+      const double len = gmath_sqrt(nz->grad[k][i][0] * nz->grad[k][i][0] + nz->grad[k][i][1] * nz->grad[k][i][1]);
+      if (len > 0.0) {
+        nz->grad[k][i][0] /= len;
+        nz->grad[k][i][1] /= len;
+      }
+    }
+  }
+  for (int i = NOISE_B - 1; i > 0; i--) {
+    const int k = nz->lattice[i];
+    seed = noise_random(seed);
+    const int j = (int)(seed % NOISE_B);
+    nz->lattice[i] = nz->lattice[j];
+    nz->lattice[j] = k;
+  }
+  for (int i = 0; i < NOISE_B + 2; i++) {
+    nz->lattice[NOISE_B + i] = nz->lattice[i];
+    for (int k = 0; k < 4; k++) {
+      nz->grad[k][NOISE_B + i][0] = nz->grad[k][i][0];
+      nz->grad[k][NOISE_B + i][1] = nz->grad[k][i][1];
+    }
+  }
+}
+
+static double s_curve(double t) {
+  return t * t * (3.0 - 2.0 * t);
+}
+
+static double lerp(double t, double a, double b) {
+  return a + t * (b - a);
+}
+
+static double noise2(const Noise * nz, int ch, double vx, double vy, const Stitch * st) {
+  double t = vx + NOISE_N;
+  int bx0 = (int)t;
+  int bx1 = bx0 + 1;
+  const double rx0 = t - (double)(int)t, rx1 = rx0 - 1.0;
+  t = vy + NOISE_N;
+  int by0 = (int)t;
+  int by1 = by0 + 1;
+  const double ry0 = t - (double)(int)t, ry1 = ry0 - 1.0;
+  if (st) {
+    if (bx0 >= st->wrap_x) {
+      bx0 -= st->w;
+    }
+    if (bx1 >= st->wrap_x) {
+      bx1 -= st->w;
+    }
+    if (by0 >= st->wrap_y) {
+      by0 -= st->h;
+    }
+    if (by1 >= st->wrap_y) {
+      by1 -= st->h;
+    }
+  }
+  bx0 &= NOISE_BM;
+  bx1 &= NOISE_BM;
+  by0 &= NOISE_BM;
+  by1 &= NOISE_BM;
+  const int i = nz->lattice[bx0], j = nz->lattice[bx1];
+  const int b00 = nz->lattice[i + by0], b10 = nz->lattice[j + by0], b01 = nz->lattice[i + by1], b11 = nz->lattice[j + by1];
+  const double sx = s_curve(rx0), sy = s_curve(ry0);
+  const double (*g)[2] = nz->grad[ch];
+  double u = rx0 * g[b00][0] + ry0 * g[b00][1];
+  double v = rx1 * g[b10][0] + ry0 * g[b10][1];
+  const double a = lerp(sx, u, v);
+  u = rx0 * g[b01][0] + ry1 * g[b01][1];
+  v = rx1 * g[b11][0] + ry1 * g[b11][1];
+  const double b = lerp(sx, u, v);
+  return lerp(sy, a, b);
+}
+
+static double turbulence_sum(const Noise * nz, int ch, double px, double py, double fx, double fy, uint32_t octaves, int fractal, int stitch,
+    Rect2 tile) {
+  Stitch st;
+  Stitch * stp = NULL;
+  const double tw = tile.x1 - tile.x0, th = tile.y1 - tile.y0;
+  if (stitch) {
+    if (fx != 0.0) {
+      const double lo = gmath_floor(tw * fx) / tw, hi = gmath_ceil(tw * fx) / tw;
+      fx = (lo > 0.0 && fx / lo < hi / fx) ? lo : hi;
+    }
+    if (fy != 0.0) {
+      const double lo = gmath_floor(th * fy) / th, hi = gmath_ceil(th * fy) / th;
+      fy = (lo > 0.0 && fy / lo < hi / fy) ? lo : hi;
+    }
+    st.w = (int)(tw * fx + 0.5);
+    st.h = (int)(th * fy + 0.5);
+    st.wrap_x = (int)(tile.x0 * fx + NOISE_N + st.w);
+    st.wrap_y = (int)(tile.y0 * fy + NOISE_N + st.h);
+    stp = &st;
+  }
+  double sum = 0.0, ratio = 1.0;
+  double vx = px * fx, vy = py * fy;
+  for (uint32_t o = 0; o < octaves; o++) {
+    const double nv = noise2(nz, ch, vx, vy, stp);
+    sum += (fractal ? nv : gmath_fabs(nv)) / ratio;
+    vx *= 2.0;
+    vy *= 2.0;
+    ratio *= 2.0;
+    if (stp) {
+      stp->w *= 2;
+      stp->wrap_x = 2 * stp->wrap_x - NOISE_N;
+      stp->h *= 2;
+      stp->wrap_y = 2 * stp->wrap_y - NOISE_N;
+    }
+  }
+  return sum;
+}
+
+static void prim_turbulence(const GSHSCENE_Filter_Primitive * pr, const Aff * m, GSHCPU_Rect canvas, size_t w, size_t h, Rect2 tile, double * out) {
+  Noise * nz = NULL;
+  Noise local;
+  nz = &local;
+  noise_init(nz, pr->seed);
+  const int fractal = pr->mode == (uint32_t)GSHSCENE_FILTER_NOISE_FRACTAL;
+  for (size_t j = 0; j < h; j++) {
+    for (size_t i = 0; i < w; i++) {
+      double ux, uy;
+      aff_inverse_point(m, (double)canvas.x0 + (double)i, (double)canvas.y0 + (double)j, &ux, &uy);
+      double c[4];
+      for (int ch = 0; ch < 4; ch++) {
+        double v = turbulence_sum(nz, ch, ux, uy, pr->sx, pr->sy, pr->octaves, fractal, (int)pr->stitch_tiles, tile);
+        v = fractal ? (v + 1.0) / 2.0 : v;
+        c[ch] = clamp01(v);
+      }
+      premultiply4(c, &out[PIX * (j * w + i)]);
+    }
+  }
+}
+
+static double height_at(const double * in, size_t w, const long r[4], long x, long y) {
+  (void)r;
+  return in[PIX * ((size_t)y * w + (size_t)x) + 3];
+}
+
+/** The surface normal's x and y (before the surface scale) at (@p x, @p y) of the image rectangle @p r by the standard's table of kernels. */
+static void surface_normal(const double * in, size_t w, const long r[4], long x, long y, double ss, double * nx, double * ny) {
+  const int left = x == r[0], right = x == r[2] - 1, top = y == r[1], bottom = y == r[3] - 1;
+#define I(dx, dy) height_at(in, w, r, x + (dx), y + (dy))
+  double fx, fy, ax, ay;
+  if (r[2] - r[0] < 2 || r[3] - r[1] < 2) {
+    *nx = *ny = 0.0;
+    return;
+  }
+  if (top && left) {
+    fx = 2.0 / 3.0; fy = 2.0 / 3.0;
+    ax = (2 * I(1, 0) + I(1, 1)) - (2 * I(0, 0) + I(0, 1));
+    ay = (2 * I(0, 1) + I(1, 1)) - (2 * I(0, 0) + I(1, 0));
+  } else if (top && right) {
+    fx = 2.0 / 3.0; fy = 2.0 / 3.0;
+    ax = (2 * I(0, 0) + I(0, 1)) - (2 * I(-1, 0) + I(-1, 1));
+    ay = (I(-1, 1) + 2 * I(0, 1)) - (I(-1, 0) + 2 * I(0, 0));
+  } else if (top) {
+    fx = 1.0 / 3.0; fy = 1.0 / 2.0;
+    ax = (2 * I(1, 0) + I(1, 1)) - (2 * I(-1, 0) + I(-1, 1));
+    ay = (I(-1, 1) + 2 * I(0, 1) + I(1, 1)) - (I(-1, 0) + 2 * I(0, 0) + I(1, 0));
+  } else if (bottom && left) {
+    fx = 2.0 / 3.0; fy = 2.0 / 3.0;
+    ax = (I(1, -1) + 2 * I(1, 0)) - (I(0, -1) + 2 * I(0, 0));
+    ay = (2 * I(0, 0) + I(1, 0)) - (2 * I(0, -1) + I(1, -1));
+  } else if (bottom && right) {
+    fx = 2.0 / 3.0; fy = 2.0 / 3.0;
+    ax = (I(0, -1) + 2 * I(0, 0)) - (I(-1, -1) + 2 * I(-1, 0));
+    ay = (I(-1, 0) + 2 * I(0, 0)) - (I(-1, -1) + 2 * I(0, -1));
+  } else if (bottom) {
+    fx = 1.0 / 3.0; fy = 1.0 / 2.0;
+    ax = (I(1, -1) + 2 * I(1, 0)) - (I(-1, -1) + 2 * I(-1, 0));
+    ay = (I(-1, 0) + 2 * I(0, 0) + I(1, 0)) - (I(-1, -1) + 2 * I(0, -1) + I(1, -1));
+  } else if (left) {
+    fx = 1.0 / 2.0; fy = 1.0 / 3.0;
+    ax = (I(1, -1) + 2 * I(1, 0) + I(1, 1)) - (I(0, -1) + 2 * I(0, 0) + I(0, 1));
+    ay = (2 * I(0, 1) + I(1, 1)) - (2 * I(0, -1) + I(1, -1));
+  } else if (right) {
+    fx = 1.0 / 2.0; fy = 1.0 / 3.0;
+    ax = (I(0, -1) + 2 * I(0, 0) + I(0, 1)) - (I(-1, -1) + 2 * I(-1, 0) + I(-1, 1));
+    ay = (I(-1, 1) + 2 * I(0, 1)) - (I(-1, -1) + 2 * I(0, -1));
+  } else {
+    fx = 1.0 / 4.0; fy = 1.0 / 4.0;
+    ax = (I(1, -1) + 2 * I(1, 0) + I(1, 1)) - (I(-1, -1) + 2 * I(-1, 0) + I(-1, 1));
+    ay = (I(-1, 1) + 2 * I(0, 1) + I(1, 1)) - (I(-1, -1) + 2 * I(0, -1) + I(1, -1));
+  }
+#undef I
+  *nx = -ss * fx * ax;
+  *ny = -ss * fy * ay;
+}
+
+static void prim_lighting(const GSHSCENE_Filter_Primitive * pr, const Aff * m, GSHCPU_Rect canvas, const double * in, double * out, size_t w, size_t h,
+    const long r[4], const double color[3]) {
+  const int specular = pr->kind == GSHSCENE_FILTER_SPECULAR_LIGHTING;
+  const GSHSCENE_Filter_Light * lt = &pr->light;
+  /* a light's position in the filter's pixels: x and y through the map, z by the root of the product of the axis scales */
+  double lx = 0, ly = 0, lz = 0, px = 0, py = 0, pz = 0;
+  if (lt->kind != (uint32_t)GSHSCENE_FILTER_LIGHT_DISTANT) {
+    aff_point(m, lt->position[0], lt->position[1], &lx, &ly);
+    double sx, sy;
+    device_lengths(m, 1.0, 1.0, &sx, &sy);
+    const double zs = gmath_sqrt(sx * sy);
+    lz = lt->position[2] * zs;
+    aff_point(m, lt->points_at[0], lt->points_at[1], &px, &py);
+    pz = lt->points_at[2] * zs;
+  }
+  double dl[3] = {0, 0, 1};
+  if (lt->kind == (uint32_t)GSHSCENE_FILTER_LIGHT_DISTANT) {
+    const double az = lt->azimuth * (3.14159265358979323846 / 180.0), el = lt->elevation * (3.14159265358979323846 / 180.0);
+    dl[0] = gmath_cos(az) * gmath_cos(el);
+    dl[1] = gmath_sin(az) * gmath_cos(el);
+    dl[2] = gmath_sin(el);
+  }
+  double sdir[3] = {0, 0, 0};
+  if (lt->kind == (uint32_t)GSHSCENE_FILTER_LIGHT_SPOT) {
+    sdir[0] = px - lx;
+    sdir[1] = py - ly;
+    sdir[2] = pz - lz;
+    const double sl = gmath_sqrt(sdir[0] * sdir[0] + sdir[1] * sdir[1] + sdir[2] * sdir[2]);
+    if (sl > 0.0) {
+      sdir[0] /= sl;
+      sdir[1] /= sl;
+      sdir[2] /= sl;
+    }
+  }
+  for (size_t j = 0; j < h; j++) {
+    for (size_t i = 0; i < w; i++) {
+      double * o = &out[PIX * (j * w + i)];
+      o[0] = o[1] = o[2] = o[3] = 0.0;
+      const long x = (long)i, y = (long)j;
+      if (x < r[0] || x >= r[2] || y < r[1] || y >= r[3]) {
+        continue;
+      }
+      double nx, ny;
+      surface_normal(in, w, r, x, y, pr->surface_scale, &nx, &ny);
+      const double nl = gmath_sqrt(nx * nx + ny * ny + 1.0);
+      const double n[3] = {nx / nl, ny / nl, 1.0 / nl};
+      double l[3];
+      double lc[3] = {color[0], color[1], color[2]};
+      if (lt->kind == (uint32_t)GSHSCENE_FILTER_LIGHT_DISTANT) {
+        memcpy(l, dl, sizeof l);
+      } else {
+        const double z = pr->surface_scale * height_at(in, w, r, x, y);
+        l[0] = lx - ((double)canvas.x0 + (double)x);
+        l[1] = ly - ((double)canvas.y0 + (double)y);
+        l[2] = lz - z;
+        const double ll = gmath_sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
+        if (ll > 0.0) {
+          l[0] /= ll;
+          l[1] /= ll;
+          l[2] /= ll;
+        }
+        if (lt->kind == (uint32_t)GSHSCENE_FILTER_LIGHT_SPOT) {
+          const double sdot = -(l[0] * sdir[0] + l[1] * sdir[1] + l[2] * sdir[2]);
+          double f = 0.0;
+          if (sdot > 0.0 && !(lt->has_cone && sdot < gmath_cos(gmath_fabs(lt->cone_angle) * (3.14159265358979323846 / 180.0)))) {
+            f = gmath_pow(sdot, lt->spot_exponent);
+          }
+          for (int c = 0; c < 3; c++) {
+            lc[c] *= f;
+          }
+        }
+      }
+      if (!specular) {
+        const double ndl = n[0] * l[0] + n[1] * l[1] + n[2] * l[2];
+        const double f = pr->constant * (ndl > 0.0 ? ndl : 0.0);
+        for (int c = 0; c < 3; c++) {
+          o[c] = clamp01(f * lc[c]);
+        }
+        o[3] = 1.0;
+      } else {
+        double hv[3] = {l[0], l[1], l[2] + 1.0};
+        const double hl = gmath_sqrt(hv[0] * hv[0] + hv[1] * hv[1] + hv[2] * hv[2]);
+        double f = 0.0;
+        if (hl > 0.0) {
+          const double ndh = (n[0] * hv[0] + n[1] * hv[1] + n[2] * hv[2]) / hl;
+          f = pr->constant * (ndh > 0.0 ? gmath_pow(ndh, pr->exponent) : 0.0);
+        }
+        double a = 0.0;
+        for (int c = 0; c < 3; c++) {
+          o[c] = clamp01(f * lc[c]);
+          a = o[c] > a ? o[c] : a;
+        }
+        o[3] = a;
+      }
+    }
+  }
+}
+
 /* --- the executor ----------------------------------------------------------------------------------------------------- */
 
 typedef struct Env {
@@ -844,6 +1168,68 @@ static void pixel_span(const Env * e, Rect2 u, size_t out[4]) {
   }
 }
 
+/** The primitive's own x, y, width and height (user space) over the default @p base (FL4). */
+static Rect2 apply_subregion(const GSHSCENE_Filter_Primitive * pr, Rect2 base) {
+  Rect2 sub = base;
+  if (pr->subregion_mask & 1u) {
+    sub.x0 = pr->subregion[0];
+  }
+  if (pr->subregion_mask & 2u) {
+    sub.y0 = pr->subregion[1];
+  }
+  if (pr->subregion_mask & 4u) {
+    sub.x1 = sub.x0 + pr->subregion[2];
+  }
+  if (pr->subregion_mask & 8u) {
+    sub.y1 = sub.y0 + pr->subregion[3];
+  }
+  return sub;
+}
+
+/** feImage: the image under its placement map (the image's space to the user space), nearest texel at each pixel center, empty outside (FL17). */
+static void prim_image(const Env * e, const GSHSCENE_Filter_Primitive * pr, const GSHSCENE_Color_Space * space, double * out) {
+  GSHSCENE_Image_Info info;
+  const int ok = gshscene_resource_image(pr->image, &info) == GSHSCENE_OK;
+  GSHGEOM_Map inv;
+  GSHGEOM_Map placement = pr->placement;
+  if (placement.dim != 2) {
+    gshgeom_map_identity(2, &placement);
+  }
+  const double det = placement.m[0][0] * placement.m[1][1] - placement.m[0][1] * placement.m[1][0];
+  const int placed = ok && det != 0.0;
+  if (placed) { /* the inverse of the placement: the linear part by the adjugate, the translation carried through it */
+    inv.m[0][0] = placement.m[1][1] / det;
+    inv.m[0][1] = -placement.m[0][1] / det;
+    inv.m[1][0] = -placement.m[1][0] / det;
+    inv.m[1][1] = placement.m[0][0] / det;
+    inv.t[0] = -(inv.m[0][0] * placement.t[0] + inv.m[0][1] * placement.t[1]);
+    inv.t[1] = -(inv.m[1][0] * placement.t[0] + inv.m[1][1] * placement.t[1]);
+  }
+  GSHCPU_Convert cv;
+  const GSHSCENE_Color_Space from = ok && !gshscene_color_space_is_target(&info.space) ? info.space : e->layer_space;
+  gshcpu_render_convert_prepare(&cv, &from, space);
+  for (size_t j = 0; j < e->h; j++) {
+    for (size_t i = 0; i < e->w; i++) {
+      double * o = &out[PIX * (j * e->w + i)];
+      o[0] = o[1] = o[2] = o[3] = 0.0;
+      if (!placed) {
+        continue;
+      }
+      double ux, uy;
+      aff_inverse_point(&e->m, (double)e->canvas.x0 + (double)i + 0.5, (double)e->canvas.y0 + (double)j + 0.5, &ux, &uy);
+      const double ix = inv.m[0][0] * ux + inv.m[0][1] * uy + inv.t[0];
+      const double iy = inv.m[1][0] * ux + inv.m[1][1] * uy + inv.t[1];
+      if (!(ix >= 0.0 && iy >= 0.0 && ix < (double)info.width && iy < (double)info.height)) {
+        continue;
+      }
+      double px[4];
+      if (gshscene_image_decode(pr->image, (uint32_t)ix, (uint32_t)iy, px) == GSHSCENE_OK) {
+        gshcpu_render_convert_premultiplied(&cv, px, o);
+      }
+    }
+  }
+}
+
 static GSHCPU_Result run_primitive(Env * e, size_t i) {
   const GSHSCENE_Filter_Primitive * pr = &e->f->primitives[i];
   double * out = result_buf(e, i);
@@ -852,6 +1238,14 @@ static GSHCPU_Result run_primitive(Env * e, size_t i) {
   const double * in0 = NULL;
   const double * in1 = NULL;
   switch (pr->kind) {
+    case GSHSCENE_FILTER_IMAGE:
+      prim_image(e, pr, &e->space[i], out);
+      break;
+    case GSHSCENE_FILTER_TURBULENCE: {
+      Rect2 tile = apply_subregion(pr, e->region_u);
+      prim_turbulence(pr, &e->m, e->canvas, e->w, e->h, tile, out);
+      break;
+    }
     case GSHSCENE_FILTER_FLOOD: {
       double c[4];
       flood_color(e, pr, &e->space[i], c);
@@ -883,7 +1277,7 @@ static GSHCPU_Result run_primitive(Env * e, size_t i) {
     default:
       break;
   }
-  if (pr->kind != GSHSCENE_FILTER_FLOOD && pr->kind != GSHSCENE_FILTER_MERGE) {
+  if (pr->kind != GSHSCENE_FILTER_FLOOD && pr->kind != GSHSCENE_FILTER_MERGE && pr->kind != GSHSCENE_FILTER_TURBULENCE && pr->kind != GSHSCENE_FILTER_IMAGE) {
     in0 = fetch(e, i, 0, 0, &sub_in[0]);
     if (pr->input_count > 1) {
       in1 = fetch(e, i, 1, 1, &sub_in[1]);
@@ -956,6 +1350,18 @@ static GSHCPU_Result run_primitive(Env * e, size_t i) {
         prim_displace(pr, in0, in1, out, e->w, e->h, dx, dy);
         break;
       }
+      case GSHSCENE_FILTER_DIFFUSE_LIGHTING:
+      case GSHSCENE_FILTER_SPECULAR_LIGHTING: {
+        long r[4];
+        pixel_rect(e, sub_in[0], 0, r);
+        const GSHSCENE_Color_Space from = gshscene_color_space_is_target(&pr->color.space) ? e->layer_space : pr->color.space;
+        GSHCPU_Convert cv;
+        gshcpu_render_convert_prepare(&cv, &from, &e->space[i]);
+        double lc[3] = {pr->color.rgba[0], pr->color.rgba[1], pr->color.rgba[2]};
+        gshcpu_render_convert_straight(&cv, lc, lc);
+        prim_lighting(pr, &e->m, e->canvas, in0, out, e->w, e->h, r, lc);
+        break;
+      }
       case GSHSCENE_FILTER_DROP_SHADOW: {
         double dx, dy;
         device_lengths(&e->m, pr->sx, pr->sy, &dx, &dy);
@@ -994,19 +1400,8 @@ static GSHCPU_Result run_primitive(Env * e, size_t i) {
     }
   }
   /* FL4: the subregion, the default and the primitive's own coordinates; the result is clipped to it */
-  Rect2 sub = default_subregion(sub_in, (pr->kind == GSHSCENE_FILTER_FLOOD || pr->kind == GSHSCENE_FILTER_TILE) ? 0 : (n_in > 2 ? 2 : n_in), e->region_u); /* feTile's default is the filter region (FL4) */
-  if (pr->subregion_mask & 1u) {
-    sub.x0 = pr->subregion[0];
-  }
-  if (pr->subregion_mask & 2u) {
-    sub.y0 = pr->subregion[1];
-  }
-  if (pr->subregion_mask & 4u) {
-    sub.x1 = sub.x0 + pr->subregion[2];
-  }
-  if (pr->subregion_mask & 8u) {
-    sub.y1 = sub.y0 + pr->subregion[3];
-  }
+  Rect2 sub = default_subregion(sub_in, (pr->kind == GSHSCENE_FILTER_FLOOD || pr->kind == GSHSCENE_FILTER_TILE || pr->kind == GSHSCENE_FILTER_TURBULENCE || pr->kind == GSHSCENE_FILTER_IMAGE) ? 0 : (n_in > 2 ? 2 : n_in), e->region_u); /* feTile's default is the filter region (FL4) */
+  sub = apply_subregion(pr, sub);
   e->sub[i] = sub;
   clip_to(&e->m, e->canvas, sub, out, e->wx, e->wy);
   return GSHCPU_OK;
@@ -1032,6 +1427,10 @@ GSHCPU_Result gshcpu_filter_apply(const GSHSCENE_Filter * f, const GSHGEOM_Map *
       case GSHSCENE_FILTER_CONVOLVE_MATRIX:
       case GSHSCENE_FILTER_TILE:
       case GSHSCENE_FILTER_DISPLACEMENT_MAP:
+      case GSHSCENE_FILTER_TURBULENCE:
+      case GSHSCENE_FILTER_IMAGE:
+      case GSHSCENE_FILTER_DIFFUSE_LIGHTING:
+      case GSHSCENE_FILTER_SPECULAR_LIGHTING:
         break;
       default:
         return GSHCPU_ERR_UNSUPPORTED;

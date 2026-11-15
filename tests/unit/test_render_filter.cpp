@@ -100,6 +100,27 @@ void build(const FCase & c, Built * b) {
       p.mode = v.dilate ? GSHSCENE_FILTER_MORPHOLOGY_DILATE : GSHSCENE_FILTER_MORPHOLOGY_ERODE;
     }
     p.edge_mode = (uint32_t)v.edge;
+    if (v.kind == GSHSCENE_FILTER_TURBULENCE) {
+      p.octaves = (uint32_t)v.octaves;
+      p.stitch_tiles = (uint32_t)v.stitch;
+      p.mode = v.noise ? GSHSCENE_FILTER_NOISE_FRACTAL : GSHSCENE_FILTER_NOISE_TURBULENCE;
+      p.seed = v.seed;
+    }
+    if (v.kind == GSHSCENE_FILTER_DIFFUSE_LIGHTING || v.kind == GSHSCENE_FILTER_SPECULAR_LIGHTING) {
+      p.surface_scale = v.surface;
+      p.constant = v.kconst;
+      p.exponent = v.spec_exp;
+      p.light.kind = (uint32_t)v.light_kind;
+      p.light.azimuth = v.light[0];
+      p.light.elevation = v.light[1];
+      for (int k = 0; k < 3; k++) {
+        p.light.position[k] = v.light[2 + k];
+        p.light.points_at[k] = v.light[5 + k];
+      }
+      p.light.spot_exponent = v.light[8];
+      p.light.has_cone = (uint32_t)v.has_cone;
+      p.light.cone_angle = v.light[9];
+    }
     if (v.kind == GSHSCENE_FILTER_CONVOLVE_MATRIX) {
       p.order_x = (uint32_t)v.order_x;
       p.order_y = (uint32_t)v.order_y;
@@ -186,7 +207,7 @@ TEST(RenderFilter, EveryVectorIsTheOraclesWithinOneTrillionth) {
     }
     cases++;
   }
-  EXPECT_GE(cases, 50u);
+  EXPECT_GE(cases, 59u);
 }
 
 TEST(RenderFilter, AScratchTooSmallIsRefusedAndNothingIsWritten) {
@@ -224,7 +245,7 @@ TEST(RenderFilter, WhatThisBuildDoesNotDrawIsRefusedByName) {
   EXPECT_EQ(gshcpu_filter_apply(&b.f, &turned, &space, canvas, layer.data(), scratch.data(), scratch.size(), &dirty),
       GSHCPU_ERR_UNSUPPORTED);
   // a primitive of a later stage
-  b.prims[0].kind = GSHSCENE_FILTER_TURBULENCE;
+  b.prims[0].kind = GSHSCENE_FILTER_KIND_COUNT;
   const GSHGEOM_Map map = map_of(c.map);
   EXPECT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), &dirty),
       GSHCPU_ERR_UNSUPPORTED);
