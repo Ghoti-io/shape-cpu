@@ -375,6 +375,13 @@ void compare_seeds(unsigned first, unsigned last, bool profiles, Totals * out) {
     ASSERT_EQ(d.result, GSHSCENE_OK) << "seed " << seed;
     ASSERT_EQ(d.count(GSHSCENE_ENTRY_REFUSED), 0u) << "seed " << seed;
     profiled += sc.profiled;
+    /* one context per scene: each stroke is expanded once and every pixel's point is tested against it */
+    GSHSCENE_Pick_Context * context = nullptr;
+    ASSERT_EQ(gshscene_pick_context_create(nullptr, list, nullptr, 0, &context), GSHSCENE_OK);
+    struct ContextGuard {
+      GSHSCENE_Pick_Context * c;
+      ~ContextGuard() { gshscene_pick_context_destroy(c); }
+    } guard{context};
     for (int y = 0; y < kSize; y++) {
       for (int x = 0; x < kSize; x++) {
         GSHSCENE_Pick_Params q;
@@ -382,7 +389,7 @@ void compare_seeds(unsigned first, unsigned last, bool profiles, Totals * out) {
         q.point.x = 64 * x + 32;
         q.point.y = 64 * y + 32;
         GSHSCENE_Pick * pick = nullptr;
-        ASSERT_EQ(gshscene_pick_list(nullptr, list, &q, &pick), GSHSCENE_OK);
+        ASSERT_EQ(gshscene_pick_context_pick(context, &q, &pick), GSHSCENE_OK);
         int expect = 0;  // the red byte, 0 for nothing drawn
         bool skip = false;
         for (size_t i = 0; i < gshscene_pick_count(pick) && !skip; i++) {
