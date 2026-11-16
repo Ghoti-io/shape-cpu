@@ -760,6 +760,10 @@ def run_filter(case):
                     sub[2] = sub[0] + F(v)
                 else:
                     sub[3] = sub[1] + F(v)
+        # A subregion outside the filter region is empty there (intermediate results live in the region only).
+        sub[0], sub[1] = max(sub[0], region_u[0]), max(sub[1], region_u[1])
+        sub[2], sub[3] = min(sub[2], region_u[2]), min(sub[3], region_u[3])
+        sub[2], sub[3] = max(sub[2], sub[0]), max(sub[3], sub[1])
         sub = tuple(sub)
         kind = pr["kind"]
         if kind == "offset":
@@ -964,6 +968,10 @@ def cases():
     out.append(case("tile-subregion", [
         {"kind": "offset", "inputs": [SRC], "dx": 0, "dy": 0, "sub": [1, 1, 3, 3]},
         {"kind": "tile", "inputs": [PREV]}], space="srgb"))
+    out.append(case("tile-of-a-subregion-outside-the-region", [
+        {"kind": "flood", "inputs": [], "color": [1, 0, 0, 1], "opacity": 1, "sub": [0, 0, 1, 1]},
+        {"kind": "offset", "inputs": [PREV], "dx": 1, "dy": 1, "sub": [0, 0, 4, 4]},
+        {"kind": "tile", "inputs": [PREV]}], region=(2, 2, 6, 5), space="srgb"))
     out.append(case("displacement-map", [
         {"kind": "flood", "inputs": [], "color": [F(3, 4), F(1, 4), 0, 1], "opacity": 1, "color_space": "srgb"},
         {"kind": "displace", "inputs": [SRC, res(0)], "scale": 3, "xch": 0, "ych": 1}], space="srgb"))

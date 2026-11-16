@@ -1402,6 +1402,14 @@ static GSHCPU_Result run_primitive(Env * e, size_t i) {
   /* FL4: the subregion, the default and the primitive's own coordinates; the result is clipped to it */
   Rect2 sub = default_subregion(sub_in, (pr->kind == GSHSCENE_FILTER_FLOOD || pr->kind == GSHSCENE_FILTER_TILE || pr->kind == GSHSCENE_FILTER_TURBULENCE || pr->kind == GSHSCENE_FILTER_IMAGE) ? 0 : (n_in > 2 ? 2 : n_in), e->region_u); /* feTile's default is the filter region (FL4) */
   sub = apply_subregion(pr, sub);
+  /* A subregion outside the filter region is empty there: intermediate results live in the region only (so a feTile of such an
+     input tiles nothing, as the references have it). */
+  if (sub.x0 < e->region_u.x0) { sub.x0 = e->region_u.x0; }
+  if (sub.y0 < e->region_u.y0) { sub.y0 = e->region_u.y0; }
+  if (sub.x1 > e->region_u.x1) { sub.x1 = e->region_u.x1; }
+  if (sub.y1 > e->region_u.y1) { sub.y1 = e->region_u.y1; }
+  if (sub.x1 < sub.x0) { sub.x1 = sub.x0; }
+  if (sub.y1 < sub.y0) { sub.y1 = sub.y0; }
   e->sub[i] = sub;
   clip_to(&e->m, e->canvas, sub, out, e->wx, e->wy);
   return GSHCPU_OK;
