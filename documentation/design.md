@@ -315,6 +315,31 @@ rationals and shares nothing with the library or with shape-scene's oracle): wor
 `1e-12` bound, 204 stored values exact; nine fixtures add 72 goldens (36 exact, 36 under the fast coverages) and move no earlier
 one. On the corpus the 60 masked pops took FT-M1 in 29 and FT-M2 in 48.
 
+### A group's filter (FC1 to FC6)
+
+A group that names a filter resource (`filter.h`: a region and a graph of primitives) is drawn in `double` layers, over the whole extent of the
+render and writing only the damage (FC2), with every primitive and the features `REGION_AUTO`, `EDGE_DUPLICATE_WRAP`, `CANONICAL_SPACE` and
+`BACKDROP` claimed (FC1). The arithmetic is the primitive's definition in real numbers, rounded to `double`, which an exact-rational oracle
+restates (`tools/gen-filter-vectors.py`; the vectors agree to 1e-12).
+
+**At the pop (FC3).** A group in the default filter mode is filtered when it is popped: the filter runs over its layer, then the pop composites
+the result with the clips, the soft mask and the opacity, as it would the group's own layer (FL20: the filter comes first). The filter's scratch
+(two temporaries and the work lines of a blur) comes from the item allocator and is counted by the sizing.
+
+**On the backdrop (FC6).** A group whose filter mode is `BACKDROP` filters what is under it, at its *push*. The enclosing layer is made ready
+over the whole region and copied into the group's layer weighed by the coverage of the clips in force (the backdrop, clipped); the same
+filter engine runs over the copy in the enclosing layer's space; and the result `F` replaces the enclosing layer's pixel `P` by
+`(1 - w) P + w F`, with `w` the clips' coverage times the group's opacity times its soft mask's value (the mask is drawn as the pop of a masked
+group draws it, so a refusal inside it is the pop's). The group then draws its own content into its own isolated layer and is popped as any
+group is: the content is not filtered, and it composites over the replaced backdrop. A source-over of `F` would count a translucent
+backdrop twice; the weight is the replacement a CSS backdrop filter is. Under a non-isolated or knockout group, or one with a knockout
+ancestor, the enclosing layer carries group channels beside its pixels and cannot be replaced as one image: the group is refused
+`FILTER_BACKDROP` while the render runs, and inside a pattern's tile (a grid of its own) the use that is painted with the pattern is
+refused as a sink limit (PC8). The target's own pixels are part of the root's backdrop, so a render over a target that already holds content
+filters that content, and the damaged render equals the whole one inside the damage. `tests/unit/test_render_filter_backdrop.cpp` states
+each case against the ordinary filter of an isolated copy of the backdrop, composed by the test, and the planted defects `fb-*` of
+`tools/check-planted.py` show that each part of the push is read.
+
 ### Non-isolated and knockout groups (KC1 to KC11)
 
 A **general layer** is the layer of a group that is non-isolated or knockout. T3 to T5 of the waist's transparency model say what its

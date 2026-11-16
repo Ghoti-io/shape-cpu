@@ -736,7 +736,7 @@
  *
  * - **FC1 What the sink claims.**  `GSHSCENE_CAP_GROUP_FILTER` and, in `filter_native`, the primitives `OFFSET`, `FLOOD`, `MERGE`, `BLEND`,
  *   `COMPOSITE`, `COLOR_MATRIX`, `COMPONENT_TRANSFER`, `GAUSSIAN_BLUR`, `DROP_SHADOW`, `MORPHOLOGY`, `CONVOLVE_MATRIX`, `TILE` and
- *   `DISPLACEMENT_MAP`, and the features `REGION_AUTO` and `EDGE_DUPLICATE_WRAP`.  A filter that needs another primitive
+ *   `DISPLACEMENT_MAP`, and the features `REGION_AUTO`, `EDGE_DUPLICATE_WRAP` and `BACKDROP` (FC6).  A filter that needs another primitive
  *   (`FILTER_PRIMITIVE`, the missing bits in `second`), or a group whose composed map has a rotation other than a multiple of 90 degrees or a shear (`FILTER_MAP`) is refused by
  *   the planning pass and its block drawn as nothing.  A list that holds a filtered group is composited in `double` layers, as a masked
  *   list is.
@@ -750,6 +750,16 @@
  *   buffers the graph holds at once, two temporaries and the work lines of a blur) is taken from the item allocator at the pop and given
  *   back, so under `CALLER_MEMORY` it is the arena's, and the sizing (`gshscene_sink_workspace_bytes`) counts it exactly.
  * - **FC4 What it does not draw.**  `IMAGE`, `TURBULENCE`, the two lightings and canonical space: refused by FC1, never drawn approximately.
+ * - **FC6 A filter on the backdrop (FL22, D-FL13 to D-FL15).**  A group whose `filter_mode` is `BACKDROP` does its filtering at its push, not at
+ *   its pop.  The enclosing layer (the root's, which holds the target's own pixels, or the nearest enclosing group's) is made ready over the whole
+ *   region and copied into the group's layer weighed by the coverage of the clips in force; the filter runs over the copy in the enclosing
+ *   layer's space (FC3's arithmetic and scratch, the group's composed map, canonical space for a rotated one), and the result `F` replaces the
+ *   enclosing layer's pixel `P` by `(1 - w) P + w F`, `w` being the clips' coverage times the group's opacity times its soft mask's value, which
+ *   is drawn as the pop of a masked group draws it.  Nothing outside the clips and the mask is written.  The group then draws and pops as any
+ *   group, its own content unfiltered and composited over the replaced backdrop.  A group whose parent is non-isolated or knockout, or has a
+ *   knockout ancestor, is refused `FILTER_BACKDROP` while the render runs, and inside a pattern's tile the use that is painted with the
+ *   pattern is refused as a sink limit (PC8): the enclosing layer is then not one image this sink can replace.  The sizing counts the
+ *   filter's scratch as for any filtered group.
  *
  * ### Non-isolated and knockout groups (KC1 to KC11; shape-scene's T1 to T7)
  *

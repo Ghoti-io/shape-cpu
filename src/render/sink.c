@@ -118,7 +118,8 @@ typedef struct Clip {
 
 /**
  * The filter primitives and features this sink draws (FC1): offset, flood, merge, blend, composite, color matrix, component transfer,
- * Gaussian blur and drop shadow, morphology, convolution, tile and displacement map, every edge mode, and a region that is derived (`AUTO`).
+ * Gaussian blur and drop shadow, morphology, convolution, tile and displacement map, every edge mode, a region that is derived (`AUTO`), and a
+ * filter whose source is the backdrop under the group (FC6).
  */
 #define GSHCPU_FILTER_NATIVE                                                                                                    \
   ((UINT32_C(1) << GSHSCENE_FILTER_OFFSET) | (UINT32_C(1) << GSHSCENE_FILTER_FLOOD) | (UINT32_C(1) << GSHSCENE_FILTER_MERGE) | \
@@ -129,7 +130,8 @@ typedef struct Clip {
       (UINT32_C(1) << GSHSCENE_FILTER_TILE) | (UINT32_C(1) << GSHSCENE_FILTER_DISPLACEMENT_MAP) |                              \
       (UINT32_C(1) << GSHSCENE_FILTER_TURBULENCE) | (UINT32_C(1) << GSHSCENE_FILTER_DIFFUSE_LIGHTING) |                       \
       (UINT32_C(1) << GSHSCENE_FILTER_SPECULAR_LIGHTING) | (UINT32_C(1) << GSHSCENE_FILTER_IMAGE) |                                                                 \
-      GSHSCENE_FILTER_NATIVE_EDGE_DUPLICATE_WRAP | GSHSCENE_FILTER_NATIVE_REGION_AUTO | GSHSCENE_FILTER_NATIVE_CANONICAL_SPACE)
+      GSHSCENE_FILTER_NATIVE_EDGE_DUPLICATE_WRAP | GSHSCENE_FILTER_NATIVE_REGION_AUTO | GSHSCENE_FILTER_NATIVE_CANONICAL_SPACE |         \
+      GSHSCENE_FILTER_NATIVE_BACKDROP)
 
 /** The points of the table of a transfer between two spaces of one gamut (fast8). */
 #define XFER_POINTS 4096u
@@ -1902,11 +1904,11 @@ static GSHSCENE_Result op_workspace_bytes(void * impl, const GSHSCENE_Render_Req
 /* --- one unit ----------------------------------------------------------------------------------- */
 
 /** Refused while drawing (S6): the entry; under strict the render stops here, else the item's block is skipped. */
-static GSHSCENE_Result refuse(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+static GSHSCENE_Result refuse_as(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count, GSHSCENE_Reason reason) {
   if (cur_pat(run)) {
     return GSHSCENE_ERR_LIMIT; /* PC8: inside a tile the sink's limit refuses the use that is painted with the pattern, not the unit */
   }
-  GSHSCENE_Result r = gshscene_job_report(run->job, GSHSCENE_ENTRY_REFUSED, GSHSCENE_REASON_RESOURCE_LIMIT, chain, count);
+  GSHSCENE_Result r = gshscene_job_report(run->job, GSHSCENE_ENTRY_REFUSED, reason, chain, count);
   if (r != GSHSCENE_OK) {
     return r;
   }
@@ -1917,6 +1919,10 @@ static GSHSCENE_Result refuse(Run * run, const GSHSCENE_Item * item, const size_
   }
   skip_begin(&run->skip, item, count);
   return GSHSCENE_OK;
+}
+
+static GSHSCENE_Result refuse(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  return refuse_as(run, item, chain, count, GSHSCENE_REASON_RESOURCE_LIMIT);
 }
 
 /**
@@ -4049,7 +4055,30 @@ static GSHSCENE_Result clip_push(Run * run, const GSHSCENE_Item * item, const si
   return GSHSCENE_OK;
 }
 
-static void group_push(Run * run, const GSHSCENE_Item * item, size_t index) {
+static GSHSCENE_Result group_backdrop(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count);
+
+/**
+ * FC6, D-FL14: whether a backdrop filter may open now.  The backdrop is the enclosing context's layer as it stands, which is one image
+ * only where the group's parent is an isolated layer without a knockout ancestor; under a non-isolated or knockout parent the layer holds
+ * the parent's own backdrop and shape channels beside the pixels, and replacing a pixel would leave them describing another image.  Not
+ * inside a pattern's tile either, which is drawn on a grid of its own that the filter's canvas does not follow.
+ */
+static int backdrop_context_ok(const Run * run) {
+  if (cur_pat(run)) {
+    return 0; /* inside a pattern's tile the layer is the lattice's, drawn in the tile's own grid */
+  }
+  if (!run->general) {
+    return 1; /* no group of the list is non-isolated or knockout */
+  }
+  const Gen_Frame * pg = &gs_of(run)->frames[run->top];
+  return !pg->nonisolated && !pg->knockout && !pg->ko_anc;
+}
+
+static GSHSCENE_Result group_push(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  const size_t index = chain[count - 1u];
+  if (item->group.filter_mode == (uint32_t)GSHSCENE_FILTER_MODE_BACKDROP && !backdrop_context_ok(run)) {
+    return refuse_as(run, item, chain, count, GSHSCENE_REASON_FILTER_BACKDROP);
+  }
   const Frame * parent = &run->frames[run->top];
   Frame * f = &run->frames[++run->top];
   f->layer = run->layers + (run->top - 1u) * run->layout.pixels * 4u; /* made ready as it is drawn on (widen) */
@@ -4095,6 +4124,10 @@ static void group_push(Run * run, const GSHSCENE_Item * item, size_t index) {
     memset(&mf->whole_dirty, 0, sizeof mf->whole_dirty);
     mf->push = index;
   }
+  if (item->group.filter_mode == (uint32_t)GSHSCENE_FILTER_MODE_BACKDROP) {
+    return group_backdrop(run, item, chain, count);
+  }
+  return GSHSCENE_OK;
 }
 
 /** The pixel (x, y) of @p f's layer, in bytes (fast8). */
@@ -4785,15 +4818,15 @@ static size_t filter_scratch(const GSHSCENE_Filter * fl, const GSHGEOM_Map * com
 }
 
 /**
- * FC3: the filter of the group on top of the stack, run over its layer before the pop composites it (FL20: the filter comes first, then the
- * clips, the mask and the opacity, which are the pop's).  The whole region is the filter's canvas (or, for a rotated or skewed map, FC5's
- * canonical canvas); the pixels outside the group's dirty rectangle are made ready (zero) first, and the group's dirty rectangle becomes the
- * filter's.  The scratch comes from the item allocator (the sink's, or the caller's arena, whose measure counts it).
+ * FC3: run @p filter over @p layer, the pixels of the whole region (four doubles each, in @p space, every one made ready), which the result
+ * replaces; @p dirty is the rectangle that now holds it.  The whole region is the filter's canvas (or, for a rotated or skewed map, FC5's
+ * canonical canvas).  @p count is the chain length of the group, whose composed map is the filter's.  The scratch comes from the item
+ * allocator (the sink's, or the caller's arena, whose measure counts it).
  */
-static GSHSCENE_Result group_filter(Run * run, size_t count) {
-  Frame * f = &run->frames[run->top];
+static GSHSCENE_Result filter_over(Run * run, const GSHSCENE_Resource * filter, double * layer, const GSHSCENE_Color_Space * space,
+    size_t count, GSHCPU_Rect * dirty) {
   GSHSCENE_Filter fl;
-  if (gshscene_resource_filter(f->group.filter, &fl) != GSHSCENE_OK) {
+  if (gshscene_resource_filter(filter, &fl) != GSHSCENE_OK) {
     return GSHSCENE_ERR_INTERNAL;
   }
   GSHGEOM_Map composed;
@@ -4801,7 +4834,6 @@ static GSHSCENE_Result group_filter(Run * run, size_t count) {
     return GSHSCENE_ERR_LIMIT; /* the group's map cannot be formed: the sink's own limit */
   }
   const GSHCPU_Rect canvas = run->layout.region;
-  widen(run, f, canvas);
   size_t canon_doubles;
   const size_t need = filter_scratch(&fl, &composed, canvas, &canon_doubles);
   if (need == SIZE_MAX || need > SIZE_MAX / sizeof(double)) {
@@ -4816,10 +4848,9 @@ static GSHSCENE_Result group_filter(Run * run, size_t count) {
   if (!scratch) {
     return GSHSCENE_ERR_OOM;
   }
-  GSHCPU_Rect dirty;
   GSHCPU_Result r;
   if (!k.on) {
-    r = gshcpu_filter_apply(&fl, &composed, &f->space, canvas, f->layer, scratch, need, &dirty);
+    r = gshcpu_filter_apply(&fl, &composed, space, canvas, layer, scratch, need, dirty);
   } else {
     double * layer_q = scratch;
     double * engine = scratch + canon_doubles;
@@ -4829,10 +4860,10 @@ static GSHSCENE_Result group_filter(Run * run, size_t count) {
       for (size_t i = 0; i < wq; i++) {
         const double qx = gshcpu_render_i2d(k.q.x0) + (double)i + 0.5, qy = gshcpu_render_i2d(k.q.y0) + (double)j + 0.5;
         const double dx = k.n[0] * qx + k.n[1] * qy + k.c[0], dy = k.n[2] * qx + k.n[3] * qy + k.c[1];
-        bilinear(f->layer, canvas, dx, dy, &layer_q[4u * (j * wq + i)]);
+        bilinear(layer, canvas, dx, dy, &layer_q[4u * (j * wq + i)]);
       }
     }
-    r = gshcpu_filter_apply(&fl, &k.map, &f->space, k.q, layer_q, engine, need - canon_doubles, &dirty);
+    r = gshcpu_filter_apply(&fl, &k.map, space, k.q, layer_q, engine, need - canon_doubles, dirty);
     if (r == GSHCPU_OK) {
       /* and back onto the device's pixels */
       const size_t w = (size_t)(canvas.x1 - canvas.x0);
@@ -4840,10 +4871,10 @@ static GSHSCENE_Result group_filter(Run * run, size_t count) {
         for (int64_t x = canvas.x0; x < canvas.x1; x++) {
           const double dx = gshcpu_render_i2d(x) + 0.5 - k.c[0], dy = gshcpu_render_i2d(y) + 0.5 - k.c[1];
           const double qx = k.ninv[0] * dx + k.ninv[1] * dy, qy = k.ninv[2] * dx + k.ninv[3] * dy;
-          bilinear(layer_q, k.q, qx, qy, &f->layer[4u * ((size_t)(y - canvas.y0) * w + (size_t)(x - canvas.x0))]);
+          bilinear(layer_q, k.q, qx, qy, &layer[4u * ((size_t)(y - canvas.y0) * w + (size_t)(x - canvas.x0))]);
         }
       }
-      dirty = canvas;
+      *dirty = canvas;
     }
   }
   run->item_alloc->free_fn(run->item_alloc->ctx, scratch);
@@ -4855,19 +4886,122 @@ static GSHSCENE_Result group_filter(Run * run, size_t count) {
      * it, and not the color of the tail of a blur that no level of alpha shows (a straight target would keep that color at alpha 0). */
     const size_t n = run->layout.pixels;
     for (size_t p = 0; p < n; p++) {
-      double * v = &f->layer[4u * p];
+      double * v = &layer[4u * p];
       if (v[3] * 255.0 < 0.5) {
         v[0] = v[1] = v[2] = v[3] = 0.0;
       }
     }
   }
-  f->dirty = dirty;
   run->work += 2u * (uint64_t)run->layout.pixels * (uint64_t)fl.primitive_count;
   return GSHSCENE_OK;
 }
 
+/**
+ * FC3: the filter of the group on top of the stack, run over its layer before the pop composites it (FL20: the filter comes first, then the
+ * clips, the mask and the opacity, which are the pop's).  The pixels outside the group's dirty rectangle are made ready (zero) first, and the
+ * group's dirty rectangle becomes the filter's.
+ */
+static GSHSCENE_Result group_filter(Run * run, size_t count) {
+  Frame * f = &run->frames[run->top];
+  widen(run, f, run->layout.region);
+  GSHCPU_Rect dirty;
+  const GSHSCENE_Result r = filter_over(run, f->group.filter, f->layer, &f->space, count, &dirty);
+  if (r != GSHSCENE_OK) {
+    return r;
+  }
+  f->dirty = dirty;
+  return GSHSCENE_OK;
+}
+
+/**
+ * FC6, FL22: the backdrop filter of the group just pushed (on top of the stack, its layer not yet drawn on).  The parent's layer over the
+ * whole canvas is made ready and copied into the group's layer weighed by the clips in force (the backdrop, clipped), and the filter runs over
+ * that copy in the parent's space.  The result `F` then replaces the parent's pixels `P` by the weight `w` of the pop of any group over
+ * them, `P' = (1 - w) P + w F`, where `w` is the clips' coverage times the group's opacity times its soft mask's value (FL20: the
+ * filter's result is what the clips, the mask and the opacity act on), so nothing outside them is written.  The mask is drawn as the pop
+ * of a masked group draws it, and the group's frame is left empty, to be drawn on and popped as any group's is, its content composited
+ * over the replaced backdrop.
+ */
+static GSHSCENE_Result group_backdrop(Run * run, const GSHSCENE_Item * item, const size_t * chain, size_t count) {
+  Frame * f = &run->frames[run->top];
+  Frame * parent = &run->frames[run->top - 1u];
+  const GSHCPU_Rect canvas = run->layout.region;
+  const size_t w = (size_t)(canvas.x1 - canvas.x0);
+  widen(run, parent, canvas);
+  const int clipped = parent->clip_base != f->clip_base;
+  const GSHCPU_Rect reach = reach_of(run, parent->clip_base, f->clip_base); /* a clip's coverage is held inside its rectangle only */
+  for (int64_t y = canvas.y0; y < canvas.y1; y++) {
+    for (int64_t x = canvas.x0; x < canvas.x1; x++) {
+      const size_t p = (size_t)(y - canvas.y0) * w + (size_t)(x - canvas.x0);
+      const uint32_t m8 = !clipped ? 255u : inside(reach, x, y) ? weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y) : 0u;
+      const double keep = (double)m8 / 255.0;
+      for (int i = 0; i < 4; i++) {
+        f->layer[4u * p + (size_t)i] = parent->layer[4u * p + (size_t)i];
+        if (m8 != 255u) { /* an if, not a select of doubles: no x87 on a 32-bit x86 build (AD-17) */
+          f->layer[4u * p + (size_t)i] *= keep;
+        }
+      }
+    }
+  }
+  GSHCPU_Rect dirty;
+  GSHSCENE_Result r = filter_over(run, item->group.filter, f->layer, &parent->space, count, &dirty);
+  if (r != GSHSCENE_OK) {
+    return r;
+  }
+  /* the replacement, over the pixels the clips reach; the same region and whole region as the pop of a group that no bounded operator limits */
+  GSHCPU_Rect whole = {0, 0, 0, 0};
+  if (run->masked) {
+    Mask_Frame * frames = ms_of(run)->frames;
+    whole = gshcpu_render_rect_meet(ms_of(run)->whole_window, whole_reach_of(run, parent->clip_base, f->clip_base));
+    if (!gshcpu_render_rect_empty(whole)) {
+      frames[run->top - 1u].whole_dirty = gshcpu_render_rect_join(frames[run->top - 1u].whole_dirty, whole);
+    }
+  }
+  const int masked = f->group.soft_mask != NULL;
+  Mask_Pop mp;
+  if (masked) {
+    if (gshcpu_render_rect_empty(whole)) {
+      return GSHSCENE_OK; /* the whole render replaces nothing here, and draws no mask for it (MC6) */
+    }
+    r = mask_pop_begin(run, &mp, chain, count, reach, whole);
+    if (r != GSHSCENE_OK) {
+      return r;
+    }
+  }
+  const double o = item->group.opacity;
+  for (int64_t y = reach.y0; y < reach.y1; y++) {
+    for (int64_t x = reach.x0; x < reach.x1; x++) {
+      const uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);
+      if (m8 == 0) {
+        continue;
+      }
+      const size_t p = (size_t)(y - canvas.y0) * w + (size_t)(x - canvas.x0);
+      double v = 1.0;
+      if (masked) {
+        v = mask_pop_value(run, &mp, x, y, p);
+      }
+      const double weight = ((double)m8 / 255.0) * o * v;
+      double * d = &parent->layer[4u * p];
+      const double * fr = &f->layer[4u * p];
+      for (int i = 0; i < 4; i++) {
+        d[i] = (1.0 - weight) * d[i] + weight * fr[i];
+      }
+      if (run->top == 1u) {
+        run->touched[p] = 1;
+      }
+    }
+  }
+  if (!gshcpu_render_rect_empty(reach)) {
+    run->work += (masked ? 2u : 1u) * (uint64_t)(reach.x1 - reach.x0) * (uint64_t)(reach.y1 - reach.y0);
+  }
+  if (masked) {
+    mask_pop_end(run, &mp, reach);
+  }
+  return GSHSCENE_OK;
+}
+
 static GSHSCENE_Result group_pop(Run * run, const size_t * chain, size_t count) {
-  if (run->frames[run->top].group.filter) {
+  if (run->frames[run->top].group.filter && run->frames[run->top].group.filter_mode == (uint32_t)GSHSCENE_FILTER_MODE_OWN) {
     const GSHSCENE_Result r = group_filter(run, count);
     if (r != GSHSCENE_OK) {
       return r;
@@ -6423,8 +6557,7 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
       run->clip_count--;
       return GSHSCENE_OK;
     case GSHSCENE_ITEM_GROUP_PUSH:
-      group_push(run, item, chain[count - 1u]);
-      return GSHSCENE_OK;
+      return group_push(run, item, chain, count);
     case GSHSCENE_ITEM_GROUP_POP:
       return group_pop(run, chain, count);
     case GSHSCENE_ITEM_INSTANCE:

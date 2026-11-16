@@ -2499,6 +2499,35 @@ PLANTS_POV = [
 PLANTS += PLANTS_POV
 
 
+# A group whose filter's source is the backdrop under it (shape-scene FL22, D-FL13, D-FL14; render.h FC6): the push that runs it, the
+# clip that limits what the filter sees and where its result replaces, the weight (opacity, mask), the contexts it refuses, the
+# space it runs in and the claim.  Run alone with PLANT_ONLY='^fb-'.
+FB = ["testRender_filter_backdrop"]
+PLANTS_FB = [
+    ('fb-mode-ignored', 'src', RS, '  if (item->group.filter_mode == (uint32_t)GSHSCENE_FILTER_MODE_BACKDROP) {\n    return group_backdrop(run, item, chain, count);', '  if (0) {\n    return group_backdrop(run, item, chain, count);', FB),
+    ('fb-pop-filters-content', 'src', RS, 'if (run->frames[run->top].group.filter && run->frames[run->top].group.filter_mode == (uint32_t)GSHSCENE_FILTER_MODE_OWN) {', 'if (run->frames[run->top].group.filter) {', FB),
+    ('fb-input-unclipped', 'src', RS, '      const uint32_t m8 = !clipped ? 255u : inside(reach, x, y) ? weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y) : 0u;', '      const uint32_t m8 = ((void)reach, (void)clipped, 255u);', FB),
+    ('fb-input-clip-outside-rect', 'src', RS, '      const uint32_t m8 = !clipped ? 255u : inside(reach, x, y) ? weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y) : 0u;', '      const uint32_t m8 = !clipped ? 255u : weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);', FB),
+    ('fb-replace-unweighed-by-clip', 'src', RS, '      const uint32_t m8 = weigh_clips(run, parent->clip_base, f->clip_base, 255u, x, y);\n      if (m8 == 0) {\n        continue;\n      }\n      const size_t p = (size_t)(y - canvas.y0) * w + (size_t)(x - canvas.x0);\n      double v = 1.0;', '      const uint32_t m8 = 255u;\n      const size_t p = (size_t)(y - canvas.y0) * w + (size_t)(x - canvas.x0);\n      double v = 1.0;', FB),
+    ('fb-opacity-ignored', 'src', RS, '      const double weight = ((double)m8 / 255.0) * o * v;', '      const double weight = ((double)m8 / 255.0) * v + 0.0 * o;', FB),
+    ('fb-mask-ignored', 'src', RS, '        v = mask_pop_value(run, &mp, x, y, p);\n      }\n      const double weight', '        v = 1.0;\n      }\n      const double weight', FB),
+    ('fb-replace-adds', 'src', RS, '        d[i] = (1.0 - weight) * d[i] + weight * fr[i];', '        d[i] = d[i] + weight * fr[i];', FB),
+    ('fb-replace-keeps-backdrop', 'src', RS, '        d[i] = (1.0 - weight) * d[i] + weight * fr[i];', '        d[i] = (1.0 - weight) * d[i] + weight * fr[i] * fr[3];', FB),
+    ('fb-touched-dropped', 'src', RS, '      if (run->top == 1u) {\n        run->touched[p] = 1;\n      }\n    }\n  }\n  if (!gshcpu_render_rect_empty(reach)) {', '    }\n  }\n  if (!gshcpu_render_rect_empty(reach)) {', FB),
+    ('fb-parent-not-ready', 'src', RS, '  widen(run, parent, canvas);\n  const int clipped = parent->clip_base != f->clip_base;', '  const int clipped = parent->clip_base != f->clip_base;', FB),
+    ('fb-context-not-checked', 'src', RS, '  return !pg->nonisolated && !pg->knockout && !pg->ko_anc;', '  (void)pg;\n  return 1;', FB),
+    ('fb-context-knockout-ancestor', 'src', RS, '  return !pg->nonisolated && !pg->knockout && !pg->ko_anc;', '  return !pg->nonisolated && !pg->knockout;', FB),
+    ('fb-context-nonisolated', 'src', RS, '  return !pg->nonisolated && !pg->knockout && !pg->ko_anc;', '  return !pg->knockout && !pg->ko_anc;', FB),
+    ('fb-context-knockout', 'src', RS, '  return !pg->nonisolated && !pg->knockout && !pg->ko_anc;', '  return !pg->nonisolated && !pg->ko_anc;', FB),
+    ('fb-context-tile', 'src', RS, '  if (cur_pat(run)) {\n    return 0; /* inside a pattern\'s tile the layer is the lattice\'s', '  if (0) {\n    return 0; /* inside a pattern\'s tile the layer is the lattice\'s', FB),
+    ('fb-refusal-reason', 'src', RS, 'return refuse_as(run, item, chain, count, GSHSCENE_REASON_FILTER_BACKDROP);', 'return refuse(run, item, chain, count);', FB),
+    ('fb-filter-space-is-the-groups', 'src', RS, 'filter_over(run, item->group.filter, f->layer, &parent->space, count, &dirty);', 'filter_over(run, item->group.filter, f->layer, &f->space, count, &dirty);', FB),
+    ('fb-claim', 'src', RS, '      GSHSCENE_FILTER_NATIVE_BACKDROP)\n', '      0u)\n', FB),
+    ('fb-mask-whole-join', 'src', RS, '      frames[run->top - 1u].whole_dirty = gshcpu_render_rect_join(frames[run->top - 1u].whole_dirty, whole);\n    }\n  }\n  const int masked = f->group.soft_mask != NULL;', '      (void)frames;\n    }\n  }\n  const int masked = f->group.soft_mask != NULL;', FB),
+]
+PLANTS += PLANTS_FB
+
+
 # The hand-written plants no test is seen to catch, with why.  The gate prints each as "known" and does not fail on it; it fails
 # when one of them IS caught (take it out of this table then) and when a name here is not in the plant table.  The first is
 # equivalent in the design; the others are not shown to be, and each names the case a test would have to build.
