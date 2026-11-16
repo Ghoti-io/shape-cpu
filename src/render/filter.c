@@ -1190,6 +1190,7 @@ static Rect2 apply_subregion(const GSHSCENE_Filter_Primitive * pr, Rect2 base) {
 /**
  * feImage: the image under its placement map (the image's space to the user space), sampled as an image paint is (FL17): the primitive's `rendering`
  * names the point filter, or the exact mean for AREA, by the same arithmetic as the paint's (gshcpu_render_image_at), empty outside the image.
+ * The image is interpolated in its own color space and the result converted to the primitive's.
  * The mean's work is bounded by the limits' defaults (IC9), as the paint's is by the sink's limits.
  */
 static GSHCPU_Result prim_image(const Env * e, const GSHSCENE_Filter_Primitive * pr, const GSHSCENE_Color_Space * space, double * out) {
@@ -1214,10 +1215,24 @@ static GSHCPU_Result prim_image(const Env * e, const GSHSCENE_Filter_Primitive *
   composed.t[1] = e->m.c * placement.t[0] + e->m.d * placement.t[1] + e->m.f;
   const uint32_t whole_window[4] = {0, 0, 0, 0};
   GSHCPU_Image im;
-  /* the filtering happens in the primitive's space, so the sampler's output needs no further conversion */
-  if (!ok || pr->rendering >= (uint32_t)GSHSCENE_IMAGE_FILTER_COUNT ||
-      gshcpu_render_image_open(&im, pr->image, whole_window, (uint32_t)GSHSCENE_IMAGE_EXTEND_NONE, (uint32_t)GSHSCENE_IMAGE_EXTEND_NONE,
-          pr->rendering, space, &e->layer_space, space) != GSHCPU_OK ||
+  /* The image is filtered in its own space, as the references do (the texels are what is interpolated), and the result is then converted
+     to the primitive's space. */
+  const GSHSCENE_Color_Space from = ok && !gshscene_color_space_is_target(&info.space) ? info.space : e->layer_space;
+  /* The edge texels continue (PAD) so that the smoothing does not fade the image's border; the image's rectangle is then cut out by the
+     pixel center, as the references clip it. */
+  GSHGEOM_Map inv;
+  const double det = placement.m[0][0] * placement.m[1][1] - placement.m[0][1] * placement.m[1][0];
+  if (det != 0.0) {
+    inv.m[0][0] = placement.m[1][1] / det;
+    inv.m[0][1] = -placement.m[0][1] / det;
+    inv.m[1][0] = -placement.m[1][0] / det;
+    inv.m[1][1] = placement.m[0][0] / det;
+    inv.t[0] = -(inv.m[0][0] * placement.t[0] + inv.m[0][1] * placement.t[1]);
+    inv.t[1] = -(inv.m[1][0] * placement.t[0] + inv.m[1][1] * placement.t[1]);
+  }
+  if (!ok || det == 0.0 || pr->rendering >= (uint32_t)GSHSCENE_IMAGE_FILTER_COUNT ||
+      gshcpu_render_image_open(&im, pr->image, whole_window, (uint32_t)GSHSCENE_IMAGE_EXTEND_PAD, (uint32_t)GSHSCENE_IMAGE_EXTEND_PAD,
+          pr->rendering, &from, &e->layer_space, &from) != GSHCPU_OK ||
       !gshcpu_render_image_place(&im, &composed)) {
     return GSHCPU_OK; /* a missing image or a placement that cannot be inverted draws nothing */
   }
@@ -1232,17 +1247,22 @@ static GSHCPU_Result prim_image(const Env * e, const GSHSCENE_Filter_Primitive *
       return GSHCPU_ERR_LIMIT;
     }
   }
+  GSHCPU_Convert cv;
+  gshcpu_render_convert_prepare(&cv, &from, space);
   const double cx = gshcpu_render_i2d(e->canvas.x0);
   const double cy = gshcpu_render_i2d(e->canvas.y0);
   for (size_t j = 0; j < e->h; j++) {
     for (size_t i = 0; i < e->w; i++) {
+      double ux, uy;
+      aff_inverse_point(&e->m, cx + (double)i + 0.5, cy + (double)j + 0.5, &ux, &uy);
+      const double ix = inv.m[0][0] * ux + inv.m[0][1] * uy + inv.t[0];
+      const double iy = inv.m[1][0] * ux + inv.m[1][1] * uy + inv.t[1];
+      if (!(ix >= 0.0 && iy >= 0.0 && ix < (double)info.width && iy < (double)info.height)) {
+        continue; /* outside the image's rectangle: empty (the buffer is cleared above) */
+      }
       double src[4];
       gshcpu_render_image_at(&im, cx + (double)i + 0.5, cy + (double)j + 0.5, src);
-      double * o = &out[PIX * (j * e->w + i)];
-      o[0] = src[0];
-      o[1] = src[1];
-      o[2] = src[2];
-      o[3] = src[3];
+      gshcpu_render_convert_premultiplied(&cv, src, &out[PIX * (j * e->w + i)]);
     }
   }
   return GSHCPU_OK;
