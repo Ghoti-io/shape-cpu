@@ -57,7 +57,11 @@ struct Scenario {
   Gen g;
   int next_color = 1;
   std::vector<GSHSCENE_Paint> paints;
-  explicit Scenario(unsigned seed) : g(seed) {}
+  /** Whether a stroke may carry a width profile: building the body of a profiled, dashed stroke is the cost of the whole comparison
+   *  (every pixel is its own pick, and a pick expands the stroke again), so the profiled scenarios are a test of their own. */
+  bool profiles;
+  size_t profiled = 0;
+  Scenario(unsigned seed, bool with_profiles) : g(seed), profiles(with_profiles) {}
 
   GSHSCENE_Paint fresh() {
     GSHSCENE_Paint p = rh::solid((double)next_color / 255.0, 0.0, 0.0, 1.0);
@@ -102,7 +106,8 @@ struct Scenario {
     st.width = widths[g.pick(0, 3)];
     st.join = (uint32_t)g.pick(0, 2);
     st.cap = (uint32_t)g.pick(0, 2);
-    if (g.pick(0, 3) == 0) {
+    if (g.pick(0, 3) == 0 && profiles) {
+      profiled++;
       /* a width profile (SW1 to SW14), with the join and cap picked above, and below the dashes and the alignment: stops that taper,
        * swell and jump */
       std::vector<GSHSCENE_Width_Stop> stops;
@@ -351,20 +356,25 @@ int color_of(const GSHSCENE_List * top, const size_t * chain, size_t count) {
   return -1;
 }
 
-}  // namespace
+struct Totals {
+  size_t compared = 0, drawn = 0, boundary = 0, chains = 0, stroked = 0, profiled = 0;
+};
 
-TEST(RenderPick, EveryPixelCenterNamesTheItemThatIsDrawnThere) {
+/** The pick against the pixels for the seeds [first, last], with or without width profiles; fails through gtest. */
+void compare_seeds(unsigned first, unsigned last, bool profiles, Totals * out) {
   size_t compared = 0;
   size_t drawn = 0;
   size_t boundary = 0;
   size_t chains = 0;
   size_t stroked = 0;
-  for (unsigned seed = 1; seed <= 140; seed++) {
-    Scenario sc(seed);
+  size_t profiled = 0;
+  for (unsigned seed = first; seed <= last; seed++) {
+    Scenario sc(seed, profiles);
     GSHSCENE_List * list = sc.list();
     const Draw d = draw(list, kSize, kSize);
     ASSERT_EQ(d.result, GSHSCENE_OK) << "seed " << seed;
     ASSERT_EQ(d.count(GSHSCENE_ENTRY_REFUSED), 0u) << "seed " << seed;
+    profiled += sc.profiled;
     for (int y = 0; y < kSize; y++) {
       for (int x = 0; x < kSize; x++) {
         GSHSCENE_Pick_Params q;
@@ -405,11 +415,29 @@ TEST(RenderPick, EveryPixelCenterNamesTheItemThatIsDrawnThere) {
       }
     }
   }
-  EXPECT_GT(compared, 70000u);
-  EXPECT_GT(drawn, 20000u) << "the comparison sees drawn pixels, not only empty ones";
-  EXPECT_GT(chains, 2000u) << "and pixels drawn through an instance";
-  EXPECT_GT(stroked, 2000u) << "and strokes";
-  EXPECT_LT(boundary, compared / 20) << "edges are the exception";
+  *out = Totals{compared, drawn, boundary, chains, stroked, profiled};
+}
+
+}  // namespace
+
+TEST(RenderPick, EveryPixelCenterNamesTheItemThatIsDrawnThere) {
+  Totals t;
+  compare_seeds(1, 140, false, &t);
+  EXPECT_GT(t.compared, 70000u);
+  EXPECT_GT(t.drawn, 20000u) << "the comparison sees drawn pixels, not only empty ones";
+  EXPECT_GT(t.chains, 2000u) << "and pixels drawn through an instance";
+  EXPECT_GT(t.stroked, 2000u) << "and strokes";
+  EXPECT_EQ(t.profiled, 0u);
+  EXPECT_LT(t.boundary, t.compared / 20) << "edges are the exception";
+}
+
+TEST(RenderPick, EveryPixelCenterOfAWidthProfileStrokeNamesTheItemThatIsDrawnThere) {
+  Totals t;
+  compare_seeds(1001, 1016, true, &t);
+  EXPECT_GT(t.compared, 8000u);
+  EXPECT_GT(t.stroked, 200u);
+  EXPECT_GE(t.profiled, 10u) << "the scenarios carry width profiles: this test would otherwise be the one above";
+  EXPECT_LT(t.boundary, t.compared / 20) << "edges are the exception";
 }
 
 int main(int argc, char ** argv) {

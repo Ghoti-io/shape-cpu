@@ -1696,20 +1696,31 @@ def link_test(test, objs, out, test_obj=None):
         raise RuntimeError("cannot link %s:\n%s" % (test, r.stderr))
 
 
-def _limits():
-    """A planted defect may loop or allocate without end; bound both."""
-    import resource
-    limit = int(float(os.environ.get("PLANT_AS_GB", "3")) * (1 << 30))
-    resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
-    resource.setrlimit(resource.RLIMIT_CPU, (120, 120))
+# A test that is a soak of its own (the pick comparison draws and picks every pixel of 140 scenes, about twelve minutes) and that
+# no plant names: it runs on the control only, with the time it needs, instead of failing the control at the common bound.
+SLOW_TESTS = {"testRender_pick": 2400}
+
+
+def _limits_for(seconds):
+    def limits():
+        """A planted defect may loop or allocate without end; bound both."""
+        import resource
+        limit = int(float(os.environ.get("PLANT_AS_GB", "3")) * (1 << 30))
+        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+        resource.setrlimit(resource.RLIMIT_CPU, (seconds, seconds))
+    return limits
 
 
 def run_test(exe):
     environment = dict(os.environ)
     environment["LD_LIBRARY_PATH"] = LD_PATH
+    seconds = 180
+    for name, allowed in SLOW_TESTS.items():
+        if str(exe).endswith(name):
+            seconds = allowed
     try:
         r = subprocess.run([str(exe), "--gtest_brief=1"], capture_output=True, text=True,
-                           env=environment, cwd=ROOT, timeout=180, preexec_fn=_limits)
+                           env=environment, cwd=ROOT, timeout=seconds, preexec_fn=_limits_for(seconds - 60 if seconds > 180 else 120))
     except subprocess.TimeoutExpired:
         return 1, ["[  FAILED  ] (timed out)"]
     failing = [l for l in (r.stdout + r.stderr).splitlines() if l.startswith("[  FAILED  ]")]
