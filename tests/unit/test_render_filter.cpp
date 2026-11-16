@@ -201,7 +201,7 @@ TEST(RenderFilter, EveryVectorIsTheOraclesWithinOneTrillionth) {
     const GSHSCENE_Color_Space space = srgb();
     GSHCPU_Rect canvas = {0, 0, c.w, c.h};
     GSHCPU_Rect dirty{};
-    ASSERT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), &dirty), GSHCPU_OK);
+    ASSERT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), nullptr, &dirty), GSHCPU_OK);
     for (size_t q = 0; q < n * 4u; q++) {
       ASSERT_NEAR(layer[q], c.want[q], 1e-12) << "pixel " << q / 4u << " channel " << q % 4u;
     }
@@ -222,7 +222,7 @@ TEST(RenderFilter, AScratchTooSmallIsRefusedAndNothingIsWritten) {
   const GSHSCENE_Color_Space space = srgb();
   GSHCPU_Rect canvas = {0, 0, c.w, c.h};
   GSHCPU_Rect dirty{};
-  EXPECT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), need - 1u, &dirty), GSHCPU_ERR_LIMIT);
+  EXPECT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), need - 1u, nullptr, &dirty), GSHCPU_ERR_LIMIT);
   EXPECT_EQ(std::memcmp(layer.data(), c.src, n * 4u * sizeof(double)), 0);
 }
 
@@ -242,15 +242,15 @@ TEST(RenderFilter, WhatThisBuildDoesNotDrawIsRefusedByName) {
   turned.m[0][1] = -0.6;
   turned.m[1][0] = 0.6;
   turned.m[1][1] = 0.8;
-  EXPECT_EQ(gshcpu_filter_apply(&b.f, &turned, &space, canvas, layer.data(), scratch.data(), scratch.size(), &dirty),
+  EXPECT_EQ(gshcpu_filter_apply(&b.f, &turned, &space, canvas, layer.data(), scratch.data(), scratch.size(), nullptr, &dirty),
       GSHCPU_ERR_UNSUPPORTED);
   // a primitive of a later stage
   b.prims[0].kind = GSHSCENE_FILTER_KIND_COUNT;
   const GSHGEOM_Map map = map_of(c.map);
-  EXPECT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), &dirty),
+  EXPECT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), nullptr, &dirty),
       GSHCPU_ERR_UNSUPPORTED);
   b.prims[0].kind = GSHSCENE_FILTER_OFFSET;
-  EXPECT_EQ(gshcpu_filter_apply(nullptr, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), &dirty),
+  EXPECT_EQ(gshcpu_filter_apply(nullptr, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), nullptr, &dirty),
       GSHCPU_ERR_INVALID);
   EXPECT_EQ(std::memcmp(layer.data(), c.src, n * 4u * sizeof(double)), 0);
 }

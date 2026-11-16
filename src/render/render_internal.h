@@ -232,17 +232,24 @@ GSHCPU_Rect gshcpu_render_rect_join(GSHCPU_Rect a, GSHCPU_Rect b);
  */
 size_t gshcpu_filter_scratch_doubles(const GSHSCENE_Filter * f, size_t width, size_t height);
 
+/** The bounds a filter's image primitive holds to: the sink's IC9 limits (the most one pixel of an `AREA` image visits, and the most one primitive visits). */
+typedef struct GSHCPU_Filter_Limits {
+  uint64_t max_area_pixel_work;
+  uint64_t max_image_work;
+} GSHCPU_Filter_Limits;
+
 /**
  * Run the filter @p f over @p layer: a canvas @p canvas of whole device pixels, four premultiplied `double`s each in @p layer_space,
  * which the filtered result replaces.  @p map is the group's composed map (the user space to the device), a scale, a mirror or a quarter
  * turn and a translation.  @p scratch holds @p scratch_doubles `double`s, at least ::gshcpu_filter_scratch_doubles of them.
  *
+ * @param limits The image primitive's bounds (IC9); NULL for the defaults.
  * @param dirty The pixels the result may touch: the region met with the canvas.
  * @return ::GSHCPU_OK; ::GSHCPU_ERR_UNSUPPORTED for a primitive, an edge mode or a map this build does not draw (the planning pass does not
  *   let one through); ::GSHCPU_ERR_LIMIT if the scratch is too small; ::GSHCPU_ERR_INVALID for a NULL.
  */
 GSHCPU_Result gshcpu_filter_apply(const GSHSCENE_Filter * f, const GSHGEOM_Map * map, const GSHSCENE_Color_Space * layer_space,
-    GSHCPU_Rect canvas, double * layer, double * scratch, size_t scratch_doubles, GSHCPU_Rect * dirty);
+    GSHCPU_Rect canvas, double * layer, double * scratch, size_t scratch_doubles, const GSHCPU_Filter_Limits * limits, GSHCPU_Rect * dirty);
 
 
 /** The most a 26.6 coordinate of an item may be in magnitude: 2^24 pixels. */

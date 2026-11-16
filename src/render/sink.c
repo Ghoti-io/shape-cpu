@@ -4848,9 +4848,10 @@ static GSHSCENE_Result filter_over(Run * run, const GSHSCENE_Resource * filter, 
   if (!scratch) {
     return GSHSCENE_ERR_OOM;
   }
+  const GSHCPU_Filter_Limits flim = {run->cs->max_area_pixel_work, run->cs->max_image_work};
   GSHCPU_Result r;
   if (!k.on) {
-    r = gshcpu_filter_apply(&fl, &composed, space, canvas, layer, scratch, need, dirty);
+    r = gshcpu_filter_apply(&fl, &composed, space, canvas, layer, scratch, need, &flim, dirty);
   } else {
     double * layer_q = scratch;
     double * engine = scratch + canon_doubles;
@@ -4863,7 +4864,7 @@ static GSHSCENE_Result filter_over(Run * run, const GSHSCENE_Resource * filter, 
         bilinear(layer, canvas, dx, dy, &layer_q[4u * (j * wq + i)]);
       }
     }
-    r = gshcpu_filter_apply(&fl, &k.map, space, k.q, layer_q, engine, need - canon_doubles, dirty);
+    r = gshcpu_filter_apply(&fl, &k.map, space, k.q, layer_q, engine, need - canon_doubles, &flim, dirty);
     if (r == GSHCPU_OK) {
       /* and back onto the device's pixels */
       const size_t w = (size_t)(canvas.x1 - canvas.x0);

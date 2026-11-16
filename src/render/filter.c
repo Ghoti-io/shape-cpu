@@ -1057,6 +1057,7 @@ typedef struct Env {
   GSHCPU_Rect canvas;
   size_t w, h, pixels;
   GSHSCENE_Color_Space layer_space;
+  GSHCPU_Filter_Limits limits; /* the image primitive's IC9 bounds, defaults filled in */
   double * layer;
   double * slots; /* plan.slots buffers */
   double * temp[TEMPS];
@@ -1242,8 +1243,8 @@ static GSHCPU_Result prim_image(const Env * e, const GSHSCENE_Filter_Primitive *
   if (pr->rendering == (uint32_t)GSHSCENE_IMAGE_FILTER_AREA) {
     uint64_t pixel = 0;
     uint64_t total = 0;
-    if (!gshcpu_render_image_area_bound(&im, &pixel) || pixel > GSHCPU_LIMITS_DEFAULT_MAX_AREA_PIXEL_WORK ||
-        !gcu_safe_mul_u64((uint64_t)n, pixel, &total) || total > GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK) {
+    if (!gshcpu_render_image_area_bound(&im, &pixel) || pixel > e->limits.max_area_pixel_work ||
+        !gcu_safe_mul_u64((uint64_t)n, pixel, &total) || total > e->limits.max_image_work) {
       return GSHCPU_ERR_LIMIT;
     }
   }
@@ -1459,7 +1460,7 @@ static GSHCPU_Result run_primitive(Env * e, size_t i) {
 }
 
 GSHCPU_Result gshcpu_filter_apply(const GSHSCENE_Filter * f, const GSHGEOM_Map * map, const GSHSCENE_Color_Space * layer_space,
-    GSHCPU_Rect canvas, double * layer, double * scratch, size_t scratch_doubles, GSHCPU_Rect * dirty) {
+    GSHCPU_Rect canvas, double * layer, double * scratch, size_t scratch_doubles, const GSHCPU_Filter_Limits * limits, GSHCPU_Rect * dirty) {
   if (!f || !map || !layer_space || !layer || !scratch || f->primitive_count == 0) {
     return GSHCPU_ERR_INVALID;
   }
@@ -1502,6 +1503,8 @@ GSHCPU_Result gshcpu_filter_apply(const GSHSCENE_Filter * f, const GSHGEOM_Map *
   e.h = (size_t)(canvas.y1 - canvas.y0);
   e.pixels = e.w * e.h;
   e.layer_space = *layer_space;
+  e.limits.max_area_pixel_work = limits && limits->max_area_pixel_work ? limits->max_area_pixel_work : GSHCPU_LIMITS_DEFAULT_MAX_AREA_PIXEL_WORK;
+  e.limits.max_image_work = limits && limits->max_image_work ? limits->max_image_work : GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK;
   e.layer = layer;
   plan_make(f, &e.plan);
   const size_t need = gshcpu_filter_scratch_doubles(f, e.w, e.h);

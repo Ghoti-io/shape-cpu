@@ -119,8 +119,9 @@ struct Rendered {
   std::vector<GSHSCENE_Report_Entry> entries;
 };
 
-Rendered render(GSHSCENE_List * list, GIMG_Raster * raster, const GSHGEOM_Map * map = nullptr, const GSHSCENE_Rect * damage = nullptr) {
-  rh::SinkRef sink;
+Rendered render(GSHSCENE_List * list, GIMG_Raster * raster, const GSHGEOM_Map * map = nullptr, const GSHSCENE_Rect * damage = nullptr,
+    const GSHCPU_Limits * limits = nullptr) {
+  rh::SinkRef sink(limits);
   rh::ReportRef report;
   GSHSCENE_Target target = rh::target_of(raster, map);
   target.damage = damage;
@@ -317,6 +318,34 @@ TEST(RenderFilterSink, AnImagePrimitiveFollowsItsRenderingField) {
   EXPECT_LT(at_edge[2][0], 255);
   EXPECT_LT(at_edge[2][1], 255);
   EXPECT_EQ(at_center[0][0], 255);
+}
+
+TEST(RenderFilterSink, AnAreaImagePrimitiveHoldsToTheSinksImageLimits) {
+  rh::Store s;
+  GIMG_Raster * pic = nullptr;
+  ASSERT_EQ(gimg_raster_create(2, 2, &GIMG_PIXEL_RGBA8, GIMG_RASTER_OWNED, nullptr, 0, &pic), GIMG_OK);
+  std::memset(gimg_raster_pixels(pic), 255, 2 * gimg_raster_stride_bytes(pic));
+  GSHSCENE_Image_Params params{};
+  params.space.primaries = GCOL_PRIMARIES_SRGB;
+  params.space.transfer = GCOL_TRANSFER_SRGB;
+  const GSHSCENE_Resource * image = nullptr;
+  ASSERT_EQ(gshscene_store_intern_image(s.store, pic, &params, &image), GSHSCENE_OK);
+  gimg_raster_destroy(pic);
+  s.held.push_back(image);
+  GSHSCENE_Filter_Primitive m = prim(GSHSCENE_FILTER_IMAGE);
+  m.input_count = 0;
+  m.inputs = nullptr;
+  m.image = image;
+  m.rendering = GSHSCENE_IMAGE_FILTER_AREA;
+  gshgeom_map_scale(2, 4.0, 4.0, 1.0, &m.placement);
+  GSHSCENE_List * l = group_of_rect(s, intern_filter(s, {m}), 1.0, 0, 0, 1, 1);
+  rh::RasterRef ok(make_raster(12, 12));
+  EXPECT_EQ(render(l, ok.raster).result, GSHSCENE_OK) << "the defaults admit it";
+  GSHCPU_Limits tight;
+  gshcpu_limits_default(&tight);
+  tight.max_image_work = 4; // a 12 by 12 canvas of AREA pixels visits far more than four
+  rh::RasterRef refused(make_raster(12, 12));
+  EXPECT_NE(render(l, refused.raster, nullptr, nullptr, &tight).result, GSHSCENE_OK) << "the sink's own limit binds the filter";
 }
 
 TEST(RenderFilterSink, ARotatedMapIsFilteredInCanonicalSpaceSoTheFilterFollowsTheElement) {
