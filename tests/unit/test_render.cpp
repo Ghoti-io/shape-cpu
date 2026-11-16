@@ -264,10 +264,12 @@ TEST(RenderCaps, EveryOtherFormatAndTargetIsUnsupported) {
   g = rf_pixel_format(GSHCPU_FORMAT_RGBAF32_STRAIGHT);
   g.bits_per_channel[3] = 8;
   refused.push_back(g); // float with a narrow alpha (not creatable: skipped if image refuses it)
-  int tried = 0;
+  int tried = 0, not_made = 0;
   for (size_t i = 0; i < refused.size(); i++) {
     RasterRef r(raster_of(refused[i]));
     if (!r.raster) {
+      /* image refuses a self-contradicting format where a raster is made (since 2026-11-12), so no sink sees it. */
+      not_made++;
       continue;
     }
     tried++;
@@ -283,7 +285,8 @@ TEST(RenderCaps, EveryOtherFormatAndTargetIsUnsupported) {
     uint64_t h;
     EXPECT_EQ(gshcpu_render_hash(r.raster, nullptr, &h), GSHCPU_ERR_UNSUPPORTED) << i;
   }
-  EXPECT_GE(tried, 7);
+  EXPECT_EQ((size_t)(tried + not_made), refused.size());
+  EXPECT_GE(tried, 3) << "the formats image builds and the sink refuses must still be exercised: " << tried << " of " << refused.size();
   // A stream: a document, not pixels.
   GSHSCENE_Writer writer{};
   writer.write = [](void *, const void *, size_t) { return GSHSCENE_OK; };
