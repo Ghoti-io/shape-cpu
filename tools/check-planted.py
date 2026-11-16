@@ -2623,9 +2623,11 @@ PLANTS_FH = [
     ('ffh-light-specular-alpha', 'src', FLT, 'a = o[c] > a ? o[c] : a;', 'a = o[c] < a ? o[c] : a;', FH),
     ('ffh-light-normal-interior', 'src', FLT, '    fx = 1.0 / 4.0; fy = 1.0 / 4.0;', '    fx = 1.0 / 3.0; fy = 1.0 / 4.0;', FH),
     # image
-    ('ffh-image-translation', 'src', FLT, 'const double ix = inv.m[0][0] * ux + inv.m[0][1] * uy + inv.t[0];', 'const double ix = inv.m[0][0] * ux + inv.m[0][1] * uy + inv.t[1];', FH),
-    ('ffh-image-pixel-center', 'src', FLT, '(double)j + 0.5, &ux, &uy);', '(double)j + 0.0, &ux, &uy);', FH),
-    ('ffh-image-texel-order', 'src', FLT, 'gshscene_image_decode(pr->image, (uint32_t)ix, (uint32_t)iy, px)', 'gshscene_image_decode(pr->image, (uint32_t)iy, (uint32_t)ix, px)', FH),
+    ('ffh-image-pixel-center', 'src', FLT, 'gshcpu_render_image_at(&im, cx + (double)i + 0.5, cy + (double)j + 0.5, src);', 'gshcpu_render_image_at(&im, cx + (double)i, cy + (double)j, src);', FH),
+    ('ffh-image-rendering-ignored', 'src', FLT, 'pr->rendering, space, &e->layer_space, space) != GSHCPU_OK ||', '0u, space, &e->layer_space, space) != GSHCPU_OK ||', FH),
+    ('ffh-image-placement-translation', 'src', FLT, 'composed.t[0] = e->m.a * placement.t[0] + e->m.b * placement.t[1] + e->m.e;', 'composed.t[0] = e->m.a * placement.t[0] + e->m.b * placement.t[1];', FH),
+    ('ffh-image-placement-order', 'src', FLT, 'composed.m[0][1] = e->m.a * placement.m[0][1] + e->m.b * placement.m[1][1];', 'composed.m[0][1] = e->m.a * placement.m[1][0] + e->m.b * placement.m[1][1];', FH),
+    ('ffh-image-area-bound', 'src', FLT, 'total > GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK) {', 'total > GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK + UINT64_MAX) {', FH),
 ]
 PLANTS += PLANTS_FH
 

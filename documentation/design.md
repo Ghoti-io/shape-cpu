@@ -1141,8 +1141,9 @@ flags prevent: the cross-target script shows that the filter hashes move without
 contraction on an arm64 target, as the render hashes do. `tests/unit/test_render_filter_fixtures.cpp` checks every scene against its golden
 on both tiers, that none refuses or approximates anything, and that between them the scenes use every primitive kind and every mode
 (a rule no scene reaches is a rule the hash cannot see). The planted defects `ffh-*` of `tools/check-planted.py` put one defect in each rule
-of each primitive in `src/render/filter.c` and ask only the probe to see it. The image primitive reads the nearest texel today (FL17), so its
-scenes' `rendering` values draw the same pixels; the field is set in the scenes so that a primitive that honors it moves the goldens knowingly.
+of each primitive in `src/render/filter.c` and ask only the probe to see it. The image primitive samples as an image paint does (FL17): its
+`rendering` names the point filter or the exact mean (`AREA`), by the paint's own arithmetic, and the scenes set the field so that the goldens pin each.
+The mean's work is bounded by the limits' defaults, since the filter has no limits of its own.
 
 The stroke tests (`test_render_stroke.cpp`): the style's every value drawn and none refused for its style; a stroke at
 a whole-pixel translation is the same pixels moved, bit for bit, and another fraction another picture; the test sink's

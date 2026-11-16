@@ -35,6 +35,7 @@
 #include <ghoti.io/shape-geometry/shape-geometry.h>
 #include <ghoti.io/shape-scene/shape-scene.h>
 
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -272,6 +273,50 @@ TEST(RenderFilterSink, AnImagePrimitiveDrawsTheImageUnderItsPlacement) {
   EXPECT_EQ(pixel(r.raster, 3, 7), px(0, 0, 255, 255));
   EXPECT_EQ(pixel(r.raster, 7, 7), px(255, 255, 255, 255));
   EXPECT_EQ(pixel(r.raster, 1, 1), px(0, 0, 0, 0)) << "outside the image is empty";
+}
+
+TEST(RenderFilterSink, AnImagePrimitiveFollowsItsRenderingField) {
+  rh::Store s;
+  GIMG_Raster * pic = nullptr;
+  ASSERT_EQ(gimg_raster_create(2, 2, &GIMG_PIXEL_RGBA8, GIMG_RASTER_OWNED, nullptr, 0, &pic), GIMG_OK);
+  unsigned char * bytes = (unsigned char *)gimg_raster_pixels(pic);
+  const unsigned char texels[4][4] = {{255, 0, 0, 255}, {0, 255, 0, 255}, {0, 0, 255, 255}, {255, 255, 255, 255}};
+  for (int t = 0; t < 4; t++) {
+    std::memcpy(bytes + (t / 2) * gimg_raster_stride_bytes(pic) + (t % 2) * 4, texels[t], 4);
+  }
+  GSHSCENE_Image_Params params{};
+  params.space.primaries = GCOL_PRIMARIES_SRGB;
+  params.space.transfer = GCOL_TRANSFER_SRGB;
+  const GSHSCENE_Resource * image = nullptr;
+  ASSERT_EQ(gshscene_store_intern_image(s.store, pic, &params, &image), GSHSCENE_OK);
+  gimg_raster_destroy(pic);
+  s.held.push_back(image);
+  const uint32_t renderings[3] = {GSHSCENE_IMAGE_FILTER_NEAREST, GSHSCENE_IMAGE_FILTER_LINEAR, GSHSCENE_IMAGE_FILTER_AREA};
+  std::vector<std::array<unsigned char, 4>> at_edge, at_center;
+  for (uint32_t rendering : renderings) {
+    GSHSCENE_Filter_Primitive m = prim(GSHSCENE_FILTER_IMAGE);
+    m.input_count = 0;
+    m.inputs = nullptr;
+    m.image = image;
+    m.rendering = rendering;
+    gshgeom_map_scale(2, 4.0, 4.0, 1.0, &m.placement); // each texel is 4 user units
+    m.placement.t[0] = 2.25; // the texel boundaries fall inside pixel 6, so a pixel's mean spans four texels
+    m.placement.t[1] = 2.25;
+    GSHSCENE_List * l = group_of_rect(s, intern_filter(s, {m}), 1.0, 0, 0, 1, 1);
+    rh::RasterRef r(make_raster(12, 12));
+    ASSERT_EQ(render(l, r.raster).result, GSHSCENE_OK);
+    const auto e = pixel(r.raster, 6, 6);  // the pixel the four texels meet in
+    const auto c = pixel(r.raster, 3, 3);  // inside the first texel
+    at_edge.push_back({(unsigned char)e.at(0), (unsigned char)e.at(1), (unsigned char)e.at(2), (unsigned char)e.at(3)});
+    at_center.push_back({(unsigned char)c.at(0), (unsigned char)c.at(1), (unsigned char)c.at(2), (unsigned char)c.at(3)});
+  }
+  EXPECT_EQ(at_edge[0], (std::array<unsigned char, 4>{255, 255, 255, 255})) << "nearest reads the one texel, the white one";
+  EXPECT_NE(at_edge[1], at_edge[0]) << "linear mixes the neighbors in";
+  EXPECT_NE(at_edge[2], at_edge[0]) << "the area mean over the pixel spans four texels";
+  EXPECT_NE(at_edge[1], at_edge[2]) << "and is not the bilinear value";
+  EXPECT_LT(at_edge[2][0], 255);
+  EXPECT_LT(at_edge[2][1], 255);
+  EXPECT_EQ(at_center[0][0], 255);
 }
 
 TEST(RenderFilterSink, ARotatedMapIsFilteredInCanonicalSpaceSoTheFilterFollowsTheElement) {
