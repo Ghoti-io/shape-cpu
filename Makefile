@@ -515,16 +515,16 @@ check-no-x87: $(APP_DIR)/$(STATIC_TARGET) ## Fail if an x86 object holds an x87 
 # archive as the examples are.
 HASH_PROBE := $(APP_DIR)/corpus-hash$(EXE_EXTENSION)
 
-$(HASH_PROBE): tools/corpus-hash.c tests/render_fixtures.h tests/dense_vectors.h $(APP_DIR)/$(STATIC_TARGET) \
+$(HASH_PROBE): tools/corpus-hash.c tests/render_fixtures.h tests/filter_fixtures.h tests/dense_vectors.h $(APP_DIR)/$(STATIC_TARGET) \
 		$(FLAGS_STAMP) | $(APP_DIR)/$(TARGET) $(LIBVER_GEN)
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) $(INCLUDE) -o $@ $< $(LDFLAGS) $(SELF_LIBRARY) $(DEP_LIBS)
 
 check-corpus-hash-scalar: $(HASH_PROBE) ## Fail unless the probe, with the vector kernels off, prints the same committed hashes
-	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" PROBE_ARGS=scalar tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash tests/corpus/render.hash tests/corpus/dense.hash tests/corpus/render-fast.hash
+	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" PROBE_ARGS=scalar tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash tests/corpus/render.hash tests/corpus/dense.hash tests/corpus/render-fast.hash tests/corpus/filter.hash tests/corpus/filter-fast.hash
 
 check-corpus-hash: $(HASH_PROBE) ## Fail unless the probe prints the committed cross-target hash (CAP-13)
-	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash tests/corpus/render.hash tests/corpus/dense.hash tests/corpus/render-fast.hash
+	@LD_LIBRARY_PATH="$(TEST_LD_PATH)" tools/check-corpus-hash.sh $(HASH_PROBE) tests/corpus/coverage.hash tests/corpus/render.hash tests/corpus/dense.hash tests/corpus/render-fast.hash tests/corpus/filter.hash tests/corpus/filter-fast.hash
 
 check-vectors: ## Fail if tests/known_answers.h, tests/render_vectors.h, tests/mask_vectors.h, tests/general_vectors.h or tests/center_vectors.h is not what its independent generator writes
 	@python3 tools/gen-coverage-vectors.py --check

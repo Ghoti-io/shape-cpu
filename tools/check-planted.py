@@ -1734,7 +1734,8 @@ def probe_hash(objs, d, extra=()):
     r = run(cmd, shell=True)
     if r.returncode != 0:
         raise RuntimeError("cannot build the probe:\n%s" % r.stderr)
-    c = run(["tools/check-corpus-hash.sh", str(exe), "tests/corpus/coverage.hash", "tests/corpus/render.hash"],
+    c = run(["tools/check-corpus-hash.sh", str(exe), "tests/corpus/coverage.hash", "tests/corpus/render.hash", "tests/corpus/dense.hash",
+             "tests/corpus/render-fast.hash", "tests/corpus/filter.hash", "tests/corpus/filter-fast.hash"],
             env_extra={"LD_LIBRARY_PATH": LD_PATH})
     return c.returncode, (c.stdout + c.stderr).strip()
 
@@ -2539,6 +2540,96 @@ PLANTS_FB = [
 PLANTS += PLANTS_FB
 
 
+# The filter scenes' hash (tests/filter_fixtures.h, tests/corpus/filter.hash and filter-fast.hash): each defect below is in the filter engine
+# (src/render/filter.c), one per rule of a primitive that the scenes are meant to reach, and only the probe is asked to see it, so that a
+# scene that does not reach a rule shows as a plant that is not caught.  The unit tests see most of these too (testRender_filter against the
+# oracle's vectors); this table is about the cross-target hash, the one gate that runs on every target.  Run alone with PLANT_ONLY='^ffh-'.
+FH = ["probe"]
+FLT = "src/render/filter.c"
+PLANTS_FH = [
+    # offset, flood, merge
+    ('ffh-offset-direction', 'src', FLT, 'const long si = (long)i - sx;', 'const long si = (long)i + sx;', FH),
+    ('ffh-offset-map-shear', 'src', FLT, 'double ddx = e->m.a * pr->dx + e->m.b * pr->dy;\n        double ddy = e->m.c * pr->dx + e->m.d * pr->dy;\n        prim_offset(', 'double ddx = e->m.a * pr->dx;\n        double ddy = e->m.c * pr->dx + e->m.d * pr->dy;\n        prim_offset(', FH),
+    ('ffh-flood-opacity', 'src', FLT, 'out[0] = straight[0] * a * pr->opacity;', 'out[0] = straight[0] * a;', FH),
+    ('ffh-flood-space', 'src', FLT, 'gshcpu_render_convert_prepare(&c, &from, space);\n  double straight[3]', 'gshcpu_render_convert_prepare(&c, space, &from);\n  double straight[3]', FH),
+    ('ffh-merge-inputs', 'src', FLT, '      for (size_t k = 1; k < n_in; k++) {\n        Rect2 sk;', '      for (size_t k = 1; k < n_in && k < 2; k++) {\n        Rect2 sk;', FH),
+    ('ffh-subregion-width', 'src', FLT, 'sub.x1 = sub.x0 + pr->subregion[2];', 'sub.x1 = pr->subregion[2];', FH),
+    ('ffh-subregion-pixels-outward', 'src', FLT, 'double v = round ? gmath_floor(o[k] + 0.5) : (k < 2 ? gmath_floor(o[k]) : gmath_ceil(o[k]));', 'double v = round ? gmath_floor(o[k] + 0.5) : gmath_ceil(o[k]);', FH),
+    # blend, composite
+    ('ffh-blend-inputs-swapped', 'src', FLT, 'memcpy(d, &in1[PIX * p], sizeof d);\n          if (!gshcpu_render_apply(d, &in0[PIX * p], 1.0, pr->mode)) {', 'memcpy(d, &in0[PIX * p], sizeof d);\n          if (!gshcpu_render_apply(d, &in1[PIX * p], 1.0, pr->mode)) {', FH),
+    ('ffh-composite-over', 'src', FLT, 'o[c] = a[c] + b[c] * (1.0 - a[3]);\n          break;\n        case GSHSCENE_FILTER_COMPOSITE_IN:', 'o[c] = b[c] + a[c] * (1.0 - b[3]);\n          break;\n        case GSHSCENE_FILTER_COMPOSITE_IN:', FH),
+    ('ffh-composite-in', 'src', FLT, 'o[c] = a[c] * b[3];', 'o[c] = a[c] * a[3];', FH),
+    ('ffh-composite-out', 'src', FLT, 'o[c] = a[c] * (1.0 - b[3]);\n          break;\n        case GSHSCENE_FILTER_COMPOSITE_ATOP:', 'o[c] = a[c] * (1.0 - a[3]);\n          break;\n        case GSHSCENE_FILTER_COMPOSITE_ATOP:', FH),
+    ('ffh-composite-atop', 'src', FLT, 'o[c] = a[c] * b[3] + b[c] * (1.0 - a[3]);', 'o[c] = a[c] * b[3] + b[c] * (1.0 - b[3]);', FH),
+    ('ffh-composite-xor', 'src', FLT, 'o[c] = a[c] * (1.0 - b[3]) + b[c] * (1.0 - a[3]);', 'o[c] = a[c] * (1.0 - b[3]) + b[c];', FH),
+    ('ffh-arithmetic-terms', 'src', FLT, 'o[c] = k[0] * a[c] * b[c] + k[1] * a[c] + k[2] * b[c] + k[3];', 'o[c] = k[0] * a[c] * b[c] + k[2] * a[c] + k[1] * b[c] + k[3];', FH),
+    ('ffh-arithmetic-clamp', 'src', FLT, 'o[c] = !(o[c] > 0.0) ? 0.0 : (o[c] > o[3] ? o[3] : o[c]);', 'o[c] = clamp01(o[c]);', FH),
+    # color matrix, component transfer
+    ('ffh-matrix-saturate', 'src', FLT, 'const double r0[3] = {0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s};', 'const double r0[3] = {0.213 + 0.78 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s};', FH),
+    ('ffh-matrix-hue-angle', 'src', FLT, 'const double th = pr->values[0] * (3.14159265358979323846 / 180.0);', 'const double th = pr->values[0] * (3.14159265358979323846 / 360.0);', FH),
+    ('ffh-matrix-luminance', 'src', FLT, 'm[15] = 0.2125;', 'm[15] = 0.2126;', FH),
+    ('ffh-matrix-general-rows', 'src', FLT, 'memcpy(m, pr->values, sizeof m);', 'memcpy(m, pr->values, 15 * sizeof(double));', FH),
+    ('ffh-transfer-table', 'src', FLT, 'double k = gmath_floor(c * (double)(n - 1));', 'double k = gmath_ceil(c * (double)(n - 1));', FH),
+    ('ffh-transfer-discrete', 'src', FLT, 'double k = gmath_floor(c * (double)n);', 'double k = gmath_ceil(c * (double)n);', FH),
+    ('ffh-transfer-linear', 'src', FLT, 'return t->slope * c + t->intercept;', 'return t->slope * c - t->intercept;', FH),
+    ('ffh-transfer-gamma', 'src', FLT, 'return t->amplitude * gmath_pow(c, t->exponent) + t->offset;', 'return t->amplitude * gmath_pow(c, t->exponent) - t->offset;', FH),
+    # blur
+    ('ffh-blur-gauss-weight', 'src', FLT, 'ker[k] = x == 0.0 ? 1.0 : gmath_exp(-(x * x) / (2.0 * s * s));', 'ker[k] = x == 0.0 ? 1.0 : gmath_exp(-(x * x) / (2.0 * s));', FH),
+    ('ffh-blur-gauss-normalized', 'src', FLT, 'ker[k] /= total;', 'ker[k] /= (total * 1.0625);', FH),
+    ('ffh-blur-gauss-radius', 'src', FLT, 'const size_t r = (size_t)gmath_ceil(3.0 * s);', 'const size_t r = (size_t)gmath_floor(3.0 * s);', FH),
+    ('ffh-blur-box-size', 'src', FLT, 'gmath_sqrt(2.0 * 3.14159265358979323846) / 4.0 + 0.5);', 'gmath_sqrt(2.0 * 3.14159265358979323846) / 4.0 + 0.0);', FH),
+    ('ffh-blur-box-odd-offset', 'src', FLT, '      box_line(b, a, n, d, (d - 1) / 2, mode);', '      box_line(b, a, n, d, (d + 1) / 2, mode);', FH),
+    ('ffh-blur-box-even-second', 'src', FLT, 'box_line(b, a, n, d, d / 2 - 1, mode);', 'box_line(b, a, n, d, d / 2, mode);', FH),
+    ('ffh-blur-box-even-third', 'src', FLT, 'box_line(a, b, n, d + 1, d / 2, mode);', 'box_line(a, b, n, d, d / 2, mode);', FH),
+    ('ffh-blur-edge-wrap', 'src', FLT, 'return in[m < 0 ? m + (long)n : m];', 'return in[m < 0 ? 0 : m];', FH),
+    ('ffh-blur-edge-duplicate', 'src', FLT, 'return j < 0 ? in[0] : in[n - 1u];', 'return in[0];', FH),
+    ('ffh-blur-edge-none-spans-the-canvas', 'src', FLT, 'const size_t x0 = mode == (uint32_t)GSHSCENE_FILTER_EDGE_NONE ? 0 : span[0];', 'const size_t x0 = span[0];', FH),
+    ('ffh-blur-device-lengths', 'src', FLT, 'device_lengths(&e->m, pr->sx, pr->sy, &dx, &dy);\n        memcpy(out, in0, e->pixels * PIX * sizeof(double));\n        size_t span[4];', 'device_lengths(&e->m, pr->sx, pr->sx, &dx, &dy);\n        memcpy(out, in0, e->pixels * PIX * sizeof(double));\n        size_t span[4];', FH),
+    # drop shadow
+    ('ffh-shadow-direction', 'src', FLT, 'const long si = (long)q - sx;', 'const long si = (long)q + sx;', FH),
+    ('ffh-shadow-under-the-source', 'src', FLT, 'o[k] = s[k] + c[k] * a * (1.0 - s[3]);', 'o[k] = s[k] + c[k] * a;', FH),
+    # morphology
+    ('ffh-morphology-erode-edge', 'src', FLT, 'out[j] = (!dilate && (j < r || j + r >= n)) ? 0.0 : in[(size_t)queue[head]];', 'out[j] = in[(size_t)queue[head]];', FH),
+    ('ffh-morphology-extremum', 'src', FLT, 'if (dilate ? last <= in[i] : last >= in[i]) {', 'if (dilate ? last >= in[i] : last <= in[i]) {', FH),
+    ('ffh-morphology-radius-rounding', 'src', FLT, 'long rx = whole_px(dx);', 'long rx = (long)dx;', FH),
+    # convolve, tile
+    ('ffh-convolve-unflipped', 'src', FLT, 'const double k = pr->values[(size_t)(pr->order_y - 1u - ky) * pr->order_x + (pr->order_x - 1u - kx)];', 'const double k = pr->values[(size_t)ky * pr->order_x + kx];', FH),
+    ('ffh-convolve-bias', 'src', FLT, 'const double v = sum[c] / pr->divisor + pr->bias * a;', 'const double v = sum[c] / pr->divisor + pr->bias;', FH),
+    ('ffh-convolve-preserved-alpha', 'src', FLT, 'const double a = in[PIX * (j * w + i) + 3];\n        double u[4]', 'const double a = 1.0;\n        double u[4]', FH),
+    ('ffh-convolve-wrap', 'src', FLT, 'long mx = (x - r[0]) % (r[2] - r[0]);', 'long mx = x % (r[2] - r[0]);', FH),
+    ('ffh-convolve-duplicate', 'src', FLT, 'x = x < r[0] ? r[0] : (x >= r[2] ? r[2] - 1 : x);', 'x = x < r[0] ? r[0] : (x >= r[2] ? r[2] : x);', FH),
+    ('ffh-convolve-region-rounding', 'src', FLT, 'pixel_rect(e, sub_in[0], 0, r);\n        prim_convolve(', 'pixel_rect(e, sub_in[0], 1, r);\n        prim_convolve(', FH),
+    ('ffh-tile-phase', 'src', FLT, 'long mx = ((long)i - r[0]) % rw;', 'long mx = (long)i % rw;', FH),
+    ('ffh-tile-rounding', 'src', FLT, 'pixel_rect(e, sub_in[0], 1, r);\n        prim_tile(', 'pixel_rect(e, sub_in[0], 0, r);\n        prim_tile(', FH),
+    # displacement
+    ('ffh-displace-channel', 'src', FLT, 'const double xs = (double)i + scale_x * (u[pr->x_channel] - 0.5);', 'const double xs = (double)i + scale_x * (u[pr->y_channel] - 0.5);', FH),
+    ('ffh-displace-center', 'src', FLT, 'const double ys = (double)j + scale_y * (u[pr->y_channel] - 0.5);', 'const double ys = (double)j + scale_y * (u[pr->y_channel] + 0.5);', FH),
+    ('ffh-displace-scale-axes', 'src', FLT, 'device_lengths(&e->m, pr->scale, pr->scale, &dx, &dy);\n        prim_displace(', 'device_lengths(&e->m, pr->scale, 0.0, &dx, &dy);\n        prim_displace(', FH),
+    # turbulence
+    ('ffh-noise-seed-rounding', 'src', FLT, 'long seed = (long)(seed_value < 0 ? gmath_ceil(seed_value - 0.5) : gmath_floor(seed_value + 0.5));', 'long seed = (long)(seed_value < 0 ? gmath_ceil(seed_value - 0.5) : gmath_floor(seed_value));', FH),
+    ('ffh-noise-curve', 'src', FLT, 'return t * t * (3.0 - 2.0 * t);', 'return t * t * (3.0 - t);', FH),
+    ('ffh-noise-turbulence-abs', 'src', FLT, 'sum += (fractal ? nv : gmath_fabs(nv)) / ratio;', 'sum += ((void)fractal, nv) / ratio;', FH),
+    ('ffh-noise-fractal-scale', 'src', FLT, 'v = fractal ? (v + 1.0) / 2.0 : v;', 'v = fractal ? (v + 1.0) / 4.0 : v;', FH),
+    ('ffh-noise-stitch-width', 'src', FLT, 'st.w = (int)(tw * fx + 0.5);', 'st.w = (int)(tw * fx + 1.5);', FH),
+    ('ffh-noise-stitch-frequency', 'src', FLT, 'fx = (lo > 0.0 && fx / lo < hi / fx) ? lo : hi;', 'fx = hi + 0.0 * lo;', FH),
+    # lighting
+    ('ffh-light-distant-elevation', 'src', FLT, 'dl[2] = gmath_sin(el);', 'dl[2] = gmath_cos(el);', FH),
+    ('ffh-light-point-height', 'src', FLT, 'l[2] = lz - z;', 'l[2] = lz + z;', FH),
+    ('ffh-light-height-scale', 'src', FLT, 'const double zs = gmath_sqrt(sx * sy);', 'const double zs = sx;', FH),
+    ('ffh-light-spot-cone', 'src', FLT, 'if (sdot > 0.0 && !(lt->has_cone && sdot < gmath_cos(gmath_fabs(lt->cone_angle) * (3.14159265358979323846 / 180.0)))) {', 'if (sdot > 0.0) {', FH),
+    ('ffh-light-spot-exponent', 'src', FLT, 'f = gmath_pow(sdot, lt->spot_exponent);', 'f = sdot;', FH),
+    ('ffh-light-diffuse-constant', 'src', FLT, 'const double f = pr->constant * (ndl > 0.0 ? ndl : 0.0);', 'const double f = (ndl > 0.0 ? ndl : 0.0);', FH),
+    ('ffh-light-specular-exponent', 'src', FLT, 'f = pr->constant * (ndh > 0.0 ? gmath_pow(ndh, pr->exponent) : 0.0);', 'f = pr->constant * (ndh > 0.0 ? gmath_pow(ndh, pr->exponent + 1.0) : 0.0);', FH),
+    ('ffh-light-specular-alpha', 'src', FLT, 'a = o[c] > a ? o[c] : a;', 'a = o[c] < a ? o[c] : a;', FH),
+    ('ffh-light-normal-interior', 'src', FLT, '    fx = 1.0 / 4.0; fy = 1.0 / 4.0;', '    fx = 1.0 / 3.0; fy = 1.0 / 4.0;', FH),
+    # image
+    ('ffh-image-translation', 'src', FLT, 'const double ix = inv.m[0][0] * ux + inv.m[0][1] * uy + inv.t[0];', 'const double ix = inv.m[0][0] * ux + inv.m[0][1] * uy + inv.t[1];', FH),
+    ('ffh-image-pixel-center', 'src', FLT, '(double)j + 0.5, &ux, &uy);', '(double)j + 0.0, &ux, &uy);', FH),
+    ('ffh-image-texel-order', 'src', FLT, 'gshscene_image_decode(pr->image, (uint32_t)ix, (uint32_t)iy, px)', 'gshscene_image_decode(pr->image, (uint32_t)iy, (uint32_t)ix, px)', FH),
+]
+PLANTS += PLANTS_FH
+
+
 # The hand-written plants no test is seen to catch, with why.  The gate prints each as "known" and does not fail on it; it fails
 # when one of them IS caught (take it out of this table then) and when a name here is not in the plant table.  The first is
 # equivalent in the design; the others are not shown to be, and each names the case a test would have to build.
@@ -3034,16 +3125,23 @@ def main():
 
     # The probe's own plants.
     (WORK / "bit").mkdir(parents=True, exist_ok=True)
-    for name, flag in (("probe-planted-bit", "-DSHAPE_CPU_PLANT_BIT"),):
+    # (name, flag, the file the message must name): the whole planted bit is seen at the first part (the coverage); a bit in the filter scenes of
+    # one tier alone must fail the gate in that part and name its file, which shows that the filter hashes are read and not only the first ones
+    for name, flag, part in (("probe-planted-bit", "-DSHAPE_CPU_PLANT_BIT", ""),
+                             ("probe-planted-filter-bit", "-DSHAPE_CPU_PLANT_FILTER_BIT", "tests/corpus/filter.hash"),
+                             ("probe-planted-filter-fast-bit", "-DSHAPE_CPU_PLANT_FILTER_FAST_BIT", "tests/corpus/filter-fast.hash")):
         (WORK / name).mkdir(parents=True, exist_ok=True)
         rc, msg = probe_hash(control, WORK / name, extra=[flag])
         if rc == 0:
             print("FAIL  %s: the probe printed the committed hash with a bit flipped" % name)
             failures += 1
+        elif part and part not in msg:
+            print("FAIL  %s: the gate failed, but not in %s: %s" % (name, part, msg.splitlines()[-1] if msg else "no message"))
+            failures += 1
         else:
             print("ok    %s: %s" % (name, msg.splitlines()[-1]))
 
-    print("%d plants, %d not caught, %d known survivors" % (len(PLANTS) + 1, failures, known))
+    print("%d plants, %d not caught, %d known survivors" % (len(PLANTS) + 3, failures, known))
     return 1 if failures else 0
 
 

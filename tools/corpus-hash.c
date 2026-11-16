@@ -56,6 +56,7 @@
 #include <ghoti.io/shape-geometry/shape-geometry.h>
 
 #include "../tests/render_fixtures.h"
+#include "../tests/filter_fixtures.h"
 
 #include "../src/render/render_internal.h"
 #include "../tests/dense_vectors.h"
@@ -294,6 +295,11 @@ int main(int argc, char ** argv) {
       if (rf_render_with(i, RF_FORMATS[f], &fast, &h, NULL) != 0) {
         fail("a fixture did not render under the fast coverages");
       }
+#ifdef SHAPE_CPU_PLANT_BIT
+      if (fast_count == 5) {
+        h ^= 1u;
+      }
+#endif
       printf("shape-cpu.render-fast %s %s %016" PRIx64 "\n", RF_FIXTURES[i].name, gshcpu_format_string(RF_FORMATS[f]), h);
       gshgeom_hash_u64(&fast_renders, h);
       fast_count++;
@@ -301,6 +307,59 @@ int main(int argc, char ** argv) {
   }
   printf("shape-cpu.render-fast-hash %016" PRIx64 "\n", gshgeom_hash_value(&fast_renders));
   printf("shape-cpu.render-fast-count %lu\n", fast_count);
+
+  /* The filter scenes of tests/filter_fixtures.h rendered the same way: every primitive of the filter engine (the blur's Gaussian and
+   * its box approximation, the lighting, the noise, the morphology and the rest), in both color spaces, under maps that turn, shear
+   * and mirror, and as a backdrop filter, on each of the four formats; the same scenes again under the fast coverages.  The engine
+   * is double arithmetic and math's gmath_exp, gmath_pow, gmath_sqrt, gmath_sin and gmath_cos, so a fused multiply-add, x87 excess
+   * precision, a different libm or an uninitialised value in a buffer shows here. */
+  for (int tier = 0; tier < 2; tier++) {
+    GSHCPU_Limits tier_limits;
+    gshcpu_limits_default(&tier_limits);
+    if (tier) {
+      tier_limits.fill_coverage = GSHCPU_FILL_COVERAGE_FAST;
+      tier_limits.stroke_coverage = GSHCPU_STROKE_COVERAGE_FAST;
+    }
+    GSHGEOM_Hash filters;
+    gshgeom_hash_init(&filters);
+    unsigned long filter_count = 0;
+    for (size_t i = 0; i < FF_FIXTURE_COUNT; i++) {
+      for (size_t f = 0; f < 4; f++) {
+        uint64_t h = 0;
+        if (ff_render_with(i, RF_FORMATS[f], &tier_limits, &h, NULL) != 0) {
+          fail("a filter fixture did not render");
+        }
+#ifdef SHAPE_CPU_PLANT_BIT
+        if (filter_count == 11) {
+          h ^= 1u;
+        }
+#endif
+        if (tier == 0) {
+#ifdef SHAPE_CPU_PLANT_FILTER_BIT
+          if (filter_count == 11) {
+            h ^= 1u;
+          }
+#endif
+        } else {
+#ifdef SHAPE_CPU_PLANT_FILTER_FAST_BIT
+          if (filter_count == 11) {
+            h ^= 1u;
+          }
+#endif
+        }
+        printf("shape-cpu.%s %s %s %016" PRIx64 "\n", tier ? "filter-fast" : "filter", FF_FIXTURES[i].name,
+            gshcpu_format_string(RF_FORMATS[f]), h);
+#ifdef SHAPE_CPU_CONTROL_NATIVE_ORDER
+        gshgeom_hash_bytes(&filters, &h, sizeof h);
+#else
+        gshgeom_hash_u64(&filters, h);
+#endif
+        filter_count++;
+      }
+    }
+    printf("shape-cpu.%s-hash %016" PRIx64 "\n", tier ? "filter-fast" : "filter", gshgeom_hash_value(&filters));
+    printf("shape-cpu.%s-count %lu\n", tier ? "filter-fast" : "filter", filter_count);
+  }
 
   /* Strokes story S4c: the dense cells of tests/dense_vectors.h through the exact step, each vector's result and the counters
    * (its meetings, the evaluations at the slabs' ends, its fragments) folded in order.  Every one is an integer: the sweep

@@ -1123,6 +1123,27 @@ requires a test to fail on it (the defects it accepts as invisible, with
 reasons, are in its docstring). `suite/tools/xarch/shape.sh` (section 7) and
 `suite/tools/xwin/shape.sh` run the cross-target probe on every target.
 
+**The filter scenes' hash.** The probe also renders the scenes of `tests/filter_fixtures.h` on each of the four formats under the default
+coverages and again under the fast ones, and prints one hash per scene, format and tier and the fold of each tier, which are the committed
+`tests/corpus/filter.hash` and `filter-fast.hash` (`tools/gen-filter-hash.sh` writes them from an x86-64 build; regenerate them only for a
+change that is meant to move a pixel of a filter, and say which scenes moved). The twenty-two scenes are grids of cells, one group around a
+small source graphic per cell, so that every primitive of the engine is drawn in every mode: offset, flood, merge of two to four inputs
+and subregions; the sixteen blend modes and the five composite operators with six arithmetic sets, in `linearRGB` and in `sRGB`; the color
+matrix of each type, the component transfer of each function on each channel; the blur as the true Gaussian below a deviation of 2 and as
+the box approximation from 2 (an even and an odd box, both axes, a zero axis), with each edge mode on a region that cuts the shape;
+morphology, convolution (six kernels, every edge mode, with and without preserving alpha), tile, image, the displacement map over each
+channel pair, turbulence and fractal noise with and without stitching, diffuse and specular lighting under a distant, a point, a spot and a
+spot with a cone, drop shadow, chains that use earlier results, the source alpha and a primitive's own color space; the same primitives
+under a target map that turns by 30 degrees, shears, scales unevenly, turns by a quarter and mirrors (the canonical-space route and the
+axis-aligned one), inside pictures instanced under such maps, and as backdrop filters. The filter engine is `double` arithmetic and
+`math`'s `exp`, `pow`, `sqrt`, `sin` and `cos` (`gmath_exp`, `gmath_pow`, `gmath_sqrt`, `gmath_sin`, `gmath_cos`), so the scenes see what the
+flags prevent: the cross-target script shows that the filter hashes move without the SSE flags on a 32-bit x86 target and with
+contraction on an arm64 target, as the render hashes do. `tests/unit/test_render_filter_fixtures.cpp` checks every scene against its golden
+on both tiers, that none refuses or approximates anything, and that between them the scenes use every primitive kind and every mode
+(a rule no scene reaches is a rule the hash cannot see). The planted defects `ffh-*` of `tools/check-planted.py` put one defect in each rule
+of each primitive in `src/render/filter.c` and ask only the probe to see it. The image primitive reads the nearest texel today (FL17), so its
+scenes' `rendering` values draw the same pixels; the field is set in the scenes so that a primitive that honors it moves the goldens knowingly.
+
 The stroke tests (`test_render_stroke.cpp`): the style's every value drawn and none refused for its style; a stroke at
 a whole-pixel translation is the same pixels moved, bit for bit, and another fraction another picture; the test sink's
 `outline=` is the hash of the outline drawn; what draws nothing (a singular chain, a singular product of invertible
