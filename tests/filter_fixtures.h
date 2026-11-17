@@ -49,6 +49,7 @@
  * | filter-graphs | chains of three to five primitives that use results by index, per-primitive color spaces, source alpha, a group opacity, `AUTO` and fractional regions |
  * | filter-map-rotate, filter-map-skew, filter-map-scale, filter-map-quarter, filter-map-mirror | twelve primitives under a target map that turns by 30 degrees, shears, scales unevenly, turns by a quarter and mirrors: the canonical-space route and the axis-aligned one |
  * | filter-picture | filtered groups inside pictures, instanced under a turn, a scale and a shear |
+ * | filter-slot, filter-slot-rotated | twelve filters whose `IMAGE` primitives draw slots of the filter's picture (FL25): one slot under a translation, a fractional one, a turn, a scale with a shear; two and three slots merged; a slot fed to a blur and to a composite with the source graphic; a region that cuts the slot; an element with a group and an element with a filtered group inside; one slot drawn by two primitives; a group opacity; and the same under a turned target map |
  * | filter-backdrop, filter-backdrop-rotated | twelve backdrop-filter groups (FL22) over a drawn backdrop, under a clip with fractional edges, with opacity, a blend space of their own and unfiltered content over the result; and the same under a turned target map |
  */
 
@@ -90,6 +91,7 @@ typedef struct FF_Spec {
   uint32_t variant;    /* the source graphic */
   uint32_t mode;       /* the group's filter mode */
   int content;         /* draw the cell's source graphic in the group (backdrop scenes: a mark of the group's own) */
+  const GSHSCENE_Resource * picture; /* the filter's picture, whose instances the `IMAGE` primitives that use a slot draw (FL25); NULL for none */
 } FF_Spec;
 
 /** A maker fills @p s for cell @p i whose origin is (@p ox, @p oy). */
@@ -243,6 +245,7 @@ static inline const GSHSCENE_Resource * ff_intern(RF_Ctx * c, const FF_Spec * s)
   f.color_space = s->space;
   f.primitive_count = s->n;
   f.primitives = prims;
+  f.picture = s->picture;
   const GSHSCENE_Resource * r = NULL;
   rf_check(c, gshscene_store_intern_filter(c->store, &f, &r) == GSHSCENE_OK);
   return rf_hold(c, r);
@@ -1022,6 +1025,181 @@ static inline GSHSCENE_List * ff_picture(RF_Ctx * c) {
   return l;
 }
 
+/* --- slots of the filter's picture (FL25) ------------------------------------------------------------------------------- */
+
+/** An element a slot's instance draws: kinds 0 to 2 are the cell's source graphics at the origin, 3 is the third of them in a group at half
+ * opacity, 4 and 5 are the pictures of filtered groups (a blur then an offset; a drop shadow). */
+static inline const GSHSCENE_Resource * ff_element(RF_Ctx * c, unsigned kind) {
+  if (kind == 4u) {
+    return ff_picture_of(c, 0);
+  }
+  if (kind == 5u) {
+    return ff_picture_of(c, 1);
+  }
+  GSHSCENE_List * l = rf_open(c);
+  if (kind == 3u) {
+    GSHSCENE_Group g = rf_group(0.5, GSHSCENE_COMPOSITE_SRC_OVER);
+    rf_check(c, gshscene_list_group_push(l, &g, 0, 0.0) == GSHSCENE_OK);
+    ff_content(c, l, 0.0, 0.0, 2u);
+    rf_check(c, gshscene_list_group_pop(l) == GSHSCENE_OK);
+  } else {
+    ff_content(c, l, 0.0, 0.0, kind);
+  }
+  rf_close(c, l);
+  const GSHSCENE_Resource * element = NULL;
+  rf_check(c, gshscene_store_intern_picture(c->store, l, &element) == GSHSCENE_OK);
+  return rf_hold(c, element);
+}
+
+/** Give @p s a picture of @p n instances, the elements @p kinds under the maps @p maps, in that order: slot i is instance i. */
+static inline void ff_slots(RF_Ctx * c, FF_Spec * s, size_t n, const unsigned * kinds, const GSHGEOM_Map * maps) {
+  GSHSCENE_List * l = rf_open(c);
+  for (size_t i = 0; i < n; i++) {
+    const GSHSCENE_Resource * element = ff_element(c, kinds[i]);
+    if (!element) {
+      c->failed = 1;
+      return;
+    }
+    rf_check(c, gshscene_list_instance(l, element, &maps[i], 0, 0.0) == GSHSCENE_OK);
+  }
+  rf_close(c, l);
+  const GSHSCENE_Resource * picture = NULL;
+  rf_check(c, gshscene_store_intern_picture(c->store, l, &picture) == GSHSCENE_OK);
+  s->picture = rf_hold(c, picture);
+}
+
+/** A primitive that draws slot @p slot of the filter's picture. */
+static inline FF_Prim * ff_slot(FF_Spec * s, uint32_t slot) {
+  FF_Prim * q = ff_add(s, GSHSCENE_FILTER_IMAGE);
+  q->p.use_picture = 1;
+  q->p.slot = slot;
+  return q;
+}
+
+/** A merge of the results of primitives 0 to @p n - 1 (two or three). */
+static inline FF_Prim * ff_merge_results(FF_Spec * s, uint32_t n) {
+  FF_Prim * q = ff_add(s, GSHSCENE_FILTER_MERGE);
+  if (n == 2u) {
+    ff_ins(q, 2, FF_RES, 0u, FF_RES, 1u);
+  } else {
+    ff_ins(q, 3, FF_RES, 0u, FF_RES, 1u, FF_RES, 2u);
+  }
+  return q;
+}
+
+static inline void ff_m_slot(RF_Ctx * c, unsigned i, double ox, double oy, FF_Spec * s) {
+  const unsigned one[1] = {0u};
+  GSHGEOM_Map m[3];
+  FF_Prim * p;
+  switch (i) {
+    case 0: /* one slot at the cell's origin */
+      m[0] = rf_affine(c, 1.0, 0.0, 0.0, 1.0, ox, oy);
+      ff_slots(c, s, 1, one, m);
+      ff_slot(s, 0);
+      break;
+    case 1: { /* a fractional translation, and a different element */
+      const unsigned k[1] = {1u};
+      m[0] = rf_affine(c, 1.0, 0.0, 0.0, 1.0, ox + 2.375, oy + 1.625);
+      ff_slots(c, s, 1, k, m);
+      ff_slot(s, 0);
+      break;
+    }
+    case 2: /* a turn of 30 degrees about the cell's origin, moved into the cell */
+      m[0] = rf_affine(c, 0.8660254037844387, 0.5, -0.5, 0.8660254037844387, ox + 3.0, oy + 0.5);
+      ff_slots(c, s, 1, one, m);
+      ff_slot(s, 0);
+      break;
+    case 3: { /* an uneven scale with a shear */
+      const unsigned k[1] = {2u};
+      m[0] = rf_affine(c, 0.75, 0.0, 0.4, 0.9, ox + 0.5, oy + 0.25);
+      ff_slots(c, s, 1, k, m);
+      ff_slot(s, 0);
+      break;
+    }
+    case 4: { /* two slots, merged */
+      const unsigned k[2] = {0u, 3u};
+      m[0] = rf_affine(c, 0.6, 0.0, 0.0, 0.6, ox, oy);
+      m[1] = rf_affine(c, 0.6, 0.0, 0.0, 0.6, ox + 5.5, oy + 4.0);
+      ff_slots(c, s, 2, k, m);
+      ff_slot(s, 0);
+      ff_slot(s, 1);
+      ff_merge_results(s, 2u);
+      break;
+    }
+    case 5: { /* three slots, merged, in sRGB */
+      const unsigned k[3] = {1u, 2u, 0u};
+      m[0] = rf_affine(c, 0.5, 0.0, 0.0, 0.5, ox, oy);
+      m[1] = rf_affine(c, 0.5, 0.0, 0.0, 0.5, ox + 6.0, oy);
+      m[2] = rf_affine(c, 0.5, 0.0, 0.0, 0.5, ox + 3.0, oy + 5.0);
+      ff_slots(c, s, 3, k, m);
+      ff_slot(s, 0);
+      ff_slot(s, 1);
+      ff_slot(s, 2);
+      ff_merge_results(s, 3u);
+      s->space = FF_SRGB;
+      break;
+    }
+    case 6: /* a slot fed to a blur */
+      m[0] = rf_affine(c, 1.0, 0.0, 0.0, 1.0, ox + 1.0, oy + 0.5);
+      ff_slots(c, s, 1, one, m);
+      ff_slot(s, 0);
+      ff_blur(s, 1.5, 1.5, 0);
+      break;
+    case 7: { /* a slot composited with the source graphic */
+      const unsigned k[1] = {1u};
+      m[0] = rf_affine(c, 1.0, 0.0, 0.0, 1.0, ox + 2.0, oy);
+      ff_slots(c, s, 1, k, m);
+      ff_slot(s, 0);
+      p = ff_composite(s, GSHSCENE_FILTER_COMPOSITE_IN);
+      ff_in2(p, FF_SRC, 0, FF_RES, 0);
+      break;
+    }
+    case 8: /* a region that cuts the slot */
+      m[0] = rf_affine(c, 1.0, 0.0, 0.0, 1.0, ox, oy);
+      ff_slots(c, s, 1, one, m);
+      ff_tight(s, ox, oy);
+      ff_slot(s, 0);
+      break;
+    case 9: { /* an element that holds a filtered group of its own */
+      const unsigned k[1] = {4u};
+      m[0] = rf_affine(c, 1.0, 0.0, 0.0, 1.0, ox + 1.0, oy + 1.0);
+      ff_slots(c, s, 1, k, m);
+      ff_slot(s, 0);
+      break;
+    }
+    case 10: { /* one slot drawn by two primitives, a flood between them */
+      const unsigned k[1] = {5u};
+      m[0] = rf_affine(c, 0.8, 0.0, 0.0, 0.8, ox + 1.0, oy + 0.5);
+      ff_slots(c, s, 1, k, m);
+      ff_slot(s, 0);
+      ff_flood(s, 0.2, 0.4, 0.9, 0.5, 1.0);
+      ff_slot(s, 0);
+      p = ff_add(s, GSHSCENE_FILTER_MERGE);
+      ff_ins(p, 3, FF_RES, 0u, FF_RES, 1u, FF_RES, 2u);
+      break;
+    }
+    default: { /* a group opacity, and a cell with no content of its own */
+      const unsigned k[1] = {3u};
+      m[0] = rf_affine(c, 1.0, 0.0, 0.0, 1.0, ox + 0.5, oy);
+      ff_slots(c, s, 1, k, m);
+      ff_slot(s, 0);
+      s->opacity = 0.6;
+      s->content = 0;
+      break;
+    }
+  }
+}
+
+static inline GSHSCENE_List * ff_slot_scene(RF_Ctx * c) {
+  return ff_grid(c, ff_m_slot, 12u);
+}
+
+static inline GSHSCENE_List * ff_slot_rotated(RF_Ctx * c) {
+  /* the same twelve under a turn of 20 degrees and a scale of 0.8: the slots' frame is the filter's canvas, drawn in canonical space */
+  c->target_map = rf_affine(c, 0.8 * 0.9396926207859084, -0.8 * 0.3420201433256687, 0.8 * 0.3420201433256687, 0.8 * 0.9396926207859084, 9.0, 1.0);
+  return ff_slot_scene(c);
+}
+
 /* --- backdrop-filter groups (FL22) ----------------------------------------------------------------------------------- */
 
 static inline void ff_m_backdrop(RF_Ctx * c, unsigned i, double ox, double oy, FF_Spec * s) {
@@ -1175,6 +1353,8 @@ static const FF_Fixture FF_FIXTURES[] = {
     {"filter-map-quarter", ff_map_quarter},
     {"filter-map-mirror", ff_map_mirror},
     {"filter-picture", ff_picture},
+    {"filter-slot", ff_slot_scene},
+    {"filter-slot-rotated", ff_slot_rotated},
     {"filter-backdrop", ff_backdrop},
     {"filter-backdrop-rotated", ff_backdrop_rotated},
 };

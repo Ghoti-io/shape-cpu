@@ -1,6 +1,6 @@
 # The committed renders of the filter scenes (tests/filter_fixtures.h) under the default coverages, one line per scene and format:
 # gshcpu_render_hash of the whole raster.  The scenes cover every primitive of the filter engine, both color spaces, 8-bit
-# and float targets, maps that turn, shear, scale unevenly, mirror and turn by a quarter, and backdrop filters. Every target
+# and float targets, maps that turn, shear, scale unevenly, mirror and turn by a quarter, backdrop filters and slots of the picture of a filter. Every target
 # must print these (make check-corpus-hash; suite/tools/xarch/shape.sh; suite/tools/xwin/shape.sh).  tools/gen-filter-hash.sh writes this file.
 render filter-basic rgba8 f7867a3ecc439ad6
 render filter-basic rgba8-premultiplied e02907f8e9b9fad2
@@ -82,6 +82,14 @@ render filter-picture rgba8 929d18fcf0fc8578
 render filter-picture rgba8-premultiplied d0c912018985d5dc
 render filter-picture rgbaf32 0f0ddd2b04579250
 render filter-picture rgbaf32-premultiplied 0003f1ac6e20bdf9
+render filter-slot rgba8 77d417f338ce8459
+render filter-slot rgba8-premultiplied 9a58119fb2c485e2
+render filter-slot rgbaf32 8242b694f25a1f62
+render filter-slot rgbaf32-premultiplied b782c021a73697c5
+render filter-slot-rotated rgba8 c583460e25d59c70
+render filter-slot-rotated rgba8-premultiplied fdd528ccabc7f2d4
+render filter-slot-rotated rgbaf32 5f846423c561374e
+render filter-slot-rotated rgbaf32-premultiplied 4b25bbbc02eaf408
 render filter-backdrop rgba8 a99a5648fbe30e57
 render filter-backdrop rgba8-premultiplied 805240ca36b914b8
 render filter-backdrop rgbaf32 b6a49f35977cf00d
@@ -90,5 +98,5 @@ render filter-backdrop-rotated rgba8 596ea2c19d92fd48
 render filter-backdrop-rotated rgba8-premultiplied d5ae65ed5ac3721a
 render filter-backdrop-rotated rgbaf32 697bdd29ac90b07e
 render filter-backdrop-rotated rgbaf32-premultiplied e6f4c3c945f26195
-hash e9a100196e2c905e
-count 88
+hash c9a98bc21790e295
+count 96

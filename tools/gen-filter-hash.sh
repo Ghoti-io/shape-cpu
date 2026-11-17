@@ -25,7 +25,7 @@ for tier in filter filter-fast; do
   {
     printf '# The committed renders of the filter scenes (tests/filter_fixtures.h) under %s, one line per scene and format:\n' "$what"
     printf '# gshcpu_render_hash of the whole raster.  The scenes cover every primitive of the filter engine, both color spaces, 8-bit\n'
-    printf '# and float targets, maps that turn, shear, scale unevenly, mirror and turn by a quarter, and backdrop filters.%s Every target\n' "$extra"
+    printf '# and float targets, maps that turn, shear, scale unevenly, mirror and turn by a quarter, backdrop filters and slots of the picture of a filter.%s Every target\n' "$extra"
     printf '# must print these (make check-corpus-hash; suite/tools/xarch/shape.sh; suite/tools/xwin/shape.sh).  tools/gen-filter-hash.sh writes this file.\n'
     printf '%s\n' "$out" | awk -v t="shape-cpu.$tier" '$1==t{print "render", $2, $3, $4}'
     printf '%s\n' "$out" | awk -v t="shape-cpu.$tier-hash" '$1==t{print "hash", $2}'

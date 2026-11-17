@@ -1,6 +1,6 @@
 # The committed renders of the filter scenes (tests/filter_fixtures.h) under the fast coverages (GSHCPU_FILL_COVERAGE_FAST and GSHCPU_STROKE_COVERAGE_FAST), one line per scene and format:
 # gshcpu_render_hash of the whole raster.  The scenes cover every primitive of the filter engine, both color spaces, 8-bit
-# and float targets, maps that turn, shear, scale unevenly, mirror and turn by a quarter, and backdrop filters. Integer cells and byte layers change the source graphic the filter reads, and the filter engine itself is the same code. Every target
+# and float targets, maps that turn, shear, scale unevenly, mirror and turn by a quarter, backdrop filters and slots of the picture of a filter. Integer cells and byte layers change the source graphic the filter reads, and the filter engine itself is the same code. Every target
 # must print these (make check-corpus-hash; suite/tools/xarch/shape.sh; suite/tools/xwin/shape.sh).  tools/gen-filter-hash.sh writes this file.
 render filter-basic rgba8 6d67facbdfff8652
 render filter-basic rgba8-premultiplied 6ecf0b526f14a71e
@@ -82,6 +82,14 @@ render filter-picture rgba8 3c55fbad619b6dea
 render filter-picture rgba8-premultiplied e38bfb3ee1889c01
 render filter-picture rgbaf32 1104833f915cb8ec
 render filter-picture rgbaf32-premultiplied 2a8bf3fc56ea4253
+render filter-slot rgba8 a113ee5300f92aed
+render filter-slot rgba8-premultiplied 77596c79d1e3863d
+render filter-slot rgbaf32 a3fd47b0834c55ba
+render filter-slot rgbaf32-premultiplied 0244046c5ec35065
+render filter-slot-rotated rgba8 98473af6687e1c0e
+render filter-slot-rotated rgba8-premultiplied e5735bdb06d3881c
+render filter-slot-rotated rgbaf32 55585f40e4add70d
+render filter-slot-rotated rgbaf32-premultiplied f498c1f8c3332100
 render filter-backdrop rgba8 894b648ab8db38ca
 render filter-backdrop rgba8-premultiplied 1fe711ad803dd0b9
 render filter-backdrop rgbaf32 7162e47f6f4d585e
@@ -90,5 +98,5 @@ render filter-backdrop-rotated rgba8 f6d245547eba54a2
 render filter-backdrop-rotated rgba8-premultiplied 028ffc68ed624161
 render filter-backdrop-rotated rgbaf32 ecd75f20e689034c
 render filter-backdrop-rotated rgbaf32-premultiplied b29d28fe18350985
-hash ad44fc4ea649968c
-count 88
+hash 78b30237ccd6e0db
+count 96

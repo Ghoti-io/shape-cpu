@@ -121,9 +121,9 @@
 /** What one fixture's lists hold on to; released by rf_release. */
 typedef struct RF_Ctx {
   GSHSCENE_Store * store;
-  const GSHSCENE_Resource * held[192];
+  const GSHSCENE_Resource * held[512];
   size_t held_count;
-  GSHSCENE_List * lists[24];
+  GSHSCENE_List * lists[96];
   size_t list_count;
   int failed;
   GSHGEOM_Map target_map; /* the target's map the fixture asks for (the identity for most) */

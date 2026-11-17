@@ -65,6 +65,8 @@ struct Census {
   std::set<std::pair<uint32_t, uint32_t>> transfers; // (channel, type)
   std::set<uint32_t> region_modes, filter_spaces, primitive_spaces, preserve_alpha, stitch;
   std::set<size_t> merge_inputs;
+  std::set<uint32_t> slots;  // the slot indexes some primitive draws (FL25)
+  size_t slot_filters = 0;   // the primitives that draw a slot
   size_t cones = 0, subregions = 0, backdrop_groups = 0, filtered_groups = 0, results_used = 0, source_alpha_used = 0;
   bool box_blur = false, gaussian_blur = false, anisotropic = false, zero_axis = false, fractional_seed = false;
   bool dil_zero = false;
@@ -140,7 +142,12 @@ void tally(const GSHSCENE_Filter & f, Census * c) {
         c->cones += p.light.has_cone;
         break;
       case GSHSCENE_FILTER_IMAGE:
-        c->image_renderings.insert(p.rendering);
+        if (p.use_picture) {
+          c->slots.insert(p.slot);
+          c->slot_filters++;
+        } else {
+          c->image_renderings.insert(p.rendering);
+        }
         break;
       default:
         break;
@@ -286,6 +293,8 @@ TEST(FilterFixtures, EveryPrimitiveAndEveryModeIsDrawnBySomeScene) {
   EXPECT_GT(c.results_used, 0u);
   EXPECT_GT(c.source_alpha_used, 0u);
   EXPECT_GT(c.backdrop_groups, 0u) << "a backdrop filter";
+  EXPECT_TRUE(c.slots.count(0u) && c.slots.count(1u) && c.slots.count(2u)) << "the first three slots of a filter's picture";
+  EXPECT_GE(c.slot_filters, 24u) << "a primitive that draws a slot, in both slot scenes";
 }
 
 TEST(FilterFixtures, TheMapScenesUseTheRouteTheyAreNamedFor) {
