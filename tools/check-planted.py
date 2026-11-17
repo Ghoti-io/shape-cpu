@@ -2631,6 +2631,37 @@ PLANTS_FH = [
 ]
 PLANTS += PLANTS_FH
 
+# The slots of a filter's picture (FL25) in the hash: the scenes filter-slot and filter-slot-rotated (tests/filter_fixtures.h) draw instances
+# of the picture of a filter through `IMAGE` primitives.  Each defect below is in how the sink sizes, draws, resamples and releases the
+# slot frames (src/render/sink.c), or in how the engine takes a slot's layer (src/render/filter.c); only the probe is asked to see it, so a
+# rule the scenes do not reach shows as a plant not caught.  Run alone with PLANT_ONLY='^fsl-'.
+SNK = "src/render/sink.c"
+PLANTS_FSL = [
+    # sizing: the frames the picture's groups open above, and the canonical canvas's room for each slot
+    ('fsl-need-slots-uncounted', 'src', SNK, '    slots += fl->primitives[i].kind == GSHSCENE_FILTER_IMAGE && fl->primitives[i].use_picture;', '    slots += 0;', FH),
+    ('fsl-need-one-canvas-short', 'src', SNK, 'gcu_safe_mul_size(wq * hq * 4u, 1u + slots, canon_doubles)', 'gcu_safe_mul_size(wq * hq * 4u, 1u + (slots ? slots - 1u : 0u), canon_doubles)', FH),
+    ('fsl-frames-reserve-one', 'src', SNK, 'const size_t reserve = slot_frames > 1u ? slot_frames : 1u;', 'const size_t reserve = 1u;', FH),
+    # the loop: which primitives draw, which instance, over what, and what is kept
+    ('fsl-slot-loop-every-image', 'src', SNK, 'if (fl.primitives[i].kind != GSHSCENE_FILTER_IMAGE || !fl.primitives[i].use_picture) {\n        continue;', 'if (fl.primitives[i].kind != GSHSCENE_FILTER_IMAGE) {\n        continue;', FH),
+    ('fsl-slot-instance-zero', 'src', SNK, 'identity_map, space, fl.primitives[i].slot, push', 'identity_map, space, 0u, push', FH),
+    ('fsl-slot-placed-by-the-group-map', 'src', SNK, 'picture_pass(run, fl.picture, &identity_map, space,', 'picture_pass(run, fl.picture, &composed, space,', FH),
+    ('fsl-slot-unit-filter-off', 'src', SNK, 'if (only != SIZE_MAX && inner[0] != only) {', 'if (0 && only != SIZE_MAX && inner[0] != only) {', FH),
+    ('fsl-slot-not-widened', 'src', SNK, '        widen(run, &run->frames[run->top], canvas); /* the pixels the units did not reach are zero */\n        slot_dev[i]', '        slot_dev[i]', FH),
+    ('fsl-slot-layer-is-the-groups', 'src', SNK, 'slot_dev[i] = run->frames[run->top].layer;', 'slot_dev[i] = layer;', FH),
+    ('fsl-slot-frame-not-counted', 'src', SNK, '        drawn++;\n', '', FH),
+    ('fsl-slot-frames-one-left', 'src', SNK, 'run->top -= drawn; /* the slots\' frames are released */', 'run->top -= drawn ? drawn - 1u : 0u;', FH),
+    # the canonical canvas (a turned or skewed map): each slot resampled as the layer is, into a place of its own
+    ('fsl-canon-slot-resamples-the-layer', 'src', SNK, 'bilinear(slot_dev[p], canvas, dx, dy,', 'bilinear(layer, canvas, dx, dy,', FH),
+    ('fsl-canon-slots-share-a-place', 'src', SNK, 'double * dst = scratch + next++ * wq * hq * 4u;', 'double * dst = scratch + (next++ ? 1u : 1u) * wq * hq * 4u;', FH),
+    ('fsl-canon-slot-q-is-the-layer', 'src', SNK, 'slot_q[p] = dst;', 'slot_q[p] = layer_q;', FH),
+    ('fsl-canon-slot-not-bilinear', 'src', SNK, 'bilinear(slot_dev[p], canvas, dx, dy,', 'bilinear(slot_dev[p], canvas, gshcpu_render_i2d((int64_t)dx), gshcpu_render_i2d((int64_t)dy),', FH),
+    # the engine: the layer's space into the primitive's, the whole of it
+    ('fsl-prim-space-direction', 'src', FLT, 'gshcpu_render_convert_prepare(&c, &e->layer_space, space);\n    convert_buffer(&c, src, out, e->pixels);', 'gshcpu_render_convert_prepare(&c, space, &e->layer_space);\n    convert_buffer(&c, src, out, e->pixels);', FH),
+    ('fsl-prim-copy-short', 'src', FLT, 'memcpy(out, src, e->pixels * PIX * sizeof(double));\n  } else {\n    GSHCPU_Convert c;', 'memcpy(out, src, (e->pixels - 1u) * PIX * sizeof(double));\n  } else {\n    GSHCPU_Convert c;', FH + ["testRender_filter"]),
+    ('fsl-prim-slot-index', 'src', FLT, 'const double * src = e->slot_layers[i];', 'const double * src = e->slot_layers[e->slot_count - 1u];', FH),
+]
+PLANTS += PLANTS_FSL
+
 
 # The hand-written plants no test is seen to catch, with why.  The gate prints each as "known" and does not fail on it; it fails
 # when one of them IS caught (take it out of this table then) and when a name here is not in the plant table.  The first is
@@ -2954,6 +2985,9 @@ SURVIVORS = {
         "pattern fill in it; the guard that reads the fact is the one above (rp-tier-nested-pattern-allowed): the two are one test to write",
     "uc15-meeting-depth-rounded-2": "not seen in the sweep that keeps the cell's own exchanges (the group sweep's copy, uc15-meeting-depth-rounded, is caught by the union vectors): needs a meeting whose depth is not a multiple of 1/1024 at a resolution where the "
         "rounding changes a level",
+    "fsl-slot-loop-every-image": "an ordinary IMAGE primitive in a filter that has a picture would draw slot 0 into a frame nothing reads, so no hash "
+        "moves; the harm is a frame past the reserve and, on a turned map, a scratch place past the canonical canvas's room, which only a "
+        "fixture with an ordinary image beside a slot, under a memory checker, can see (none yet)",
 }
 
 
