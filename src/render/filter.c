@@ -1059,6 +1059,8 @@ typedef struct Env {
   GSHSCENE_Color_Space layer_space;
   GSHCPU_Filter_Limits limits; /* the image primitive's IC9 bounds, defaults filled in */
   double * layer;
+  const double * const * slot_layers; /* FL25: for each primitive that draws a slot, that slot's picture drawn on the canvas, in the layer's space */
+  size_t slot_count;
   double * slots; /* plan.slots buffers */
   double * temp[TEMPS];
   double * wx;
@@ -1269,6 +1271,25 @@ static GSHCPU_Result prim_image(const Env * e, const GSHSCENE_Filter_Primitive *
   return GSHCPU_OK;
 }
 
+/**
+ * FL25, feImage of an element: the slot's picture was drawn by the sink over the canvas in the layer's space, as the group's own content
+ * is, so it is the primitive's result converted into the primitive's space; the subregion clips it as it clips any primitive's.
+ */
+static GSHCPU_Result prim_slot(const Env * e, size_t i, const GSHSCENE_Color_Space * space, double * out) {
+  if (i >= e->slot_count || !e->slot_layers || !e->slot_layers[i]) {
+    return GSHCPU_ERR_INVALID; /* the sink draws every slot a primitive names, so none is missing */
+  }
+  const double * src = e->slot_layers[i];
+  if (prim_space_is(&e->layer_space, space)) {
+    memcpy(out, src, e->pixels * PIX * sizeof(double));
+  } else {
+    GSHCPU_Convert c;
+    gshcpu_render_convert_prepare(&c, &e->layer_space, space);
+    convert_buffer(&c, src, out, e->pixels);
+  }
+  return GSHCPU_OK;
+}
+
 static GSHCPU_Result run_primitive(Env * e, size_t i) {
   const GSHSCENE_Filter_Primitive * pr = &e->f->primitives[i];
   double * out = result_buf(e, i);
@@ -1279,7 +1300,7 @@ static GSHCPU_Result run_primitive(Env * e, size_t i) {
   switch (pr->kind) {
     case GSHSCENE_FILTER_IMAGE:
       {
-        const GSHCPU_Result ir = prim_image(e, pr, &e->space[i], out);
+        const GSHCPU_Result ir = pr->use_picture ? prim_slot(e, i, &e->space[i], out) : prim_image(e, pr, &e->space[i], out);
         if (ir != GSHCPU_OK) {
           return ir;
         }
@@ -1460,7 +1481,8 @@ static GSHCPU_Result run_primitive(Env * e, size_t i) {
 }
 
 GSHCPU_Result gshcpu_filter_apply(const GSHSCENE_Filter * f, const GSHGEOM_Map * map, const GSHSCENE_Color_Space * layer_space,
-    GSHCPU_Rect canvas, double * layer, double * scratch, size_t scratch_doubles, const GSHCPU_Filter_Limits * limits, GSHCPU_Rect * dirty) {
+    GSHCPU_Rect canvas, double * layer, double * scratch, size_t scratch_doubles, const GSHCPU_Filter_Limits * limits,
+    const double * const * slots, size_t slot_count, GSHCPU_Rect * dirty) {
   if (!f || !map || !layer_space || !layer || !scratch || f->primitive_count == 0) {
     return GSHCPU_ERR_INVALID;
   }
@@ -1506,6 +1528,8 @@ GSHCPU_Result gshcpu_filter_apply(const GSHSCENE_Filter * f, const GSHGEOM_Map *
   e.limits.max_area_pixel_work = limits && limits->max_area_pixel_work ? limits->max_area_pixel_work : GSHCPU_LIMITS_DEFAULT_MAX_AREA_PIXEL_WORK;
   e.limits.max_image_work = limits && limits->max_image_work ? limits->max_image_work : GSHCPU_LIMITS_DEFAULT_MAX_IMAGE_WORK;
   e.layer = layer;
+  e.slot_layers = slots;
+  e.slot_count = slot_count;
   plan_make(f, &e.plan);
   const size_t need = gshcpu_filter_scratch_doubles(f, e.w, e.h);
   if (need == SIZE_MAX || need > scratch_doubles) {

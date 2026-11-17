@@ -119,7 +119,7 @@ typedef struct Clip {
 /**
  * The filter primitives and features this sink draws (FC1): offset, flood, merge, blend, composite, color matrix, component transfer,
  * Gaussian blur and drop shadow, morphology, convolution, tile and displacement map, every edge mode, a region that is derived (`AUTO`), and a
- * filter whose source is the backdrop under the group (FC6).
+ * filter whose source is the backdrop under the group (FC6), and a filter whose `IMAGE` primitives draw slots of its picture (FL25).
  */
 #define GSHCPU_FILTER_NATIVE                                                                                                    \
   ((UINT32_C(1) << GSHSCENE_FILTER_OFFSET) | (UINT32_C(1) << GSHSCENE_FILTER_FLOOD) | (UINT32_C(1) << GSHSCENE_FILTER_MERGE) | \
@@ -131,7 +131,7 @@ typedef struct Clip {
       (UINT32_C(1) << GSHSCENE_FILTER_TURBULENCE) | (UINT32_C(1) << GSHSCENE_FILTER_DIFFUSE_LIGHTING) |                       \
       (UINT32_C(1) << GSHSCENE_FILTER_SPECULAR_LIGHTING) | (UINT32_C(1) << GSHSCENE_FILTER_IMAGE) |                                                                 \
       GSHSCENE_FILTER_NATIVE_EDGE_DUPLICATE_WRAP | GSHSCENE_FILTER_NATIVE_REGION_AUTO | GSHSCENE_FILTER_NATIVE_CANONICAL_SPACE |         \
-      GSHSCENE_FILTER_NATIVE_BACKDROP)
+      GSHSCENE_FILTER_NATIVE_BACKDROP | GSHSCENE_FILTER_NATIVE_PICTURE)
 
 /** The points of the table of a transfer between two spaces of one gamut (fast8). */
 #define XFER_POINTS 4096u
@@ -512,22 +512,48 @@ static int out_of_range(const GSHSCENE_Paint * paint) {
 static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, size_t * gradients, size_t * stops,
     int * aligned, int * strokes, int * other, int * wide, int * general, size_t * ag, size_t * fg, Nest * nest);
 
+/**
+ * The picture a group's pop draws besides its content (MK1, FL25): its soft mask's, or, when it has none, its filter's (the waist allows
+ * a group only one); NULL for neither.  For a filter's, @p slot_frames gets how many frames its slots take: one for each primitive that draws
+ * a slot, each drawn into a frame of its own that stays on the stack until the filter has run.
+ */
+static const GSHSCENE_Resource * group_picture(const GSHSCENE_Item * group, size_t * slot_frames) {
+  if (slot_frames) {
+    *slot_frames = 0;
+  }
+  if (group->group.soft_mask) {
+    GSHSCENE_Mask m;
+    return gshscene_resource_mask(group->group.soft_mask, &m) == GSHSCENE_OK ? m.picture : NULL;
+  }
+  GSHSCENE_Filter fl;
+  if (!group->group.filter || gshscene_resource_filter(group->group.filter, &fl) != GSHSCENE_OK || !fl.picture) {
+    return NULL;
+  }
+  if (slot_frames) {
+    size_t n = 0;
+    for (size_t i = 0; i < fl.primitive_count; i++) {
+      n += fl.primitives[i].kind == GSHSCENE_FILTER_IMAGE && fl.primitives[i].use_picture;
+    }
+    *slot_frames = n;
+  }
+  return fl.picture;
+}
+
 /** The needs of the picture of @p mask (MC5), drawn into its frame at a pop: found once for a picture, however many masks name it
  * and however many pictures there are, and counted again only where the memo had no room; `mask_pictures` counts the walks. */
-static int mask_need(const GSHSCENE_Resource * mask, Need * out, Nest * nest) {
-  GSHSCENE_Mask m;
+static int mask_need(const GSHSCENE_Resource * picture, Need * out, Nest * nest) {
   memset(out, 0, sizeof *out);
-  if (gshscene_resource_mask(mask, &m) != GSHSCENE_OK) {
+  if (!picture) {
     return 0;
   }
-  const uint64_t id = gshscene_resource_id(m.picture);
+  const uint64_t id = gshscene_resource_id(picture);
   if (gshcpu_memo_find(nest->memo, id, out)) {
     return out->ok;
   }
   /* The picture is its own isolated, non-knockout group (MK2): the knockout groups around the masked group are not its ancestors. */
   Nest sub = {nest->memo, nest->cache, 0, 0, 0, 0, nest->bits, 0, 0, 0, 0};
   gshcpu_stroke_cache_count(nest->cache, offsetof(GSHCPU_Render_Counters, mask_pictures));
-  out->ok = nesting(gshscene_resource_picture(m.picture), &out->groups, &out->clips, &out->gradients, &out->stops, &out->aligned,
+  out->ok = nesting(gshscene_resource_picture(picture), &out->groups, &out->clips, &out->gradients, &out->stops, &out->aligned,
       &out->strokes, &out->other, &out->wide, &out->general, &out->ag, &out->fg, &sub);
   nest->oom = nest->oom || sub.oom;
   out->walk = sub.walk;
@@ -688,15 +714,20 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
         }
         most_ag = open_ag > most_ag ? open_ag : most_ag;
         most_fg = open_fg > most_fg ? open_fg : most_fg;
-        if (item->group.soft_mask) {
+        size_t slot_frames = 0;
+        const GSHSCENE_Resource * pic = group_picture(item, &slot_frames);
+        if (pic) {
           /* MC5: at this group's pop its mask is drawn into one more layer, and everything the picture needs while it is drawn
            * is open with it: the groups and clips of the picture (a masked group inside it, one more again), its gradients
-           * and strokes.  The layers are doubles: a mask is not a byte layer (MC8, the tiers' note). */
+           * and strokes.  The layers are doubles: a mask is not a byte layer (MC8, the tiers' note).  FL25: the slots a filter's
+           * primitives draw are drawn the same way, each into a frame that stays until the filter has run, so the picture's
+           * groups open above all of them. */
           Need pn;
-          ok = mask_need(item->group.soft_mask, &pn, nest) && ok;
+          ok = mask_need(pic, &pn, nest) && ok;
           nest->masked = 1;
           *wide = 1;
-          most_g = sat_add(sat_add(g, 1u), pn.groups) > most_g ? sat_add(sat_add(g, 1u), pn.groups) : most_g;
+          const size_t reserve = slot_frames > 1u ? slot_frames : 1u;
+          most_g = sat_add(sat_add(g, reserve), pn.groups) > most_g ? sat_add(sat_add(g, reserve), pn.groups) : most_g;
           most_c = sat_add(c, pn.clips) > most_c ? sat_add(c, pn.clips) : most_c;
           most_ag = sat_add(open_ag, pn.ag) > most_ag ? sat_add(open_ag, pn.ag) : most_ag;
           most_fg = sat_add(open_fg, pn.fg) > most_fg ? sat_add(open_fg, pn.fg) : most_fg;
@@ -709,11 +740,8 @@ static int nesting(const GSHSCENE_List * list, size_t * groups, size_t * clips, 
           *strokes = *strokes || pn.strokes;
           *other = *other || pn.other;
           *wide = *wide || pn.wide;
-          GSHSCENE_Mask m;
-          if (gshscene_resource_mask(item->group.soft_mask, &m) == GSHSCENE_OK) {
-            const size_t here = sat_add(gshscene_expansion_bytes(gshscene_resource_picture(m.picture)), pn.walk);
-            nest->walk = here > nest->walk ? here : nest->walk;
-          }
+          const size_t here = sat_add(gshscene_expansion_bytes(gshscene_resource_picture(pic)), pn.walk);
+          nest->walk = here > nest->walk ? here : nest->walk;
         }
         break;
       }
@@ -1532,18 +1560,22 @@ static GSHCPU_Result measure_tile(const Cpu_Sink * cs, const GSHSCENE_Target * t
 /** The units of the picture of @p group's mask (MC5), at the chain length @p n of the group, as measure_items measures the list's. */
 static GSHCPU_Result measure_mask(const Cpu_Sink * cs, const GSHSCENE_Target * target, unsigned char * area, const Mask_Layout * M,
     const GSHSCENE_Item * group, GSHGEOM_Map * maps, size_t n, GSHCPU_Arena * arena, size_t * peak, size_t used, int in_tile) {
-  GSHSCENE_Mask m;
-  if (gshscene_resource_mask(group->group.soft_mask, &m) != GSHSCENE_OK) {
+  const GSHSCENE_Resource * pic = group_picture(group, NULL);
+  if (!pic) {
     return GSHCPU_ERR_INTERNAL;
   }
-  const GSHSCENE_List * picture = gshscene_resource_picture(m.picture);
+  const GSHSCENE_List * picture = gshscene_resource_picture(pic);
   const size_t bytes = gshscene_expansion_bytes(picture);
   GSHSCENE_Expansion walk;
   if (used > M->walk || bytes > M->walk - used ||
       gshscene_expansion_init(&walk, picture, area + M->at_walk + used, bytes) != GSHSCENE_OK) {
     return GSHCPU_ERR_INTERNAL;
   }
-  maps[n - 1] = group->group.soft_mask_map; /* MK6: the chain of the mask's items ends in the group's placement */
+  if (group->group.soft_mask) {
+    maps[n - 1] = group->group.soft_mask_map; /* MK6: the chain of the mask's items ends in the group's placement */
+  } else {
+    gshgeom_map_identity(2, &maps[n - 1]); /* FL25: a filter's slots are placed by their instances alone */
+  }
   const GSHSCENE_Item * item;
   const size_t * chain;
   size_t m_count;
@@ -1555,7 +1587,7 @@ static GSHCPU_Result measure_mask(const Cpu_Sink * cs, const GSHSCENE_Target * t
       maps[count - 1] = item->map;
       continue;
     }
-    if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && item->group.soft_mask) {
+    if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && group_picture(item, NULL)) {
       r = measure_mask(cs, target, area, M, item, maps, count, arena, peak, used + bytes, in_tile);
     } else {
       size_t outer = 0;
@@ -1614,7 +1646,7 @@ static GSHCPU_Result measure_tile(const Cpu_Sink * cs, const GSHSCENE_Target * t
       tmaps[m_count - 1] = item->map;
       continue;
     }
-    if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && item->group.soft_mask) {
+    if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && group_picture(item, NULL)) {
       /* The items of a mask's picture in a tile are drawn in each copy, cut to its cell, like the tile's own: the same rule (CU20, CU21). */
       size_t local = 0;
       r = measure_mask(cs, &inner, area, M, item, tmaps, m_count, arena, &local, used + bytes, 1);
@@ -1688,7 +1720,7 @@ static GSHCPU_Result measure_items(const Cpu_Sink * cs, const GSHSCENE_List * li
       }
       *peak = arena->peak > *peak ? arena->peak : *peak;
     }
-    if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && item->group.soft_mask) {
+    if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && group_picture(item, NULL)) {
       r = measure_mask(cs, target, memory + M->at, M, item, maps, count, arena, peak, 0, 0);
     } else {
       size_t outer = 0;
@@ -4299,16 +4331,11 @@ static GSHSCENE_Result unit(Run * run, const GSHSCENE_Item * item, const size_t 
  * around the group are not in force inside (MK6): the frame's clip base is the clip count here.  Cancel is checked between the
  * units, and the work of each is added to the pop's (MC7).
  */
-static GSHSCENE_Result mask_pass(Run * run, const GSHCPU_Mask_Eval * me, const size_t * chain, size_t count, GSHCPU_Rect window,
+static GSHSCENE_Result picture_pass(Run * run, const GSHSCENE_Resource * picture_resource, const GSHGEOM_Map * placement,
+    const GSHSCENE_Color_Space * frame_space, size_t only, size_t push, const size_t * chain, size_t count, GSHCPU_Rect window,
     GSHCPU_Rect whole_window) {
   Mask_State * ms = ms_of(run);
-  const Frame * group = &run->frames[run->top];
-  Mask_Frame * mfs = ms->frames;
-  GSHSCENE_Mask mask;
-  if (gshscene_resource_mask(group->group.soft_mask, &mask) != GSHSCENE_OK) {
-    return GSHSCENE_ERR_INTERNAL;
-  }
-  const GSHSCENE_List * picture = gshscene_resource_picture(mask.picture);
+  const GSHSCENE_List * picture = gshscene_resource_picture(picture_resource);
   const size_t bytes = gshscene_expansion_bytes(picture);
   GSHSCENE_Expansion walk;
   if (ms->walk_used > ms->walk_bytes || bytes > ms->walk_bytes - ms->walk_used ||
@@ -4317,13 +4344,13 @@ static GSHSCENE_Result mask_pass(Run * run, const GSHCPU_Mask_Eval * me, const s
   }
   /* The chain: the group's, its push's index in place of its pop's, then the item's in the picture. */
   memmove(ms->chain, chain, (count - 1u) * sizeof *chain); /* (a mask inside a mask pass names its chain in this same array) */
-  ms->chain[count - 1u] = mfs[run->top].push;
-  run->maps[count - 1u] = group->group.soft_mask_map;
+  ms->chain[count - 1u] = push;
+  run->maps[count - 1u] = *placement;
   /* The mask's frame: an isolated layer in R that starts at (0, 0, 0, 0) (N6), made ready as the units reach it (widen). */
   Frame * f = &run->frames[++run->top];
   memset(f, 0, sizeof *f);
   f->layer = run->layers + (run->top - 1u) * run->layout.pixels * 4u;
-  f->space = me->frame_space;
+  f->space = *frame_space;
   f->group.opacity = 1.0;
   f->group.composite = GSHSCENE_COMPOSITE_SRC_OVER;
   f->group.isolation = GSHSCENE_ISOLATION_ISOLATED;
@@ -4335,7 +4362,7 @@ static GSHSCENE_Result mask_pass(Run * run, const GSHCPU_Mask_Eval * me, const s
     g->on = (run->cs->tiers & GSHCPU_RENDER_FORCE_GENERAL) != 0;
     f->general = g->on;
   }
-  memset(&mfs[run->top].whole_dirty, 0, sizeof mfs[run->top].whole_dirty);
+  memset(&ms->frames[run->top].whole_dirty, 0, sizeof ms->frames[run->top].whole_dirty);
   const GSHCPU_Rect saved_window = ms->window;
   const GSHCPU_Rect saved_whole = ms->whole_window;
   const Skip saved_skip = run->skip;
@@ -4348,6 +4375,9 @@ static GSHSCENE_Result mask_pass(Run * run, const GSHCPU_Mask_Eval * me, const s
   size_t depth;
   GSHSCENE_Result result = GSHSCENE_OK;
   while (result == GSHSCENE_OK && gshscene_expansion_next(&walk, &item, &inner, &depth)) {
+    if (only != SIZE_MAX && inner[0] != only) {
+      continue; /* FL25: the units of the other slots of the filter's picture */
+    }
     memcpy(ms->chain + count, inner, depth * sizeof *inner);
     run->work = 0;
     result = unit(run, item, ms->chain, count + depth);
@@ -4362,6 +4392,18 @@ static GSHSCENE_Result mask_pass(Run * run, const GSHCPU_Mask_Eval * me, const s
   ms->whole_window = saved_whole;
   run->skip = saved_skip;
   return result;
+}
+
+/** MC2: the picture of the mask of the group on top of the stack, drawn over @p window (`picture_pass`). */
+static GSHSCENE_Result mask_pass(Run * run, const GSHCPU_Mask_Eval * me, const size_t * chain, size_t count, GSHCPU_Rect window,
+    GSHCPU_Rect whole_window) {
+  const Frame * group = &run->frames[run->top];
+  GSHSCENE_Mask mask;
+  if (gshscene_resource_mask(group->group.soft_mask, &mask) != GSHSCENE_OK) {
+    return GSHSCENE_ERR_INTERNAL;
+  }
+  return picture_pass(run, mask.picture, &group->group.soft_mask_map, &me->frame_space, SIZE_MAX, ms_of(run)->frames[run->top].push,
+      chain, count, window, whole_window);
 }
 
 /**
@@ -4812,7 +4854,13 @@ static size_t filter_scratch(const GSHSCENE_Filter * fl, const GSHGEOM_Map * com
   if (wq == 0 || hq == 0 || wq > SIZE_MAX / hq || wq * hq > 16u * (rw * rh + 64u)) {
     return SIZE_MAX; /* a skew that spreads the canvas past sixteen times the region: past the limit */
   }
-  *canon_doubles = wq * hq * 4u;
+  size_t slots = 0; /* FL25: each slot's frame is resampled onto the canonical canvas, as the layer is */
+  for (size_t i = 0; i < fl->primitive_count; i++) {
+    slots += fl->primitives[i].kind == GSHSCENE_FILTER_IMAGE && fl->primitives[i].use_picture;
+  }
+  if (!gcu_safe_mul_size(wq * hq * 4u, 1u + slots, canon_doubles)) {
+    return SIZE_MAX;
+  }
   const size_t engine = gshcpu_filter_scratch_doubles(fl, wq, hq);
   return engine == SIZE_MAX || engine > SIZE_MAX - *canon_doubles ? SIZE_MAX : engine + *canon_doubles;
 }
@@ -4824,7 +4872,7 @@ static size_t filter_scratch(const GSHSCENE_Filter * fl, const GSHGEOM_Map * com
  * allocator (the sink's, or the caller's arena, whose measure counts it).
  */
 static GSHSCENE_Result filter_over(Run * run, const GSHSCENE_Resource * filter, double * layer, const GSHSCENE_Color_Space * space,
-    size_t count, GSHCPU_Rect * dirty) {
+    const size_t * chain, size_t count, GSHCPU_Rect * dirty) {
   GSHSCENE_Filter fl;
   if (gshscene_resource_filter(filter, &fl) != GSHSCENE_OK) {
     return GSHSCENE_ERR_INTERNAL;
@@ -4841,21 +4889,50 @@ static GSHSCENE_Result filter_over(Run * run, const GSHSCENE_Resource * filter, 
   }
   Canon k;
   canon_plan(&composed, canvas, &k);
+  /* FL25: the slots the primitives draw, each into a frame above the group's that stays until the filter has run (the frames hold the
+   * pictures drawn over the canvas; the scratch is taken after, so a pass that resets the arena takes nothing from it). */
+  const double * slot_dev[GSHSCENE_FILTER_MAX_PRIMITIVES];
+  memset(slot_dev, 0, sizeof slot_dev);
+  size_t drawn = 0;
+  GSHGEOM_Map identity_map; /* a filter's slots are placed by their instances alone */
+  gshgeom_map_identity(2, &identity_map);
+  if (fl.picture) {
+    const size_t push = ms_of(run)->frames[run->top].push;
+    for (size_t i = 0; i < fl.primitive_count; i++) {
+      if (fl.primitives[i].kind != GSHSCENE_FILTER_IMAGE || !fl.primitives[i].use_picture) {
+        continue;
+      }
+      const GSHSCENE_Result sr = picture_pass(run, fl.picture, &identity_map, space, fl.primitives[i].slot, push, chain, count, canvas, canvas);
+      if (sr == GSHSCENE_OK) {
+        drawn++;
+        widen(run, &run->frames[run->top], canvas); /* the pixels the units did not reach are zero */
+        slot_dev[i] = run->frames[run->top].layer;
+      } else {
+        run->top -= drawn;
+        return sr;
+      }
+    }
+  }
   if (run->item_alloc == &run->arena.self) {
     gshcpu_render_arena_reset(&run->arena);
   }
   double * scratch = run->item_alloc->malloc_fn(run->item_alloc->ctx, need * sizeof(double));
   if (!scratch) {
+    run->top -= drawn;
     return GSHSCENE_ERR_OOM;
   }
   const GSHCPU_Filter_Limits flim = {run->cs->max_area_pixel_work, run->cs->max_image_work};
   GSHCPU_Result r;
   if (!k.on) {
-    r = gshcpu_filter_apply(&fl, &composed, space, canvas, layer, scratch, need, &flim, dirty);
+    r = gshcpu_filter_apply(&fl, &composed, space, canvas, layer, scratch, need, &flim, fl.picture ? slot_dev : NULL,
+        fl.primitive_count, dirty);
   } else {
     double * layer_q = scratch;
     double * engine = scratch + canon_doubles;
     const size_t wq = (size_t)(k.q.x1 - k.q.x0), hq = (size_t)(k.q.y1 - k.q.y0);
+    const double * slot_q[GSHSCENE_FILTER_MAX_PRIMITIVES];
+    memset(slot_q, 0, sizeof slot_q);
+    size_t next = 1;
     /* the layer onto the canonical canvas */
     for (size_t j = 0; j < hq; j++) {
       for (size_t i = 0; i < wq; i++) {
@@ -4864,7 +4941,23 @@ static GSHSCENE_Result filter_over(Run * run, const GSHSCENE_Resource * filter, 
         bilinear(layer, canvas, dx, dy, &layer_q[4u * (j * wq + i)]);
       }
     }
-    r = gshcpu_filter_apply(&fl, &k.map, space, k.q, layer_q, engine, need - canon_doubles, &flim, dirty);
+    for (size_t p = 0; p < fl.primitive_count; p++) {
+      if (!slot_dev[p]) {
+        continue;
+      }
+      /* the slot's frame onto the canonical canvas, by the same resampling */
+      double * dst = scratch + next++ * wq * hq * 4u;
+      for (size_t j = 0; j < hq; j++) {
+        for (size_t i = 0; i < wq; i++) {
+          const double qx = gshcpu_render_i2d(k.q.x0) + (double)i + 0.5, qy = gshcpu_render_i2d(k.q.y0) + (double)j + 0.5;
+          const double dx = k.n[0] * qx + k.n[1] * qy + k.c[0], dy = k.n[2] * qx + k.n[3] * qy + k.c[1];
+          bilinear(slot_dev[p], canvas, dx, dy, &dst[4u * (j * wq + i)]);
+        }
+      }
+      slot_q[p] = dst;
+    }
+    r = gshcpu_filter_apply(&fl, &k.map, space, k.q, layer_q, engine, need - canon_doubles, &flim, fl.picture ? slot_q : NULL,
+        fl.primitive_count, dirty);
     if (r == GSHCPU_OK) {
       /* and back onto the device's pixels */
       const size_t w = (size_t)(canvas.x1 - canvas.x0);
@@ -4879,6 +4972,7 @@ static GSHSCENE_Result filter_over(Run * run, const GSHSCENE_Resource * filter, 
     }
   }
   run->item_alloc->free_fn(run->item_alloc->ctx, scratch);
+  run->top -= drawn; /* the slots' frames are released */
   if (r != GSHCPU_OK) {
     return r == GSHCPU_ERR_UNSUPPORTED ? GSHSCENE_ERR_INTERNAL : scene_result(r); /* the planning pass lets none through */
   }
@@ -4902,11 +4996,11 @@ static GSHSCENE_Result filter_over(Run * run, const GSHSCENE_Resource * filter, 
  * clips, the mask and the opacity, which are the pop's).  The pixels outside the group's dirty rectangle are made ready (zero) first, and the
  * group's dirty rectangle becomes the filter's.
  */
-static GSHSCENE_Result group_filter(Run * run, size_t count) {
+static GSHSCENE_Result group_filter(Run * run, const size_t * chain, size_t count) {
   Frame * f = &run->frames[run->top];
   widen(run, f, run->layout.region);
   GSHCPU_Rect dirty;
-  const GSHSCENE_Result r = filter_over(run, f->group.filter, f->layer, &f->space, count, &dirty);
+  const GSHSCENE_Result r = filter_over(run, f->group.filter, f->layer, &f->space, chain, count, &dirty);
   if (r != GSHSCENE_OK) {
     return r;
   }
@@ -4945,7 +5039,7 @@ static GSHSCENE_Result group_backdrop(Run * run, const GSHSCENE_Item * item, con
     }
   }
   GSHCPU_Rect dirty;
-  GSHSCENE_Result r = filter_over(run, item->group.filter, f->layer, &parent->space, count, &dirty);
+  GSHSCENE_Result r = filter_over(run, item->group.filter, f->layer, &parent->space, chain, count, &dirty);
   if (r != GSHSCENE_OK) {
     return r;
   }
@@ -5003,7 +5097,7 @@ static GSHSCENE_Result group_backdrop(Run * run, const GSHSCENE_Item * item, con
 
 static GSHSCENE_Result group_pop(Run * run, const size_t * chain, size_t count) {
   if (run->frames[run->top].group.filter && run->frames[run->top].group.filter_mode == (uint32_t)GSHSCENE_FILTER_MODE_OWN) {
-    const GSHSCENE_Result r = group_filter(run, count);
+    const GSHSCENE_Result r = group_filter(run, chain, count);
     if (r != GSHSCENE_OK) {
       return r;
     }
@@ -6064,8 +6158,8 @@ static void tile_facts(const GSHSCENE_List * list, unsigned depth, Tile_Facts * 
       }
     } else if (item->kind == GSHSCENE_ITEM_CLIP_PUSH && gshscene_resource_kind(item->resource) == GSHSCENE_RESOURCE_CLIP_UNION) {
       f->union_clip = 1;
-    } else if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && item->group.soft_mask) {
-      f->masked = 1;
+    } else if (item->kind == GSHSCENE_ITEM_GROUP_PUSH && group_picture(item, NULL)) {
+      f->masked = 1; /* FL25: a filter's picture is drawn as a mask's is */
     } else if (item->kind == GSHSCENE_ITEM_INSTANCE) {
       tile_facts(gshscene_resource_picture(item->resource), depth + 1u, f);
     }

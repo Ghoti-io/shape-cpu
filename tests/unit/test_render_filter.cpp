@@ -34,6 +34,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <array>
 #include <vector>
 
 namespace {
@@ -201,7 +202,7 @@ TEST(RenderFilter, EveryVectorIsTheOraclesWithinOneTrillionth) {
     const GSHSCENE_Color_Space space = srgb();
     GSHCPU_Rect canvas = {0, 0, c.w, c.h};
     GSHCPU_Rect dirty{};
-    ASSERT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), nullptr, &dirty), GSHCPU_OK);
+    ASSERT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), nullptr, nullptr, 0, &dirty), GSHCPU_OK);
     for (size_t q = 0; q < n * 4u; q++) {
       ASSERT_NEAR(layer[q], c.want[q], 1e-12) << "pixel " << q / 4u << " channel " << q % 4u;
     }
@@ -222,7 +223,7 @@ TEST(RenderFilter, AScratchTooSmallIsRefusedAndNothingIsWritten) {
   const GSHSCENE_Color_Space space = srgb();
   GSHCPU_Rect canvas = {0, 0, c.w, c.h};
   GSHCPU_Rect dirty{};
-  EXPECT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), need - 1u, nullptr, &dirty), GSHCPU_ERR_LIMIT);
+  EXPECT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), need - 1u, nullptr, nullptr, 0, &dirty), GSHCPU_ERR_LIMIT);
   EXPECT_EQ(std::memcmp(layer.data(), c.src, n * 4u * sizeof(double)), 0);
 }
 
@@ -242,17 +243,95 @@ TEST(RenderFilter, WhatThisBuildDoesNotDrawIsRefusedByName) {
   turned.m[0][1] = -0.6;
   turned.m[1][0] = 0.6;
   turned.m[1][1] = 0.8;
-  EXPECT_EQ(gshcpu_filter_apply(&b.f, &turned, &space, canvas, layer.data(), scratch.data(), scratch.size(), nullptr, &dirty),
+  EXPECT_EQ(gshcpu_filter_apply(&b.f, &turned, &space, canvas, layer.data(), scratch.data(), scratch.size(), nullptr, nullptr, 0, &dirty),
       GSHCPU_ERR_UNSUPPORTED);
   // a primitive of a later stage
   b.prims[0].kind = GSHSCENE_FILTER_KIND_COUNT;
   const GSHGEOM_Map map = map_of(c.map);
-  EXPECT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), nullptr, &dirty),
+  EXPECT_EQ(gshcpu_filter_apply(&b.f, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), nullptr, nullptr, 0, &dirty),
       GSHCPU_ERR_UNSUPPORTED);
   b.prims[0].kind = GSHSCENE_FILTER_OFFSET;
-  EXPECT_EQ(gshcpu_filter_apply(nullptr, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), nullptr, &dirty),
+  EXPECT_EQ(gshcpu_filter_apply(nullptr, &map, &space, canvas, layer.data(), scratch.data(), scratch.size(), nullptr, nullptr, 0, &dirty),
       GSHCPU_ERR_INVALID);
   EXPECT_EQ(std::memcmp(layer.data(), c.src, n * 4u * sizeof(double)), 0);
+}
+
+namespace {
+
+/** A one-primitive filter whose `IMAGE` draws slot @p slot of its picture (the engine reads only the slot). */
+struct SlotFilter {
+  GSHSCENE_Filter_Primitive prim;
+  GSHSCENE_Filter f;
+  SlotFilter(uint32_t slot, uint32_t space, uint32_t mask = 0, const double * sub = nullptr) {
+    std::memset(&prim, 0, sizeof prim);
+    prim.kind = GSHSCENE_FILTER_IMAGE;
+    prim.use_picture = 1;
+    prim.slot = slot;
+    prim.subregion_mask = mask;
+    for (int k = 0; sub && k < 4; k++) {
+      prim.subregion[k] = sub[k];
+    }
+    std::memset(&f, 0, sizeof f);
+    f.region_mode = GSHSCENE_FILTER_REGION_AUTO;
+    f.color_space = space;
+    f.primitive_count = 1;
+    f.primitives = &prim;
+  }
+};
+
+}  // namespace
+
+TEST(RenderFilter, ASlotOfThePictureIsTheResultAndTheSourceGraphicIsNotRead) {
+  const int w = 4, h = 3;
+  const size_t n = (size_t)w * h;
+  std::vector<double> layer(n * 4u, 0.0), slot(n * 4u, 0.0), want;
+  for (size_t p = 0; p < n; p++) {
+    layer[4 * p] = 0.5;
+    layer[4 * p + 3] = 0.5;  // a half-red source, which the primitive does not read
+    slot[4 * p + 1] = (double)(p % 3) * 0.25;  // premultiplied green with alpha the same
+    slot[4 * p + 3] = (double)(p % 3) * 0.25;
+  }
+  want = slot;
+  const GSHGEOM_Map map = map_of(std::array<double, 6>{1, 0, 0, 1, 0, 0}.data());
+  const GSHSCENE_Color_Space space = srgb();
+  GSHCPU_Rect canvas = {0, 0, w, h}, dirty{};
+  for (uint32_t filter_space : {(uint32_t)GSHSCENE_FILTER_SPACE_SRGB, (uint32_t)GSHSCENE_FILTER_SPACE_LINEAR_RGB}) {
+    SlotFilter sf(1, filter_space);  // the slot index is the sink's business, the engine is given the drawn layer
+    std::vector<double> l = layer;
+    std::vector<double> scratch(gshcpu_filter_scratch_doubles(&sf.f, (size_t)w, (size_t)h));
+    const double * slots[1] = {slot.data()};
+    ASSERT_EQ(gshcpu_filter_apply(&sf.f, &map, &space, canvas, l.data(), scratch.data(), scratch.size(), nullptr, slots, 1, &dirty), GSHCPU_OK);
+    for (size_t q = 0; q < n * 4u; q++) {
+      EXPECT_NEAR(l[q], want[q], 1e-9) << "space " << filter_space << " value " << q;  // the round trip through the primitive's space
+    }
+  }
+}
+
+TEST(RenderFilter, ASlotIsClippedToTheSubregionAndAMissingSlotIsRefused) {
+  const int w = 4, h = 2;
+  const size_t n = (size_t)w * h;
+  std::vector<double> slot(n * 4u, 1.0);
+  const GSHGEOM_Map map = map_of(std::array<double, 6>{1, 0, 0, 1, 0, 0}.data());
+  const GSHSCENE_Color_Space space = srgb();
+  GSHCPU_Rect canvas = {0, 0, w, h}, dirty{};
+  const double sub[4] = {1, 0, 2, 2};  // x = 1, width 2
+  SlotFilter sf(0, GSHSCENE_FILTER_SPACE_SRGB, 1u | 4u, sub);
+  std::vector<double> l(n * 4u, 0.0);
+  std::vector<double> scratch(gshcpu_filter_scratch_doubles(&sf.f, (size_t)w, (size_t)h));
+  const double * slots[1] = {slot.data()};
+  ASSERT_EQ(gshcpu_filter_apply(&sf.f, &map, &space, canvas, l.data(), scratch.data(), scratch.size(), nullptr, slots, 1, &dirty), GSHCPU_OK);
+  for (int y = 0; y < h; y++) {
+    for (int x = 0; x < w; x++) {
+      const double want = (x == 1 || x == 2) ? 1.0 : 0.0;
+      EXPECT_EQ(l[4 * ((size_t)y * w + x) + 3], want) << x << "," << y;
+    }
+  }
+  // no slots, too few entries, and an entry that was not drawn
+  std::vector<double> l2(n * 4u, 0.25);
+  EXPECT_EQ(gshcpu_filter_apply(&sf.f, &map, &space, canvas, l2.data(), scratch.data(), scratch.size(), nullptr, nullptr, 0, &dirty), GSHCPU_ERR_INVALID);
+  EXPECT_EQ(gshcpu_filter_apply(&sf.f, &map, &space, canvas, l2.data(), scratch.data(), scratch.size(), nullptr, slots, 0, &dirty), GSHCPU_ERR_INVALID);  // fewer entries than the primitive's index
+  const double * none[1] = {nullptr};
+  EXPECT_EQ(gshcpu_filter_apply(&sf.f, &map, &space, canvas, l2.data(), scratch.data(), scratch.size(), nullptr, none, 1, &dirty), GSHCPU_ERR_INVALID);
 }
 
 TEST(RenderFilter, TheScratchIsAFunctionOfTheGraphAndTheCanvasOnly) {

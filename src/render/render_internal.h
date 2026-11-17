@@ -244,12 +244,17 @@ typedef struct GSHCPU_Filter_Limits {
  * turn and a translation.  @p scratch holds @p scratch_doubles `double`s, at least ::gshcpu_filter_scratch_doubles of them.
  *
  * @param limits The image primitive's bounds (IC9); NULL for the defaults.
+ * @param slots FL25: for each primitive, by its index, that draws a slot of the filter's picture, the slot's picture drawn over @p canvas (four
+ *   premultiplied `double`s a pixel, in @p layer_space), which is the primitive's result (its subregion clips it); NULL for the others.
+ *   NULL when the filter has no picture.
+ * @param slot_count The number of entries of @p slots: the filter's primitive count.
  * @param dirty The pixels the result may touch: the region met with the canvas.
  * @return ::GSHCPU_OK; ::GSHCPU_ERR_UNSUPPORTED for a primitive, an edge mode or a map this build does not draw (the planning pass does not
  *   let one through); ::GSHCPU_ERR_LIMIT if the scratch is too small; ::GSHCPU_ERR_INVALID for a NULL.
  */
 GSHCPU_Result gshcpu_filter_apply(const GSHSCENE_Filter * f, const GSHGEOM_Map * map, const GSHSCENE_Color_Space * layer_space,
-    GSHCPU_Rect canvas, double * layer, double * scratch, size_t scratch_doubles, const GSHCPU_Filter_Limits * limits, GSHCPU_Rect * dirty);
+    GSHCPU_Rect canvas, double * layer, double * scratch, size_t scratch_doubles, const GSHCPU_Filter_Limits * limits,
+    const double * const * slots, size_t slot_count, GSHCPU_Rect * dirty);
 
 
 /** The most a 26.6 coordinate of an item may be in magnitude: 2^24 pixels. */
