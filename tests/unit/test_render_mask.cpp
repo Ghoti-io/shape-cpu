@@ -963,6 +963,36 @@ TEST(RenderMask, TheArenaIsSizedByTheItemsOfTheMasksPictureToo) {
   EXPECT_GT(ref.need, little.need + 600u * 16u);
 }
 
+// MC5: the instance in a mask's picture places what it holds, in the layout's measure as it does in the pass: a circle drawn at a
+// radius of one and instanced at eleven takes the memory of a circle of that size, and the exact memory draws it.
+TEST(RenderMask, AnInstanceInAMasksPictureIsMeasuredUnderItsOwnMap) {
+  size_t need[2] = {0, 0};
+  for (int variant = 0; variant < 2; variant++) {
+    Scene s;
+    GSHGEOM_Path * p = nullptr;
+    ASSERT_EQ(gshgeom_path_create(nullptr, nullptr, 2, &p), GSHGEOM_OK);
+    const double k = 0.5522847498307936;
+    gshgeom_path_move_to(p, GSHGEOM_Point{1, 0, 0});
+    gshgeom_path_cubic_to(p, GSHGEOM_Point{1, k, 0}, GSHGEOM_Point{k, 1, 0}, GSHGEOM_Point{0, 1, 0});
+    gshgeom_path_cubic_to(p, GSHGEOM_Point{-k, 1, 0}, GSHGEOM_Point{-1, k, 0}, GSHGEOM_Point{-1, 0, 0});
+    gshgeom_path_cubic_to(p, GSHGEOM_Point{-1, -k, 0}, GSHGEOM_Point{-k, -1, 0}, GSHGEOM_Point{0, -1, 0});
+    gshgeom_path_cubic_to(p, GSHGEOM_Point{k, -1, 0}, GSHGEOM_Point{1, -k, 0}, GSHGEOM_Point{1, 0, 0});
+    gshgeom_path_close(p);
+    const GSHSCENE_Resource * inner = s.picture_of(s.path(p), white());
+    GSHSCENE_List * host = s.open();
+    const GSHGEOM_Map at = variant == 0 ? mh::scale(1.0, 1.0) : mh::scale(11.0, 11.0);
+    ASSERT_EQ(gshscene_list_instance(host, inner, &at, 0, 0.0), GSHSCENE_OK);
+    const GSHSCENE_Resource * mask = s.alpha_mask(s.picture(host));
+    GSHSCENE_List * l = s.masked_fill(mask, s.rect(0, 0, 24, 24), red());
+    Options caller;
+    caller.flags = GSHSCENE_RENDER_CALLER_MEMORY;
+    Draw out = draw(l, 24, 24, caller);
+    EXPECT_EQ(out.result, GSHSCENE_OK) << "the exact memory draws the instanced circle, variant " << variant;
+    need[variant] = out.need;
+  }
+  EXPECT_GT(need[1], need[0]) << "the layout measured the circle at the instance's scale";
+}
+
 // MC7: a masked pop counts its region twice: the pixels visited and the value found for each, so the worst unit of a render of a
 // masked group over a region of 100 pixels is the pop's 200, past the push's 144 and the units of the mask's own.
 TEST(RenderMask, AMaskedPopCountsItsRegionTwice) {

@@ -1219,6 +1219,77 @@ TEST(RenderPatternRules, AUnitOfATileTheDamageDoesNotReachIsTestedAllTheSame) {
   rf_release(&c);
 }
 
+TEST(RenderPatternRules, ALimitMetByAStrokeInANestedPatternIsMetWhateverTheDamageDraws) {
+  // S4: the stroke's twin of the nested fill above.  The inner tile strokes a ring painted with a gradient past the sampling domain in
+  // every whole cell, and the outer tile paints a fill with that pattern; the damage is inside the corner copy of the outer lattice, so the copies of the outer one that
+  // the damage does not reach have an empty rectangle and a whole part, and the stroke unit of each is tested with the whole part.
+  RF_Ctx c;
+  rf_begin(&c);
+  const double up = std::ldexp(1.0, 58);
+  GSHSCENE_Gradient_Stop stops[2] = {rf_stop(0.0, rf_solid(1, 1, 0, 1)), rf_stop(1.0, rf_solid(0, 0.2, 0.9, 1))};
+  GSHSCENE_Gradient g = rf_linear(0, 0, 0x1p60, 0, 0, 0, GSHSCENE_EXTEND_PAD);
+  rf_check(&c, gshgeom_map_scale(2, 0x1p-64, 0x1p-64, 1.0, &g.map) == GSHGEOM_OK);
+  GSHGEOM_Map down;
+  rf_check(&c, gshgeom_map_scale(2, 1.0 / up, 1.0 / up, 1.0, &down) == GSHGEOM_OK);
+  GSHSCENE_List * inner = rf_open(&c);
+  const double ring[] = {0.5 * up, 0.5 * up, 60.0 * up, 0.5 * up, 60.0 * up, 60.0 * up, 0.5 * up, 60.0 * up};
+  rf_stroke(&c, inner, rf_polyline(&c, ring, 4, 1), rf_pen(&c, 6.0 * up, GSHSCENE_STROKE_JOIN_MITER, GSHSCENE_STROKE_CAP_BUTT), &down,
+      rf_gradient_paint(rf_gradient(&c, g, stops, 2), 0.9));
+  const GSHSCENE_Resource * inner_pat = rf_pattern(&c, rf_picture_of(&c, inner), 0, 0, 64, 64, 64, 64, 1, 1, rf_move(0.0, 0.0), nullptr);
+  GSHSCENE_List * outer = rf_open(&c);
+  rf_fill(&c, outer, rf_rect(&c, 0, 0, 64, 64), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(inner_pat, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * outer_pat = rf_pattern(&c, rf_picture_of(&c, outer), 0, 0, 64, 64, 64, 64, 1, 1, rf_move(0.0, 0.0), nullptr);
+  GSHSCENE_List * l = rf_open(&c);
+  rf_fill(&c, l, rf_rect(&c, 0, 0, 195, 131), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(outer_pat, 1.0), 0, 0.0);
+  rf_close(&c, l);
+  ASSERT_EQ(c.failed, 0);
+  TSink whole_sink(kNoPeriod);
+  Out whole = draw(whole_sink.sink, l, 195, 131);
+  ASSERT_EQ(whole.result, GSHSCENE_OK);
+  EXPECT_EQ(whole.summary.by_class[GSHSCENE_ENTRY_REFUSED], 1u) << "the whole render";
+  for (const GSHSCENE_Rect & damage : {GSHSCENE_Rect{193, 129, 195, 131}, GSHSCENE_Rect{193, 0, 195, 131}, GSHSCENE_Rect{0, 0, 8, 8}}) {
+    TSink sink(kNoPeriod);
+    Out part = draw(sink.sink, l, 195, 131, GSHCPU_FORMAT_RGBA8_STRAIGHT, 0, nullptr, nullptr, &damage);
+    ASSERT_EQ(part.result, GSHSCENE_OK);
+    EXPECT_EQ(part.summary.by_class[GSHSCENE_ENTRY_REFUSED], 1u) << "damage " << damage.x0 << "," << damage.y0;
+  }
+  rf_release(&c);
+}
+
+TEST(RenderPatternRules, AUseWhoseChainOfMapsOverflowsWhenComposedIsRefusedAndDrawsNothingNotEvenWithTheLastUsesMap) {
+  // PC5: the use's composed map is the item's, the pattern's and the target's; one that cannot be composed (each map is inside the bound of
+  // 2^100 and their product, 2^120, is not) is a refusal of the use, named by its chain.  The pass's record is the one the use before it
+  // left, so a refusal that were not taken would draw the second use with the first one's composed map: the second use is right of the
+  // first and painted nothing.
+  RF_Ctx c;
+  rf_begin(&c);
+  GSHGEOM_Map huge;
+  rf_check(&c, gshgeom_map_scale(2, 0x1p60, 0x1p60, 1.0, &huge) == GSHGEOM_OK);
+  GSHSCENE_List * t = rf_open(&c);
+  rf_fill(&c, t, rf_rect(&c, 0, 0, 8, 8), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(1, 0, 0, 1), 0, 0.0);
+  const GSHSCENE_Resource * tile = rf_picture_of(&c, t);
+  const GSHSCENE_Resource * fine = rf_pattern(&c, tile, 0, 0, 8, 8, 8, 8, 1, 1, rf_move(0.0, 0.0), nullptr);
+  const GSHSCENE_Resource * big = rf_pattern(&c, tile, 0, 0, 8, 8, 8, 8, 1, 1, huge, nullptr);
+  GSHSCENE_List * l = rf_open(&c);
+  rf_fill(&c, l, rf_rect(&c, 0, 0, 16, 16), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(fine, 1.0), 0, 0.0);
+  GSHGEOM_Map right;
+  rf_check(&c, gshgeom_map_scale(2, 0x1p60, 0x1p60, 1.0, &right) == GSHGEOM_OK);
+  rf_fill(&c, l, rf_rect(&c, 16.0 / 0x1p60, 0, 32.0 / 0x1p60, 16.0 / 0x1p60), &right, GSHGEOM_FILL_NONZERO, rf_pattern_paint(big, 1.0), 0, 0.0);
+  rf_close(&c, l);
+  ASSERT_EQ(c.failed, 0);
+  TSink sink(kNoPeriod);
+  Out out = draw(sink.sink, l, 32, 16);
+  ASSERT_EQ(out.result, GSHSCENE_OK);
+  EXPECT_EQ(out.summary.by_class[GSHSCENE_ENTRY_REFUSED], 1u);
+  GSHSCENE_List * only = rf_open(&c);
+  rf_fill(&c, only, rf_rect(&c, 0, 0, 16, 16), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(fine, 1.0), 0, 0.0);
+  rf_close(&c, only);
+  TSink first_sink(kNoPeriod);
+  Out first = draw(first_sink.sink, only, 32, 16);
+  EXPECT_EQ(out.bytes, first.bytes) << "only the first use painted";
+  rf_release(&c);
+}
+
 TEST(RenderPatternRules, AUnionsDensestPixelInATileIsMetWhateverTheDamageDraws) {
   // S4, CG8: the pieces of the members of a union at one pixel are bounded by max_exact_fragments, and the pixels a copy meets are the whole
   // render's part of it.  Six members overlap in the middle of the cell, past the corner copy's three pixels: a whole copy is refused for

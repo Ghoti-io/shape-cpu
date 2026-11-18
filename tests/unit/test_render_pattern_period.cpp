@@ -273,6 +273,11 @@ TEST(RenderPatternPeriod, WhereTheTierDoesNotApplyItIsNotTakenAndTheBitsAreTheSa
   EXPECT_EQ(a.bytes, b.bytes);
   EXPECT_GT(on.counters.patterns, on.counters.pattern_period) << "the outer pattern's pass is not the tier's: its tile holds a pattern";
   EXPECT_GE(on.counters.pattern_period, 1u) << "the inner passes have integer periods of their own";
+  // The outer pass is the general tier's and draws every copy of its cell, each holding the inner pattern's pass (31 passes in all); a
+  // tier that took the outer pass too would draw the window's one cell and so far fewer.  Of the 31, 20 are the tier's: the inner passes
+  // over a whole cell, the others (the copies the render's edge cuts) are too small for a period.
+  EXPECT_EQ(on.counters.patterns, 31u) << "the outer pass draws every copy of its cell";
+  EXPECT_EQ(on.counters.pattern_period, 20u);
   rf_release(&c);
 }
 

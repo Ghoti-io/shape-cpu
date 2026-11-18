@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -50,6 +51,32 @@ uint32_t union_caps(unsigned tiers) {
   EXPECT_EQ(gshscene_sink_caps(sink, &t, &caps), GSHSCENE_OK);
   EXPECT_EQ(gshscene_sink_destroy(sink), GSHSCENE_OK);
   return caps.flags & (GSHSCENE_CAP_CLIP_UNION | GSHSCENE_CAP_CLIP_UNION_GENERAL);
+}
+
+
+// The counts of every zeroed allocation of elements of two bytes: the fast tier's plane is one of them.
+struct Spy {
+  std::vector<size_t> planes;
+};
+
+void * spy_malloc(void *, size_t n) {
+  return std::malloc(n ? n : 1);
+}
+
+void * spy_calloc(void * ctx, size_t count, size_t size) {
+  Spy * spy = static_cast<Spy *>(ctx);
+  if (size == sizeof(uint16_t)) {
+    spy->planes.push_back(count);
+  }
+  return std::calloc(count ? count : 1, size ? size : 1);
+}
+
+void * spy_realloc(void *, void * old, size_t n) {
+  return std::realloc(old, n ? n : 1);
+}
+
+void spy_free(void *, void * p) {
+  std::free(p);
 }
 
 } // namespace
@@ -90,6 +117,70 @@ TEST(RenderClipUnion, EveryPolygonVectorIsTheOraclesByteForByteWhichTierDrawsIt)
   }
   EXPECT_GE(drawn, 10u);
   EXPECT_GE(general, 20u);
+}
+
+TEST(RenderClipUnion, TheMeasureOfTheDisjointTierTakesTheMemberThatTakesTheMostAndNotTheirSum) {
+  // CU20: the fast tier holds one member's geometry at a time, so the memory it asks for is that of the largest member and a union of
+  // twelve more members of the same size asks for nothing more of the arena: only the per-member bookkeeping grows (a few words each).
+  size_t need[2] = {0, 0};
+  uint64_t fast[2] = {0, 0};
+  size_t one = 0;
+  for (int variant = 0; variant < 3; variant++) {
+    const int members = variant == 0 ? 3 : variant == 1 ? 15 : 1;
+    Scene s;
+    std::vector<GSHSCENE_Clip_Member> list;
+    for (int m = 0; m < members; m++) {
+      // a comb of 2000 vertices inside a cell of four pixels by four: a polygon with a long boundary and no overlap with its neighbours
+      std::vector<double> xy;
+      const double x0 = 4.0 * m + 0.25;
+      for (int i = 0; i < 1000; i++) {
+        xy.push_back(x0 + 3.5 * (double)i / 999.0);
+        xy.push_back(i % 2 ? 1.5 : 0.5);
+      }
+      for (int i = 999; i >= 0; i--) {
+        xy.push_back(x0 + 3.5 * (double)i / 999.0);
+        xy.push_back(3.5);
+      }
+      list.push_back(member(s.polygon(xy)));
+    }
+    Draw d = draw(clipped_fill(s, make_union(s, list), 64, 4), 64, 4);
+    ASSERT_EQ(d.result, GSHSCENE_OK) << members;
+    if (variant == 2) {
+      one = d.need;
+    } else {
+      need[variant] = d.need;
+      fast[variant] = d.counters.union_fast;
+    }
+  }
+  EXPECT_EQ(fast[0], 1u);
+  EXPECT_EQ(fast[1], 1u);
+  ASSERT_GT(need[0], one - 1u);
+  // The comb's geometry is 2000 points; twelve more of them are 12 * 2000 * 8 bytes at the least, which the measure must not hold.
+  EXPECT_LT(need[1] - need[0], 12u * 2000u * 8u / 2u) << "the measure summed the members' geometry instead of taking the largest";
+}
+
+TEST(RenderClipUnion, AMemberWithNoPixelsDoesNotStretchTheUnionsPlaneToTheOrigin) {
+  // CU18: the plane covers the union's bound, which is the bound of the members that have pixels; a member with none (a hairline on a pixel
+  // boundary) is left out of it and is not the rectangle (0, 0, 0, 0), which would stretch the bound, and the plane, back to the origin.  The
+  // picture is the same either way: only the memory of the clip and the work of the push show it, so the plane is measured by what the
+  // allocator is asked for, in a render whose one square lies two thousand pixels from the origin.
+  Spy spy;
+  GSHSCENE_Allocator alloc{};
+  alloc.ctx = &spy;
+  alloc.malloc_fn = spy_malloc;
+  alloc.calloc_fn = spy_calloc;
+  alloc.realloc_fn = spy_realloc;
+  alloc.free_fn = spy_free;
+  Scene s;
+  const GSHSCENE_Resource * u = make_union(s, {member(s.polygon({5.0, 3.0, 5.0, 9.0})), member(s.polygon({2000, 2000, 2010, 2000, 2010, 2010, 2000, 2010}))});
+  Options o;
+  o.alloc = &alloc;
+  Draw d = draw(clipped_fill(s, u, 2048, 2048), 2048, 2048, o);
+  ASSERT_EQ(d.result, GSHSCENE_OK);
+  EXPECT_EQ(d.counters.union_fast, 1u);
+  EXPECT_EQ(d.counters.union_sweeps, 1u) << "the member with no pixels is not swept";
+  EXPECT_EQ(std::count(spy.planes.begin(), spy.planes.end(), 100u), 1) << "the plane is the square's ten by ten pixels";
+  EXPECT_EQ(std::count(spy.planes.begin(), spy.planes.end(), 2010u * 2010u), 0) << "and not the rectangle from the origin to it";
 }
 
 TEST(RenderClipUnion, AMemberWithNoPixelsContributesNothingAndIsNeverRefusedForItsGeometryByEitherTier) {

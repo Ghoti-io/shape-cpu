@@ -1742,7 +1742,8 @@
 "      gshcpu_render_arena_rewind(arena, mark);\n      GSHCPU_Result mr = gshcpu_render_geometry(&member, maps, count - 1, &target->map, &arena->self, &cs->geometry, &mg);",
 "      (void)mark;\n      GSHCPU_Result mr = gshcpu_render_geometry(&member, maps, count - 1, &target->map, &arena->self, &cs->geometry, &mg);",
 [
-"testRender_clip_union_general"
+"testRender_clip_union_general",
+"testRender_clip_union"
 ]
 ],
 [

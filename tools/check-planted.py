@@ -409,7 +409,7 @@ in their list, 245 only by another, which tools/extra-catchers.json names) and a
 bit-plane sweep of a union, 19 in filter_over, 12 in canon_plan, 10 in list_holds_filter, 7 in measure_items, 6 in filter_scratch, the rest
 one to six each in the pattern and measure code).  Most of the survivors are statements that count work or reset a counter, memsets of memory
 that is zero already and comparisons of a tie, which is what the survivors of earlier sweeps were; the filter's are the new code the
-hand plants above (ffh-, fsl-, fb-) are for, and the ones that need a test are the OPEN entries of SURVIVORS.
+hand plants above (ffh-, fsl-, fb-) are for, and the ones that needed a test (the seven OPEN entries of SURVIVORS then) have one: the instance's map in the measure of a mask's picture, the fast union's measure and its plane, the stroke unit of a nested pattern, the composition of a use's chain, and the period tier's count for a tile that holds a pattern.
 """
 import concurrent.futures
 import os
@@ -2407,8 +2407,11 @@ PLANTS += [
     ('cg-s-measure-takes-fast-path', 'src', 'src/render/sink.c',
      '        !((cs->tiers & GSHCPU_RENDER_TIER_UNION) && verdict.disjoint)) {', '        0) {', _CG),
     ('cg-s-measure-rewinds-per-member', 'src', 'src/render/sink.c',
-     '          gshcpu_render_arena_rewind(arena, mark);\n          GSHCPU_Result mr = gshcpu_render_geometry(&member, maps, count - 1, &target->map, &arena->self, &cs->geometry, &mg);',
-     '          (void)mark;\n          GSHCPU_Result mr = gshcpu_render_geometry(&member, maps, count - 1, &target->map, &arena->self, &cs->geometry, &mg);', _CG),
+     '      gshcpu_render_arena_rewind(arena, mark);\n      GSHCPU_Result mr = gshcpu_render_geometry(&member, maps, count - 1, &target->map, &arena->self, &cs->geometry, &mg);',
+     '      (void)mark;\n      GSHCPU_Result mr = gshcpu_render_geometry(&member, maps, count - 1, &target->map, &arena->self, &cs->geometry, &mg);', ['testRender_clip_union']),
+    ('cg-s-measure-general-rewinds-per-part', 'src', 'src/render/sink.c',
+     '            gshcpu_render_arena_rewind(arena, mark);\n            GSHCPU_Result mr = gshcpu_render_geometry(&part, maps, count - 1, &target->map, &arena->self, &cs->geometry, &mg);',
+     '            (void)mark;\n            GSHCPU_Result mr = gshcpu_render_geometry(&part, maps, count - 1, &target->map, &arena->self, &cs->geometry, &mg);', _CG),
     ('cg-s-measure-whole-extent', 'src', 'src/render/sink.c',
      'union_plan(item, maps, count - 1, &target->map, region_of(target), whole_of(target),', 'union_plan(item, maps, count - 1, &target->map, region_of(target), region_of(target),', _CG),
     ('cg-s-measure-blocks-not-taken', 'src', 'src/render/sink.c',
@@ -2991,28 +2994,14 @@ SURVIVORS = {
         "past `union_k` and `clip_k`, which are carved from one arena back to back; the written value is the initial value of the next array's first "
         "element, so nothing reads a changed byte; it is an out-of-bounds write all the same, left open: the next step is a caller-memory test whose "
         "block of memory is a malloc of exactly the size the report names for the render, under ASan",
-    "rp-chain-singular-not-refused": "OPEN (pass B 2026-11-07, not seen by any test, nor by the sweep with every test tried): the pattern pass refuses an item whose "
-        "chain cannot be composed with the target's map; the plant drops that refusal. Either an earlier check refuses every such chain (then this is "
-        "a repeated guard, to be shown by a test that feeds a pattern fill a singular placement and reads the earlier refusal), or a test of the "
-        "refusal is missing: the next step is that test",
-    "rp-tier-nested-pattern-allowed": "OPEN (pass B 2026-11-07, not seen by any test, nor with every test tried): the period tier is not taken for a tile that holds "
-        "a pattern; the plant lets the guard on that fact through and no counter or byte differs, so a later check refuses the tier for the same "
-        "tile or the tier draws the same bytes there: the next step is a test that reads the tier's counter for a tile that holds a pattern with an "
-        "integer period of its own, in the render whose outer pass would otherwise take the tier",
-    "rp-facts-pattern-fill-missed": "OPEN (pass B 2026-11-07, not seen by any test, nor with every test tried): the walk that finds the facts of a tile does not note a "
-        "pattern fill in it; the guard that reads the fact is the one above (rp-tier-nested-pattern-allowed): the two are one test to write",
     "uc15-meeting-depth-rounded-2": "not seen in the sweep that keeps the cell's own exchanges (the group sweep's copy, uc15-meeting-depth-rounded, is caught by the union vectors): needs a meeting whose depth is not a multiple of 1/1024 at a resolution where the "
         "rounding changes a level",
     "fsl-slot-loop-every-image": "an ordinary IMAGE primitive in a filter that has a picture would draw slot 0 into a frame nothing reads, so no hash "
         "moves; the harm is a frame past the reserve and, on a turned map, a scratch place past the canonical canvas's room, which only a "
         "fixture with an ordinary image beside a slot, under a memory checker, can see (none yet)",
-    "rs-1371-del-n": "OPEN (2026-11-18, realignment): the plant was caught before the filter and mask work moved the code; at its new line (the map of an item in the layout's measure walk) no test, nor every test tried, sees it",
     "rs-4898-del": "equivalent in the picture: the unit's dispatch has already stored the item's map in the slot of its own level, and the copies of the pattern draw its tile at deeper levels, so the store a copy repeats changes nothing",
     "rs-4354-lt": "not seen by a plain build: the loop over the four channels of a pixel run to `i <= 4` reads and writes one double past the pixel's, which a sanitizer sees and the plant harness does not run (the next pixel's red is the one written, and the next deposit overwrites it)",
     "rx-934-lt": "not seen by a plain build: `p <= parts` reads one winding past the parts of the window, which a sanitizer sees and the plant harness does not run",
-    "cg-s-measure-rewinds-per-member": "OPEN (2026-11-18): the measure of a union rewinds the arena between members; only the peak could show it, and no test has a union of members whose geometries together pass the arena's peak",
-    "rp-s4-fill-unit-outside-the-damage-skipped-2": "OPEN (2026-11-18): the stroke unit of a pattern, second copy of the S4 rule (the whole render's reach, not the damage's): the fill's copy is held, the stroke's has no test whose damage excludes a stroke's copy but not the whole render's",
-    "rp-union-fast-member-without-pixels-bounds": "OPEN (2026-11-18, found again when the plant was made to compile): a member with no pixels left in the union's bound as the rectangle (0, 0, 0, 0) stretches the bound to the origin; the picture is the same, only the clip's memory and the work are larger, so it needs a union of an empty member and members far from the origin, under a limit on the clip's pixels",
     "rp-tier-image-pixel-work-guard-lost": "equivalent in the picture: the bound of one pixel of an AREA image is a function of the map alone, which every copy of a cell shares, so the guard that gives the tier up for it and the check after it that refuses the item meet the same value; only the give-up counter differs (checked 2026-11-18: ALimitIsTheSameUnderBothTiersAtEveryValueOfTheLimit sweeps the limit one value at a time and sees both tiers refuse alike)",
     "ritr-negative-not-detected": "equivalent: the branch is reached only for a magnitude of 2^31 and more, where `w < 0.0` and `w < -1.0` agree",
 }
