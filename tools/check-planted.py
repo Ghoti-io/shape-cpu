@@ -2990,10 +2990,10 @@ SURVIVORS = {
         "whose piece ends at (0, 64), made with a scratch, leaves a later cell the area it has with a scratch of its own",
     "rv-670-lt": "not seen by a plain build: `p <= n` reads one part past the three that both callers pass (an array on the stack), "
         "which a sanitizer sees and the plant harness does not run",
-    "rv-1503-lt": "not seen by a plain build or by test-asan (checked 2026-11-07): the band's clearing loop `i <= total` writes 0xffff one element "
-        "past `union_k` and `clip_k`, which are carved from one arena back to back; the written value is the initial value of the next array's first "
-        "element, so nothing reads a changed byte; it is an out-of-bounds write all the same, left open: the next step is a caller-memory test whose "
-        "block of memory is a malloc of exactly the size the report names for the render, under ASan",
+    "rv-1503-lt": "equivalent (corrected 2026-11-18: an earlier note called it an out-of-bounds write): `i <= total` writes 0xffff to the element `total` "
+        "of `union_k` and `clip_k`, and each array has (width + 1) * BAND_ROWS elements (exact.c, gshcpu_exact_init), which is more than the "
+        "rows * width <= BAND_ROWS * width the loop clears, so the element is inside its array; every read is of `r * width + j` with r < rows and "
+        "j < width, which is below `total`, and the next band clears the arrays again, so the element is never read",
     "uc15-meeting-depth-rounded-2": "not seen in the sweep that keeps the cell's own exchanges (the group sweep's copy, uc15-meeting-depth-rounded, is caught by the union vectors): needs a meeting whose depth is not a multiple of 1/1024 at a resolution where the "
         "rounding changes a level",
     "fsl-slot-loop-every-image": "an ordinary IMAGE primitive in a filter that has a picture would draw slot 0 into a frame nothing reads, so no hash "
