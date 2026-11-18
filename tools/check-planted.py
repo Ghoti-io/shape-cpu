@@ -2662,6 +2662,14 @@ PLANTS_FSL = [
 ]
 PLANTS += PLANTS_FSL
 
+# An exact stroke in a render whose fill takes the fast coverage (the pixels are bytes of their own, the double layer is never made ready):
+# the sparse sweep composes into the bytes.  Without that it composed into a layer nothing reads, which Valgrind saw as an uninitialised read
+# and the picture showed as a hatch all but missing.
+PLANTS += [
+    ('sb-exact-sparse-stroke-in-bytes', 'src', 'src/render/sink.c', '    if (frame->bytes) {\n      /* The frame is premultiplied bytes of its own and its double layer is not made ready',
+     '    if (0 && frame->bytes) {\n      /* The frame is premultiplied bytes of its own and its double layer is not made ready', ['testRender_antialias']),
+]
+
 
 # The hand-written plants no test is seen to catch, with why.  The gate prints each as "known" and does not fail on it; it fails
 # when one of them IS caught (take it out of this table then) and when a name here is not in the plant table.  The first is

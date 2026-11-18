@@ -14,6 +14,8 @@
 #include "../center_vectors.h"
 #include "../render_helpers.h"
 
+#include <algorithm>
+#include <cstdlib>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -553,6 +555,17 @@ TEST(RenderAntialias, AHatchFillTakesTheModeOfTheFillThatCarriesIt) {
       partial += v != 0 && v != 255;
     }
     EXPECT_GT(partial, 20u) << "the same hatch without the mode is antialiased";
+    // Whichever coverage the fills and the strokes take, the same hatch is the same picture to within the rounding of the fast coverage's
+    // bytes: a render whose fill takes the fast coverage keeps its pixels in bytes of their own, and a stroke that takes the exact one
+    // must be composed there too (it once went into a double layer nothing read, and the hatch was all but missing).
+    const std::vector<uint8_t> exact = draw32(smooth, kConfigs[0]);
+    const std::vector<uint8_t> got = draw32(smooth, config);
+    ASSERT_EQ(exact.size(), got.size());
+    int worst = 0;
+    for (size_t i = 0; i < exact.size(); i++) {
+      worst = std::max(worst, std::abs((int)exact[i] - (int)got[i]));
+    }
+    EXPECT_LE(worst, 3) << config.name << ": the largest difference from the exact render, in levels of alpha";
     rf_release(&ctx);
   }
 }

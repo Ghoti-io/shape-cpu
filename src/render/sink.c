@@ -3172,20 +3172,32 @@ static GSHSCENE_Result stroke_item(Run * run, const GSHSCENE_Item * item, const 
     acc_clean(run, run->layout.acc_exact);
     gshcpu_render_stroke_rects(&s, reach, wreach, &rect, &whole);
     double src[4];
-    source_of(run, item, frame, src);
-    widen_w(run, frame, rect, whole);
-    count_general_fill(run, frame);
-    Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
     GSHCPU_Rect drawn;
     GSHCPU_Rect counted;
-    /* a deposit's pixel is composed when the band is swept, a while after: ask for it now (its place in the layer, from the
-     * cover's frame, which is the region's moved by the stroke's shift) */
-    GSHCPU_Prefetch pf = {
-        (char *)frame->layer + (intptr_t)sizeof(double) * 4 *
-            (((intptr_t)(sp.dy - run->layout.region.y0)) * (intptr_t)run->layout.width + (intptr_t)(sp.dx - run->layout.region.x0)),
-        (int64_t)run->layout.width * (int64_t)(4 * sizeof(double)), (int64_t)(4 * sizeof(double))};
-    r = gshcpu_render_stroke_cover_sparse(&s, reach, wreach, cs->max_deposits, run->acc, exact, run->coverage, sparse_span,
-        &sp, &drawn, &counted, &cells, &pf);
+    if (frame->bytes) {
+      /* The frame is premultiplied bytes of its own and its double layer is not made ready, so the pixels are composed in the bytes, as
+       * the fast coverage's are (a fill taking the fast coverage with a stroke that takes the exact one is such a render). */
+      Painter painter;
+      const uint64_t before = run->work;
+      (void)painter_begin(&painter, run, item, chain, count, frame, rect, whole); /* a solid paint is always ready */
+      run->work = before; /* the area is added below */
+      Sparse8 sp8 = {&painter, s.shift_x, s.shift_y};
+      r = gshcpu_render_stroke_cover_sparse(&s, reach, wreach, cs->max_deposits, run->acc, exact, run->coverage, sparse8_span,
+          &sp8, &drawn, &counted, &cells, NULL);
+    } else {
+      source_of(run, item, frame, src);
+      widen_w(run, frame, rect, whole);
+      count_general_fill(run, frame);
+      Sparse sp = {run, frame, src, s.shift_x, s.shift_y};
+      /* a deposit's pixel is composed when the band is swept, a while after: ask for it now (its place in the layer, from the
+       * cover's frame, which is the region's moved by the stroke's shift) */
+      GSHCPU_Prefetch pf = {
+          (char *)frame->layer + (intptr_t)sizeof(double) * 4 *
+              (((intptr_t)(sp.dy - run->layout.region.y0)) * (intptr_t)run->layout.width + (intptr_t)(sp.dx - run->layout.region.x0)),
+          (int64_t)run->layout.width * (int64_t)(4 * sizeof(double)), (int64_t)(4 * sizeof(double))};
+      r = gshcpu_render_stroke_cover_sparse(&s, reach, wreach, cs->max_deposits, run->acc, exact, run->coverage, sparse_span,
+          &sp, &drawn, &counted, &cells, &pf);
+    }
     run->work += exact_work(run);
     /* Never refused for its cells (the cap was bounded by the detection), but the arithmetic is shown to hold. */
     if (r == GSHCPU_OK) {
