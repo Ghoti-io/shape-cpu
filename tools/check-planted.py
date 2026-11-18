@@ -432,11 +432,19 @@ def env(name, default=None):
 
 CC = shlex.split(env("PLANT_CC"))
 CFLAGS = shlex.split(env("PLANT_CFLAGS"))
+# PLANT_SANITIZE=1: the library is built with AddressSanitizer and UBSan (the checks test-asan uses, none recovering), the tests are linked
+# with them and run without the address-space limit a sanitizer cannot live under, and a sanitizer's abort is a catch like a failed test.
+# It is for the plants a plain build cannot see (the ones SURVIVORS says a sanitizer sees): `PLANT_SANITIZE=1 PLANT_ONLY='^(a|b)$'`.
+SANITIZE = bool(os.environ.get("PLANT_SANITIZE"))
+SANITIZE_FLAGS = ["-fsanitize=address,undefined,float-cast-overflow", "-fno-sanitize-recover=undefined,float-cast-overflow", "-fno-omit-frame-pointer"]
+if SANITIZE:
+    CFLAGS = CFLAGS + SANITIZE_FLAGS
+    os.environ.pop("LD_PRELOAD", None)  # a preloaded library displaces the sanitizer's runtime, for the probe too
 PROBE_CFLAGS = shlex.split(env("PLANT_PROBE_CFLAGS"))
-PROBE_LIBS = env("PLANT_PROBE_LIBS")
+PROBE_LIBS = env("PLANT_PROBE_LIBS") + (" " + " ".join(SANITIZE_FLAGS) if SANITIZE else "")
 CXX = env("PLANT_CXX")
 CXX_INCLUDE = env("PLANT_CXX_INCLUDE")
-LDFLAGS = env("PLANT_LDFLAGS")
+LDFLAGS = env("PLANT_LDFLAGS") + (" " + " ".join(SANITIZE_FLAGS) if SANITIZE else "")
 TESTS = env("PLANT_TESTS").split()
 OBJ_DIR = Path(env("PLANT_OBJ_DIR"))
 LD_PATH = env("PLANT_LD_PATH")
@@ -1730,12 +1738,21 @@ def run_test(exe):
     for name, allowed in SLOW_TESTS.items():
         if str(exe).endswith(name):
             seconds = allowed
+    if SANITIZE:
+        environment.pop("LD_PRELOAD", None)  # a preloaded library displaces the sanitizer's runtime
+        environment["ASAN_OPTIONS"] = "detect_leaks=0:abort_on_error=0"
+        environment["UBSAN_OPTIONS"] = "halt_on_error=1:print_stacktrace=0"
+        seconds *= 5
     try:
         r = subprocess.run([str(exe), "--gtest_brief=1"], capture_output=True, text=True,
-                           env=environment, cwd=ROOT, timeout=seconds, preexec_fn=_limits_for(seconds - 60 if seconds > 180 else 120))
+                           env=environment, cwd=ROOT, timeout=seconds,
+                           preexec_fn=None if SANITIZE else _limits_for(seconds - 60 if seconds > 180 else 120))
     except subprocess.TimeoutExpired:
         return 1, ["[  FAILED  ] (timed out)"]
     failing = [l for l in (r.stdout + r.stderr).splitlines() if l.startswith("[  FAILED  ]")]
+    if SANITIZE and r.returncode != 0 and not failing:
+        found = [l for l in (r.stdout + r.stderr).splitlines() if "ERROR: AddressSanitizer" in l or "runtime error" in l]
+        failing = ["[  FAILED  ] (sanitizer) " + (found[0] if found else "exit %d" % r.returncode)]
     return r.returncode, failing
 
 
@@ -2979,7 +2996,7 @@ SURVIVORS = {
         "whole does not (a glyph past it is that glyph's note); no test sets one",
     "st8-nothing-drawn-notes-dropped": "not seen: the entries of the tests that reach it come from the planning pass, which "
         "reports a glyph the provider cannot give before the sink does; the case is a note only the expansion makes",
-    "uc3-window-unbounded": "not seen by a plain build: it writes past the piece pool, which a sanitizer sees",
+    "uc3-window-unbounded": "not seen by a plain build (nor by ASan+UBSan with every test, checked 2026-11-18: the write stays inside the one block the arrays are carved from): it writes past the piece pool, which a sanitizer sees",
     "uc4-remainder-unchecked": "not seen: the check of the dense area after it refuses an inconsistent cover with the same status; "
         "the case is a cover the remainder alone refuses",
     "uc14-gap-step-multiplicity": "not seen: needs coincident pieces of one direction at a gap step of a cell that has other "
@@ -2988,7 +3005,7 @@ SURVIVORS = {
         "and read by nothing (the sum of UC4 weights it 64 - 64, and no slab starts at 64), so the memset only keeps an uninitialised flag from being read, "
         "which a sanitizer sees and the plant harness does not run; the witness is TheStepsAtTheBottomOfTheLeftSideOfACellNeverChangeALaterCell: a cell "
         "whose piece ends at (0, 64), made with a scratch, leaves a later cell the area it has with a scratch of its own",
-    "rv-670-lt": "not seen by a plain build: `p <= n` reads one part past the three that both callers pass (an array on the stack), "
+    "rv-670-lt": "not seen by a plain build (caught by testRender_exact under PLANT_SANITIZE=1, checked 2026-11-18): `p <= n` reads one part past the three that both callers pass (an array on the stack), "
         "which a sanitizer sees and the plant harness does not run",
     "rv-1503-lt": "equivalent (corrected 2026-11-18: an earlier note called it an out-of-bounds write): `i <= total` writes 0xffff to the element `total` "
         "of `union_k` and `clip_k`, and each array has (width + 1) * BAND_ROWS elements (exact.c, gshcpu_exact_init), which is more than the "
@@ -3000,8 +3017,8 @@ SURVIVORS = {
         "moves; the harm is a frame past the reserve and, on a turned map, a scratch place past the canonical canvas's room, which only a "
         "fixture with an ordinary image beside a slot, under a memory checker, can see (none yet)",
     "rs-4898-del": "equivalent in the picture: the unit's dispatch has already stored the item's map in the slot of its own level, and the copies of the pattern draw its tile at deeper levels, so the store a copy repeats changes nothing",
-    "rs-4354-lt": "not seen by a plain build: the loop over the four channels of a pixel run to `i <= 4` reads and writes one double past the pixel's, which a sanitizer sees and the plant harness does not run (the next pixel's red is the one written, and the next deposit overwrites it)",
-    "rx-934-lt": "not seen by a plain build: `p <= parts` reads one winding past the parts of the window, which a sanitizer sees and the plant harness does not run",
+    "rs-4354-lt": "not seen by a plain build (caught by testRender_group under PLANT_SANITIZE=1, checked 2026-11-18): the loop over the four channels of a pixel run to `i <= 4` reads and writes one double past the pixel's, which a sanitizer sees and the plant harness does not run (the next pixel's red is the one written, and the next deposit overwrites it)",
+    "rx-934-lt": "not seen by a plain build (nor by ASan+UBSan with every test, checked 2026-11-18: the read stays inside the block the windings are carved from): `p <= parts` reads one winding past the parts of the window, which a sanitizer sees and the plant harness does not run",
     "rp-tier-image-pixel-work-guard-lost": "equivalent in the picture: the bound of one pixel of an AREA image is a function of the map alone, which every copy of a cell shares, so the guard that gives the tier up for it and the check after it that refuses the item meet the same value; only the give-up counter differs (checked 2026-11-18: ALimitIsTheSameUnderBothTiersAtEveryValueOfTheLimit sweeps the limit one value at a time and sees both tiers refuse alike)",
     "ritr-negative-not-detected": "equivalent: the branch is reached only for a magnitude of 2^31 and more, where `w < 0.0` and `w < -1.0` agree",
 }
@@ -3161,6 +3178,8 @@ def main():
             else:
                 print("FAIL  %-34s not caught by %s" % (p[0], " ".join(p[5])))
                 failures += 1
+        elif p[0] in SURVIVORS and SANITIZE:
+            print("ok    %-34s caught by %s under the sanitizer (a plain build does not see it)" % (p[0], r[0][0]))
         elif p[0] in SURVIVORS:
             print("FAIL  %-34s is caught by %s: take it out of SURVIVORS" % (p[0], r[0][0]))
             failures += 1
