@@ -784,5 +784,11 @@
  ],
  "cg-s-exact-uncounted-2": [
   "testRender_clip_union_inner"
+ ],
+ "ffh-image-placement-translation": [
+  "testRender_filter_sink"
+ ],
+ "ffh-image-area-bound": [
+  "testRender_filter_sink"
  ]
 }

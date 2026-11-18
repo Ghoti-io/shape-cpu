@@ -348,6 +348,102 @@ TEST(RenderFilterSink, AnAreaImagePrimitiveHoldsToTheSinksImageLimits) {
   EXPECT_NE(render(l, refused.raster, nullptr, nullptr, &tight).result, GSHSCENE_OK) << "the sink's own limit binds the filter";
 }
 
+// The placement of a filter's image primitive is composed with the map of the group, translation included: an element drawn under a
+// translating map is the element drawn under the identity, moved.
+TEST(RenderFilterSink, AnImagePrimitiveMovesWithATranslatingMapOfTheGroup) {
+  rh::Store s;
+  GIMG_Raster * pic = nullptr;
+  ASSERT_EQ(gimg_raster_create(2, 1, &GIMG_PIXEL_RGBA8, GIMG_RASTER_OWNED, nullptr, 0, &pic), GIMG_OK);
+  unsigned char * texels = (unsigned char *)gimg_raster_pixels(pic);
+  const unsigned char colors[8] = {255, 0, 0, 255, 0, 0, 255, 255};
+  std::memcpy(texels, colors, sizeof colors);
+  GSHSCENE_Image_Params params{};
+  params.space.primaries = GCOL_PRIMARIES_SRGB;
+  params.space.transfer = GCOL_TRANSFER_SRGB;
+  const GSHSCENE_Resource * image = nullptr;
+  ASSERT_EQ(gshscene_store_intern_image(s.store, pic, &params, &image), GSHSCENE_OK);
+  gimg_raster_destroy(pic);
+  s.held.push_back(image);
+  GSHSCENE_Filter_Primitive m = prim(GSHSCENE_FILTER_IMAGE);
+  m.input_count = 0;
+  m.inputs = nullptr;
+  m.image = image;
+  m.rendering = GSHSCENE_IMAGE_FILTER_NEAREST;
+  gshgeom_map_scale(2, 4.0, 4.0, 1.0, &m.placement);
+  GSHSCENE_List * l = group_of_rect(s, intern_filter(s, {m}), 1.0, 0, 0, 12, 8);
+  rh::RasterRef plain(make_raster(24, 16));
+  ASSERT_EQ(render(l, plain.raster).result, GSHSCENE_OK);
+  // The picture is drawn: the first texel's four by four pixels are red and the second's blue.
+  EXPECT_EQ(pixel(plain.raster, 1, 1), px(255, 0, 0, 255));
+  EXPECT_EQ(pixel(plain.raster, 6, 1), px(0, 0, 255, 255));
+  GSHGEOM_Map move;
+  gshgeom_map_identity(2, &move);
+  move.t[0] = 5;
+  move.t[1] = 3;
+  rh::RasterRef moved(make_raster(24, 16));
+  ASSERT_EQ(render(l, moved.raster, &move).result, GSHSCENE_OK);
+  for (uint32_t y = 3; y < 16; y++) {
+    for (uint32_t x = 5; x < 24; x++) {
+      ASSERT_EQ(pixel(moved.raster, x, y), pixel(plain.raster, x - 5, y - 3)) << "at " << x << ", " << y;
+    }
+  }
+}
+
+// IC9 for the filter's image primitive (FL25's neighbour): the work of AREA over the canvas is held to `max_area_pixel_work` for one pixel and
+// to `max_image_work` for all of them, each as a bound that is met exactly: the work that equals the limit is drawn, one past it is refused.
+TEST(RenderFilterSink, TheAreaWorkOfAnImagePrimitiveIsHeldToBothLimitsExactly) {
+  rh::Store s;
+  GIMG_Raster * pic = nullptr;
+  ASSERT_EQ(gimg_raster_create(2, 2, &GIMG_PIXEL_RGBA8, GIMG_RASTER_OWNED, nullptr, 0, &pic), GIMG_OK);
+  std::memset(gimg_raster_pixels(pic), 255, 2 * gimg_raster_stride_bytes(pic));
+  GSHSCENE_Image_Params params{};
+  params.space.primaries = GCOL_PRIMARIES_SRGB;
+  params.space.transfer = GCOL_TRANSFER_SRGB;
+  const GSHSCENE_Resource * image = nullptr;
+  ASSERT_EQ(gshscene_store_intern_image(s.store, pic, &params, &image), GSHSCENE_OK);
+  gimg_raster_destroy(pic);
+  s.held.push_back(image);
+  GSHSCENE_Filter_Primitive m = prim(GSHSCENE_FILTER_IMAGE);
+  m.input_count = 0;
+  m.inputs = nullptr;
+  m.image = image;
+  m.rendering = GSHSCENE_IMAGE_FILTER_AREA;
+  gshgeom_map_scale(2, 4.0, 4.0, 1.0, &m.placement);
+  GSHSCENE_List * l = group_of_rect(s, intern_filter(s, {m}), 1.0, 0, 0, 1, 1);
+  // The bound of one pixel, from the same primitives the engine uses: the placement is the whole map here (the target's is the identity).
+  GSHCPU_Image im;
+  const uint32_t window[4] = {0, 0, 0, 0};
+  GSHSCENE_Color_Space own{};
+  GSHSCENE_Color_Space layer = {};
+  layer.primaries = GCOL_PRIMARIES_SRGB;
+  layer.transfer = GCOL_TRANSFER_SRGB;
+  ASSERT_EQ(gshcpu_render_image_open(&im, image, window, 0, 0, GSHSCENE_IMAGE_FILTER_AREA, &own, &layer, &layer), GSHCPU_OK);
+  ASSERT_EQ(gshcpu_render_image_place(&im, &m.placement), 1);
+  uint64_t pixel = 0;
+  ASSERT_EQ(gshcpu_render_image_area_bound(&im, &pixel), 1);
+  ASSERT_GT(pixel, 0u);
+  const uint64_t canvas = 12u * 12u;
+  GSHCPU_Limits limits;
+  gshcpu_limits_default(&limits);
+  limits.max_area_pixel_work = pixel;
+  limits.max_image_work = canvas * pixel;
+  {
+    rh::RasterRef r(make_raster(12, 12));
+    EXPECT_EQ(render(l, r.raster, nullptr, nullptr, &limits).result, GSHSCENE_OK) << "work equal to both limits is drawn";
+  }
+  limits.max_area_pixel_work = pixel - 1;
+  {
+    rh::RasterRef r(make_raster(12, 12));
+    EXPECT_NE(render(l, r.raster, nullptr, nullptr, &limits).result, GSHSCENE_OK) << "one past the bound of a pixel";
+  }
+  limits.max_area_pixel_work = pixel;
+  limits.max_image_work = canvas * pixel - 1;
+  {
+    rh::RasterRef r(make_raster(12, 12));
+    EXPECT_NE(render(l, r.raster, nullptr, nullptr, &limits).result, GSHSCENE_OK) << "one past the work of the whole canvas";
+  }
+}
+
 TEST(RenderFilterSink, ARotatedMapIsFilteredInCanonicalSpaceSoTheFilterFollowsTheElement) {
   rh::Store s;
   GSHSCENE_Filter_Primitive o = prim(GSHSCENE_FILTER_OFFSET);

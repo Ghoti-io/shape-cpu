@@ -3010,15 +3010,13 @@ SURVIVORS = {
     "rs-4898-del": "OPEN (2026-11-18, realignment): the map of an item stored in the walk of a union's unit; held before the walk was rewritten, not seen at its new line by any test",
     "rs-4354-lt": "OPEN (2026-11-18, realignment): a comparison in the code that draws a picture (picture_pass, shared by masks and filter slots) at its new line; not seen by any test, nor with every test tried",
     "rx-934-lt": "OPEN (2026-11-18, realignment): a comparison of the exact step's group gaps at its new line (exact.c); not seen by any test, nor with every test tried",
-    "ritr-negative-not-detected": "OPEN (2026-11-18): the sign test of a transform's determinant in render_internal.h; no test builds a map whose determinant lies between -1 and 0",
-    "rp-tier-image-pixel-work-guard-lost": "OPEN (2026-11-18): the area bound of an image under a pattern's period tier is no longer held to max_area_pixel_work by any test since the image area work was moved; needs a pattern whose tile image's area bound exceeds the limit",
-    "ffh-image-placement-translation": "OPEN (2026-11-18): the translation of the placement of a filter's image primitive (feImage) under the filter's map; the hash scenes place that image with a map whose translation the filter's own map does not move; needs a cell with an image primitive under a filter whose map translates",
-    "ffh-image-area-bound": "OPEN (2026-11-18): the area-work limit of a filter's image primitive; no scene or test sets a limit the image's area work passes, so the refusal is never reached",
     "cg-s-exact-status-ignored-2": "OPEN (2026-11-18): the second copy (the general tier's bit-plane sweep) of a cell the exact step cannot vouch for: the refusal is not seen, no test makes the general tier's cell fail",
     "cg-s-pieces-uncounted-2": "OPEN (2026-11-18): the second copy's piece counter (union_pieces) is not asserted for the general tier's bit-plane sweep",
     "cg-s-measure-rewinds-per-member": "OPEN (2026-11-18): the measure of a union rewinds the arena between members; only the peak could show it, and no test has a union of members whose geometries together pass the arena's peak",
     "rp-s4-fill-unit-outside-the-damage-skipped-2": "OPEN (2026-11-18): the stroke unit of a pattern, second copy of the S4 rule (the whole render's reach, not the damage's): the fill's copy is held, the stroke's has no test whose damage excludes a stroke's copy but not the whole render's",
     "rp-union-fast-member-without-pixels-bounds": "OPEN (2026-11-18, found again when the plant was made to compile): a member with no pixels left in the union's bound as the rectangle (0, 0, 0, 0) stretches the bound to the origin; the picture is the same, only the clip's memory and the work are larger, so it needs a union of an empty member and members far from the origin, under a limit on the clip's pixels",
+    "rp-tier-image-pixel-work-guard-lost": "equivalent in the picture: the bound of one pixel of an AREA image is a function of the map alone, which every copy of a cell shares, so the guard that gives the tier up for it and the check after it that refuses the item meet the same value; only the give-up counter differs (checked 2026-11-18: ALimitIsTheSameUnderBothTiersAtEveryValueOfTheLimit sweeps the limit one value at a time and sees both tiers refuse alike)",
+    "ritr-negative-not-detected": "equivalent: the branch is reached only for a magnitude of 2^31 and more, where `w < 0.0` and `w < -1.0` agree",
 }
 
 
