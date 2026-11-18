@@ -266,6 +266,114 @@ TEST(RenderClipUnionInner, ALimitOnTheKeptPiecesRefusesTheUnionAndNothingIsDrawn
   EXPECT_EQ(d.count(GSHSCENE_ENTRY_REFUSED), 1u) << "the pieces the sweeps keep are the sink's resource limit";
 }
 
+namespace {
+
+Options inner_limits(const GSHCPU_Limits * l) {
+  Options o;
+  o.limits = l;
+  return o;
+}
+
+/** A clipped member: @p path with one inner clip that holds all of the lattice pixel (so the picture is the plain member's, drawn by the
+ * tier that takes inner clips). */
+GSHSCENE_Clip_Member whole_inner_member(Scene & s, const GSHSCENE_Resource * path, std::vector<std::vector<GSHSCENE_Clip_Inner>> & keep) {
+  keep.emplace_back();
+  keep.back().push_back(inner_of(lattice_polygon(s, {{-40, -40}, {120, -40}, {120, 120}, {-40, 120}})));
+  GSHSCENE_Clip_Member m = member(path);
+  m.inner_count = 1;
+  m.inner = keep.back().data();
+  return m;
+}
+
+bool inner_draws(Scene & s, const GSHSCENE_Resource * u, uint32_t w, uint32_t h, const GSHCPU_Limits & lim, bool strict = false) {
+  Options o = inner_limits(&lim);
+  o.flags = strict ? GSHSCENE_RENDER_STRICT : 0;
+  Draw d = draw(clipped_fill(s, u, w, h), w, h, o);
+  if (strict) {
+    return d.result == GSHSCENE_OK;
+  }
+  return d.result == GSHSCENE_OK && d.count(GSHSCENE_ENTRY_REFUSED) == 0u;
+}
+
+}  // namespace
+
+TEST(RenderClipUnionInner, ThePiecesTheTierKeepsAreCappedExactlyAndTheCounterIsThatManyAndNothingIsDrawnPastIt) {
+  Scene s;
+  std::vector<std::vector<GSHSCENE_Clip_Inner>> keep;
+  keep.reserve(4);
+  const GSHSCENE_Resource * u = make_union(s, {whole_inner_member(s, lattice_polygon(s, {{10, 10}, {500, 50}, {40, 300}}), keep),
+      whole_inner_member(s, lattice_polygon(s, {{20, 280}, {490, 20}, {420, 380}}), keep)});
+  GSHCPU_Limits lim;
+  gshcpu_limits_default(&lim);
+  uint64_t least = 0;
+  for (uint64_t cap = 1; cap < 4096 && !least; cap++) {
+    lim.max_union_pieces = cap;
+    if (inner_draws(s, u, 8, 7, lim)) {
+      least = cap;
+    }
+  }
+  ASSERT_GT(least, 1u);
+  lim.max_union_pieces = least;
+  Draw ok = draw(clipped_fill(s, u, 8, 7), 8, 7, inner_limits(&lim));
+  ASSERT_EQ(ok.count(GSHSCENE_ENTRY_REFUSED), 0u) << "exactly the pieces it keeps";
+  EXPECT_EQ(ok.counters.union_pieces, least) << "the counter is the pieces the sweeps kept";
+  EXPECT_GE(ok.counters.union_exact, 1u) << "a cell is settled by the exact step";
+  EXPECT_GE(ok.counters.union_sweeps, 1u);
+  lim.max_union_pieces = least - 1;
+  Draw over = draw(clipped_fill(s, u, 8, 7), 8, 7, inner_limits(&lim));
+  EXPECT_EQ(over.count(GSHSCENE_ENTRY_REFUSED, GSHSCENE_REASON_RESOURCE_LIMIT), 1u);
+  for (uint8_t a : alphas(over)) {
+    EXPECT_EQ(a, 0u) << "the block is skipped: nothing is drawn with the union left out";
+  }
+  EXPECT_FALSE(inner_draws(s, u, 8, 7, lim, true)) << "strict fails at the clip";
+}
+
+TEST(RenderClipUnionInner, TheCrossingsBudgetRefusesAPixelPastItInAClippedUnionToo) {
+  // Five slivers cross in pixel (0, 0): ten meetings at most; each member has an inner clip that holds the whole pixel.
+  Scene s;
+  std::vector<std::vector<GSHSCENE_Clip_Inner>> keep;
+  keep.reserve(8);
+  const GSHSCENE_Resource * u = make_union(s, {whole_inner_member(s, lattice_polygon(s, {{0, 0}, {60, 20}, {0, 9}}), keep),
+      whole_inner_member(s, lattice_polygon(s, {{0, 30}, {63, 3}, {63, 14}}), keep),
+      whole_inner_member(s, lattice_polygon(s, {{5, 0}, {30, 63}, {14, 63}}), keep),
+      whole_inner_member(s, lattice_polygon(s, {{60, 0}, {33, 63}, {49, 63}}), keep),
+      whole_inner_member(s, lattice_polygon(s, {{0, 55}, {63, 40}, {63, 51}}), keep)});
+  GSHCPU_Limits lim;
+  gshcpu_limits_default(&lim);
+  uint64_t least = 0;
+  for (uint64_t budget = 1; budget < 64 && !least; budget++) {
+    lim.max_exact_crossings = budget;
+    if (inner_draws(s, u, 1, 1, lim)) {
+      least = budget;
+    }
+  }
+  ASSERT_GT(least, 1u) << "a budget of one is refused";
+  lim.max_exact_crossings = least;
+  EXPECT_TRUE(inner_draws(s, u, 1, 1, lim));
+  lim.max_exact_crossings = least - 1;
+  Draw over = draw(clipped_fill(s, u, 1, 1), 1, 1, inner_limits(&lim));
+  EXPECT_EQ(over.count(GSHSCENE_ENTRY_REFUSED, GSHSCENE_REASON_RESOURCE_LIMIT), 1u);
+  EXPECT_EQ(over.at8(0, 0, 3), 0u);
+  EXPECT_FALSE(inner_draws(s, u, 1, 1, lim, true));
+}
+
+TEST(RenderClipUnionInner, ADeclaredBoundCoversAClippedUnionPushAndItsWorkIsCounted) {
+  Scene s;
+  std::vector<std::vector<GSHSCENE_Clip_Inner>> keep;
+  keep.reserve(4);
+  const GSHSCENE_Resource * u = make_union(s, {whole_inner_member(s, lattice_polygon(s, {{10, 10}, {200, 50}, {40, 120}}), keep),
+      whole_inner_member(s, lattice_polygon(s, {{20, 100}, {190, 20}, {120, 125}}), keep)});
+  Draw d = draw(clipped_fill(s, u, 4, 3), 4, 3);
+  ASSERT_EQ(d.result, GSHSCENE_OK);
+  SinkRef sink;
+  RasterRef r(blank(GSHCPU_FORMAT_RGBA8_PREMULTIPLIED, 4, 3));
+  GSHSCENE_Target t = target_of(r.raster);
+  GSHSCENE_Sink_Caps caps{};
+  ASSERT_EQ(gshscene_sink_caps(sink.sink, &t, &caps), GSHSCENE_OK);
+  EXPECT_LE(d.summary.work_max, caps.cancel_work_bound);
+  EXPECT_GT(d.summary.work_max, 12u) << "the passes over the pixels, the members and the exact step are counted";
+}
+
 TEST(RenderClipUnionInner, TheMeasureHoldsTheGeometryOfTheLargestPartAndAnInnerClipMayBeIt) {
   Scene s;
   // an inner clip with far more points than anything else in the union: the memory of the render is what its geometry takes

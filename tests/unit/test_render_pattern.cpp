@@ -408,6 +408,25 @@ TEST(RenderPattern, ASeamPixelIsPC4sCombinationOfItsCopiesInExactRationals) {
   }
 }
 
+TEST(RenderPattern, TwoHundredAndFiftySixCopiesOfAUnitInOnePixelAreTheirWholeSum) {
+  // PC4: the count of the copies a pixel holds saturates at 255 and is not allowed to wrap.  A cell of a sixteenth of a pixel each way,
+  // abutting its neighbours, puts exactly 256 copies in the pixel, each a 256th of it; a count that wrapped on the 256th would read as
+  // "no copy touched it" and leave a hole where the pixel is covered through.
+  RF_Ctx ctx;
+  rf_begin(&ctx);
+  const double cell = 1.0 / 16.0;
+  GSHSCENE_List * tile = rf_open(&ctx);
+  rf_fill(&ctx, tile, rf_rect(&ctx, 0, 0, cell, cell), nullptr, GSHGEOM_FILL_NONZERO, rf_solid(0.1, 0.2, 0.6, 1.0), 0, 0.0);
+  const GSHSCENE_Resource * pat = rf_pattern(&ctx, rf_picture_of(&ctx, tile), 0, 0, cell, cell, cell, cell, 1, 1, rf_move(0.0, 0.0), nullptr);
+  GSHSCENE_List * l = rf_open(&ctx);
+  rf_fill(&ctx, l, rf_rect(&ctx, 0, 0, 1, 1), nullptr, GSHGEOM_FILL_NONZERO, rf_pattern_paint(pat, 1.0), 0, 0.0);
+  rf_close(&ctx, l);
+  Drawn d(l, 1, 1);
+  ASSERT_EQ(d.result, GSHSCENE_OK);
+  EXPECT_EQ((unsigned char)d.raster.pixel(0, 0)[3], 255);
+  rf_release(&ctx);
+}
+
 TEST(RenderPattern, ARepeatOfZeroDrawsTheIndexZeroCopiesOnly) {
   // PT1: repeat_x 0 draws the column of index 0 only; the copies of that axis beyond it are not there, nor are they counted.
   Case c(10.0, 0.0, 8.0, 48, 40, 0, 1, 1);

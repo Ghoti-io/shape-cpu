@@ -790,5 +790,20 @@
  ],
  "ffh-image-area-bound": [
   "testRender_filter_sink"
+ ],
+ "rs-3731-del": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3760-del": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3764-del": [
+  "testRender_clip_union_inner"
+ ],
+ "cg-s-exact-status-ignored-2": [
+  "testRender_clip_union_inner"
+ ],
+ "cg-s-pieces-uncounted-2": [
+  "testRender_clip_union_inner"
  ]
 }
