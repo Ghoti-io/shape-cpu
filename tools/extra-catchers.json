@@ -22,5 +22,767 @@
  ],
  "rm-layout-pictures-gradients-omitted": [
   "testRender"
+ ],
+ "rs-1082-lt": [
+  "testRender_clip_union_general"
+ ],
+ "rs-3702-lt": [
+  "testRender_fast_fill"
+ ],
+ "rs-4676-del": [
+  "testRender_pattern_period"
+ ],
+ "rv-1942-del": [
+  "testRender_antialias"
+ ],
+ "rv-1977-del": [
+  "testRender_antialias"
+ ],
+ "rg-248-del": [
+  "testRender_clip_union_font"
+ ],
+ "rg-251-deln": [
+  "testRender_clip_union_font"
+ ],
+ "rg-252-deln": [
+  "testRender_clip_union_font"
+ ],
+ "ra-228-eq": [
+  "testRender_filter_backdrop"
+ ],
+ "ra-228-neg": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-855-eq": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-855-neg": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-872-ne": [
+  "testRender_pattern_rules"
+ ],
+ "rs-1088-ne": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1089-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1133-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1133-eq2": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1147-ne": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1147-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1151-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1151-eq2": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1152-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1152-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1154-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1157-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1158-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1161-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1198-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1198-neg": [
+  "testRender_clip_union"
+ ],
+ "rs-1201-or": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1276-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1281-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1381-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1383-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1384-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1385-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1386-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1387-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1388-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1389-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1390-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1391-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1392-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1395-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1396-ret": [
+  "testRender_clip_union_font"
+ ],
+ "rs-1649-eq": [
+  "testRender_pattern_union"
+ ],
+ "rs-1668-del": [
+  "testRender_pattern_union"
+ ],
+ "rs-1701-eq": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-1704-ne": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-1704-neg": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-1708-ne": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-1708-neg": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-1713-eq": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-1713-neg": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-1718-neg": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-3177-neg": [
+  "testRender_antialias"
+ ],
+ "rs-3491-lt": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3675-del": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3676-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3677-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3678-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3679-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3680-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3681-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3684-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3688-ne": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3690-ne": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3690-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3693-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3694-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3696-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3697-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3698-eq": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3698-del": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3699-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3700-lt": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3702-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3703-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3704-eq": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3704-del": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3705-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3708-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3711-and": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3712-lt": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3712-and": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3713-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3719-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3719-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3721-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3721-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3722-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3724-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3726-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3727-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3727-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3728-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3730-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3735-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3735-eq2": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3735-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3737-lt": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3743-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3744-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3744-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3746-ne": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3746-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3753-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3758-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3763-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3765-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3766-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3767-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3768-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3769-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3771-lt": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3771-and": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3772-and": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3772-lt2": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3772-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3776-lt": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3776-and": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3776-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3776-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3777-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3778-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3779-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3785-lt": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3785-and": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3790-lt": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3791-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3792-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3793-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3798-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3801-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3801-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3805-lt": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3806-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3810-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3811-deln": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3812-deln": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3813-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3814-del": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3815-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3816-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3818-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3819-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3821-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3822-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3823-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3826-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3827-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3828-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3829-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3830-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3831-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3835-ne": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3835-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3842-deln": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3846-lt": [
+  "testRender_clip_union_inner"
+ ],
+ "rs-3847-deln": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3992-le": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3994-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3994-ne": [
+  "testRender_clip_union_font"
+ ],
+ "rs-3999-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4003-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4004-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4004-lt": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4005-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4010-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4010-eq2": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4014-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4017-del": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4018-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4018-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4021-ne": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4021-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rs-4842-ge": [
+  "testRender_filter_fixtures"
+ ],
+ "rs-4928-eq": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-4928-neg": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-4929-del": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5016-ne": [
+  "testRender_filter_sink"
+ ],
+ "rs-5016-neg": [
+  "testRender_filter_sink"
+ ],
+ "rs-5037-del": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5060-neg": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5062-del": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5063-neg": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5070-neg": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5073-del": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5074-ne": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5074-neg": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5088-del": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5096-eq": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5096-neg": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5097-del": [
+  "testRender_filter_backdrop"
+ ],
+ "rs-5554-eq": [
+  "testRender_antialias"
+ ],
+ "rs-5732-eq": [
+  "testRender_pattern"
+ ],
+ "rs-5743-gt": [
+  "testRender_pattern_period"
+ ],
+ "rs-5744-ret": [
+  "testRender_pattern_period"
+ ],
+ "rs-5746-del": [
+  "testRender_pattern_period"
+ ],
+ "rs-5758-eq": [
+  "testRender_pattern_period"
+ ],
+ "rs-5813-le": [
+  "testRender_pattern_period"
+ ],
+ "rs-5813-neg": [
+  "testRender_pattern_period"
+ ],
+ "rs-5819-del": [
+  "testRender_pattern_period"
+ ],
+ "rs-5894-deln": [
+  "testRender_pattern_period"
+ ],
+ "rs-5957-neg": [
+  "testRender_pattern_period"
+ ],
+ "rs-5959-del": [
+  "testRender_pattern_period"
+ ],
+ "rs-5962-del": [
+  "testRender_pattern_period"
+ ],
+ "rs-6033-eq": [
+  "testRender_antialias"
+ ],
+ "rs-6064-le": [
+  "testRender_pattern_period"
+ ],
+ "rs-6064-neg": [
+  "testRender_pattern_period"
+ ],
+ "rs-6173-eq": [
+  "testRender_pattern_keys"
+ ],
+ "rs-6173-and": [
+  "testRender_pattern_keys"
+ ],
+ "rs-6173-neg": [
+  "testRender_pattern_keys"
+ ],
+ "rs-6365-del": [
+  "testRender_pattern_keys"
+ ],
+ "rx-183-del": [
+  "testRender_clip_union_font"
+ ],
+ "rx-909-del": [
+  "testRender_clip_union_font"
+ ],
+ "rx-911-ltn": [
+  "testRender_clip_union_font"
+ ],
+ "rx-912-del": [
+  "testRender_clip_union_font"
+ ],
+ "rx-915-lt": [
+  "testRender_clip_union_font"
+ ],
+ "rx-916-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rx-916-del": [
+  "testRender_clip_union_font"
+ ],
+ "rx-931-eq": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-931-neg": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-932-del": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-935-lt": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-937-eq": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-937-neg": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-938-del": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-941-ge": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-941-neg": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-945-lt": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-946-eq": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-946-neg": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-947-del": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-951-eq": [
+  "testRender_clip_union_inner"
+ ],
+ "rx-967-negn": [
+  "testRender_clip_union_font"
+ ],
+ "rx-969-del": [
+  "testRender_clip_union_font"
+ ],
+ "rx-976-del": [
+  "testRender_clip_union_font"
+ ],
+ "rx-981-neg": [
+  "testRender_clip_union_font"
+ ],
+ "rx-982-lt": [
+  "testRender_clip_union_font"
+ ],
+ "rx-983-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rx-983-del": [
+  "testRender_clip_union_font"
+ ],
+ "rx-993-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rx-994-del": [
+  "testRender_clip_union_font"
+ ],
+ "rx-995-del": [
+  "testRender_clip_union_font"
+ ],
+ "rx-996-deln": [
+  "testRender_clip_union_font"
+ ],
+ "rx-997-eq": [
+  "testRender_clip_union_font"
+ ],
+ "rk-736-eq": [
+  "testRender_antialias"
+ ],
+ "rgl-strict-goes-on-2": [
+  "testRender_clip_union_font"
+ ],
+ "rm-child-pop-not-joined-into-the-parent-whole-2": [
+  "testRender_filter_backdrop"
+ ],
+ "rp-table-store-evicts-pinned": [
+  "testRender_stroke"
+ ],
+ "cg-s-group-pass-skipped-2": [
+  "testRender_clip_union_font"
+ ],
+ "cg-s-records-unsorted-2": [
+  "testRender_clip_union_font"
+ ],
+ "cg-s-exact-uncounted-2": [
+  "testRender_clip_union_inner"
  ]
 }

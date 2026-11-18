@@ -18,5 +18,10 @@
  "rm-window-not-restored": "does not compile: the mutant leaves a variable unused or a value undefined and the build refuses it under -Werror (the compiler is the test); the text it plants is kept in the history of this file",
  "rm-window-not-restored-2": "does not compile: the mutant leaves a variable unused or a value undefined and the build refuses it under -Werror (the compiler is the test); the text it plants is kept in the history of this file",
  "rm-walk-not-released": "does not compile: the mutant leaves a variable unused or a value undefined and the build refuses it under -Werror (the compiler is the test); the text it plants is kept in the history of this file",
- "rm-walk-not-released-2": "does not compile: the mutant leaves a variable unused or a value undefined and the build refuses it under -Werror (the compiler is the test); the text it plants is kept in the history of this file"
+ "rm-walk-not-released-2": "does not compile: the mutant leaves a variable unused or a value undefined and the build refuses it under -Werror (the compiler is the test); the text it plants is kept in the history of this file",
+ "rv-871-lt": "does not compile: the mutant leaves a variable unused or a value undefined and the build refuses it under -Werror (the compiler is the test); the text it plants is kept in the history of this file",
+ "rv-1681-lt": "does not compile: the mutant leaves a variable unused or a value undefined and the build refuses it under -Werror (the compiler is the test); the text it plants is kept in the history of this file",
+ "rv-1703-lt": "does not compile: the mutant leaves a variable unused or a value undefined and the build refuses it under -Werror (the compiler is the test); the text it plants is kept in the history of this file",
+ "rx-1057-eq": "does not compile: the mutant leaves a variable unused or a value undefined and the build refuses it under -Werror (the compiler is the test); the text it plants is kept in the history of this file",
+ "rx-1057-neg": "does not compile: the mutant leaves a variable unused or a value undefined and the build refuses it under -Werror (the compiler is the test); the text it plants is kept in the history of this file"
 }

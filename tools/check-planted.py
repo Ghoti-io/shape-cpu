@@ -398,6 +398,18 @@ seven of them are caught now.
 
 Run by ``make check-planted`` from the library directory, with the build's
 flags in the PLANT_* environment variables.
+
+The realignment after the filter, mask-picture and slot work (2026-11-17 and 18, ghoti-build:gcc16): the sources had moved since the table
+was last in step (2026-11-08: filter.c is new, sink.c grew by 1300 lines, image.c, image_area.c, exact.c, cover.c and stroke_cache.c changed),
+so 2873 of 6111 plants did not apply.  tools/relocate-plants.py moved 2747 generated plants to their lines (1647 had not moved; 77 stood on
+changed lines and were dropped); 5 of the moved ones no longer compile (a ``<`` that now falls in a ``<=``) and are retired; 66 plants addressed
+by text were re-found in the code as it stands (tools/reanchored-plants.json, 79 of them: 13 anchors now occur in two places, a plant for
+each); and the 741 candidates of tools/gen-render-plants.py on lines that changed were swept: 81 do not compile, 513 are caught (268 by a test
+in their list, 245 only by another, which tools/extra-catchers.json names) and are held, and 147 survive (not held: 27 in the general tier's
+bit-plane sweep of a union, 19 in filter_over, 12 in canon_plan, 10 in list_holds_filter, 7 in measure_items, 6 in filter_scratch, the rest
+one to six each in the pattern and measure code).  Most of the survivors are statements that count work or reset a counter, memsets of memory
+that is zero already and comparisons of a tie, which is what the survivors of earlier sweeps were; the filter's are the new code the
+hand plants above (ffh-, fsl-, fb-) are for, and the ones that need a test are the OPEN entries of SURVIVORS.
 """
 import concurrent.futures
 import os
@@ -2975,8 +2987,6 @@ SURVIVORS = {
         "whose piece ends at (0, 64), made with a scratch, leaves a later cell the area it has with a scratch of its own",
     "rv-670-lt": "not seen by a plain build: `p <= n` reads one part past the three that both callers pass (an array on the stack), "
         "which a sanitizer sees and the plant harness does not run",
-    "rv-741-lt": "not seen by a plain build: `p <= n` reads one part past the three that the caller passes (an array on the stack); seen by "
-        "`make test-asan` (UBSan: index 3 out of bounds for type 'uint32_t [3]', checked 2026-11-07 on this plant), which the plant harness does not run",
     "rv-1503-lt": "not seen by a plain build or by test-asan (checked 2026-11-07): the band's clearing loop `i <= total` writes 0xffff one element "
         "past `union_k` and `clip_k`, which are carved from one arena back to back; the written value is the initial value of the next array's first "
         "element, so nothing reads a changed byte; it is an out-of-bounds write all the same, left open: the next step is a caller-memory test whose "
@@ -2996,6 +3006,19 @@ SURVIVORS = {
     "fsl-slot-loop-every-image": "an ordinary IMAGE primitive in a filter that has a picture would draw slot 0 into a frame nothing reads, so no hash "
         "moves; the harm is a frame past the reserve and, on a turned map, a scratch place past the canonical canvas's room, which only a "
         "fixture with an ordinary image beside a slot, under a memory checker, can see (none yet)",
+    "rs-1371-del-n": "OPEN (2026-11-18, realignment): the plant was caught before the filter and mask work moved the code; at its new line (the map of an item in the layout's measure walk) no test, nor every test tried, sees it",
+    "rs-4898-del": "OPEN (2026-11-18, realignment): the map of an item stored in the walk of a union's unit; held before the walk was rewritten, not seen at its new line by any test",
+    "rs-4354-lt": "OPEN (2026-11-18, realignment): a comparison in the code that draws a picture (picture_pass, shared by masks and filter slots) at its new line; not seen by any test, nor with every test tried",
+    "rx-934-lt": "OPEN (2026-11-18, realignment): a comparison of the exact step's group gaps at its new line (exact.c); not seen by any test, nor with every test tried",
+    "ritr-negative-not-detected": "OPEN (2026-11-18): the sign test of a transform's determinant in render_internal.h; no test builds a map whose determinant lies between -1 and 0",
+    "rp-tier-image-pixel-work-guard-lost": "OPEN (2026-11-18): the area bound of an image under a pattern's period tier is no longer held to max_area_pixel_work by any test since the image area work was moved; needs a pattern whose tile image's area bound exceeds the limit",
+    "ffh-image-placement-translation": "OPEN (2026-11-18): the translation of the placement of a filter's image primitive (feImage) under the filter's map; the hash scenes place that image with a map whose translation the filter's own map does not move; needs a cell with an image primitive under a filter whose map translates",
+    "ffh-image-area-bound": "OPEN (2026-11-18): the area-work limit of a filter's image primitive; no scene or test sets a limit the image's area work passes, so the refusal is never reached",
+    "cg-s-exact-status-ignored-2": "OPEN (2026-11-18): the second copy (the general tier's bit-plane sweep) of a cell the exact step cannot vouch for: the refusal is not seen, no test makes the general tier's cell fail",
+    "cg-s-pieces-uncounted-2": "OPEN (2026-11-18): the second copy's piece counter (union_pieces) is not asserted for the general tier's bit-plane sweep",
+    "cg-s-measure-rewinds-per-member": "OPEN (2026-11-18): the measure of a union rewinds the arena between members; only the peak could show it, and no test has a union of members whose geometries together pass the arena's peak",
+    "rp-s4-fill-unit-outside-the-damage-skipped-2": "OPEN (2026-11-18): the stroke unit of a pattern, second copy of the S4 rule (the whole render's reach, not the damage's): the fill's copy is held, the stroke's has no test whose damage excludes a stroke's copy but not the whole render's",
+    "rp-union-fast-member-without-pixels-bounds": "OPEN (2026-11-18, found again when the plant was made to compile): a member with no pixels left in the union's bound as the rectangle (0, 0, 0, 0) stretches the bound to the origin; the picture is the same, only the clip's memory and the work are larger, so it needs a union of an empty member and members far from the origin, under a limit on the clip's pixels",
 }
 
 
