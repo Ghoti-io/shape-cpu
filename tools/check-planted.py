@@ -2992,8 +2992,9 @@ SURVIVORS = {
         "none of PDF's, and the shape of every other operator is its weight, so the group shape read there is never used",
     "sc7-hit-limit-unchecked": "equivalent: a cache is one sink's, under one geometry limit, and the expansion refuses a part "
         "past max_points before an entry is made, so a hit is never past it",
-    "st8-limit-not-the-items": "not seen: a run's centerline is the item's limit only past a limit each glyph passes and the "
-        "whole does not (a glyph past it is that glyph's note); no test sets one",
+    "st8-limit-not-the-items": "not seen, and not reachable by the public interface (probed 2026-11-18): the plant changes the status of a "
+        "centerline that is past max_points; a sweep of max_points from 1 to 3000 over a two-glyph run gives the same result with and without it, "
+        "because the run is refused (RESOURCE_LIMIT) before the centerline is asked for with the limit that would fail",
     "st8-nothing-drawn-notes-dropped": "not seen: the entries of the tests that reach it come from the planning pass, which "
         "reports a glyph the provider cannot give before the sink does; the case is a note only the expansion makes",
     "uc3-window-unbounded": "not seen by a plain build (nor by ASan+UBSan with every test, checked 2026-11-18: the write stays inside the one block the arrays are carved from): it writes past the piece pool, which a sanitizer sees",
