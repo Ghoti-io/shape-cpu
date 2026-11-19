@@ -475,6 +475,42 @@ TEST(RenderFilterSink, ARotatedMapIsFilteredInCanonicalSpaceSoTheFilterFollowsTh
   EXPECT_TRUE(ok.entries.empty());
 }
 
+TEST(RenderFilterSink, ATurbulencesNoiseIsTheStandardsFunctionOfThePointFromItsOriginAndAtItsFrequencyPerUnit) {
+  // The noise at a pixel is the function of the pixel's position from the primitive's origin (dx, dy: where the user space's origin lies in
+  // the group's space), so moving the origin by (5, 3) moves the picture by (5, 3); and a different frequency is a different picture.
+  const double region[4] = {0, 0, 40, 30};
+  auto noise = [&](double fx, double ox, double oy) {
+    rh::Store s;
+    GSHSCENE_Filter_Primitive t = prim(GSHSCENE_FILTER_TURBULENCE);
+    t.input_count = 0;
+    t.inputs = nullptr;
+    t.sx = fx;
+    t.sy = fx;
+    t.octaves = 2;
+    t.seed = 7;
+    t.dx = ox;
+    t.dy = oy;
+    GSHSCENE_List * l = group_of_rect(s, intern_filter(s, {t}, false, region), 1.0, 0, 0, 1, 1);
+    rh::RasterRef r(make_raster(40, 30));
+    Rendered got = render(l, r.raster);
+    EXPECT_EQ(got.result, GSHSCENE_OK);
+    return bytes_of(r.raster);
+  };
+  const std::string at_origin = noise(0.1, 0, 0);
+  const std::string moved = noise(0.1, 5, 3);
+  ASSERT_EQ(at_origin.size(), (size_t)40 * 30 * 4);
+  size_t compared = 0;
+  for (uint32_t y = 8; y < 24; y++) {
+    for (uint32_t x = 10; x < 30; x++) {
+      EXPECT_EQ(moved.substr(((size_t)y * 40 + x) * 4, 4), at_origin.substr(((size_t)(y - 3) * 40 + (x - 5)) * 4, 4)) << x << "," << y;
+      compared++;
+    }
+  }
+  EXPECT_EQ(compared, 16u * 20u);
+  EXPECT_NE(at_origin, moved) << "the origin moves the picture";
+  EXPECT_NE(at_origin, noise(0.2, 0, 0)) << "and the frequency changes it";
+}
+
 TEST(RenderFilterSink, TheCallersMemoryIsExactAndTheRenderFromItIsTheSame) {
   rh::Store s;
   GSHSCENE_Filter_Primitive b = prim(GSHSCENE_FILTER_GAUSSIAN_BLUR);

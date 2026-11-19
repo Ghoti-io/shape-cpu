@@ -2578,6 +2578,12 @@ PLANTS += PLANTS_FB
 # oracle's vectors); this table is about the cross-target hash, the one gate that runs on every target.  Run alone with PLANT_ONLY='^ffh-'.
 FH = ["probe"]
 FLT = "src/render/filter.c"
+# A turbulence's noise is a function of the point from its origin (dx, dy), which the vector lowering sets when a document is scaled or placed.
+PLANTS += [
+    ('ft-turbulence-origin-ignored', 'src', FLT, '      ux -= pr->dx;\n      uy -= pr->dy;\n', '', ['testRender_filter_sink']),
+    ('ft-turbulence-origin-x-only', 'src', FLT, '      uy -= pr->dy;\n', '', ['testRender_filter_sink']),
+    ('ft-turbulence-origin-y-only', 'src', FLT, '      ux -= pr->dx;\n      uy -= pr->dy;\n', '      ux -= pr->dy;\n      uy -= pr->dy;\n', ['testRender_filter_sink']),
+]
 PLANTS_FH = [
     # offset, flood, merge
     ('ffh-offset-direction', 'src', FLT, 'const long si = (long)i - sx;', 'const long si = (long)i + sx;', FH),

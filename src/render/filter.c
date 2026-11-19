@@ -880,10 +880,18 @@ static void prim_turbulence(const GSHSCENE_Filter_Primitive * pr, const Aff * m,
   nz = &local;
   noise_init(nz, pr->seed);
   const int fractal = pr->mode == (uint32_t)GSHSCENE_FILTER_NOISE_FRACTAL;
+  /* The noise is the standard's function of the point in the user space, whose origin lies at (dx, dy) of the group's space and whose unit is
+   * what the frequency is per: the point is taken from that origin, and so is the tile a stitched noise wraps over. */
+  tile.x0 -= pr->dx;
+  tile.x1 -= pr->dx;
+  tile.y0 -= pr->dy;
+  tile.y1 -= pr->dy;
   for (size_t j = 0; j < h; j++) {
     for (size_t i = 0; i < w; i++) {
       double ux, uy;
       aff_inverse_point(m, gshcpu_render_i2d(canvas.x0) + (double)i, gshcpu_render_i2d(canvas.y0) + (double)j, &ux, &uy);
+      ux -= pr->dx;
+      uy -= pr->dy;
       double c[4];
       for (int ch = 0; ch < 4; ch++) {
         double v = turbulence_sum(nz, ch, ux, uy, pr->sx, pr->sy, pr->octaves, fractal, (int)pr->stitch_tiles, tile);
