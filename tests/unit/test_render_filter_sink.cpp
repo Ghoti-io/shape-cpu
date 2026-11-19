@@ -511,6 +511,31 @@ TEST(RenderFilterSink, ATurbulencesNoiseIsTheStandardsFunctionOfThePointFromItsO
   EXPECT_NE(at_origin, noise(0.2, 0, 0)) << "and the frequency changes it";
 }
 
+TEST(RenderFilterSink, ATurbulencesSeedIsTruncatedTowardZeroBeforeTheGeneratorGetsIt) {
+  // Filter Effects 1: "the seed number ... must first be truncated, i.e. rounded to the closest integer value towards zero".
+  const double region[4] = {0, 0, 24, 16};
+  auto noise = [&](double seed) {
+    rh::Store s;
+    GSHSCENE_Filter_Primitive t = prim(GSHSCENE_FILTER_TURBULENCE);
+    t.input_count = 0;
+    t.inputs = nullptr;
+    t.sx = 0.1;
+    t.sy = 0.1;
+    t.octaves = 2;
+    t.seed = seed;
+    GSHSCENE_List * l = group_of_rect(s, intern_filter(s, {t}, false, region), 1.0, 0, 0, 1, 1);
+    rh::RasterRef r(make_raster(24, 16));
+    EXPECT_EQ(render(l, r.raster).result, GSHSCENE_OK);
+    return bytes_of(r.raster);
+  };
+  EXPECT_EQ(noise(2.5), noise(2.0)) << "2.5 is 2, not 3";
+  EXPECT_NE(noise(2.5), noise(3.0));
+  EXPECT_EQ(noise(2.999), noise(2.0));
+  EXPECT_EQ(noise(-2.5), noise(-2.0)) << "toward zero: -2.5 is -2, not -3";
+  EXPECT_NE(noise(-2.5), noise(-3.0));
+  EXPECT_NE(noise(-2.5), noise(2.0)) << "and a negative seed is not its magnitude";
+}
+
 TEST(RenderFilterSink, TheCallersMemoryIsExactAndTheRenderFromItIsTheSame) {
   rh::Store s;
   GSHSCENE_Filter_Primitive b = prim(GSHSCENE_FILTER_GAUSSIAN_BLUR);

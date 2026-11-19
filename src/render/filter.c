@@ -751,7 +751,7 @@ static long noise_random(long seed) {
 
 /** The reference implementation of the standard's turbulence: the lattice and the gradients from the seed. */
 static void noise_init(Noise * nz, double seed_value) {
-  long seed = (long)(seed_value < 0 ? gmath_ceil(seed_value - 0.5) : gmath_floor(seed_value + 0.5)); /* the seed is rounded (FL18) */
+  long seed = (long)(seed_value < 0 ? gmath_ceil(seed_value) : gmath_floor(seed_value)); /* the seed is truncated toward zero (Filter Effects 1, feTurbulence `seed`) */
   if (seed <= 0) {
     seed = -(seed % (RAND_M - 1)) + 1;
   }

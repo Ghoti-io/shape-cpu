@@ -42,10 +42,10 @@ render filter-tile-image-displace rgba8 1f404bbe915d8f25
 render filter-tile-image-displace rgba8-premultiplied e1d15d44ed5e3994
 render filter-tile-image-displace rgbaf32 20dff853dcc04e83
 render filter-tile-image-displace rgbaf32-premultiplied 47d0382a0f9d3435
-render filter-turbulence rgba8 00aed790cfcc531e
-render filter-turbulence rgba8-premultiplied ac3239a714f18d42
-render filter-turbulence rgbaf32 8cb54938f026e086
-render filter-turbulence rgbaf32-premultiplied 995ed4b53cc650b4
+render filter-turbulence rgba8 e90237bda15e9fce
+render filter-turbulence rgba8-premultiplied c0a29551d6ef85c5
+render filter-turbulence rgbaf32 80bf18562d60ee7f
+render filter-turbulence rgbaf32-premultiplied 4676c2925f34d440
 render filter-lighting rgba8 a6e881873e987278
 render filter-lighting rgba8-premultiplied 0d14c2917d93df0a
 render filter-lighting rgbaf32 b9232fc2838d8836
@@ -98,5 +98,5 @@ render filter-backdrop-rotated rgba8 596ea2c19d92fd48
 render filter-backdrop-rotated rgba8-premultiplied d5ae65ed5ac3721a
 render filter-backdrop-rotated rgbaf32 697bdd29ac90b07e
 render filter-backdrop-rotated rgbaf32-premultiplied e6f4c3c945f26195
-hash c9a98bc21790e295
+hash 19a7382892968f9c
 count 96

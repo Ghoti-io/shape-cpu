@@ -2644,7 +2644,8 @@ PLANTS_FH = [
     ('ffh-displace-center', 'src', FLT, 'const double ys = (double)j + scale_y * (u[pr->y_channel] - 0.5);', 'const double ys = (double)j + scale_y * (u[pr->y_channel] + 0.5);', FH),
     ('ffh-displace-scale-axes', 'src', FLT, 'device_lengths(&e->m, pr->scale, pr->scale, &dx, &dy);\n        prim_displace(', 'device_lengths(&e->m, pr->scale, 0.0, &dx, &dy);\n        prim_displace(', FH),
     # turbulence
-    ('ffh-noise-seed-rounding', 'src', FLT, 'long seed = (long)(seed_value < 0 ? gmath_ceil(seed_value - 0.5) : gmath_floor(seed_value + 0.5));', 'long seed = (long)(seed_value < 0 ? gmath_ceil(seed_value - 0.5) : gmath_floor(seed_value));', FH),
+    ('ffh-noise-seed-truncation', 'src', FLT, 'long seed = (long)(seed_value < 0 ? gmath_ceil(seed_value) : gmath_floor(seed_value));', 'long seed = (long)(seed_value < 0 ? gmath_ceil(seed_value - 0.5) : gmath_floor(seed_value + 0.5));', FH + ['testRender_filter_sink']),
+    ('ffh-noise-seed-negative-floored', 'src', FLT, 'long seed = (long)(seed_value < 0 ? gmath_ceil(seed_value) : gmath_floor(seed_value));', 'long seed = (long)gmath_floor(seed_value);', FH + ['testRender_filter_sink']),
     ('ffh-noise-curve', 'src', FLT, 'return t * t * (3.0 - 2.0 * t);', 'return t * t * (3.0 - t);', FH),
     ('ffh-noise-turbulence-abs', 'src', FLT, 'sum += (fractal ? nv : gmath_fabs(nv)) / ratio;', 'sum += ((void)fractal, nv) / ratio;', FH),
     ('ffh-noise-fractal-scale', 'src', FLT, 'v = fractal ? (v + 1.0) / 2.0 : v;', 'v = fractal ? (v + 1.0) / 4.0 : v;', FH),

@@ -451,7 +451,7 @@ def rnd(seed):
 
 
 def noise_init(seed_value):
-    seed = int(math.floor(seed_value + 0.5)) if seed_value >= 0 else int(math.ceil(seed_value - 0.5))
+    seed = int(math.trunc(seed_value))  # truncated toward zero (Filter Effects 1, feTurbulence `seed`)
     if seed <= 0:
         seed = -(seed % (RAND_M - 1)) + 1
     if seed > RAND_M - 1:
