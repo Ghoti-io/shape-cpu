@@ -475,6 +475,27 @@ TEST(RenderFilterSink, ARotatedMapIsFilteredInCanonicalSpaceSoTheFilterFollowsTh
   EXPECT_TRUE(ok.entries.empty());
 }
 
+TEST(RenderFilterSink, TheResamplingOfARotatedFilterReadsNothingPastTheEdgeOfTheCanvasItSamples) {
+  // A fill of the whole raster turned by 20 degrees about the origin leaves the upper right corner empty: the line of its top edge is at
+  // y = x tan 20, 8.4 pixels down at the last column.  The resampling of the canonical canvas is zero outside the canvas, so those pixels
+  // stay empty; a read of the pixel one past the right edge would take the first pixel of the next row (an opaque one) into them.
+  rh::Store s;
+  GSHSCENE_Filter_Primitive o = prim(GSHSCENE_FILTER_OFFSET);
+  GSHSCENE_List * l = group_of_rect(s, intern_filter(s, {o}), 1.0, 0, 0, 24, 16);
+  GSHGEOM_Map turn;
+  ASSERT_EQ(gshgeom_map_rotate(GSHGEOM_ANGLE_DEGREES, 20.0, &turn), GSHGEOM_OK);
+  turn.t[0] = 0;
+  turn.t[1] = 0;
+  rh::RasterRef r(make_raster(24, 16));
+  Rendered got = render(l, r.raster, &turn);
+  ASSERT_EQ(got.result, GSHSCENE_OK);
+  const std::string all = bytes_of(r.raster);
+  for (uint32_t y = 0; y < 6; y++) {
+    EXPECT_EQ((unsigned char)all[((size_t)y * 24 + 23) * 4 + 3], 0u) << "row " << y << ", the last column: above the turned edge";
+  }
+  EXPECT_GT((unsigned char)all[((size_t)10 * 24 + 5) * 4 + 3], 250u) << "and the inside of the turned fill is there";
+}
+
 TEST(RenderFilterSink, ATurbulencesNoiseIsTheStandardsFunctionOfThePointFromItsOriginAndAtItsFrequencyPerUnit) {
   // The noise at a pixel is the function of the pixel's position from the primitive's origin (dx, dy: where the user space's origin lies in
   // the group's space), so moving the origin by (5, 3) moves the picture by (5, 3); and a different frequency is a different picture.

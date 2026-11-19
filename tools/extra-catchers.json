@@ -552,7 +552,8 @@
   "testRender_clip_union_font"
  ],
  "rs-4842-ge": [
-  "testRender_filter_fixtures"
+  "testRender_filter_fixtures",
+  "testRender_filter_sink"
  ],
  "rs-4928-eq": [
   "testRender_filter_backdrop"
