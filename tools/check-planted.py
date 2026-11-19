@@ -2996,11 +2996,12 @@ SURVIVORS = {
         "centerline that is past max_points; a sweep of max_points from 1 to 3000 over a two-glyph run gives the same result with and without it, "
         "because the run is refused (RESOURCE_LIMIT) before the centerline is asked for with the limit that would fail",
     "st8-nothing-drawn-notes-dropped": "not seen: the entries of the tests that reach it come from the planning pass, which "
-        "reports a glyph the provider cannot give before the sink does; the case is a note only the expansion makes",
+        "reports a glyph the provider cannot give before the sink does; the case is a note only the expansion makes (tried 2026-11-18: a run whose "
+        "every glyph is past the geometry's bounds gives the same two entries with and without the plant, so the plan names them)",
     "uc3-window-unbounded": "not seen by a plain build (nor by ASan+UBSan with every test, checked 2026-11-18: the write stays inside the one block the arrays are carved from): it writes past the piece pool, which a sanitizer sees",
     "uc4-remainder-unchecked": "not seen: the check of the dense area after it refuses an inconsistent cover with the same status; "
         "the case is a cover the remainder alone refuses",
-    "uc14-gap-step-multiplicity": "not seen: needs coincident pieces of one direction at a gap step of a cell that has other "
+    "uc14-gap-step-multiplicity": "not seen (tried 2026-11-18: a three-part cover with an aligned square twice and a reversed square over it in one pixel cell, which matches the instrument with and without the plant, so the pair does not reach this sum as a multiplicity of two): needs coincident pieces of one direction at a gap step of a cell that has other "
         "pieces (the mid-gap variant is caught)",
     "cg-x-steps64-not-cleared": "equivalent in the design (CG5): a step of a part's winding at the cell's last row is written to the part's record and its mark, "
         "and read by nothing (the sum of UC4 weights it 64 - 64, and no slab starts at 64), so the memset only keeps an uninitialised flag from being read, "

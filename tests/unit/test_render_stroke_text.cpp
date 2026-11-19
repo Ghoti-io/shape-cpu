@@ -649,6 +649,25 @@ TEST(RenderStrokeText, ALimitOfTheRunRefusesTheWholeItemAndNeverStrokesPartOfIt)
   }
 }
 
+TEST(RenderStrokeText, ARunWhoseEveryGlyphIsPastTheGeometrysBoundsDrawsNothingAndNamesEachOfThem) {
+  // ST8: the notes of a run are reported when nothing of it is drawn too: the glyphs here are ones only the expansion refuses, so the
+  // plan reports nothing and the sink's own entry is the only one.
+  Text t;
+  GSHSCENE_Paint white = solid(1, 1, 1, 1);
+  Params p = pen(2.0);
+  GSHGEOM_Map m = translation(0.25, 0.5);
+  const GSHSCENE_Resource * none = t.run(t.face(), 14.0, GSHSCENE_HINT_NONE, {{9, 2.0, 20.0}, {9, 12.0, 20.0}});
+  Sink sink;
+  Drawn d = render_list(sink.sink, t.stroke(none, p.get(), &m, white), 30, 24);
+  ASSERT_EQ(d.entries.size(), 2u) << "one note for each glyph";
+  for (const auto & e : d.entries) {
+    EXPECT_EQ(e.reason, GSHSCENE_REASON_GLYPH_UNAVAILABLE);
+  }
+  for (uint8_t a : d.alpha) {
+    EXPECT_EQ(a, 0) << "nothing is drawn";
+  }
+}
+
 /* --- damage ---------------------------------------------------------------------------------------------------------------- */
 
 TEST(RenderStrokeText, InsideADamageTheRenderIsTheWholeRenderOverAWholeRunAndOverOneGlyph) {
